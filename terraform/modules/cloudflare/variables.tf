@@ -22,3 +22,8 @@ variable "domain" {
   description = "Domain name"
   type        = string
 }
+
+variable "subdomain" {
+  description = "Subdomain prefix (e.g. 'enclave' for enclave.example.com)"
+  type        = string
+}

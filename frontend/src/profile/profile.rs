@@ -1,12 +1,12 @@
-use yew::prelude::*;
-use web_sys::window;
-use yew_router::prelude::*;
-use crate::Route;
-use crate::utils::api::Api;
-use wasm_bindgen_futures::spawn_local;
-use crate::profile::billing_models::UserProfile;
 use crate::profile::billing_credits::BillingPage;
+use crate::profile::billing_models::UserProfile;
+use crate::utils::api::Api;
+use crate::Route;
+use wasm_bindgen_futures::spawn_local;
+use web_sys::window;
 use web_sys::UrlSearchParams;
+use yew::prelude::*;
+use yew_router::prelude::*;
 
 #[function_component]
 pub fn Billing() -> Html {
@@ -18,75 +18,84 @@ pub fn Billing() -> Html {
     // Check for subscription success parameter
     {
         let success = success.clone();
-        use_effect_with_deps(move |_| {
-            let query = location.query_str();
-            if let Ok(params) = UrlSearchParams::new_with_str(query) {
-                if params.has("subscription") && params.get("subscription").unwrap_or_default() == "success" {
-                    success.set(Some("Subscription activated successfully!".to_string()));
+        use_effect_with_deps(
+            move |_| {
+                let query = location.query_str();
+                if let Ok(params) = UrlSearchParams::new_with_str(query) {
+                    if params.has("subscription")
+                        && params.get("subscription").unwrap_or_default() == "success"
+                    {
+                        success.set(Some("Subscription activated successfully!".to_string()));
 
-                    // Clean up the URL after showing the message
-                    if let Some(window) = window() {
-                        if let Ok(history) = window.history() {
-                            let _ = history.replace_state_with_url(
-                                &wasm_bindgen::JsValue::NULL,
-                                "",
-                                Some("/billing")
-                            );
+                        // Clean up the URL after showing the message
+                        if let Some(window) = window() {
+                            if let Ok(history) = window.history() {
+                                let _ = history.replace_state_with_url(
+                                    &wasm_bindgen::JsValue::NULL,
+                                    "",
+                                    Some("/billing"),
+                                );
+                            }
+                        }
+                    }
+                    if params.has("subscription")
+                        && params.get("subscription").unwrap_or_default() == "canceled"
+                    {
+                        success.set(Some("Subscription canceled successfully.".to_string()));
+
+                        // Clean up the URL after showing the message
+                        if let Some(window) = window() {
+                            if let Ok(history) = window.history() {
+                                let _ = history.replace_state_with_url(
+                                    &wasm_bindgen::JsValue::NULL,
+                                    "",
+                                    Some("/billing"),
+                                );
+                            }
                         }
                     }
                 }
-                if params.has("subscription") && params.get("subscription").unwrap_or_default() == "canceled" {
-                    success.set(Some("Subscription canceled successfully.".to_string()));
-
-                    // Clean up the URL after showing the message
-                    if let Some(window) = window() {
-                        if let Ok(history) = window.history() {
-                            let _ = history.replace_state_with_url(
-                                &wasm_bindgen::JsValue::NULL,
-                                "",
-                                Some("/billing")
-                            );
-                        }
-                    }
-                }
-            }
-            || ()
-        }, ());
+                || ()
+            },
+            (),
+        );
     }
 
     // Authentication is handled by the profile fetch - if 401, user will be redirected
 
-    // Fetch user profile 
+    // Fetch user profile
     {
         let profile = profile.clone();
         let error = error.clone();
-        use_effect_with_deps(move |_| {
-            spawn_local(async move {
-                match Api::get("/api/profile").send().await
-                {
-                    Ok(response) => {
-                        // Automatic retry handles 401 with token refresh and redirect
-                        // We only need to handle successful responses
-                        if response.ok() {
-                            match response.json::<UserProfile>().await {
-                                Ok(data) => {
-                                    profile.set(Some(data));
+        use_effect_with_deps(
+            move |_| {
+                spawn_local(async move {
+                    match Api::get("/api/profile").send().await {
+                        Ok(response) => {
+                            // Automatic retry handles 401 with token refresh and redirect
+                            // We only need to handle successful responses
+                            if response.ok() {
+                                match response.json::<UserProfile>().await {
+                                    Ok(data) => {
+                                        profile.set(Some(data));
+                                    }
+                                    Err(_) => {
+                                        error.set(Some("Failed to parse profile data".to_string()));
+                                    }
                                 }
-                                Err(_) => {
-                                    error.set(Some("Failed to parse profile data".to_string()));
-                                }
+                            } else {
+                                error.set(Some("Failed to fetch profile".to_string()));
                             }
-                        } else {
+                        }
+                        Err(_) => {
                             error.set(Some("Failed to fetch profile".to_string()));
                         }
                     }
-                    Err(_) => {
-                        error.set(Some("Failed to fetch profile".to_string()));
-                    }
-                }
-            });
-            || ()
-        }, ());
+                });
+                || ()
+            },
+            (),
+        );
     }
 
     let profile_data = (*profile).clone();
@@ -290,4 +299,3 @@ pub fn Billing() -> Html {
         </>
     }
 }
-

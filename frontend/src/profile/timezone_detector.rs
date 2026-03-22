@@ -1,8 +1,8 @@
-use yew::prelude::*;
-use web_sys::window;
 use crate::utils::api::Api;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::js_sys;
+use web_sys::window;
+use yew::prelude::*;
 
 #[derive(Properties, PartialEq, Clone)]
 pub struct TimezoneDetectorProps {
@@ -39,9 +39,10 @@ pub fn TimezoneDetector(props: &TimezoneDetectorProps) -> Html {
                                 .json(&serde_json::json!({"timezone": tz}))
                                 .expect("Failed to build request")
                                 .send()
-                                .await {
-                                    log::error!("Failed to send timezone update: {:?}", e);
-                                }
+                                .await
+                            {
+                                log::error!("Failed to send timezone update: {:?}", e);
+                            }
                         });
                     }
                 }

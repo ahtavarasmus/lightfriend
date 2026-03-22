@@ -264,11 +264,15 @@ pub async fn validate_twilio_signature(
 
     mac.update(string_to_sign.as_bytes());
 
-    // Get the result and encode as base64
-    let result = BASE64.encode(mac.finalize().into_bytes());
+    let signature_bytes = match BASE64.decode(signature.as_bytes()) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            tracing::error!("❌ Failed to decode Twilio signature: {}", e);
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+    };
 
-    // Compare signatures
-    if result != signature {
+    if mac.verify_slice(&signature_bytes).is_err() {
         tracing::error!("❌ Signature validation failed");
         return Err(StatusCode::UNAUTHORIZED);
     }
@@ -365,10 +369,15 @@ pub async fn validate_twilio_status_callback_signature(
     };
 
     mac.update(string_to_sign.as_bytes());
-    let result = BASE64.encode(mac.finalize().into_bytes());
+    let signature_bytes = match BASE64.decode(signature.as_bytes()) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            tracing::error!("Failed to decode Twilio signature: {}", e);
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+    };
 
-    // Compare signatures
-    if result != signature {
+    if mac.verify_slice(&signature_bytes).is_err() {
         tracing::error!("Status callback signature validation failed");
         return Err(StatusCode::UNAUTHORIZED);
     }

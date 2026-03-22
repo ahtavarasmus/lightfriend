@@ -1,13 +1,13 @@
 pub mod login {
-    use yew::prelude::*;
-    use web_sys::HtmlInputElement;
-    use gloo_net::http::Request;
-    use serde::{Deserialize, Serialize};
-    use yew_router::prelude::*;
-    use crate::Route;
     use crate::config;
     use crate::utils::webauthn;
+    use crate::Route;
     use gloo_console::log;
+    use gloo_net::http::Request;
+    use serde::{Deserialize, Serialize};
+    use web_sys::HtmlInputElement;
+    use yew::prelude::*;
+    use yew_router::prelude::*;
 
     #[derive(Serialize)]
     pub struct LoginRequest {
@@ -103,7 +103,9 @@ pub mod login {
                                 if let Ok(text) = response.text().await {
                                     // Try new 2FA format first
                                     if text.contains("requires_2fa") {
-                                        if let Ok(resp) = serde_json::from_str::<TwoFaRequiredResponse>(&text) {
+                                        if let Ok(resp) =
+                                            serde_json::from_str::<TwoFaRequiredResponse>(&text)
+                                        {
                                             if resp.requires_2fa {
                                                 requires_2fa.set(true);
                                                 totp_enabled.set(resp.totp_enabled);
@@ -111,14 +113,20 @@ pub mod login {
                                                 login_token.set(resp.login_token);
                                                 // Default to TOTP form if both are enabled and webauthn not supported
                                                 // Otherwise prefer WebAuthn
-                                                show_totp_form.set(!resp.webauthn_enabled || (resp.totp_enabled && !webauthn::is_webauthn_supported()));
+                                                show_totp_form.set(
+                                                    !resp.webauthn_enabled
+                                                        || (resp.totp_enabled
+                                                            && !webauthn::is_webauthn_supported()),
+                                                );
                                                 return;
                                             }
                                         }
                                     }
                                     // Try legacy TOTP format
                                     else if text.contains("requires_totp") {
-                                        if let Ok(totp_resp) = serde_json::from_str::<TotpRequiredResponse>(&text) {
+                                        if let Ok(totp_resp) =
+                                            serde_json::from_str::<TotpRequiredResponse>(&text)
+                                        {
                                             if totp_resp.requires_totp {
                                                 requires_2fa.set(true);
                                                 totp_enabled.set(true);
@@ -133,7 +141,8 @@ pub mod login {
 
                                 log!("Login request successful, cookies set by backend");
                                 error_setter.set(None);
-                                success_setter.set(Some("Login successful! Redirecting...".to_string()));
+                                success_setter
+                                    .set(Some("Login successful! Redirecting...".to_string()));
 
                                 let window = web_sys::window().unwrap();
                                 wasm_bindgen_futures::spawn_local(async move {
@@ -191,7 +200,7 @@ pub mod login {
                         .json(&TotpVerifyRequest {
                             totp_token: token,
                             code,
-                            is_backup_code: is_backup
+                            is_backup_code: is_backup,
                         })
                         .unwrap()
                         .send()
@@ -201,7 +210,8 @@ pub mod login {
                             if response.ok() {
                                 log!("TOTP verification successful");
                                 error_setter.set(None);
-                                success_setter.set(Some("Login successful! Redirecting...".to_string()));
+                                success_setter
+                                    .set(Some("Login successful! Redirecting...".to_string()));
 
                                 let window = web_sys::window().unwrap();
                                 wasm_bindgen_futures::spawn_local(async move {
@@ -245,14 +255,17 @@ pub mod login {
 
                 wasm_bindgen_futures::spawn_local(async move {
                     // Step 1: Get WebAuthn options from server
-                    let options_result = match Request::post(&format!("{}/api/webauthn/login/start", config::get_backend_url()))
-                        .credentials(web_sys::RequestCredentials::Include)
-                        .json(&WebAuthnLoginStartRequest {
-                            login_token: token.clone(),
-                        })
-                        .unwrap()
-                        .send()
-                        .await
+                    let options_result = match Request::post(&format!(
+                        "{}/api/webauthn/login/start",
+                        config::get_backend_url()
+                    ))
+                    .credentials(web_sys::RequestCredentials::Include)
+                    .json(&WebAuthnLoginStartRequest {
+                        login_token: token.clone(),
+                    })
+                    .unwrap()
+                    .send()
+                    .await
                     {
                         Ok(resp) if resp.ok() => {
                             match resp.json::<serde_json::Value>().await {
@@ -265,12 +278,14 @@ pub mod login {
                                         // Fallback: maybe the response is already the options directly
                                         Ok(json)
                                     }
-                                },
+                                }
                                 Err(e) => Err(format!("Failed to parse options: {:?}", e)),
                             }
                         }
                         Ok(resp) => {
-                            let err = resp.json::<ErrorResponse>().await
+                            let err = resp
+                                .json::<ErrorResponse>()
+                                .await
                                 .map(|e| e.error)
                                 .unwrap_or_else(|_| format!("Server error: {}", resp.status()));
                             Err(err)
@@ -298,21 +313,25 @@ pub mod login {
                     };
 
                     // Step 3: Verify with server
-                    match Request::post(&format!("{}/api/webauthn/verify-login", config::get_backend_url()))
-                        .credentials(web_sys::RequestCredentials::Include)
-                        .json(&WebAuthnVerifyRequest {
-                            login_token: token,
-                            response: credential,
-                        })
-                        .unwrap()
-                        .send()
-                        .await
+                    match Request::post(&format!(
+                        "{}/api/webauthn/verify-login",
+                        config::get_backend_url()
+                    ))
+                    .credentials(web_sys::RequestCredentials::Include)
+                    .json(&WebAuthnVerifyRequest {
+                        login_token: token,
+                        response: credential,
+                    })
+                    .unwrap()
+                    .send()
+                    .await
                     {
                         Ok(response) => {
                             if response.ok() {
                                 log!("WebAuthn verification successful");
                                 error_setter.set(None);
-                                success_setter.set(Some("Login successful! Redirecting...".to_string()));
+                                success_setter
+                                    .set(Some("Login successful! Redirecting...".to_string()));
 
                                 let window = web_sys::window().unwrap();
                                 wasm_bindgen_futures::spawn_local(async move {
@@ -488,7 +507,7 @@ pub mod login {
         left: 0;
         width: 100%;
         height: 100vh;
-        background-image: url('/assets/rain.gif');
+        background-image: url('/assets/aurora-bg.jpg');
         background-size: cover;
         background-position: center;
         background-repeat: no-repeat;
@@ -667,18 +686,18 @@ pub mod login {
     }
 }
 pub mod password_reset {
-    use yew::prelude::*;
-    use web_sys::HtmlInputElement;
     use gloo_net::http::Request;
     use serde::{Deserialize, Serialize};
+    use web_sys::HtmlInputElement;
+    use yew::prelude::*;
 
     #[derive(Deserialize)]
     struct ErrorResponse {
         pub error: String,
     }
-    use yew_router::prelude::*;
-    use crate::Route;
     use crate::config;
+    use crate::Route;
+    use yew_router::prelude::*;
 
     #[derive(Serialize)]
     struct CompletePasswordResetRequest {
@@ -741,7 +760,7 @@ pub mod password_reset {
     left: 0;
     width: 100%;
     height: 100vh;
-    background-image: url('/assets/rain.gif');
+    background-image: url('/assets/aurora-bg.jpg');
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
@@ -829,30 +848,39 @@ pub mod password_reset {
             let loading = loading.clone();
             let token_valid = token_valid.clone();
 
-            use_effect_with_deps(move |_| {
-                wasm_bindgen_futures::spawn_local(async move {
-                    match Request::get(&format!("{}/api/password-reset/validate/{}", config::get_backend_url(), token))
+            use_effect_with_deps(
+                move |_| {
+                    wasm_bindgen_futures::spawn_local(async move {
+                        match Request::get(&format!(
+                            "{}/api/password-reset/validate/{}",
+                            config::get_backend_url(),
+                            token
+                        ))
                         .send()
                         .await
-                    {
-                        Ok(response) => {
-                            if response.ok() {
-                                token_valid.set(true);
-                            } else {
-                                match response.json::<ErrorResponse>().await {
-                                    Ok(err) => error.set(Some(err.error)),
-                                    Err(_) => error.set(Some("Invalid or expired reset link.".to_string())),
+                        {
+                            Ok(response) => {
+                                if response.ok() {
+                                    token_valid.set(true);
+                                } else {
+                                    match response.json::<ErrorResponse>().await {
+                                        Ok(err) => error.set(Some(err.error)),
+                                        Err(_) => error.set(Some(
+                                            "Invalid or expired reset link.".to_string(),
+                                        )),
+                                    }
                                 }
                             }
+                            Err(e) => {
+                                error.set(Some(format!("Failed to validate token: {}", e)));
+                            }
                         }
-                        Err(e) => {
-                            error.set(Some(format!("Failed to validate token: {}", e)));
-                        }
-                    }
-                    loading.set(false);
-                });
-                || ()
-            }, ());
+                        loading.set(false);
+                    });
+                    || ()
+                },
+                (),
+            );
         }
 
         let submit_reset = {
@@ -870,7 +898,9 @@ pub mod password_reset {
                 let confirm = (*confirm_password).clone();
 
                 if password.len() < 8 {
-                    error.set(Some("Password must be at least 8 characters long.".to_string()));
+                    error.set(Some(
+                        "Password must be at least 8 characters long.".to_string(),
+                    ));
                     return;
                 }
 
@@ -885,14 +915,17 @@ pub mod password_reset {
                 let navigator = navigator.clone();
 
                 wasm_bindgen_futures::spawn_local(async move {
-                    match Request::post(&format!("{}/api/password-reset/complete", config::get_backend_url()))
-                        .json(&CompletePasswordResetRequest {
-                            token,
-                            new_password: password,
-                        })
-                        .unwrap()
-                        .send()
-                        .await
+                    match Request::post(&format!(
+                        "{}/api/password-reset/complete",
+                        config::get_backend_url()
+                    ))
+                    .json(&CompletePasswordResetRequest {
+                        token,
+                        new_password: password,
+                    })
+                    .unwrap()
+                    .send()
+                    .await
                     {
                         Ok(response) => {
                             if response.ok() {
@@ -903,19 +936,26 @@ pub mod password_reset {
                                         // Redirect to login after 2 seconds
                                         gloo_timers::callback::Timeout::new(2_000, move || {
                                             navigator.push(&Route::Login);
-                                        }).forget();
+                                        })
+                                        .forget();
                                     }
                                     Err(_) => {
-                                        error.set(Some("Password reset successful! Redirecting to login...".to_string()));
+                                        error.set(Some(
+                                            "Password reset successful! Redirecting to login..."
+                                                .to_string(),
+                                        ));
                                         gloo_timers::callback::Timeout::new(2_000, move || {
                                             navigator.push(&Route::Login);
-                                        }).forget();
+                                        })
+                                        .forget();
                                     }
                                 }
                             } else {
                                 match response.json::<ErrorResponse>().await {
                                     Ok(err) => error.set(Some(err.error)),
-                                    Err(_) => error.set(Some("Failed to reset password.".to_string())),
+                                    Err(_) => {
+                                        error.set(Some("Failed to reset password.".to_string()))
+                                    }
                                 }
                             }
                         }

@@ -1,5 +1,5 @@
-use yew::prelude::*;
 use gloo_timers::callback::Timeout;
+use yew::prelude::*;
 
 #[function_component(AnimationComponent)]
 pub fn animation_component() -> Html {
@@ -10,15 +10,15 @@ pub fn animation_component() -> Html {
         let stage_setter = stage.setter();
         use_effect(move || {
             let delay = match *stage_clone {
-                0 => 0, // Start immediately to stage 1
+                0 => 0,    // Start immediately to stage 1
                 1 => 1000, // Luukas shown, wait 0.2s for green arrow
                 2 => 1000, // Green arrow shown, wait 0.2s for green flash
                 3 => 1000, // Green flash fade in out (slower, 1s), then to notification phone
                 4 => 7000, // Hold notification phone for 5s, then reset
-                5 => 0, // Reset, immediately to Krister
+                5 => 0,    // Reset, immediately to Krister
                 6 => 1000, // Krister shown, wait 0.2s for red arrow
                 7 => 5000, // Hold red arrow for 5s, then reset
-                8 => 0, // Reset, loop back to Luukas
+                8 => 0,    // Reset, loop back to Luukas
                 _ => 0,
             };
 
@@ -50,7 +50,11 @@ pub fn animation_component() -> Html {
 
     let middle_src = format!("/assets/{}", middle_img);
 
-    let mut middle_class = if middle_img != "white-bg.png" { "fade-in".to_string() } else { "".to_string() };
+    let mut middle_class = if middle_img != "white-bg.png" {
+        "fade-in".to_string()
+    } else {
+        "".to_string()
+    };
     if middle_img == "green-arrow.png" {
         middle_class.push_str(" green-arrow");
     } else if middle_img == "red-arrow.png" {

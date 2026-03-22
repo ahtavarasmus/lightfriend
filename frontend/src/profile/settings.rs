@@ -1,16 +1,16 @@
-use yew::prelude::*;
-use log::info;
-use web_sys::{HtmlInputElement, KeyboardEvent};
-use yew_router::prelude::*;
-use crate::Route;
+use crate::profile::billing_models::UserProfile;
+use crate::profile::security::SecuritySettings;
+use crate::profile::timezone_detector::TimezoneDetector;
 use crate::utils::api::Api;
 use crate::utils::webauthn;
-use crate::profile::timezone_detector::TimezoneDetector;
-use crate::profile::security::SecuritySettings;
+use crate::Route;
+use log::info;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen_futures::spawn_local;
-use crate::profile::billing_models::UserProfile;
 use web_sys::js_sys::encode_uri_component;
+use web_sys::{HtmlInputElement, KeyboardEvent};
+use yew::prelude::*;
+use yew_router::prelude::*;
 
 const MAX_NICKNAME_LENGTH: usize = 30;
 const MAX_INFO_LENGTH: usize = 500;
@@ -107,7 +107,10 @@ async fn perform_profile_update_email(
         phone_number: profile.phone_number.clone(),
         nickname: profile.nickname.clone().unwrap_or_default(),
         info: profile.info.clone().unwrap_or_default(),
-        timezone: profile.timezone.clone().unwrap_or_else(|| "UTC".to_string()),
+        timezone: profile
+            .timezone
+            .clone()
+            .unwrap_or_else(|| "UTC".to_string()),
         timezone_auto: profile.timezone_auto.unwrap_or(true),
         agent_language: profile.agent_language.clone(),
         notification_type: profile.notification_type.clone(),
@@ -132,14 +135,15 @@ async fn perform_profile_update_email(
             save_state.set(FieldSaveState::Success);
             let save_state_clone = save_state.clone();
             spawn_local(async move {
-                gloo_timers::future::TimeoutFuture::new(2000).await;
+                gloo_timers::future::TimeoutFuture::new(3_000).await;
                 save_state_clone.set(FieldSaveState::Idle);
             });
         }
         Ok(response) => {
             // Try to get error message from response
             let error_msg = if let Ok(error_json) = response.json::<serde_json::Value>().await {
-                error_json.get("error")
+                error_json
+                    .get("error")
                     .and_then(|e| e.as_str())
                     .unwrap_or("Email already exists or invalid")
                     .to_string()
@@ -174,7 +178,10 @@ async fn perform_profile_update_phone(
         phone_number: new_phone.clone(),
         nickname: profile.nickname.clone().unwrap_or_default(),
         info: profile.info.clone().unwrap_or_default(),
-        timezone: profile.timezone.clone().unwrap_or_else(|| "UTC".to_string()),
+        timezone: profile
+            .timezone
+            .clone()
+            .unwrap_or_else(|| "UTC".to_string()),
         timezone_auto: profile.timezone_auto.unwrap_or(true),
         agent_language: profile.agent_language.clone(),
         notification_type: profile.notification_type.clone(),
@@ -203,7 +210,8 @@ async fn perform_profile_update_phone(
         Ok(response) => {
             // Try to get error message from response
             let error_msg = if let Ok(error_json) = response.json::<serde_json::Value>().await {
-                error_json.get("error")
+                error_json
+                    .get("error")
                     .and_then(|e| e.as_str())
                     .unwrap_or("Phone number already exists or invalid")
                     .to_string()
@@ -233,22 +241,34 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let nickname_original = use_state(|| (*user_profile).nickname.clone().unwrap_or_default());
     let info = use_state(|| (*user_profile).info.clone().unwrap_or_default());
     let info_original = use_state(|| (*user_profile).info.clone().unwrap_or_default());
-    let timezone = use_state(|| (*user_profile).timezone.clone().unwrap_or_else(|| String::from("UTC")));
+    let timezone = use_state(|| {
+        (*user_profile)
+            .timezone
+            .clone()
+            .unwrap_or_else(|| String::from("UTC"))
+    });
     let timezone_auto = use_state(|| (*user_profile).timezone_auto.unwrap_or(true));
     let phone_service_active = use_state(|| (*user_profile).phone_service_active.unwrap_or(true));
     let agent_language = use_state(|| (*user_profile).agent_language.clone());
-    let notification_type = use_state(|| (*user_profile).notification_type.clone().or(Some("sms".to_string())));
+    let notification_type = use_state(|| {
+        (*user_profile)
+            .notification_type
+            .clone()
+            .or(Some("sms".to_string()))
+    });
     let save_context = use_state(|| (*user_profile).save_context.unwrap_or(0));
     let feature_updates = use_state(|| (*user_profile).notify);
     let auto_create_items = use_state(|| (*user_profile).auto_create_items.unwrap_or(false));
     // Sending number selector state (for notification-only countries)
     let show_sending_number_selector = use_state(|| false);
     let available_sending_numbers = use_state(|| Vec::<serde_json::Value>::new());
-    let preferred_sending_number = use_state(|| (*user_profile).preferred_number.clone().unwrap_or_default());
+    let preferred_sending_number =
+        use_state(|| (*user_profile).preferred_number.clone().unwrap_or_default());
     let location = use_state(|| (*user_profile).location.clone().unwrap_or_default());
     let location_original = use_state(|| (*user_profile).location.clone().unwrap_or_default());
     let nearby_places = use_state(|| (*user_profile).nearby_places.clone().unwrap_or_default());
-    let nearby_places_original = use_state(|| (*user_profile).nearby_places.clone().unwrap_or_default());
+    let nearby_places_original =
+        use_state(|| (*user_profile).nearby_places.clone().unwrap_or_default());
 
     // Per-field save states
     let nickname_save_state = use_state(|| FieldSaveState::Idle);
@@ -301,29 +321,37 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let location_original = location_original.clone();
         let nearby_places = nearby_places.clone();
         let nearby_places_original = nearby_places_original.clone();
-        use_effect_with_deps(move |props_profile| {
-            email.set(props_profile.email.clone());
-            email_original.set(props_profile.email.clone());
-            phone_number.set(props_profile.phone_number.clone());
-            phone_number_original.set(props_profile.phone_number.clone());
-            nickname.set(props_profile.nickname.clone().unwrap_or_default());
-            nickname_original.set(props_profile.nickname.clone().unwrap_or_default());
-            info.set(props_profile.info.clone().unwrap_or_default());
-            info_original.set(props_profile.info.clone().unwrap_or_default());
-            timezone.set(props_profile.timezone.clone().unwrap_or_else(|| String::from("UTC")));
-            timezone_auto.set(props_profile.timezone_auto.unwrap_or(true));
-            phone_service_active.set(props_profile.phone_service_active.unwrap_or(true));
-            auto_create_items.set(props_profile.auto_create_items.unwrap_or(false));
-            agent_language.set(props_profile.agent_language.clone());
-            notification_type.set(props_profile.notification_type.clone());
-            location.set(props_profile.location.clone().unwrap_or_default());
-            location_original.set(props_profile.location.clone().unwrap_or_default());
-            nearby_places.set(props_profile.nearby_places.clone().unwrap_or_default());
-            nearby_places_original.set(props_profile.nearby_places.clone().unwrap_or_default());
-            save_context.set(props_profile.save_context.unwrap_or(0));
-            user_profile_state.set(props_profile.clone());
-            || ()
-        }, props.user_profile.clone());
+        use_effect_with_deps(
+            move |props_profile| {
+                email.set(props_profile.email.clone());
+                email_original.set(props_profile.email.clone());
+                phone_number.set(props_profile.phone_number.clone());
+                phone_number_original.set(props_profile.phone_number.clone());
+                nickname.set(props_profile.nickname.clone().unwrap_or_default());
+                nickname_original.set(props_profile.nickname.clone().unwrap_or_default());
+                info.set(props_profile.info.clone().unwrap_or_default());
+                info_original.set(props_profile.info.clone().unwrap_or_default());
+                timezone.set(
+                    props_profile
+                        .timezone
+                        .clone()
+                        .unwrap_or_else(|| String::from("UTC")),
+                );
+                timezone_auto.set(props_profile.timezone_auto.unwrap_or(true));
+                phone_service_active.set(props_profile.phone_service_active.unwrap_or(true));
+                auto_create_items.set(props_profile.auto_create_items.unwrap_or(false));
+                agent_language.set(props_profile.agent_language.clone());
+                notification_type.set(props_profile.notification_type.clone());
+                location.set(props_profile.location.clone().unwrap_or_default());
+                location_original.set(props_profile.location.clone().unwrap_or_default());
+                nearby_places.set(props_profile.nearby_places.clone().unwrap_or_default());
+                nearby_places_original.set(props_profile.nearby_places.clone().unwrap_or_default());
+                save_context.set(props_profile.save_context.unwrap_or(0));
+                user_profile_state.set(props_profile.clone());
+                || ()
+            },
+            props.user_profile.clone(),
+        );
     }
 
     // Fetch available sending numbers for notification-only country users
@@ -331,32 +359,41 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let show_sending_number_selector = show_sending_number_selector.clone();
         let available_sending_numbers = available_sending_numbers.clone();
         let preferred_sending_number = preferred_sending_number.clone();
-        use_effect_with_deps(move |_| {
-            spawn_local(async move {
-                match Api::get("/api/profile/available-sending-numbers")
-                    .send()
-                    .await
-                {
-                    Ok(response) if response.ok() => {
-                        if let Ok(data) = response.json::<serde_json::Value>().await {
-                            if let Some(show) = data.get("show_selector").and_then(|v| v.as_bool()) {
-                                show_sending_number_selector.set(show);
-                            }
-                            if let Some(numbers) = data.get("available_numbers").and_then(|v| v.as_array()) {
-                                available_sending_numbers.set(numbers.clone());
-                            }
-                            if let Some(current) = data.get("current_preferred").and_then(|v| v.as_str()) {
-                                preferred_sending_number.set(current.to_string());
+        use_effect_with_deps(
+            move |_| {
+                spawn_local(async move {
+                    match Api::get("/api/profile/available-sending-numbers")
+                        .send()
+                        .await
+                    {
+                        Ok(response) if response.ok() => {
+                            if let Ok(data) = response.json::<serde_json::Value>().await {
+                                if let Some(show) =
+                                    data.get("show_selector").and_then(|v| v.as_bool())
+                                {
+                                    show_sending_number_selector.set(show);
+                                }
+                                if let Some(numbers) =
+                                    data.get("available_numbers").and_then(|v| v.as_array())
+                                {
+                                    available_sending_numbers.set(numbers.clone());
+                                }
+                                if let Some(current) =
+                                    data.get("current_preferred").and_then(|v| v.as_str())
+                                {
+                                    preferred_sending_number.set(current.to_string());
+                                }
                             }
                         }
+                        _ => {
+                            info!("Failed to fetch available sending numbers");
+                        }
                     }
-                    _ => {
-                        info!("Failed to fetch available sending numbers");
-                    }
-                }
-            });
-            || ()
-        }, ());
+                });
+                || ()
+            },
+            (),
+        );
     }
 
     // Helper function to save nickname
@@ -377,7 +414,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             spawn_local(async move {
                 let request = PatchFieldRequest {
                     field: "nickname".to_string(),
-                    value: serde_json::Value::String(new_val.clone())
+                    value: serde_json::Value::String(new_val.clone()),
                 };
                 match Api::patch("/api/profile/field")
                     .json(&request)
@@ -393,7 +430,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -465,7 +502,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             spawn_local(async move {
                 let request = PatchFieldRequest {
                     field: "info".to_string(),
-                    value: serde_json::Value::String(new_val.clone())
+                    value: serde_json::Value::String(new_val.clone()),
                 };
                 match Api::patch("/api/profile/field")
                     .json(&request)
@@ -481,7 +518,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -554,7 +591,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             spawn_local(async move {
                 let request = PatchFieldRequest {
                     field: "location".to_string(),
-                    value: serde_json::Value::String(new_val.clone())
+                    value: serde_json::Value::String(new_val.clone()),
                 };
                 match Api::patch("/api/profile/field")
                     .json(&request)
@@ -570,7 +607,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -642,7 +679,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             spawn_local(async move {
                 let request = PatchFieldRequest {
                     field: "nearby_places".to_string(),
-                    value: serde_json::Value::String(new_val.clone())
+                    value: serde_json::Value::String(new_val.clone()),
                 };
                 match Api::patch("/api/profile/field")
                     .json(&request)
@@ -658,7 +695,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -730,7 +767,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             spawn_local(async move {
                 let request = PatchFieldRequest {
                     field: "timezone".to_string(),
-                    value: serde_json::Value::String(new_val.clone())
+                    value: serde_json::Value::String(new_val.clone()),
                 };
                 match Api::patch("/api/profile/field")
                     .json(&request)
@@ -745,7 +782,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -777,7 +814,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             spawn_local(async move {
                 let request = PatchFieldRequest {
                     field: "timezone_auto".to_string(),
-                    value: serde_json::Value::Bool(new_val)
+                    value: serde_json::Value::Bool(new_val),
                 };
                 match Api::patch("/api/profile/field")
                     .json(&request)
@@ -792,7 +829,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -824,7 +861,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             spawn_local(async move {
                 let request = PatchFieldRequest {
                     field: "phone_service_active".to_string(),
-                    value: serde_json::Value::Bool(new_val)
+                    value: serde_json::Value::Bool(new_val),
                 };
                 match Api::patch("/api/profile/field")
                     .json(&request)
@@ -839,7 +876,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -871,7 +908,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             spawn_local(async move {
                 let request = PatchFieldRequest {
                     field: "agent_language".to_string(),
-                    value: serde_json::Value::String(new_val.clone())
+                    value: serde_json::Value::String(new_val.clone()),
                 };
                 match Api::patch("/api/profile/field")
                     .json(&request)
@@ -886,7 +923,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -910,7 +947,11 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         Callback::from(move |e: Event| {
             let select: HtmlInputElement = e.target_unchecked_into();
             let new_val = select.value();
-            let value = if new_val == "none" { None } else { Some(new_val.clone()) };
+            let value = if new_val == "none" {
+                None
+            } else {
+                Some(new_val.clone())
+            };
             notification_type.set(value.clone());
             let save_state = save_state.clone();
             let user_profile = user_profile.clone();
@@ -919,7 +960,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             spawn_local(async move {
                 let request = PatchFieldRequest {
                     field: "notification_type".to_string(),
-                    value: serde_json::Value::String(new_val.clone())
+                    value: serde_json::Value::String(new_val.clone()),
                 };
                 match Api::patch("/api/profile/field")
                     .json(&request)
@@ -934,7 +975,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -966,7 +1007,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 spawn_local(async move {
                     let request = PatchFieldRequest {
                         field: "save_context".to_string(),
-                        value: serde_json::Value::Number(new_val.into())
+                        value: serde_json::Value::Number(new_val.into()),
                     };
                     match Api::patch("/api/profile/field")
                         .json(&request)
@@ -981,7 +1022,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                             save_state.set(FieldSaveState::Success);
                             let save_state_clone = save_state.clone();
                             spawn_local(async move {
-                                gloo_timers::future::TimeoutFuture::new(2000).await;
+                                gloo_timers::future::TimeoutFuture::new(3_000).await;
                                 save_state_clone.set(FieldSaveState::Idle);
                             });
                         }
@@ -1014,7 +1055,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             spawn_local(async move {
                 let request = PatchFieldRequest {
                     field: "preferred_number".to_string(),
-                    value: serde_json::Value::String(new_val.clone())
+                    value: serde_json::Value::String(new_val.clone()),
                 };
                 match Api::patch("/api/profile/field")
                     .json(&request)
@@ -1029,7 +1070,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -1059,11 +1100,14 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             let on_profile_update = on_profile_update.clone();
             save_state.set(FieldSaveState::Saving);
             spawn_local(async move {
-                match Api::post(&format!("/api/profile/update-notify/{}", (*user_profile).id))
-                    .json(&serde_json::json!({"notify": new_val}))
-                    .unwrap()
-                    .send()
-                    .await
+                match Api::post(&format!(
+                    "/api/profile/update-notify/{}",
+                    (*user_profile).id
+                ))
+                .json(&serde_json::json!({"notify": new_val}))
+                .unwrap()
+                .send()
+                .await
                 {
                     Ok(response) if response.ok() => {
                         let mut profile = (*user_profile).clone();
@@ -1072,7 +1116,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -1119,7 +1163,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
                         spawn_local(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
                             save_state_clone.set(FieldSaveState::Idle);
                         });
                     }
@@ -1222,13 +1266,20 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 // First check if 2FA is required
                 two_factor_state.set(TwoFactorVerifyState::Loading);
                 spawn_local(async move {
-                    match Api::get("/api/profile/sensitive-change-requirements").send().await {
+                    match Api::get("/api/profile/sensitive-change-requirements")
+                        .send()
+                        .await
+                    {
                         Ok(resp) if resp.ok() => {
-                            if let Ok(requirements) = resp.json::<SensitiveChangeRequirements>().await {
+                            if let Ok(requirements) =
+                                resp.json::<SensitiveChangeRequirements>().await
+                            {
                                 if requirements.requires_2fa {
                                     // Store the change type and show 2FA modal
-                                    pending_change_type.set(Some(SensitiveChangeType::Email(new_email.clone())));
-                                    pending_passkey_options.set(requirements.passkey_options.clone());
+                                    pending_change_type
+                                        .set(Some(SensitiveChangeType::Email(new_email.clone())));
+                                    pending_passkey_options
+                                        .set(requirements.passkey_options.clone());
                                     two_factor_state.set(TwoFactorVerifyState::ShowingOptions {
                                         has_passkeys: requirements.has_passkeys,
                                         has_totp: requirements.has_totp,
@@ -1247,17 +1298,23 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                         user_profile,
                                         on_profile_update,
                                         pending_email,
-                                    ).await;
+                                    )
+                                    .await;
                                 }
                             } else {
-                                two_factor_state.set(TwoFactorVerifyState::Error("Failed to parse 2FA requirements".to_string()));
+                                two_factor_state.set(TwoFactorVerifyState::Error(
+                                    "Failed to parse 2FA requirements".to_string(),
+                                ));
                             }
                         }
                         Ok(_) => {
-                            two_factor_state.set(TwoFactorVerifyState::Error("Failed to check 2FA requirements".to_string()));
+                            two_factor_state.set(TwoFactorVerifyState::Error(
+                                "Failed to check 2FA requirements".to_string(),
+                            ));
                         }
                         Err(_) => {
-                            two_factor_state.set(TwoFactorVerifyState::Error("Network error".to_string()));
+                            two_factor_state
+                                .set(TwoFactorVerifyState::Error("Network error".to_string()));
                         }
                     }
                 });
@@ -1306,13 +1363,20 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 // First check if 2FA is required
                 two_factor_state.set(TwoFactorVerifyState::Loading);
                 spawn_local(async move {
-                    match Api::get("/api/profile/sensitive-change-requirements").send().await {
+                    match Api::get("/api/profile/sensitive-change-requirements")
+                        .send()
+                        .await
+                    {
                         Ok(resp) if resp.ok() => {
-                            if let Ok(requirements) = resp.json::<SensitiveChangeRequirements>().await {
+                            if let Ok(requirements) =
+                                resp.json::<SensitiveChangeRequirements>().await
+                            {
                                 if requirements.requires_2fa {
                                     // Store the change type and show 2FA modal
-                                    pending_change_type.set(Some(SensitiveChangeType::Phone(new_phone.clone())));
-                                    pending_passkey_options.set(requirements.passkey_options.clone());
+                                    pending_change_type
+                                        .set(Some(SensitiveChangeType::Phone(new_phone.clone())));
+                                    pending_passkey_options
+                                        .set(requirements.passkey_options.clone());
                                     two_factor_state.set(TwoFactorVerifyState::ShowingOptions {
                                         has_passkeys: requirements.has_passkeys,
                                         has_totp: requirements.has_totp,
@@ -1332,17 +1396,23 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                         on_profile_update,
                                         pending_phone,
                                         navigator,
-                                    ).await;
+                                    )
+                                    .await;
                                 }
                             } else {
-                                two_factor_state.set(TwoFactorVerifyState::Error("Failed to parse 2FA requirements".to_string()));
+                                two_factor_state.set(TwoFactorVerifyState::Error(
+                                    "Failed to parse 2FA requirements".to_string(),
+                                ));
                             }
                         }
                         Ok(_) => {
-                            two_factor_state.set(TwoFactorVerifyState::Error("Failed to check 2FA requirements".to_string()));
+                            two_factor_state.set(TwoFactorVerifyState::Error(
+                                "Failed to check 2FA requirements".to_string(),
+                            ));
                         }
                         Err(_) => {
-                            two_factor_state.set(TwoFactorVerifyState::Error("Network error".to_string()));
+                            two_factor_state
+                                .set(TwoFactorVerifyState::Error("Network error".to_string()));
                         }
                     }
                 });
@@ -1438,7 +1508,8 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                             user_profile,
                                             on_profile_update,
                                             pending_email,
-                                        ).await;
+                                        )
+                                        .await;
                                         two_factor_state.set(TwoFactorVerifyState::Hidden);
                                     }
                                     SensitiveChangeType::Phone(new_phone) => {
@@ -1452,18 +1523,24 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                             on_profile_update,
                                             pending_phone,
                                             navigator,
-                                        ).await;
+                                        )
+                                        .await;
                                         two_factor_state.set(TwoFactorVerifyState::Hidden);
                                     }
                                 }
                             }
                         }
                         Err(e) => {
-                            two_factor_state.set(TwoFactorVerifyState::Error(format!("Passkey verification failed: {}", e)));
+                            two_factor_state.set(TwoFactorVerifyState::Error(format!(
+                                "Passkey verification failed: {}",
+                                e
+                            )));
                         }
                     }
                 } else {
-                    two_factor_state.set(TwoFactorVerifyState::Error("No passkey options available".to_string()));
+                    two_factor_state.set(TwoFactorVerifyState::Error(
+                        "No passkey options available".to_string(),
+                    ));
                 }
             });
         })
@@ -1525,7 +1602,8 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                 user_profile,
                                 on_profile_update,
                                 pending_email,
-                            ).await;
+                            )
+                            .await;
                             two_factor_state.set(TwoFactorVerifyState::Hidden);
                             totp_code_input.set(String::new());
                         }
@@ -1540,7 +1618,8 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                 on_profile_update,
                                 pending_phone,
                                 navigator,
-                            ).await;
+                            )
+                            .await;
                             two_factor_state.set(TwoFactorVerifyState::Hidden);
                             totp_code_input.set(String::new());
                         }
@@ -1588,9 +1667,12 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             }
             spawn_local(async move {
                 let encoded_loc = encode_uri_component(&loc).to_string();
-                match Api::get(&format!("/api/profile/get_nearby_places?location={}", encoded_loc))
-                    .send()
-                    .await
+                match Api::get(&format!(
+                    "/api/profile/get_nearby_places?location={}",
+                    encoded_loc
+                ))
+                .send()
+                .await
                 {
                     Ok(response) if response.ok() => {
                         if let Ok(json) = response.json::<Vec<String>>().await {
@@ -1601,7 +1683,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                             save_state.set(FieldSaveState::Saving);
                             let request = PatchFieldRequest {
                                 field: "nearby_places".to_string(),
-                                value: serde_json::Value::String(new_val.clone())
+                                value: serde_json::Value::String(new_val.clone()),
                             };
                             match Api::patch("/api/profile/field")
                                 .json(&request)
@@ -1617,15 +1699,17 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     save_state.set(FieldSaveState::Success);
                                     let save_state_clone = save_state.clone();
                                     spawn_local(async move {
-                                        gloo_timers::future::TimeoutFuture::new(2000).await;
+                                        gloo_timers::future::TimeoutFuture::new(3_000).await;
                                         save_state_clone.set(FieldSaveState::Idle);
                                     });
                                 }
                                 Ok(_) => {
-                                    save_state.set(FieldSaveState::Error("Failed to save".to_string()));
+                                    save_state
+                                        .set(FieldSaveState::Error("Failed to save".to_string()));
                                 }
                                 Err(_) => {
-                                    save_state.set(FieldSaveState::Error("Network error".to_string()));
+                                    save_state
+                                        .set(FieldSaveState::Error("Network error".to_string()));
                                 }
                             }
                         }

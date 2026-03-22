@@ -49,8 +49,9 @@ module "compute" {
   vpc_id               = module.networking.vpc_id
   public_subnet_id     = module.networking.public_subnet_id
   security_group_id    = module.networking.security_group_id
-  cloudflare_tunnel_token = module.cloudflare.tunnel_token
   domain               = var.cloudflare_domain
+  subdomain            = var.subdomain
+  github_repo          = var.github_repo
 }
 
 # Cloudflare: Zero Trust tunnel and DNS
@@ -61,5 +62,6 @@ module "cloudflare" {
   cloudflare_zone_id  = var.cloudflare_zone_id
   cloudflare_account_id = var.cloudflare_account_id
   domain              = var.cloudflare_domain
+  subdomain           = var.subdomain
   project_name        = var.project_name
 }

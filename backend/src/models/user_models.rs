@@ -27,6 +27,9 @@ pub struct User {
     pub last_credits_notification: Option<i32>, // Unix timestamp of last insufficient credits notification to prevent spam
     pub next_billing_date_timestamp: Option<i32>, // when is user next billed for their subscription
     pub magic_token: Option<String>,            // token for magic link login/password setup
+    pub refresh_token_hash: Option<String>,     // hash of the currently active refresh token
+    pub refresh_token_compromised: bool,        // set if an invalidated refresh token is reused
+    pub magic_token_expires_at: Option<i32>,    // expiry for magic link token
     pub plan_type: Option<String>,              // "assistant", "autopilot", or "byot"
     pub matrix_e2ee_enabled: bool,              // whether E2EE is enabled for Matrix messaging
 }

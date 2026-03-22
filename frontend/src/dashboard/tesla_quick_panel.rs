@@ -1,11 +1,11 @@
-use yew::prelude::*;
-use wasm_bindgen_futures::spawn_local;
-use wasm_bindgen::JsCast;
-use wasm_bindgen::closure::Closure;
-use serde::Deserialize;
 use crate::utils::api::Api;
-use std::rc::Rc;
+use serde::Deserialize;
 use std::cell::RefCell;
+use std::rc::Rc;
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::spawn_local;
+use yew::prelude::*;
 
 const TESLA_PANEL_STYLES: &str = r#"
 .tesla-quick-panel {
@@ -340,12 +340,15 @@ pub fn tesla_quick_panel(props: &TeslaQuickPanelProps) -> Html {
                                         }
                                     }
                                 }
-                            }) as Box<dyn Fn()>);
+                            })
+                                as Box<dyn Fn()>);
 
-                            if let Ok(id) = window.set_interval_with_callback_and_timeout_and_arguments_0(
-                                interval_callback.as_ref().unchecked_ref(),
-                                1000,
-                            ) {
+                            if let Ok(id) = window
+                                .set_interval_with_callback_and_timeout_and_arguments_0(
+                                    interval_callback.as_ref().unchecked_ref(),
+                                    1000,
+                                )
+                            {
                                 *interval_id.borrow_mut() = Some(id);
                             }
                             interval_callback.forget();
@@ -388,21 +391,33 @@ pub fn tesla_quick_panel(props: &TeslaQuickPanelProps) -> Html {
                                         match Api::get("/api/tesla/battery-status").send().await {
                                             Ok(resp) => {
                                                 if resp.ok() {
-                                                    if let Ok(battery_data) = resp.json::<TeslaBatteryStatus>().await {
+                                                    if let Ok(battery_data) =
+                                                        resp.json::<TeslaBatteryStatus>().await
+                                                    {
                                                         // Initialize charge limit input
-                                                        if let Some(limit) = battery_data.charge_limit_soc {
+                                                        if let Some(limit) =
+                                                            battery_data.charge_limit_soc
+                                                        {
                                                             charge_limit_input.set(limit);
                                                         }
                                                         status.set(Some(battery_data));
                                                     } else {
-                                                        error.set(Some("Failed to parse status".to_string()));
+                                                        error.set(Some(
+                                                            "Failed to parse status".to_string(),
+                                                        ));
                                                     }
                                                 } else {
-                                                    if let Ok(err_data) = resp.json::<serde_json::Value>().await {
-                                                        let msg = err_data["error"].as_str().unwrap_or("Failed to fetch status");
+                                                    if let Ok(err_data) =
+                                                        resp.json::<serde_json::Value>().await
+                                                    {
+                                                        let msg = err_data["error"]
+                                                            .as_str()
+                                                            .unwrap_or("Failed to fetch status");
                                                         error.set(Some(msg.to_string()));
                                                     } else {
-                                                        error.set(Some("Failed to fetch status".to_string()));
+                                                        error.set(Some(
+                                                            "Failed to fetch status".to_string(),
+                                                        ));
                                                     }
                                                 }
                                             }
@@ -452,9 +467,13 @@ pub fn tesla_quick_panel(props: &TeslaQuickPanelProps) -> Html {
                             Ok(resp) => {
                                 if resp.ok() {
                                     // Refresh status after command
-                                    if let Ok(refresh_resp) = Api::get("/api/tesla/battery-status").send().await {
+                                    if let Ok(refresh_resp) =
+                                        Api::get("/api/tesla/battery-status").send().await
+                                    {
                                         if refresh_resp.ok() {
-                                            if let Ok(new_status) = refresh_resp.json::<TeslaBatteryStatus>().await {
+                                            if let Ok(new_status) =
+                                                refresh_resp.json::<TeslaBatteryStatus>().await
+                                            {
                                                 if let Some(limit) = new_status.charge_limit_soc {
                                                     charge_limit_input.set(limit);
                                                 }
@@ -464,7 +483,8 @@ pub fn tesla_quick_panel(props: &TeslaQuickPanelProps) -> Html {
                                     }
                                 } else {
                                     if let Ok(err_data) = resp.json::<serde_json::Value>().await {
-                                        let msg = err_data["error"].as_str()
+                                        let msg = err_data["error"]
+                                            .as_str()
                                             .or(err_data["message"].as_str())
                                             .unwrap_or("Command failed");
                                         error.set(Some(msg.to_string()));
@@ -504,7 +524,10 @@ pub fn tesla_quick_panel(props: &TeslaQuickPanelProps) -> Html {
         let send_command = send_command.clone();
 
         Callback::from(move |_: MouseEvent| {
-            let is_on = status.as_ref().and_then(|s| s.is_climate_on).unwrap_or(false);
+            let is_on = status
+                .as_ref()
+                .and_then(|s| s.is_climate_on)
+                .unwrap_or(false);
             let command = if is_on { "climate_off" } else { "climate_on" };
             send_command(command.to_string(), climate_loading.clone());
         })
@@ -525,7 +548,10 @@ pub fn tesla_quick_panel(props: &TeslaQuickPanelProps) -> Html {
         let send_command = send_command.clone();
 
         Callback::from(move |_: MouseEvent| {
-            let is_on = status.as_ref().and_then(|s| s.cabin_overheat_protection).unwrap_or(false);
+            let is_on = status
+                .as_ref()
+                .and_then(|s| s.cabin_overheat_protection)
+                .unwrap_or(false);
             let command = if is_on { "cop_off" } else { "cop_on" };
             send_command(command.to_string(), cop_loading.clone());
         })
@@ -555,7 +581,8 @@ pub fn tesla_quick_panel(props: &TeslaQuickPanelProps) -> Html {
                                     remote_start_countdown.set(Some(120));
                                 } else {
                                     if let Ok(err_data) = resp.json::<serde_json::Value>().await {
-                                        let msg = err_data["error"].as_str()
+                                        let msg = err_data["error"]
+                                            .as_str()
                                             .or(err_data["message"].as_str())
                                             .unwrap_or("Remote start failed");
                                         error.set(Some(msg.to_string()));
@@ -607,7 +634,9 @@ pub fn tesla_quick_panel(props: &TeslaQuickPanelProps) -> Html {
                                     charge_limit_editing.set(false);
                                 } else {
                                     if let Ok(err_data) = resp.json::<serde_json::Value>().await {
-                                        let msg = err_data["error"].as_str().unwrap_or("Failed to set charge limit");
+                                        let msg = err_data["error"]
+                                            .as_str()
+                                            .unwrap_or("Failed to set charge limit");
                                         error.set(Some(msg.to_string()));
                                     }
                                 }

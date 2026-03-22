@@ -63,10 +63,15 @@ async-stream = "0.3"
 resend-rs = "0.9"
 serde_urlencoded = "0.7.1"
 phonenumber = "0.3"  # Google libphonenumber port for Rust - handles E.164 parsing and country detection
+rocksdb = "0.24"
 
 [[bin]]
 name = "migrate_to_pg"
 path = "src/bin/migrate_to_pg.rs"
+
+[[bin]]
+name = "tuwunel_checkpoint"
+path = "src/bin/tuwunel_checkpoint.rs"
 
 [dev-dependencies]
 serial_test = "3.0"  # For tests that modify environment variables

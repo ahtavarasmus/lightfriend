@@ -1,22 +1,23 @@
-use yew::prelude::*;
-use yew_router::prelude::Link;
-use web_sys::HtmlInputElement;
-use crate::utils::api::Api;
-use crate::Route;
-use serde_json::{Value, json};
-use chrono::{Utc, Duration};
-use crate::profile::billing_models::{ // Import from the new file
+use crate::profile::billing_models::{
+    ApiResponse,
+    // Import from the new file
     AutoTopupSettings,
     BuyCreditsRequest,
-    ApiResponse,
-    UserProfile,
-    UsageProjection,
-    MIN_TOPUP_AMOUNT_CREDITS,
     ByotUsageResponse,
+    UsageProjection,
+    UserProfile,
+    MIN_TOPUP_AMOUNT_CREDITS,
 };
-use wasm_bindgen_futures::spawn_local;
+use crate::utils::api::Api;
+use crate::Route;
+use chrono::{Duration, Utc};
 use gloo_timers::future::TimeoutFuture;
+use serde_json::{json, Value};
 use wasm_bindgen::JsValue;
+use wasm_bindgen_futures::spawn_local;
+use web_sys::HtmlInputElement;
+use yew::prelude::*;
+use yew_router::prelude::Link;
 #[derive(Properties, PartialEq, Clone)]
 pub struct BillingPageProps {
     pub user_profile: UserProfile,
@@ -51,54 +52,58 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
     // Fetch usage projection on mount (only once)
     {
         let usage_projection = usage_projection.clone();
-        use_effect_with_deps(move |_| {
-            spawn_local(async move {
-                match Api::get("/api/pricing/usage-projection")
-                    .send()
-                    .await
-                {
-                    Ok(response) => {
-                        if response.ok() {
-                            if let Ok(data) = response.json::<UsageProjection>().await {
-                                usage_projection.set(Some(data));
+        use_effect_with_deps(
+            move |_| {
+                spawn_local(async move {
+                    match Api::get("/api/pricing/usage-projection").send().await {
+                        Ok(response) => {
+                            if response.ok() {
+                                if let Ok(data) = response.json::<UsageProjection>().await {
+                                    usage_projection.set(Some(data));
+                                }
                             }
                         }
+                        Err(e) => {
+                            web_sys::console::log_1(
+                                &format!("Failed to fetch usage projection: {:?}", e).into(),
+                            );
+                        }
                     }
-                    Err(e) => {
-                        web_sys::console::log_1(&format!("Failed to fetch usage projection: {:?}", e).into());
-                    }
-                }
-            });
-            || ()
-        }, ());
+                });
+                || ()
+            },
+            (),
+        );
     }
 
     // Fetch BYOT usage on mount if user is BYOT
     {
         let byot_usage = byot_usage.clone();
         let is_byot = user_profile.plan_type.as_deref() == Some("byot");
-        use_effect_with_deps(move |_| {
-            if is_byot {
-                spawn_local(async move {
-                    match Api::get("/api/pricing/byot-usage")
-                        .send()
-                        .await
-                    {
-                        Ok(response) => {
-                            if response.ok() {
-                                if let Ok(data) = response.json::<ByotUsageResponse>().await {
-                                    byot_usage.set(Some(data));
+        use_effect_with_deps(
+            move |_| {
+                if is_byot {
+                    spawn_local(async move {
+                        match Api::get("/api/pricing/byot-usage").send().await {
+                            Ok(response) => {
+                                if response.ok() {
+                                    if let Ok(data) = response.json::<ByotUsageResponse>().await {
+                                        byot_usage.set(Some(data));
+                                    }
                                 }
                             }
+                            Err(e) => {
+                                web_sys::console::log_1(
+                                    &format!("Failed to fetch BYOT usage: {:?}", e).into(),
+                                );
+                            }
                         }
-                        Err(e) => {
-                            web_sys::console::log_1(&format!("Failed to fetch BYOT usage: {:?}", e).into());
-                        }
-                    }
-                });
-            }
-            || ()
-        }, ());
+                    });
+                }
+                || ()
+            },
+            (),
+        );
     }
 
     let one_time_credits = user_profile.credits;
@@ -123,7 +128,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
             let user_profile_state = user_profile_state.clone();
             let usage_projection = usage_projection.clone();
             let settings = settings.clone();
-           
+
             spawn_local(async move {
                 // Update auto-topup settings
                 match Api::post(&format!("/api/billing/update-auto-topup/{}", user_id))
@@ -144,17 +149,16 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                     saved_auto_topup_amount.set(amount); // Update saved amount locally
                                 }
                                 // Fetch updated user profile to ensure server state matches
-                                match Api::get("/api/profile")
-                                    .send()
-                                    .await
-                                {
+                                match Api::get("/api/profile").send().await {
                                     Ok(profile_response) => {
                                         if profile_response.ok() {
                                             match profile_response.json::<UserProfile>().await {
                                                 Ok(updated_profile) => {
                                                     user_profile_state.set(updated_profile.clone());
                                                     // Update saved amount with the server's value
-                                                    if let Some(new_amount) = updated_profile.charge_back_to {
+                                                    if let Some(new_amount) =
+                                                        updated_profile.charge_back_to
+                                                    {
                                                         saved_auto_topup_amount.set(new_amount);
                                                     }
                                                     // Refresh usage projection to reflect new auto top-up status
@@ -165,10 +169,14 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                     {
                                                         Ok(proj_response) => {
                                                             if proj_response.ok() {
-                                                                match proj_response.json::<UsageProjection>().await {
+                                                                match proj_response
+                                                                    .json::<UsageProjection>()
+                                                                    .await
+                                                                {
                                                                     Ok(data) => {
                                                                         web_sys::console::log_1(&format!("Usage projection refreshed, has_auto_topup: {}", data.has_auto_topup).into());
-                                                                        usage_projection.set(Some(data));
+                                                                        usage_projection
+                                                                            .set(Some(data));
                                                                     }
                                                                     Err(e) => {
                                                                         web_sys::console::log_1(&format!("Failed to parse usage projection: {:?}", e).into());
@@ -184,7 +192,10 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                     }
                                                 }
                                                 Err(e) => {
-                                                    error.set(Some(format!("Failed to parse updated profile: {:?}", e)));
+                                                    error.set(Some(format!(
+                                                        "Failed to parse updated profile: {:?}",
+                                                        e
+                                                    )));
                                                     // Clear error after 3 seconds
                                                     let error_clone = error.clone();
                                                     spawn_local(async move {
@@ -194,7 +205,9 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                 }
                                             }
                                         } else {
-                                            error.set(Some("Failed to refresh user profile".to_string()));
+                                            error.set(Some(
+                                                "Failed to refresh user profile".to_string(),
+                                            ));
                                             // Clear error after 3 seconds
                                             let error_clone = error.clone();
                                             spawn_local(async move {
@@ -204,7 +217,10 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                         }
                                     }
                                     Err(e) => {
-                                        error.set(Some(format!("Network error refreshing profile: {:?}", e)));
+                                        error.set(Some(format!(
+                                            "Network error refreshing profile: {:?}",
+                                            e
+                                        )));
                                         // Clear error after 3 seconds
                                         let error_clone = error.clone();
                                         spawn_local(async move {
@@ -313,7 +329,10 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                         .location()
                                         .set_href(url)
                                         .unwrap_or_else(|e| {
-                                            error.set(Some(format!("Failed to redirect to Stripe: {:?}", e)));
+                                            error.set(Some(format!(
+                                                "Failed to redirect to Stripe: {:?}",
+                                                e
+                                            )));
                                         });
                                     show_confirmation_modal.set(false); // Close confirmation modal
                                 } else {
@@ -325,15 +344,24 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                         } else {
                             // Check if this is an upgrade required error
                             if let Ok(data) = response.json::<Value>().await {
-                                if data.get("upgrade_required").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                if data
+                                    .get("upgrade_required")
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(false)
+                                {
                                     error.set(Some("Credit top-ups are only available on the Digest plan. Upgrade to Digest for more credits and top-up ability.".to_string()));
-                                } else if let Some(msg) = data.get("error").and_then(|v| v.as_str()) {
+                                } else if let Some(msg) = data.get("error").and_then(|v| v.as_str())
+                                {
                                     error.set(Some(msg.to_string()));
                                 } else {
-                                    error.set(Some("Failed to create Stripe Checkout session".to_string()));
+                                    error.set(Some(
+                                        "Failed to create Stripe Checkout session".to_string(),
+                                    ));
                                 }
                             } else {
-                                error.set(Some("Failed to create Stripe Checkout session".to_string()));
+                                error.set(Some(
+                                    "Failed to create Stripe Checkout session".to_string(),
+                                ));
                             }
                         }
                         // Clear error after 3 seconds
@@ -360,76 +388,93 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
     let _handle_successful_payment = {
         let success = success.clone();
         let error = error.clone();
-        use_effect_with_deps(move |_| {
-            let window = web_sys::window().unwrap();
-            let search = window.location().search().unwrap_or_default();
-            let mut need_refresh = false;
-            let session_id_opt = if search.contains("session_id=") {
-                let sid = search.split("session_id=").nth(1)
-                    .and_then(|s| s.split('&').next())
-                    .unwrap_or_default()
-                    .to_string();
-                need_refresh = true;
-                Some(sid)
-            } else {
-                None
-            };
-            if search.contains("subscription=success") || search.contains("subscription=changed") || search.contains("credits=success") {
-                need_refresh = true;
-            }
-            if need_refresh {
-                spawn_local(async move {
-                    let mut refresh_success = true;
-                    if let Some(session_id) = session_id_opt.clone() {
-                        match Api::post("/api/stripe/confirm-checkout")
-                            .header("Content-Type", "application/json")
-                            .json(&json!({ "session_id": session_id }))
-                            .expect("Failed to serialize session ID")
-                            .send()
-                            .await
-                        {
-                            Ok(response) => {
-                                if response.ok() {
-                                    if let Ok(data) = response.json::<ApiResponse>().await {
-                                        success.set(Some(data.message));
+        use_effect_with_deps(
+            move |_| {
+                let window = web_sys::window().unwrap();
+                let search = window.location().search().unwrap_or_default();
+                let mut need_refresh = false;
+                let session_id_opt = if search.contains("session_id=") {
+                    let sid = search
+                        .split("session_id=")
+                        .nth(1)
+                        .and_then(|s| s.split('&').next())
+                        .unwrap_or_default()
+                        .to_string();
+                    need_refresh = true;
+                    Some(sid)
+                } else {
+                    None
+                };
+                if search.contains("subscription=success")
+                    || search.contains("subscription=changed")
+                    || search.contains("credits=success")
+                {
+                    need_refresh = true;
+                }
+                if need_refresh {
+                    spawn_local(async move {
+                        let mut refresh_success = true;
+                        if let Some(session_id) = session_id_opt.clone() {
+                            match Api::post("/api/stripe/confirm-checkout")
+                                .header("Content-Type", "application/json")
+                                .json(&json!({ "session_id": session_id }))
+                                .expect("Failed to serialize session ID")
+                                .send()
+                                .await
+                            {
+                                Ok(response) => {
+                                    if response.ok() {
+                                        if let Ok(data) = response.json::<ApiResponse>().await {
+                                            success.set(Some(data.message));
+                                        } else {
+                                            error.set(Some(
+                                                "Failed to parse confirmation response".to_string(),
+                                            ));
+                                            refresh_success = false;
+                                        }
                                     } else {
-                                        error.set(Some("Failed to parse confirmation response".to_string()));
+                                        error.set(Some(
+                                            "Failed to confirm Stripe payment".to_string(),
+                                        ));
                                         refresh_success = false;
                                     }
-                                } else {
-                                    error.set(Some("Failed to confirm Stripe payment".to_string()));
+                                }
+                                Err(e) => {
+                                    error.set(Some(format!(
+                                        "Network error confirming payment: {:?}",
+                                        e
+                                    )));
                                     refresh_success = false;
                                 }
                             }
-                            Err(e) => {
-                                error.set(Some(format!("Network error confirming payment: {:?}", e)));
-                                refresh_success = false;
-                            }
                         }
-                    }
-                    if refresh_success {
-                        let message = if session_id_opt.is_some() {
-                            "Credits added successfully! Reloading..."
-                        } else {
-                            "Subscription updated successfully! Reloading..."
-                        };
-                        success.set(Some(message.to_string()));
-                        TimeoutFuture::new(10_000).await;
-                        success.set(None);
-                        let history = window.history().expect("no history");
-                        history.replace_state_with_url(&JsValue::NULL, "", Some("/billing")).expect("replace state failed");
-                        window.location().reload().expect("reload failed");
-                    } else {
-                        let error_clone = error.clone();
-                        spawn_local(async move {
+                        if refresh_success {
+                            let message = if session_id_opt.is_some() {
+                                "Credits added successfully! Reloading..."
+                            } else {
+                                "Subscription updated successfully! Reloading..."
+                            };
+                            success.set(Some(message.to_string()));
                             TimeoutFuture::new(10_000).await;
-                            error_clone.set(None);
-                        });
-                    }
-                });
-            }
-            || () // Cleanup function (none needed here)
-        }, ())
+                            success.set(None);
+                            let history = window.history().expect("no history");
+                            history
+                                .replace_state_with_url(&JsValue::NULL, "", Some("/billing"))
+                                .expect("replace state failed");
+                            window.location().reload().expect("reload failed");
+                        } else {
+                            let error_clone = error.clone();
+                            spawn_local(async move {
+                                TimeoutFuture::new(10_000).await;
+                                error_clone.set(None);
+                            });
+                        }
+                    });
+                }
+                || () // Cleanup function (none needed here)
+            },
+            (),
+        )
     };
     // Function to open Stripe Customer Portal
     let open_customer_portal = {
@@ -458,12 +503,18 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                         .unwrap_or_else(|e| {
                                             error.set(Some(format!("Failed to redirect to Stripe Customer Portal: {:?}", e)));
                                         });
-                                    success.set(Some("Redirecting to Stripe Customer Portal".to_string()));
+                                    success.set(Some(
+                                        "Redirecting to Stripe Customer Portal".to_string(),
+                                    ));
                                 } else {
-                                    error.set(Some("No URL in Customer Portal response".to_string()));
+                                    error.set(Some(
+                                        "No URL in Customer Portal response".to_string(),
+                                    ));
                                 }
                             } else {
-                                error.set(Some("Failed to parse Customer Portal response".to_string()));
+                                error.set(Some(
+                                    "Failed to parse Customer Portal response".to_string(),
+                                ));
                             }
                         } else {
                             error.set(Some("Failed to create Customer Portal session".to_string()));
@@ -1143,12 +1194,12 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                         <span class="slider round"></span>
                                                     </label>
                                                 </div>
-                                               
+
                                                 <div class="current-balance">
                                                     <span>{"Currently: "}</span>
                                                     <span class="balance-amount">{format!("${:.2}", *saved_auto_topup_amount)}</span>
                                                 </div>
-                                               
+
                                                 {
                                                     if *auto_topup_active {
                                                         html! {
@@ -1209,7 +1260,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                                 >
                                                                     {"Save"}
                                                                 </button>
-                                                               
+
                                                                 {
                                                                     if let Some(error_msg) = (*error).as_ref() {
                                                                         html! {

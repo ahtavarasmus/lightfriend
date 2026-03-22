@@ -8,8 +8,11 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 use std::sync::Arc;
+use tokio::net::lookup_host;
 use tracing::{error, info};
+use url::Url;
 
 use crate::handlers::auth_middleware::AuthUser;
 use crate::models::mcp_models::{
@@ -18,6 +21,57 @@ use crate::models::mcp_models::{
 use crate::repositories::mcp_repository::McpRepository;
 use crate::services::mcp_client::McpClientService;
 use crate::AppState;
+
+fn is_private_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ipv4) => {
+            ipv4.is_private()
+                || ipv4.is_loopback()
+                || ipv4.is_link_local()
+                || ipv4.is_unspecified()
+                || ipv4.octets()[0] == 169 && ipv4.octets()[1] == 254
+        }
+        IpAddr::V6(ipv6) => {
+            ipv6.is_loopback()
+                || ipv6.is_unspecified()
+                || ipv6.is_unique_local()
+                || ipv6.is_unicast_link_local()
+        }
+    }
+}
+
+async fn validate_public_mcp_url(url: &str) -> Result<(), String> {
+    let parsed = Url::parse(url).map_err(|_| "Invalid URL".to_string())?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "URL must include a host".to_string())?;
+    let port = parsed
+        .port_or_known_default()
+        .ok_or_else(|| "URL must include a valid port".to_string())?;
+
+    if host.eq_ignore_ascii_case("localhost") {
+        return Err("Localhost MCP URLs are not allowed".to_string());
+    }
+
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_private_ip(ip) {
+            return Err("Private or local MCP URLs are not allowed".to_string());
+        }
+        return Ok(());
+    }
+
+    let resolved = lookup_host((host, port))
+        .await
+        .map_err(|_| "Failed to resolve MCP server host".to_string())?;
+
+    for addr in resolved {
+        if is_private_ip(addr.ip()) {
+            return Err("MCP URL resolves to a private or local address".to_string());
+        }
+    }
+
+    Ok(())
+}
 
 /// POST /api/mcp/servers - Add a new MCP server
 pub async fn create_mcp_server(
@@ -64,6 +118,10 @@ pub async fn create_mcp_server(
             }),
         ));
     }
+
+    validate_public_mcp_url(&request.url)
+        .await
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
 
     let mcp_repository = McpRepository::new(state.pg_pool.clone());
 
@@ -210,6 +268,7 @@ pub async fn list_server_tools(
                 .map(|t| McpToolInfo {
                     name: t.name,
                     description: t.description,
+                    input_schema: Some(t.input_schema),
                 })
                 .collect();
 
@@ -293,6 +352,7 @@ pub async fn test_server_connection(
                 .map(|t| McpToolInfo {
                     name: t.name,
                     description: t.description,
+                    input_schema: Some(t.input_schema),
                 })
                 .collect();
 
@@ -385,6 +445,10 @@ pub async fn test_url_connection(
         ));
     }
 
+    validate_public_mcp_url(&request.url)
+        .await
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+
     let mcp_client = McpClientService::new();
     match mcp_client
         .test_connection(&request.url, request.auth_token.as_deref())
@@ -396,6 +460,7 @@ pub async fn test_url_connection(
                 .map(|t| McpToolInfo {
                     name: t.name,
                     description: t.description,
+                    input_schema: Some(t.input_schema),
                 })
                 .collect();
 
