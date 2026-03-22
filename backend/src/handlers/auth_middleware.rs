@@ -8,8 +8,10 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use governor::{Quota, RateLimiter};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde_json::json;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use crate::handlers::auth_dtos::Claims;
@@ -48,32 +50,54 @@ pub async fn check_subscription_access(
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     info!("Starting subscription access check");
 
-    // Extract user_id from query parameters
-    let uri = request.uri();
-    let query_string = uri.query().unwrap_or("");
-    let query_params: std::collections::HashMap<String, String> =
-        url::form_urlencoded::parse(query_string.as_bytes())
-            .into_owned()
-            .collect();
+    let cookie_header = request
+        .headers()
+        .get(axum::http::header::COOKIE)
+        .and_then(|header| header.to_str().ok())
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({
+                "error": "No authorization token provided"
+            })),
+        ))?;
 
-    let user_id = match query_params
-        .get("user_id")
-        .and_then(|id| id.parse::<i32>().ok())
-    {
-        Some(id) => {
-            debug!("Found user_id in query parameters: {}", id);
-            id
-        }
-        None => {
-            error!("No valid user_id found in query parameters");
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "Missing or invalid user_id"
-                })),
-            ));
-        }
-    };
+    let token = cookie_header
+        .split(';')
+        .map(|s| s.trim())
+        .find_map(|cookie| {
+            let cookie_parts: Vec<&str> = cookie.splitn(2, '=').collect();
+            if cookie_parts.len() == 2 && cookie_parts[0] == "access_token" {
+                Some(cookie_parts[1])
+            } else {
+                None
+            }
+        })
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({
+                "error": "No authorization token provided"
+            })),
+        ))?;
+
+    let claims = decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(
+            std::env::var("JWT_SECRET_KEY")
+                .expect("JWT_SECRET_KEY must be set in environment")
+                .as_bytes(),
+        ),
+        &Validation::new(Algorithm::HS256),
+    )
+    .map_err(|_| {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({
+                "error": "Invalid token"
+            })),
+        )
+    })?
+    .claims;
+    let user_id = claims.sub;
 
     // Get user from database
     let user = match state.user_core.find_by_id(user_id) {
@@ -115,6 +139,46 @@ pub async fn check_subscription_access(
     }
 
     info!("Subscription access check passed");
+    Ok(next.run(request).await)
+}
+
+pub async fn apply_api_rate_limit(
+    State(state): State<Arc<AppState>>,
+    request: Request<Body>,
+    next: Next,
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    let path = request.uri().path();
+    if path == "/api/health" {
+        return Ok(next.run(request).await);
+    }
+
+    let client_key = request
+        .headers()
+        .get("cf-connecting-ip")
+        .or_else(|| request.headers().get("x-real-ip"))
+        .or_else(|| request.headers().get("x-forwarded-for"))
+        .and_then(|value| value.to_str().ok())
+        .map(|raw| raw.split(',').next().unwrap_or(raw).trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "unknown-client".to_string());
+
+    let quota =
+        Quota::per_minute(NonZeroU32::new(120).unwrap()).allow_burst(NonZeroU32::new(30).unwrap());
+    let entry = state
+        .api_rate_limiter
+        .entry(client_key.clone())
+        .or_insert_with(|| RateLimiter::keyed(quota));
+    let limiter = entry.value();
+
+    if limiter.check_key(&client_key).is_err() {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({
+                "error": "Too many requests, slow down"
+            })),
+        ));
+    }
+
     Ok(next.run(request).await)
 }
 

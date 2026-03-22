@@ -337,7 +337,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     for email in &sorted_emails {
                                         // Find matching ontology Person for this email sender
                                         let mut matched_person_id: Option<i32> = None;
-                                        if let Ok(persons) = state.ontology_repository.get_persons_with_channels(user.id) {
+                                        if let Ok(persons) = state.ontology_repository.get_persons_with_channels(user.id, 500, 0) {
                                             let from_lower = email.from_email.as_deref().unwrap_or("").to_lowercase();
                                             let from_name_lower = email.from.as_deref().unwrap_or("").to_lowercase();
                                             for pwc in &persons {

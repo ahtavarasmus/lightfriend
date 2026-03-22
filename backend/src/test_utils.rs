@@ -127,6 +127,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         login_limiter: DashMap::new(),
         password_reset_limiter: DashMap::new(),
         password_reset_verify_limiter: DashMap::new(),
+        api_rate_limiter: DashMap::new(),
         matrix_sync_tasks: Arc::new(Mutex::new(HashMap::new())),
         matrix_clients: Arc::new(Mutex::new(HashMap::new())),
         tesla_monitoring_tasks: Arc::new(DashMap::new()),
@@ -754,6 +755,14 @@ pub mod mock_user_core {
             Ok(None)
         }
 
+        fn find_by_valid_magic_token(
+            &self,
+            _token: &str,
+            _now_ts: i32,
+        ) -> Result<Option<User>, DieselError> {
+            Ok(None)
+        }
+
         fn get_all_users(&self) -> Result<Vec<User>, DieselError> {
             Ok(self.users.lock().unwrap().values().cloned().collect())
         }
@@ -790,6 +799,10 @@ pub mod mock_user_core {
             Ok(())
         }
 
+        fn clear_magic_token(&self, _user_id: i32) -> Result<(), DieselError> {
+            Ok(())
+        }
+
         fn update_phone_number(&self, _user_id: i32, _phone: &str) -> Result<(), DieselError> {
             Ok(())
         }
@@ -804,6 +817,18 @@ pub mod mock_user_core {
                 .unwrap()
                 .update_preferred_number_calls
                 .push((user_id, number.to_string()));
+            Ok(())
+        }
+
+        fn set_refresh_token_hash(
+            &self,
+            _user_id: i32,
+            _token_hash: &str,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn mark_refresh_token_compromised(&self, _user_id: i32) -> Result<(), DieselError> {
             Ok(())
         }
 

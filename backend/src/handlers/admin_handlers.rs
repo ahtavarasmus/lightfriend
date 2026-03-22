@@ -594,18 +594,12 @@ pub async fn send_password_reset_link(
         std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
     let reset_link = format!("{}/password-reset/{}", frontend_url, token);
 
-    // Send email with reset link
-    if let Err(e) = crate::utils::email::send_password_reset_email(&user.email, &reset_link).await {
-        tracing::error!(
-            "Failed to send password reset email to {}: {}",
-            user.email,
-            e
-        );
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to send reset email. Please try again."})),
-        ));
-    }
+    let email = user.email.clone();
+    tokio::spawn(async move {
+        if let Err(e) = crate::utils::email::send_password_reset_email(&email, &reset_link).await {
+            tracing::error!("Failed to send password reset email to {}: {}", email, e);
+        }
+    });
 
     tracing::info!(
         "Password reset link sent to user {} ({})",

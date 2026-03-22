@@ -268,7 +268,7 @@ impl ContextBuilder {
             let persons = self
                 .state
                 .ontology_repository
-                .get_persons_with_channels(user_id)
+                .get_persons_with_channels(user_id, 500, 0)
                 .ok();
 
             let fragment = if let Some(ref persons_list) = persons {

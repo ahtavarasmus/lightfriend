@@ -232,6 +232,9 @@ diesel::table! {
         last_credits_notification -> Nullable<Int4>,
         next_billing_date_timestamp -> Nullable<Int4>,
         magic_token -> Nullable<Text>,
+        refresh_token_hash -> Nullable<Text>,
+        refresh_token_compromised -> Bool,
+        magic_token_expires_at -> Nullable<Int4>,
         plan_type -> Nullable<Text>,
         matrix_e2ee_enabled -> Bool,
     }

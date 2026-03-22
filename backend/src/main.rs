@@ -1,5 +1,6 @@
 use axum::http::HeaderValue;
 use axum::{
+    extract::DefaultBodyLimit,
     middleware,
     routing::{delete, get, patch, post, put},
     Router,
@@ -120,9 +121,8 @@ async fn bootstrap_admin_if_needed(
         .filter(|e| !e.is_empty())
         .expect("ADMIN_EMAILS must contain at least one email");
 
-    // Password defaults to 12345678 if not set
-    let password =
-        std::env::var("BOOTSTRAP_ADMIN_PASSWORD").unwrap_or_else(|_| "12345678".to_string());
+    let password = std::env::var("BOOTSTRAP_ADMIN_PASSWORD")
+        .expect("BOOTSTRAP_ADMIN_PASSWORD environment variable is required for admin bootstrap");
 
     let phone = std::env::var("BOOTSTRAP_ADMIN_PHONE").unwrap_or_else(|_| "+12345678".to_string());
 
@@ -165,10 +165,15 @@ async fn main() {
         }
     }
 
-    let _guard = sentry::init(("https://07fbdaf63c1270c8509844b775045dd3@o4507415184539648.ingest.de.sentry.io/4508802101411920", sentry::ClientOptions {
-        release: sentry::release_name!(),
-        ..Default::default()
-    }));
+    let _guard = std::env::var("SENTRY_DSN").ok().map(|dsn| {
+        sentry::init((
+            dsn,
+            sentry::ClientOptions {
+                release: sentry::release_name!(),
+                ..Default::default()
+            },
+        ))
+    });
     use tracing_subscriber::{fmt, EnvFilter};
 
     // Create filter that sets Matrix SDK logs to WARN and keeps our app at DEBUG
@@ -308,6 +313,7 @@ async fn main() {
         login_limiter: DashMap::new(),
         password_reset_limiter: DashMap::new(),
         password_reset_verify_limiter: DashMap::new(),
+        api_rate_limiter: DashMap::new(),
         password_reset_otps: DashMap::new(),
         phone_verify_otps: DashMap::new(),
         matrix_sync_tasks,
@@ -1129,9 +1135,14 @@ async fn main() {
         )
         .layer(middleware::from_fn_with_state(
             state.clone(),
+            handlers::auth_middleware::apply_api_rate_limit,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
             handlers::maintenance_handlers::maintenance_guard,
         ))
         .layer(session_layer)
+        .layer(DefaultBodyLimit::max(10 * 1024 * 1024))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
@@ -1159,8 +1170,11 @@ async fn main() {
                     axum::http::header::CONTENT_LENGTH,
                 ]);
             if frontend_url.is_empty() {
-                // Same-origin mode: permissive CORS (no credentials needed)
-                cors.allow_origin(AllowOrigin::any())
+                let server_origin = std::env::var("SERVER_URL")
+                    .expect("SERVER_URL must be set when FRONTEND_URL is not configured");
+                cors.allow_origin(AllowOrigin::exact(
+                    server_origin.parse().expect("Invalid SERVER_URL"),
+                ))
             } else {
                 // Cross-origin mode (local dev): exact origin with credentials
                 cors.allow_origin(AllowOrigin::exact(

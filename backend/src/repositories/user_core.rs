@@ -50,6 +50,11 @@ pub trait UserCoreOps: Send + Sync {
     fn find_by_email(&self, email: &str) -> Result<Option<User>, DieselError>;
     fn find_by_phone_number(&self, phone: &str) -> Result<Option<User>, DieselError>;
     fn find_by_magic_token(&self, token: &str) -> Result<Option<User>, DieselError>;
+    fn find_by_valid_magic_token(
+        &self,
+        token: &str,
+        now_ts: i32,
+    ) -> Result<Option<User>, DieselError>;
     fn get_all_users(&self) -> Result<Vec<User>, DieselError>;
     fn get_users_by_tier(&self, tier: &str) -> Result<Vec<User>, DieselError>;
 
@@ -60,9 +65,12 @@ pub trait UserCoreOps: Send + Sync {
 
     // Core field updates
     fn update_password(&self, user_id: i32, password_hash: &str) -> Result<(), DieselError>;
+    fn clear_magic_token(&self, user_id: i32) -> Result<(), DieselError>;
     fn update_phone_number(&self, user_id: i32, phone: &str) -> Result<(), DieselError>;
     fn update_nickname(&self, user_id: i32, nickname: &str) -> Result<(), DieselError>;
     fn update_preferred_number(&self, user_id: i32, number: &str) -> Result<(), DieselError>;
+    fn set_refresh_token_hash(&self, user_id: i32, token_hash: &str) -> Result<(), DieselError>;
+    fn mark_refresh_token_compromised(&self, user_id: i32) -> Result<(), DieselError>;
 
     // User info
     fn ensure_user_info_exists(&self, user_id: i32) -> Result<(), DieselError>;
@@ -273,10 +281,33 @@ impl UserCoreOps for UserCore {
         Ok(user)
     }
 
+    fn find_by_valid_magic_token(
+        &self,
+        token: &str,
+        now_ts: i32,
+    ) -> Result<Option<User>, DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        let user = users::table
+            .filter(users::magic_token.eq(token))
+            .filter(users::magic_token_expires_at.is_not_null())
+            .filter(users::magic_token_expires_at.gt(now_ts))
+            .first::<User>(&mut pg_conn)
+            .optional()?;
+        Ok(user)
+    }
+
     fn set_magic_token(&self, user_id: i32, token: &str) -> Result<(), DieselError> {
         let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        let expiry = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32
+            + (24 * 60 * 60);
         diesel::update(users::table.find(user_id))
-            .set(users::magic_token.eq(Some(token)))
+            .set((
+                users::magic_token.eq(Some(token)),
+                users::magic_token_expires_at.eq(Some(expiry)),
+            ))
             .execute(&mut pg_conn)?;
         Ok(())
     }
@@ -346,6 +377,42 @@ impl UserCoreOps for UserCore {
         diesel::update(users::table)
             .filter(users::id.eq(user_id))
             .set(users::password_hash.eq(password_hash))
+            .execute(&mut pg_conn)?;
+        Ok(())
+    }
+
+    fn clear_magic_token(&self, user_id: i32) -> Result<(), DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        diesel::update(users::table)
+            .filter(users::id.eq(user_id))
+            .set((
+                users::magic_token.eq::<Option<String>>(None),
+                users::magic_token_expires_at.eq::<Option<i32>>(None),
+            ))
+            .execute(&mut pg_conn)?;
+        Ok(())
+    }
+
+    fn set_refresh_token_hash(&self, user_id: i32, token_hash: &str) -> Result<(), DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        diesel::update(users::table)
+            .filter(users::id.eq(user_id))
+            .set((
+                users::refresh_token_hash.eq(Some(token_hash)),
+                users::refresh_token_compromised.eq(false),
+            ))
+            .execute(&mut pg_conn)?;
+        Ok(())
+    }
+
+    fn mark_refresh_token_compromised(&self, user_id: i32) -> Result<(), DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        diesel::update(users::table)
+            .filter(users::id.eq(user_id))
+            .set((
+                users::refresh_token_hash.eq::<Option<String>>(None),
+                users::refresh_token_compromised.eq(true),
+            ))
             .execute(&mut pg_conn)?;
         Ok(())
     }

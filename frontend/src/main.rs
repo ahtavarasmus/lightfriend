@@ -1,71 +1,72 @@
-use yew::prelude::*;
-use yew_router::prelude::*;
 use log::{info, Level};
-use web_sys::MouseEvent;
+use std::panic;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
+use web_sys::MouseEvent;
+use yew::prelude::*;
+use yew_router::prelude::*;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum AuthState {
-    Checking,  // Initial - don't show Login or Logout
+    Checking, // Initial - don't show Login or Logout
     LoggedIn,
     LoggedOut,
 }
 mod config;
 mod utils {
     pub mod api;
-    pub mod webauthn;
     pub mod elevenlabs_web;
     pub mod seo;
+    pub mod webauthn;
 }
 mod profile {
-    pub mod stripe;
     pub mod billing_credits;
     pub mod billing_models;
     pub mod profile;
-    pub mod settings;
-    pub mod timezone_detector;
     pub mod security;
+    pub mod settings;
+    pub mod stripe;
+    pub mod timezone_detector;
 }
 mod blog {
-    pub mod switch_to_dumbphone;
     pub mod read_books_accidentally;
+    pub mod switch_to_dumbphone;
 }
 mod pages {
+    pub mod blog;
+    pub mod bring_own_number;
+    pub mod change_log;
+    pub mod faq;
     pub mod home;
     pub mod landing;
+    pub mod lightphone3_whatsapp_guide;
     pub mod money;
+    pub mod subscription_success;
+    pub mod supported_countries;
     pub mod termsprivacy;
     pub mod trustless;
-    pub mod faq;
-    pub mod supported_countries;
-    pub mod bring_own_number;
-    pub mod lightphone3_whatsapp_guide;
-    pub mod blog;
-    pub mod change_log;
-    pub mod subscription_success;
 }
 mod components {
     pub mod notification;
 }
 mod dashboard {
-    pub mod dashboard_view;
-    pub mod chat_box;
-    pub mod triage_indicator;
-    pub mod timeline_view;
-    pub mod settings_panel;
-    pub mod activity_panel;
-    pub mod quiet_mode;
-    pub mod media_panel;
-    pub mod tesla_quick_panel;
-    pub mod youtube_quick_panel;
-    pub mod contact_avatar_row;
-    pub mod items_status;
-    pub mod rules_section;
-    pub mod rule_builder;
-    pub mod emoji_utils;
     pub mod activity_feed;
+    pub mod activity_panel;
+    pub mod chat_box;
+    pub mod contact_avatar_row;
+    pub mod dashboard_view;
+    pub mod emoji_utils;
+    pub mod items_status;
+    pub mod media_panel;
     pub mod people_list;
+    pub mod quiet_mode;
+    pub mod rule_builder;
+    pub mod rules_section;
+    pub mod settings_panel;
+    pub mod tesla_quick_panel;
+    pub mod timeline_view;
+    pub mod triage_indicator;
+    pub mod youtube_quick_panel;
 }
 mod proactive {
     pub mod contact_profiles;
@@ -73,47 +74,46 @@ mod proactive {
 mod connections {
     pub mod bridge_connect;
     pub mod email;
-    pub mod whatsapp;
-    pub mod telegram;
-    pub mod signal;
-    pub mod tesla;
-    pub mod youtube;
     pub mod mcp;
+    pub mod signal;
+    pub mod telegram;
+    pub mod tesla;
+    pub mod whatsapp;
+    pub mod youtube;
 }
 mod auth {
     pub mod connect;
-    pub mod signup;
     pub mod set_password;
+    pub mod signup;
 }
 mod admin {
     pub mod dashboard;
 }
-use pages::{
-    home::Home,
-    faq::Faq,
-    supported_countries::SupportedCountries,
-    termsprivacy::{TermsAndConditions, PrivacyPolicy},
-    trustless::TrustlessVerification,
-    money::UnifiedPricing,
-    bring_own_number::TwilioHostedInstructions,
-    lightphone3_whatsapp_guide::LightPhone3WhatsappGuide,
-    blog::Blog,
-    change_log::Changelog,
-    subscription_success::SubscriptionSuccess,
-};
-use blog::{
-    switch_to_dumbphone::SwitchToDumbphoneGuide,
-    read_books_accidentally::ReadMoreAccidentallyGuide,
-};
-use auth::{
-    signup::login::Login,
-    signup::password_reset::{PasswordReset, PasswordResetWithToken},
-    set_password::SetPassword,
-};
-use admin::dashboard::AdminDashboard;
 use crate::profile::billing_models::UserProfile;
 use crate::utils::api::Api;
+use admin::dashboard::AdminDashboard;
+use auth::{
+    set_password::SetPassword,
+    signup::login::Login,
+    signup::password_reset::{PasswordReset, PasswordResetWithToken},
+};
+use blog::{
+    read_books_accidentally::ReadMoreAccidentallyGuide, switch_to_dumbphone::SwitchToDumbphoneGuide,
+};
 use gloo_net::http::Request;
+use pages::{
+    blog::Blog,
+    bring_own_number::TwilioHostedInstructions,
+    change_log::Changelog,
+    faq::Faq,
+    home::Home,
+    lightphone3_whatsapp_guide::LightPhone3WhatsappGuide,
+    money::UnifiedPricing,
+    subscription_success::SubscriptionSuccess,
+    supported_countries::SupportedCountries,
+    termsprivacy::{PrivacyPolicy, TermsAndConditions},
+    trustless::TrustlessVerification,
+};
 
 #[derive(Clone, Routable, PartialEq)]
 pub enum Route {
@@ -165,113 +165,113 @@ fn switch(routes: Route) -> Html {
         Route::PasswordReset => {
             info!("Rendering Password Reset page");
             html! { <PasswordReset /> }
-        },
+        }
         Route::PasswordResetWithToken { token } => {
             info!("Rendering Password Reset page with token");
             html! { <PasswordResetWithToken token={token.clone()} /> }
-        },
+        }
         Route::Faq => {
             info!("Rendering FAQ page");
             html! { <Faq /> }
-        },
+        }
         Route::Blog => {
             info!("Rendering Blog page");
             html! { <Blog /> }
-        },
+        }
         Route::Changelog => {
             info!("Rendering Changelog page");
             html! { <Changelog /> }
-        },
+        }
         Route::SupportedCountries => {
             info!("Rendering SupportedCountries page");
             html! { <SupportedCountries/> }
-        },
+        }
         Route::TwilioHostedInstructions => {
             info!("Rendering TwilioHostedInstructions page");
             html! { <TwilioHostedInstructionsWrapper /> }
-        },
+        }
         Route::Home => {
             info!("Rendering Home page");
             html! { <Home /> }
-        },
+        }
         Route::Login => {
             info!("Rendering Login page");
             html! { <Login /> }
-        },
+        }
         Route::Admin => {
             info!("Rendering Admin page");
             html! { <AdminDashboard /> }
-        },
+        }
         Route::Billing => {
             // Redirect to Home with billing tab parameter
             html! { <Redirect<Route> to={Route::Home} /> }
-        },
+        }
         Route::Terms => {
             info!("Rendering Terms page");
             html! { <TermsAndConditions /> }
-        },
+        }
         Route::Privacy => {
             info!("Rendering Privacy page");
             html! { <PrivacyPolicy /> }
-        },
+        }
         Route::Trustless => {
             info!("Rendering Trustless page");
             html! { <TrustlessVerification /> }
-        },
+        }
         Route::Pricing => {
             info!("Rendering Pricing page");
             html! { <PricingWrapper /> }
-        },
+        }
         Route::LightPhone3WhatsappGuide => {
             info!("Rendering LightPhone3WhatsappGuide page");
             html! { <LightPhone3WhatsappGuide /> }
-        },
+        }
         Route::SwitchToDumbphoneGuide => {
             info!("Rendering SwitchToDumbphoneGuide page");
             html! { <SwitchToDumbphoneGuide /> }
-        },
+        }
         Route::ReadMoreAccidentallyGuide => {
             info!("Rendering ReadMoreAccidentallyGuide page");
             html! { <ReadMoreAccidentallyGuide /> }
-        },
+        }
         Route::SetPassword => {
             info!("Rendering SetPassword page");
             html! { <SetPassword /> }
-        },
+        }
         Route::SetPasswordWithToken { token } => {
             info!("Rendering SetPassword page with token");
             html! { <SetPassword token={Some(token)} /> }
-        },
+        }
         Route::SubscriptionSuccess => {
             info!("Rendering SubscriptionSuccess page");
             html! { <SubscriptionSuccess /> }
-        },
+        }
     }
 }
 #[function_component(TwilioHostedInstructionsWrapper)]
 pub fn twilio_hosted_instructions_wrapper() -> Html {
     let profile_data = use_state(|| None::<UserProfile>);
-   
+
     {
         let profile_data = profile_data.clone();
 
-        use_effect_with_deps(move |_| {
-            wasm_bindgen_futures::spawn_local(async move {
-                match Api::get("/api/profile")
-                    .send()
-                    .await
-                {
-                    Ok(response) if response.ok() => {
-                        if let Ok(profile) = response.json::<UserProfile>().await {
-                            profile_data.set(Some(profile));
+        use_effect_with_deps(
+            move |_| {
+                wasm_bindgen_futures::spawn_local(async move {
+                    match Api::get("/api/profile").send().await {
+                        Ok(response) if response.ok() => {
+                            if let Ok(profile) = response.json::<UserProfile>().await {
+                                profile_data.set(Some(profile));
+                            }
                         }
+                        _ => {}
                     }
-                    _ => {}
-                }
-            });
+                });
 
-            || ()
-        }, ());
+                || ()
+            },
+            (),
+        );
     }
     if let Some(profile) = (*profile_data).as_ref() {
         html! {
@@ -301,9 +301,9 @@ pub fn twilio_hosted_instructions_wrapper() -> Html {
         }
     }
 }
+use crate::utils::seo::{use_seo, SeoMeta};
 use serde_json::Value;
 use std::collections::HashMap;
-use crate::utils::seo::{use_seo, SeoMeta};
 
 #[function_component(PricingWrapper)]
 pub fn pricing_wrapper() -> Html {
@@ -365,7 +365,10 @@ pub fn pricing_wrapper() -> Html {
         ("IL".to_string(), "Israel".to_string()),
         // Other
         ("Other".to_string(), "Other".to_string()),
-    ].iter().cloned().collect();
+    ]
+    .iter()
+    .cloned()
+    .collect();
 
     {
         let selected_country = selected_country.clone();
@@ -375,70 +378,75 @@ pub fn pricing_wrapper() -> Html {
         let profile_data = profile_data.clone();
         let country_map = country_map.clone();
 
-        use_effect_with_deps(move |_| {
-            if let Some(window) = web_sys::window() {
-                let _ = window.scroll_to_with_x_and_y(0.0, 0.0);
-            }
+        use_effect_with_deps(
+            move |_| {
+                if let Some(window) = web_sys::window() {
+                    let _ = window.scroll_to_with_x_and_y(0.0, 0.0);
+                }
 
-            wasm_bindgen_futures::spawn_local(async move {
-                let mut ip_code = "Other".to_string();
-                let mut ip_name = "your country".to_string();
+                wasm_bindgen_futures::spawn_local(async move {
+                    let mut ip_code = "Other".to_string();
+                    let mut ip_name = "your country".to_string();
 
-                if let Ok(resp) = Request::get("https://ipapi.co/json/").send().await {
-                    if let Ok(json) = resp.json::<Value>().await {
-                        if let Some(code) = json.get("country_code").and_then(|v| v.as_str()) {
-                            ip_code = code.to_uppercase();
-                        }
-                        if let Some(name) = json.get("country_name").and_then(|v| v.as_str()) {
-                            ip_name = name.to_string();
+                    if let Ok(resp) = Request::get("https://ipapi.co/json/").send().await {
+                        if let Ok(json) = resp.json::<Value>().await {
+                            if let Some(code) = json.get("country_code").and_then(|v| v.as_str()) {
+                                ip_code = code.to_uppercase();
+                            }
+                            if let Some(name) = json.get("country_name").and_then(|v| v.as_str()) {
+                                ip_name = name.to_string();
+                            }
                         }
                     }
-                }
 
-                ip_country_name.set(ip_name.clone());
+                    ip_country_name.set(ip_name.clone());
 
-                // Local number countries + notification-only countries
-                let known_countries = [
-                    // Local number countries
-                    "US", "CA", "FI", "NL", "GB", "AU",
-                    // Notification-only countries (receive SMS from US number)
-                    "DE", "FR", "ES", "IT", "PT", "BE", "AT", "CH", "PL", "CZ",
-                    "SE", "DK", "NO", "IE", "NZ", "GR", "HU", "RO", "SK", "BG",
-                    "HR", "SI", "LT", "LV", "EE", "LU", "MT", "CY", "IS",
-                    // Asia-Pacific
-                    "JP", "KR", "SG", "HK", "TW",
-                    // Middle East
-                    "IL",
-                ];
-                if !known_countries.contains(&ip_code.as_str()) {
-                    ip_code = "Other".to_string();
-                }
+                    // Local number countries + notification-only countries
+                    let known_countries = [
+                        // Local number countries
+                        "US", "CA", "FI", "NL", "GB", "AU",
+                        // Notification-only countries (receive SMS from US number)
+                        "DE", "FR", "ES", "IT", "PT", "BE", "AT", "CH", "PL", "CZ", "SE", "DK",
+                        "NO", "IE", "NZ", "GR", "HU", "RO", "SK", "BG", "HR", "SI", "LT", "LV",
+                        "EE", "LU", "MT", "CY", "IS", // Asia-Pacific
+                        "JP", "KR", "SG", "HK", "TW", // Middle East
+                        "IL",
+                    ];
+                    if !known_countries.contains(&ip_code.as_str()) {
+                        ip_code = "Other".to_string();
+                    }
 
-                selected_country.set(ip_code.clone());
-                country_name.set(if ip_code == "Other" { ip_name.clone() } else { country_map.get(&ip_code).cloned().unwrap_or(ip_name.clone()) });
+                    selected_country.set(ip_code.clone());
+                    country_name.set(if ip_code == "Other" {
+                        ip_name.clone()
+                    } else {
+                        country_map
+                            .get(&ip_code)
+                            .cloned()
+                            .unwrap_or(ip_name.clone())
+                    });
 
-                // Try to get profile with cookie-based auth
-                if let Ok(response) = Api::get("/api/profile")
-                    .send()
-                    .await
-                {
-                    if response.ok() {
-                        if let Ok(profile) = response.json::<UserProfile>().await {
-                            profile_data.set(Some(profile.clone()));
-                            is_logged_in.set(true);
+                    // Try to get profile with cookie-based auth
+                    if let Ok(response) = Api::get("/api/profile").send().await {
+                        if response.ok() {
+                            if let Ok(profile) = response.json::<UserProfile>().await {
+                                profile_data.set(Some(profile.clone()));
+                                is_logged_in.set(true);
+                            } else {
+                                is_logged_in.set(false);
+                            }
                         } else {
                             is_logged_in.set(false);
                         }
                     } else {
                         is_logged_in.set(false);
                     }
-                } else {
-                    is_logged_in.set(false);
-                }
-            });
+                });
 
-            || ()
-        }, ());
+                || ()
+            },
+            (),
+        );
     }
 
     let on_country_change = if !*is_logged_in {
@@ -489,23 +497,34 @@ pub fn nav(props: &NavProps) -> Html {
     let is_scrolled = use_state(|| false);
     {
         let is_scrolled = is_scrolled.clone();
-        use_effect_with_deps(move |_| {
-            let window = web_sys::window().unwrap();
-            let document = window.document().unwrap();
+        use_effect_with_deps(
+            move |_| {
+                let window = web_sys::window().unwrap();
+                let document = window.document().unwrap();
 
-            let scroll_callback = Closure::wrap(Box::new(move || {
-                let scroll_top = document.document_element().unwrap().scroll_top();
-                is_scrolled.set(scroll_top > 2500);
-            }) as Box<dyn FnMut()>);
+                let scroll_callback = Closure::wrap(Box::new(move || {
+                    let scroll_top = document.document_element().unwrap().scroll_top();
+                    is_scrolled.set(scroll_top > 2500);
+                }) as Box<dyn FnMut()>);
 
-            window.add_event_listener_with_callback("scroll", scroll_callback.as_ref().unchecked_ref())
-                .unwrap();
-
-            move || {
-                window.remove_event_listener_with_callback("scroll", scroll_callback.as_ref().unchecked_ref())
+                window
+                    .add_event_listener_with_callback(
+                        "scroll",
+                        scroll_callback.as_ref().unchecked_ref(),
+                    )
                     .unwrap();
-            }
-        }, ());
+
+                move || {
+                    window
+                        .remove_event_listener_with_callback(
+                            "scroll",
+                            scroll_callback.as_ref().unchecked_ref(),
+                        )
+                        .unwrap();
+                }
+            },
+            (),
+        );
     }
     html! {
         <nav class={classes!("top-nav", (*is_scrolled).then(|| "scrolled"), is_pricing.then(|| "nav-static"), (*auth_state == AuthState::LoggedOut).then(|| "nav-landing"))}>
@@ -583,27 +602,29 @@ fn App() -> Html {
     {
         let auth_state = auth_state.clone();
         let auth_check_started = auth_check_started.clone();
-        use_effect_with_deps(move |_| {
-            // Only run if we haven't started the check yet
-            if !*auth_check_started {
-                auth_check_started.set(true);
+        use_effect_with_deps(
+            move |_| {
+                // Only run if we haven't started the check yet
+                if !*auth_check_started {
+                    auth_check_started.set(true);
 
-                let auth_state = auth_state.clone();
-                wasm_bindgen_futures::spawn_local(async move {
-                    if let Ok(response) = Api::get("/api/auth/status").send().await
-                    {
-                        if response.ok() {
-                            auth_state.set(AuthState::LoggedIn);
+                    let auth_state = auth_state.clone();
+                    wasm_bindgen_futures::spawn_local(async move {
+                        if let Ok(response) = Api::get("/api/auth/status").send().await {
+                            if response.ok() {
+                                auth_state.set(AuthState::LoggedIn);
+                            } else {
+                                auth_state.set(AuthState::LoggedOut);
+                            }
                         } else {
                             auth_state.set(AuthState::LoggedOut);
                         }
-                    } else {
-                        auth_state.set(AuthState::LoggedOut);
-                    }
-                });
-            }
-            || ()
-        }, ());
+                    });
+                }
+                || ()
+            },
+            (),
+        );
     }
 
     html! {
@@ -616,7 +637,24 @@ fn App() -> Html {
     }
 }
 fn main() {
-    console_error_panic_hook::set_once();
+    panic::set_hook(Box::new(|panic_info| {
+        console_error_panic_hook::hook(panic_info);
+        if let Some(window) = web_sys::window() {
+            if let Some(document) = window.document() {
+                if let Some(body) = document.body() {
+                    body.set_inner_html(
+                        r#"<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:#f5f1e8;color:#1f1a17;font-family:Georgia,serif;">
+<div style="max-width:560px;text-align:center;">
+<h1 style="margin-bottom:12px;font-size:32px;">Lightfriend crashed</h1>
+<p style="margin-bottom:16px;font-size:18px;line-height:1.5;">The app hit an unexpected error. Reload the page and try again.</p>
+<button onclick="window.location.reload()" style="padding:12px 18px;border:none;border-radius:999px;background:#1f1a17;color:#f5f1e8;cursor:pointer;font-size:16px;">Reload</button>
+</div>
+</div>"#,
+                    );
+                }
+            }
+        }
+    }));
     console_log::init_with_level(Level::Info).expect("error initializing log");
     info!("Starting application");
     yew::Renderer::<App>::new().render();

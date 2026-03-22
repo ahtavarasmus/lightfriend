@@ -132,7 +132,7 @@ pub async fn get_dashboard_summary(
     // Get persons with channels for name lookups
     let persons = state
         .ontology_repository
-        .get_persons_with_channels(user_id)
+        .get_persons_with_channels(user_id, 500, 0)
         .unwrap_or_default();
 
     // Get notifiable messages (from known persons in last 24h)
@@ -484,7 +484,7 @@ pub async fn get_activity_feed(
     // Build name lookup maps
     let persons = state
         .ontology_repository
-        .get_persons_with_channels(user_id)
+        .get_persons_with_channels(user_id, 500, 0)
         .unwrap_or_default();
     let person_names: HashMap<i32, String> = persons
         .iter()
@@ -931,7 +931,7 @@ pub async fn get_senders(
     // 1. Persons with channels (highest priority)
     let persons = state
         .ontology_repository
-        .get_persons_with_channels(user_id)
+        .get_persons_with_channels(user_id, 500, 0)
         .unwrap_or_default();
 
     for person in &persons {

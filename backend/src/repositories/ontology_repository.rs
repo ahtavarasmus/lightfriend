@@ -1,5 +1,6 @@
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
+use diesel::sql_types::Text;
 
 use crate::models::ontology_models::{
     NewOntChangelog, NewOntChannel, NewOntLink, NewOntMessage, NewOntPerson, NewOntPersonEdit,
@@ -10,6 +11,10 @@ use crate::pg_schema::{
     ont_changelog, ont_channels, ont_links, ont_messages, ont_person_edits, ont_persons, ont_rules,
 };
 use crate::PgDbPool;
+
+define_sql_function! {
+    fn lower(x: Text) -> Text;
+}
 
 #[derive(diesel::QueryableByName, Debug)]
 struct SuggestionCandidate {
@@ -98,10 +103,7 @@ impl OntologyRepository {
         // Try to find by name match (case-insensitive)
         let existing_person: Option<OntPerson> = ont_persons::table
             .filter(ont_persons::user_id.eq(user_id))
-            .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(&format!(
-                "LOWER(name) = LOWER('{}')",
-                name.replace('\'', "''")
-            )))
+            .filter(lower(ont_persons::name).eq(lower(name)))
             .first::<OntPerson>(&mut conn)
             .optional()?;
 
@@ -262,13 +264,21 @@ impl OntologyRepository {
     pub fn get_persons_with_channels(
         &self,
         user_id: i32,
+        limit: i64,
+        offset: i64,
     ) -> Result<Vec<PersonWithChannels>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let persons = ont_persons::table
             .filter(ont_persons::user_id.eq(user_id))
             .order(ont_persons::name.asc())
+            .limit(limit)
+            .offset(offset)
             .load::<OntPerson>(&mut conn)?;
+
+        if persons.is_empty() {
+            return Ok(Vec::new());
+        }
 
         let person_ids: Vec<i32> = persons.iter().map(|p| p.id).collect();
 

@@ -44,7 +44,7 @@ fn query_person(
         if name == "all" {
             state
                 .ontology_repository
-                .get_persons_with_channels(user_id)
+                .get_persons_with_channels(user_id, 500, 0)
                 .map_err(|e| format!("Failed to query people: {}", e))?
         } else {
             match state
@@ -135,7 +135,7 @@ fn query_channel(
     // Load all persons with channels, then filter
     let all_persons = state
         .ontology_repository
-        .get_persons_with_channels(user_id)
+        .get_persons_with_channels(user_id, 500, 0)
         .map_err(|e| format!("Failed to query channels: {}", e))?;
 
     let mut results: Vec<(

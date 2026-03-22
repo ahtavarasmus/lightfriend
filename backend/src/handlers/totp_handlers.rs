@@ -631,5 +631,5 @@ pub async fn verify_login(
     state.pending_totp_logins.remove(&req.totp_token);
 
     // Generate tokens and return response
-    generate_tokens_and_response(user_id)
+    generate_tokens_and_response(&state, user_id)
 }

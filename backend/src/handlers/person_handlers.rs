@@ -16,6 +16,12 @@ pub struct SearchQuery {
     pub q: String,
 }
 
+#[derive(Deserialize)]
+pub struct PersonListQuery {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
 /// GET /api/persons/search/:service?q=query
 /// Searches for chats on the specified service (reuses existing bridge room search)
 pub async fn search_chats(
@@ -126,12 +132,15 @@ pub struct MergePersonsRequest {
 
 pub async fn get_persons(
     State(state): State<Arc<AppState>>,
+    Query(query): Query<PersonListQuery>,
     auth_user: AuthUser,
 ) -> Result<Json<Vec<PersonWithChannels>>, StatusCode> {
     let user_id = auth_user.user_id;
+    let limit = query.limit.unwrap_or(100).clamp(1, 200);
+    let offset = query.offset.unwrap_or(0).max(0);
     state
         .ontology_repository
-        .get_persons_with_channels(user_id)
+        .get_persons_with_channels(user_id, limit, offset)
         .map(Json)
         .map_err(|e| {
             tracing::error!("Failed to get persons: {}", e);
