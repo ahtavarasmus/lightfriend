@@ -9,7 +9,7 @@ use native_tls::TlsConnector;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::error::Error;
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -187,11 +187,32 @@ async fn connect_imap(
         email
     );
 
-    // Use TCP connect with timeout to avoid hanging on unreachable servers
-    let tcp_stream = TcpStream::connect_timeout(
-        &format!("{}:{}", server, port).parse()?,
-        Duration::from_secs(15),
-    )?;
+    // Resolve hostname first. Parsing "host:port" as SocketAddr only works for
+    // numeric IPs and breaks normal IMAP hosts like imap.gmail.com.
+    let resolved_addrs: Vec<_> = (server, port).to_socket_addrs()?.collect();
+    if resolved_addrs.is_empty() {
+        return Err(format!("No socket addresses resolved for {}:{}", server, port).into());
+    }
+
+    // Use TCP connect with timeout to avoid hanging on unreachable servers.
+    let mut last_error = None;
+    let mut connected = None;
+    for addr in resolved_addrs {
+        match TcpStream::connect_timeout(&addr, Duration::from_secs(15)) {
+            Ok(stream) => {
+                connected = Some(stream);
+                break;
+            }
+            Err(err) => last_error = Some(err),
+        }
+    }
+
+    let tcp_stream = connected
+        .ok_or_else(|| {
+            last_error
+                .map(|e| format!("Failed to connect to {}:{}: {}", server, port, e))
+                .unwrap_or_else(|| format!("Failed to connect to {}:{}", server, port))
+        })?;
     tcp_stream.set_read_timeout(Some(Duration::from_secs(15)))?;
     tcp_stream.set_write_timeout(Some(Duration::from_secs(15)))?;
 
