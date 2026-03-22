@@ -2245,6 +2245,8 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                 {" | "}
                 <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
                 {" | "}
+                <Link<Route> to={Route::Trustless}>{"Trustless"}</Link<Route>>
+                {" | "}
                 <Link<Route> to={Route::Changelog}>{"Updates"}</Link<Route>>
             </div>
         </div>

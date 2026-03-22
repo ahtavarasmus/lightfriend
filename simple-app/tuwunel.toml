@@ -1,0 +1,9 @@
+[global]
+server_name = "localhost"
+database_path = "/var/lib/tuwunel"
+address = "0.0.0.0"
+port = 8008
+allow_registration = true
+registration_token = "b325625b6f2c02b73238990d26caf9b39c471828e3a0d09a02a1fee8f7f64112"
+grant_admin_to_first_user = true
+allow_federation = false

@@ -3,8 +3,16 @@
 # NOTE: mold linker is configured via RUSTFLAGS in Docker only (see Dockerfile)
 # This allows native builds on servers without mold installed
 
+[target.aarch64-apple-darwin]
+rustflags = [
+    "-C", "link-arg=-Wl,-rpath,/opt/homebrew/lib",
+    "-C", "link-arg=-Wl,-rpath,/opt/homebrew/opt/openssl@3/lib",
+    "-C", "link-arg=-Wl,-rpath,/opt/homebrew/lib/postgresql@14",
+]
+
 [build]
 # Use all available CPU cores for parallel compilation (default behavior)
+rustflags = ["-L", "/opt/homebrew/opt/libpq/lib"]
 
 [profile.release]
 # Optimize for speed while keeping reasonable build times

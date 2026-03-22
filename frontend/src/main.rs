@@ -36,6 +36,7 @@ mod pages {
     pub mod landing;
     pub mod money;
     pub mod termsprivacy;
+    pub mod trustless;
     pub mod faq;
     pub mod supported_countries;
     pub mod bring_own_number;
@@ -60,7 +61,11 @@ mod dashboard {
     pub mod youtube_quick_panel;
     pub mod contact_avatar_row;
     pub mod items_status;
+    pub mod rules_section;
+    pub mod rule_builder;
     pub mod emoji_utils;
+    pub mod activity_feed;
+    pub mod people_list;
 }
 mod proactive {
     pub mod contact_profiles;
@@ -88,6 +93,7 @@ use pages::{
     faq::Faq,
     supported_countries::SupportedCountries,
     termsprivacy::{TermsAndConditions, PrivacyPolicy},
+    trustless::TrustlessVerification,
     money::UnifiedPricing,
     bring_own_number::TwilioHostedInstructions,
     lightphone3_whatsapp_guide::LightPhone3WhatsappGuide,
@@ -137,6 +143,8 @@ pub enum Route {
     Terms,
     #[at("/privacy")]
     Privacy,
+    #[at("/trustless")]
+    Trustless,
     #[at("/pricing")]
     Pricing,
     #[at("/light-phone-3-whatsapp-guide")]
@@ -205,6 +213,10 @@ fn switch(routes: Route) -> Html {
         Route::Privacy => {
             info!("Rendering Privacy page");
             html! { <PrivacyPolicy /> }
+        },
+        Route::Trustless => {
+            info!("Rendering Trustless page");
+            html! { <TrustlessVerification /> }
         },
         Route::Pricing => {
             info!("Rendering Pricing page");

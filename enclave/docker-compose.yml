@@ -1,0 +1,115 @@
+services:
+  lightfriend:
+    image: ahtavarasmus/lightfriend-enclave:latest
+    build:
+      context: ..
+      dockerfile: enclave/Dockerfile
+      args:
+        BUILD_MODE: ${BUILD_MODE:-production}
+    container_name: lightfriend-enclave
+    environment:
+      # Core application
+      PG_DATABASE_URL: postgres://lightfriend:lightfriend@localhost:5432/lightfriend_db?sslmode=disable
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_REFRESH_KEY: ${JWT_REFRESH_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      # Twilio
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      # Stripe
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      STRIPE_CREDITS_PRODUCT_ID: ${STRIPE_CREDITS_PRODUCT_ID:-}
+      STRIPE_ASSISTANT_PLAN_PRICE_ID: ${STRIPE_ASSISTANT_PLAN_PRICE_ID:-}
+      STRIPE_ASSISTANT_PLAN_PRICE_ID_US: ${STRIPE_ASSISTANT_PLAN_PRICE_ID_US:-}
+      STRIPE_AUTOPILOT_PLAN_PRICE_ID: ${STRIPE_AUTOPILOT_PLAN_PRICE_ID:-}
+      STRIPE_AUTOPILOT_PLAN_PRICE_ID_US: ${STRIPE_AUTOPILOT_PLAN_PRICE_ID_US:-}
+      # Matrix
+      MATRIX_HOMESERVER: http://localhost:8008
+      MATRIX_SHARED_SECRET: ${MATRIX_HOMESERVER_SHARED_SECRET}
+      MATRIX_REGISTRATION_TOKEN: ${MATRIX_REGISTRATION_TOKEN}
+      MATRIX_HOMESERVER_PERSISTENT_STORE_PATH: /app/matrix_store
+      MATRIX_HOMESERVER_SHARED_SECRET: ${MATRIX_HOMESERVER_SHARED_SECRET}
+      DOUBLE_PUPPET_SECRET: ${DOUBLE_PUPPET_SECRET}
+      WHATSAPP_BRIDGE_BOT: "@whatsappbot:localhost"
+      SIGNAL_BRIDGE_BOT: "@signalbot:localhost"
+      TELEGRAM_BRIDGE_BOT: "@telegrambot:localhost"
+      # AI APIs
+      ELEVENLABS_SERVER_URL_SECRET: ${ELEVENLABS_SERVER_URL_SECRET:-}
+      ELEVENLABS_WEBHOOK_SECRET: ${ELEVENLABS_WEBHOOK_SECRET:-}
+      # Phone numbers
+      FIN_PHONE: ${FIN_PHONE:-}
+      USA_PHONE: ${USA_PHONE:-}
+      AUS_PHONE: ${AUS_PHONE:-}
+      GB_PHONE: ${GB_PHONE:-}
+      NL_PHONE: ${NL_PHONE:-}
+      CAN_PHONE: ${CAN_PHONE:-}
+      # ElevenLabs phone number IDs
+      USA_PHONE_NUMBER_ID: ${USA_PHONE_NUMBER_ID:-}
+      FIN_PHONE_NUMBER_ID: ${FIN_PHONE_NUMBER_ID:-}
+      AUS_PHONE_NUMBER_ID: ${AUS_PHONE_NUMBER_ID:-}
+      GB_PHONE_NUMBER_ID: ${GB_PHONE_NUMBER_ID:-}
+      NL_PHONE_NUMBER_ID: ${NL_PHONE_NUMBER_ID:-}
+      CAN_PHONE_NUMBER_ID: ${CAN_PHONE_NUMBER_ID:-}
+      # AI APIs
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      TINFOIL_API_KEY: ${TINFOIL_API_KEY:-}
+      PERPLEXITY_API_KEY: ${PERPLEXITY_API_KEY:-}
+      # Email
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-notifications@lightfriend.ai}
+      # Admin
+      ADMIN_EMAILS: ${ADMIN_EMAILS}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-12345678}
+      BOOTSTRAP_ADMIN_PHONE: ${BOOTSTRAP_ADMIN_PHONE:-+12345678}
+      # Runtime
+      FRONTEND_URL: ${FRONTEND_URL:-}
+      PORT: 3000
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SERVER_URL: ${SERVER_URL:-}
+      ASSISTANT_ID: ${ASSISTANT_ID:-}
+      MAINTENANCE_SECRET: ${MAINTENANCE_SECRET:-}
+      # Enclave mode
+      SKIP_BACKEND: ${SKIP_BACKEND:-false}
+      # Local-only fallback. Production should derive the backup key inside the enclave.
+      ALLOW_INSECURE_BACKUP_KEY_FALLBACK: ${ALLOW_INSECURE_BACKUP_KEY_FALLBACK:-false}
+      BACKUP_ENCRYPTION_KEY: ${BACKUP_ENCRYPTION_KEY:-}
+      MARLIN_ROOT_SERVER_ENDPOINT: ${MARLIN_ROOT_SERVER_ENDPOINT:-}
+      MARLIN_ROOT_SERVER_X25519_PUBKEY: ${MARLIN_ROOT_SERVER_X25519_PUBKEY:-}
+      MARLIN_KMS_CONTRACT_ADDRESS: ${MARLIN_KMS_CONTRACT_ADDRESS:-}
+      MARLIN_BACKUP_KEY_PATH: ${MARLIN_BACKUP_KEY_PATH:-lightfriend.backup.v1}
+      MARLIN_BACKUP_KEY_COMMAND: ${MARLIN_BACKUP_KEY_COMMAND:-}
+      # Cloudflare tunnel (Nitro Enclave mode)
+      CLOUDFLARE_TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+      # Telegram bridge
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+      TELEGRAM_PROXY_TYPE: ${TELEGRAM_PROXY_TYPE:-}
+      TELEGRAM_PROXY_ADDRESS: ${TELEGRAM_PROXY_ADDRESS:-}
+      TELEGRAM_PROXY_PORT: ${TELEGRAM_PROXY_PORT:-}
+      TELEGRAM_PROXY_USERNAME: ${TELEGRAM_PROXY_USERNAME:-}
+      TELEGRAM_PROXY_PASSWORD: ${TELEGRAM_PROXY_PASSWORD:-}
+      # VSOCK proxy (Nitro Enclave)
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - tuwunel_data:/var/lib/tuwunel
+      - bridge_data:/data/bridges
+      - core_data:/app/data
+      - core_uploads:/app/uploads
+      - core_matrix_store:/app/matrix_store
+      - ./seed:/data/seed
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:8008:8008"
+
+volumes:
+  pg_data:
+  tuwunel_data:
+  bridge_data:
+  core_data:
+  core_uploads:
+  core_matrix_store:

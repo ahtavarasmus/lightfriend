@@ -1,4 +1,5 @@
 use yew::prelude::*;
+use wasm_bindgen::JsCast;
 use web_sys::MouseEvent;
 use wasm_bindgen_futures::spawn_local;
 use serde::Deserialize;
@@ -321,6 +322,39 @@ pub fn activity_panel(props: &ActivityPanelProps) -> Html {
         );
     }
 
+    // Escape key to close panel
+    {
+        let on_close = props.on_close.clone();
+        let is_open = props.is_open;
+        use_effect_with_deps(
+            move |is_open: &bool| {
+                let closure_holder: std::rc::Rc<std::cell::RefCell<Option<wasm_bindgen::closure::Closure<dyn Fn(web_sys::KeyboardEvent)>>>> =
+                    std::rc::Rc::new(std::cell::RefCell::new(None));
+                if *is_open {
+                    let on_close = on_close.clone();
+                    let closure = wasm_bindgen::closure::Closure::<dyn Fn(web_sys::KeyboardEvent)>::new(move |e: web_sys::KeyboardEvent| {
+                        if e.key() == "Escape" {
+                            on_close.emit(());
+                        }
+                    });
+                    if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+                        let _ = document.add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
+                    }
+                    *closure_holder.borrow_mut() = Some(closure);
+                }
+                let holder = closure_holder;
+                move || {
+                    if let Some(closure) = holder.borrow_mut().take() {
+                        if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+                            let _ = document.remove_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
+                        }
+                    }
+                }
+            },
+            is_open,
+        );
+    }
+
     if !props.is_open {
         return html! {};
     }
@@ -328,7 +362,7 @@ pub fn activity_panel(props: &ActivityPanelProps) -> Html {
     // Recent tab content
     let recent_content = if *active_tab == ActivityTab::Recent {
         if *loading {
-            html! { <div class="activity-loading">{"Loading..."}</div> }
+            html! { <div class="activity-loading"><div class="loading-spinner-inline"></div></div> }
         } else if let Some(err) = (*error).as_ref() {
             html! { <div class="activity-error">{err}</div> }
         } else if activities.is_empty() {
@@ -401,7 +435,7 @@ pub fn activity_panel(props: &ActivityPanelProps) -> Html {
     html! {
         <>
             <style>{ACTIVITY_STYLES}</style>
-            <div class="activity-panel-overlay" onclick={overlay_click}>
+            <div class="activity-panel-overlay" onclick={overlay_click} role="dialog" aria-modal="true" aria-label="Activity">
                 <div class="activity-panel" onclick={stop_propagation}>
                     <div class="activity-header">
                         <h2>{"Activity"}</h2>

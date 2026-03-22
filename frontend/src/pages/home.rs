@@ -162,7 +162,7 @@ pub fn Home() -> Html {
             html! {
                 <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center;">
                     <div style="text-align: center;">
-                        <p>{"Loading..."}</p>
+                        <div class="loading-spinner-inline"></div>
                     </div>
                 </div>
             }
@@ -196,11 +196,25 @@ pub fn Home() -> Html {
                 <>
                     <style>
                         {r#"
+                            @media (min-width: 769px) {
+                                html, body {
+                                    overflow: hidden;
+                                }
+                            }
                             .dashboard-container {
-                                max-width: 600px;
-                                margin: 0 auto;
-                                padding: 6rem 1rem 2rem 1rem;
-                                min-height: calc(100vh - 80px);
+                                max-width: 100%;
+                                margin: 0;
+                                padding: 0;
+                                padding-top: 77px;
+                                height: 100vh;
+                                height: 100dvh;
+                                overflow: hidden;
+                            }
+                            @media (max-width: 768px) {
+                                .dashboard-container {
+                                    height: auto;
+                                    overflow: auto;
+                                }
                             }
                             .panel-title {
                                 display: none;
@@ -232,26 +246,6 @@ pub fn Home() -> Html {
                             }
                             .twofa-banner-dismiss:hover {
                                 color: rgba(255, 255, 255, 0.8);
-                            }
-                            .dashboard-footer {
-                                margin-top: 2rem;
-                                padding-top: 1rem;
-                                border-top: 1px solid rgba(255, 255, 255, 0.1);
-                                text-align: center;
-                            }
-                            .development-links {
-                                color: rgba(255, 255, 255, 0.5);
-                                font-size: 0.85rem;
-                            }
-                            .development-links a {
-                                color: #1E90FF;
-                                text-decoration: none;
-                            }
-                            .development-links a:hover {
-                                text-decoration: underline;
-                            }
-                            .legal-links {
-                                margin-top: 0.5rem;
                             }
                         "#}
                     </style>
@@ -323,26 +317,6 @@ pub fn Home() -> Html {
                                 }
                             }
                         }
-                        <footer class="dashboard-footer">
-                            <div class="development-links">
-                                <p>{"Source code on "}
-                                    <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer">{"GitHub"}</a>
-                                </p>
-                                <div class="legal-links">
-                                    <a href="/faq">{"FAQ"}</a>
-                                    {" | "}
-                                    <a href="/blog">{"Blog"}</a>
-                                    {" | "}
-                                    <a href="/pricing">{"Pricing"}</a>
-                                    {" | "}
-                                    <a href="/terms">{"Terms"}</a>
-                                    {" | "}
-                                    <a href="/privacy">{"Privacy"}</a>
-                                    {" | "}
-                                    <a href="/updates">{"Updates"}</a>
-                                </div>
-                            </div>
-                        </footer>
                     </div>
                 </>
             }

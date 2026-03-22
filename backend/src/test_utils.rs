@@ -42,15 +42,21 @@ pub fn create_test_pg_pool() -> crate::PgDbPool {
         let _ = conn.run_pending_migrations(PG_MIGRATIONS);
         // Truncate all PG tables so each test starts clean
         use diesel::RunQueryDsl;
+        // Core tables - always exist
         let _ = diesel::sql_query(
             "TRUNCATE users, user_settings, refund_info, \
              country_availability, message_status_log, admin_alerts, \
              disabled_alert_types, site_metrics, waitlist, \
-             items, message_history, usage_logs, contact_profiles, \
-             contact_profile_exceptions, bridges, bridge_disconnection_events, \
+             items, message_history, usage_logs, \
+             bridges, bridge_disconnection_events, \
              imap_connection, tesla, youtube, mcp_servers, totp_secrets, \
              totp_backup_codes, webauthn_credentials, webauthn_challenges, \
              user_secrets, user_info, processed_emails CASCADE",
+        )
+        .execute(&mut conn);
+        // Ontology tables - may not exist yet in all test environments
+        let _ = diesel::sql_query(
+            "TRUNCATE ont_links, ont_changelog, ont_channels, ont_person_edits, ont_persons CASCADE",
         )
         .execute(&mut conn);
     }
@@ -83,7 +89,6 @@ pub fn create_test_state() -> Arc<crate::AppState> {
 
     let user_core = Arc::new(crate::UserCore::new(pg_pool.clone()));
     let user_repository = Arc::new(crate::UserRepository::new(pg_pool.clone()));
-    let item_repository = Arc::new(crate::ItemRepository::new(pg_pool.clone()));
     let totp_repository = Arc::new(crate::repositories::totp_repository::TotpRepository::new(
         pg_pool.clone(),
     ));
@@ -95,6 +100,9 @@ pub fn create_test_state() -> Arc<crate::AppState> {
     );
     let metrics_repository =
         Arc::new(crate::repositories::metrics_repository::MetricsRepository::new(pg_pool.clone()));
+    let ontology_repository = Arc::new(
+        crate::repositories::ontology_repository::OntologyRepository::new(pg_pool.clone()),
+    );
 
     let google_oauth = create_dummy_google_oauth_client();
     let tesla_oauth = create_dummy_tesla_oauth_client();
@@ -110,7 +118,6 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         pg_pool,
         user_core,
         user_repository,
-        item_repository,
         twilio_client,
         twilio_message_service,
         ai_config: crate::AiConfig::default_for_tests(),
@@ -139,7 +146,11 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         session_to_token: DashMap::new(),
         totp_verify_limiter: DashMap::new(),
         webauthn_verify_limiter: DashMap::new(),
+        ontology_repository,
+        ontology_registry: crate::ontology::registry::OntologyRegistry::build(),
         tool_registry: crate::build_tool_registry(),
+        pending_rule_tests: Arc::new(dashmap::DashMap::new()),
+        maintenance_mode: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     })
 }
 
@@ -596,7 +607,7 @@ pub fn get_total_credits(state: &Arc<crate::AppState>, user_id: i32) -> f32 {
 pub mod mock_user_core {
     use crate::handlers::profile_handlers::CriticalNotificationInfo;
     use crate::models::user_models::{User, UserSettings};
-    use crate::pg_models::{PgItem, PgUserInfo};
+    use crate::pg_models::PgUserInfo;
     use crate::repositories::user_core::{UpdateProfileParams, UserCoreOps};
     use diesel::result::Error as DieselError;
     use std::collections::HashMap;
@@ -630,7 +641,7 @@ pub mod mock_user_core {
         pub byot_users: Mutex<Vec<i32>>,
         pub phone_service_active: Mutex<HashMap<i32, bool>>,
         pub quiet_mode: Mutex<HashMap<i32, Option<i32>>>,
-        pub quiet_rules: Mutex<HashMap<i32, Vec<PgItem>>>,
+        pub quiet_rules: Mutex<HashMap<i32, Vec<String>>>,
         pub llm_provider: Mutex<HashMap<i32, String>>,
 
         // Error injection
@@ -1135,31 +1146,7 @@ pub mod mock_user_core {
         }
 
         fn set_quiet_mode(&self, user_id: i32, until: Option<i32>) -> Result<(), DieselError> {
-            // Global quiet mode deletes all items including rules
             self.quiet_rules.lock().unwrap().remove(&user_id);
-            if let Some(ts) = until {
-                // Store as an item in quiet_rules too for get_quiet_rules/check_quiet_with_context
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i32;
-                let end_time = if ts == 0 { None } else { Some(ts) };
-                let item = PgItem {
-                    id: now, // use timestamp as fake id
-                    user_id,
-                    summary: "Quiet mode.".to_string(),
-                    due_at: end_time,
-                    priority: 0,
-                    source_id: Some("quiet_mode".to_string()),
-                    created_at: now,
-                };
-                self.quiet_rules
-                    .lock()
-                    .unwrap()
-                    .entry(user_id)
-                    .or_default()
-                    .push(item);
-            }
             self.quiet_mode.lock().unwrap().insert(user_id, until);
             Ok(())
         }
@@ -1176,272 +1163,31 @@ pub mod mock_user_core {
 
         fn add_quiet_rule(
             &self,
-            user_id: i32,
-            until: i32,
-            rule_type: &str,
-            platform: Option<&str>,
-            sender: Option<&str>,
-            topic: Option<&str>,
-            description: &str,
+            _user_id: i32,
+            _until: i32,
+            _rule_type: &str,
+            _platform: Option<&str>,
+            _sender: Option<&str>,
+            _topic: Option<&str>,
+            _description: &str,
         ) -> Result<i32, DieselError> {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i32;
-
-            let mut tags = format!("[quiet:{}]", rule_type);
-            if let Some(p) = platform {
-                tags.push_str(&format!(" [platform:{}]", p));
-            }
-            if let Some(s) = sender {
-                tags.push_str(&format!(" [sender:{}]", s));
-            }
-            if let Some(t) = topic {
-                tags.push_str(&format!(" [topic:{}]", t));
-            }
-            let summary = format!("{}\n{}", tags, description);
-
-            let id = now; // use timestamp as fake id
-            let item = PgItem {
-                id,
-                user_id,
-                summary,
-                due_at: Some(until),
-                priority: 0,
-                source_id: Some("quiet_mode".to_string()),
-                created_at: now,
-            };
-            self.quiet_rules
-                .lock()
-                .unwrap()
-                .entry(user_id)
-                .or_default()
-                .push(item);
-            Ok(id)
+            Ok(0)
         }
 
-        fn get_quiet_rules(&self, user_id: i32) -> Result<Vec<PgItem>, DieselError> {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i32;
-
-            let items = self
-                .quiet_rules
-                .lock()
-                .unwrap()
-                .get(&user_id)
-                .cloned()
-                .unwrap_or_default();
-
-            // Filter out expired
-            let active: Vec<_> = items
-                .into_iter()
-                .filter(|item| match item.due_at {
-                    None => true,
-                    Some(ts) => ts > now,
-                })
-                .collect();
-            Ok(active)
+        fn get_quiet_rules(&self, _user_id: i32) -> Result<Vec<String>, DieselError> {
+            Ok(Vec::new())
         }
 
         fn check_quiet_with_context(
             &self,
-            user_id: i32,
-            platform: Option<&str>,
-            sender: Option<&str>,
-            content: Option<&str>,
+            _user_id: i32,
+            _platform: Option<&str>,
+            _sender: Option<&str>,
+            _content: Option<&str>,
         ) -> Result<bool, DieselError> {
-            let items = self.get_quiet_rules(user_id)?;
-
-            if items.is_empty() {
-                return Ok(false);
-            }
-
-            let mut has_global_suppress = false;
-            let mut suppress_rules = Vec::new();
-            let mut allow_rules = Vec::new();
-
-            for item in &items {
-                let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
-                match tags.quiet.as_deref() {
-                    None => has_global_suppress = true,
-                    Some("suppress") => suppress_rules.push(tags),
-                    Some("allow") => allow_rules.push(tags),
-                    _ => {}
-                }
-            }
-
-            if has_global_suppress {
-                return Ok(true);
-            }
-
-            for rule in &suppress_rules {
-                if crate::repositories::user_core::rule_matches(rule, platform, sender, content) {
-                    return Ok(true);
-                }
-            }
-
-            if !allow_rules.is_empty() {
-                let any_match = allow_rules.iter().any(|rule| {
-                    crate::repositories::user_core::rule_matches(rule, platform, sender, content)
-                });
-                if !any_match {
-                    return Ok(true);
-                }
-            }
-
             Ok(false)
         }
     }
-}
-
-// =============================================================================
-// Task Testing Helpers
-// =============================================================================
-
-// =============================================================================
-// Item Testing Helpers
-// =============================================================================
-
-/// Builder for test item parameters
-#[derive(Debug, Clone)]
-pub struct TestItemParams {
-    pub user_id: i32,
-    pub summary: String,
-    pub due_at: Option<i32>,
-    pub priority: i32,
-    pub source_id: Option<String>,
-}
-
-impl TestItemParams {
-    /// Simple reminder item
-    pub fn reminder(user_id: i32, summary: &str) -> Self {
-        Self {
-            user_id,
-            summary: summary.to_string(),
-            due_at: None,
-            priority: 0,
-            source_id: None,
-        }
-    }
-
-    /// Scheduled reminder (fires at due_at)
-    pub fn scheduled_reminder(user_id: i32, summary: &str, trigger_at: i32) -> Self {
-        Self {
-            user_id,
-            summary: summary.to_string(),
-            due_at: Some(trigger_at),
-            priority: 0,
-            source_id: None,
-        }
-    }
-
-    /// Digest item
-    pub fn digest(user_id: i32, summary: &str, trigger_at: i32) -> Self {
-        Self {
-            user_id,
-            summary: summary.to_string(),
-            due_at: Some(trigger_at),
-            priority: 0,
-            source_id: None,
-        }
-    }
-
-    /// Tracking item (matches against incoming data)
-    pub fn tracking(user_id: i32, summary: &str) -> Self {
-        // Prepend [type:tracking] tag if not already present
-        let tagged_summary = if summary.contains("[type:tracking]") {
-            summary.to_string()
-        } else {
-            format!("[type:tracking] {}", summary)
-        };
-        Self {
-            user_id,
-            summary: tagged_summary,
-            due_at: None,
-            priority: 0,
-            source_id: None,
-        }
-    }
-
-    /// Alert item (system alerts like bridge disconnect)
-    pub fn alert(user_id: i32, summary: &str) -> Self {
-        Self {
-            user_id,
-            summary: summary.to_string(),
-            due_at: None,
-            priority: 1,
-            source_id: None,
-        }
-    }
-
-    /// Email-sourced item (with source_id for dedup)
-    pub fn from_email(user_id: i32, summary: &str, source_id: &str) -> Self {
-        Self {
-            user_id,
-            summary: summary.to_string(),
-            due_at: None,
-            priority: 0,
-            source_id: Some(source_id.to_string()),
-        }
-    }
-
-    pub fn with_priority(mut self, priority: i32) -> Self {
-        self.priority = priority;
-        self
-    }
-
-    pub fn with_due_at(mut self, ts: i32) -> Self {
-        self.due_at = Some(ts);
-        self
-    }
-
-    pub fn with_source_id(mut self, source_id: &str) -> Self {
-        self.source_id = Some(source_id.to_string());
-        self
-    }
-}
-
-/// Create a test item in the database from TestItemParams, returns the item
-pub fn create_test_item(
-    state: &Arc<crate::AppState>,
-    params: &TestItemParams,
-) -> crate::pg_models::PgItem {
-    use crate::pg_models::NewPgItem;
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i32;
-
-    let new_item = NewPgItem {
-        user_id: params.user_id,
-        summary: params.summary.clone(),
-        due_at: params.due_at,
-        priority: params.priority,
-        source_id: params.source_id.clone(),
-        created_at: now,
-    };
-
-    let item_id = state
-        .item_repository
-        .create_item(&new_item)
-        .expect("Failed to create test item");
-
-    state
-        .item_repository
-        .get_item(item_id, params.user_id)
-        .expect("Failed to get test item")
-        .expect("Item not found after creation")
-}
-
-/// Get all items for a user
-pub fn get_user_items(state: &Arc<crate::AppState>, user_id: i32) -> Vec<crate::pg_models::PgItem> {
-    state
-        .item_repository
-        .get_items(user_id)
-        .expect("Failed to get user items")
 }
 
 #[cfg(test)]

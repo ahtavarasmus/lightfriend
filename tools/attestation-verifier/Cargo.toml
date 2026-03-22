@@ -1,0 +1,17 @@
+[package]
+name = "attestation-verifier"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+hex = "0.4"
+rand = "0.8"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha3 = "0.10"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+url = "2"
+oyster-sdk = { git = "https://github.com/marlinprotocol/oyster-monorepo", package = "oyster-sdk", rev = "f60874a27f56eee2974cf0099ff80e9627c8f1dd" }

@@ -304,7 +304,7 @@ pub fn get_direct_response_tool() -> openai_api_rs::v1::chat_completion::Tool {
         function: types::Function {
             name: String::from("direct_response"),
             description: Some(String::from(
-                "For greetings, acknowledgments, simple math, and responses based entirely on current conversation context. Use ask_perplexity for factual questions and other tools for messages, emails, weather, or tasks."
+                "For greetings, acknowledgments, simple math, and responses based entirely on current conversation context. NEVER use for reminders, scheduling, or notifications - use create_rule instead. Use ask_perplexity for factual questions."
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,

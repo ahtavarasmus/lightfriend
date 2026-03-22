@@ -1,0 +1,64 @@
+# Signal bridge configuration for enclave (single container)
+
+network:
+    displayname_template: "{{if .ContactName}}{{.ContactName}} (Signal){{else}}{{or .ProfileName .PhoneNumber}} (Signal~){{end}}"
+
+homeserver:
+    address: http://localhost:8008
+    domain: localhost
+
+appservice:
+    address: http://localhost:29328
+    hostname: 0.0.0.0
+    port: 29328
+    id: signal
+    bot:
+        username: signalbot
+        displayname: Signal Bridge
+    ephemeral_events: true
+    async_transactions: true
+
+database:
+    type: postgres
+    uri: postgres://signal_user:signal_password@localhost:5432/signal_db?sslmode=disable
+    max_open_conns: 25
+    max_idle_conns: 5
+
+signal:
+    device_name: mautrix-signal
+
+bridge:
+    username_template: signal_{{.}}
+    displayname_template: "{{or .ContactName .ProfileName .PhoneNumber \"Unknown user\"}} (Signal)"
+    permissions:
+        "*": user
+        "@admin:localhost": admin
+    cleanup_on_logout:
+        enabled: true
+        manual:
+            private: delete
+            relayed: delete
+            shared_no_users: delete
+            shared_has_users: kick
+        bad_credentials:
+            private: delete
+            relayed: delete
+            shared_no_users: delete
+            shared_has_users: kick
+
+encryption:
+    allow: false
+    default: false
+    appservice: false
+    require: false
+
+double_puppet:
+    servers: {}
+    secrets:
+        localhost: as_token:${DOUBLE_PUPPET_SECRET}
+
+logging:
+    min_level: info
+    writers:
+    - type: stdout
+      format: pretty-colored

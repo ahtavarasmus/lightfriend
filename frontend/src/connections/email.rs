@@ -8,7 +8,6 @@ use crate::utils::api::Api;
 pub struct EmailProps {
     pub user_id: i32,
     pub sub_tier: Option<String>,
-    pub discount: bool,
 }
 #[function_component(EmailConnect)]
 pub fn email_connect(props: &EmailProps) -> Html {
@@ -377,7 +376,7 @@ pub fn email_connect(props: &EmailProps) -> Html {
                     }
                 }
             }
-            if props.sub_tier.as_deref() == Some("tier 2") || props.discount {
+            if props.sub_tier.is_some() {
                 if *imap_connected {
                     <div class="imap-controls">
                         <button
