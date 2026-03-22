@@ -958,6 +958,10 @@ async fn main() {
             get(whatsapp_auth::start_whatsapp_connection),
         )
         .route(
+            "/api/auth/whatsapp/connect-phone",
+            post(whatsapp_auth::start_whatsapp_phone_connection),
+        )
+        .route(
             "/api/auth/whatsapp/disconnect",
             delete(whatsapp_auth::disconnect_whatsapp),
         )
