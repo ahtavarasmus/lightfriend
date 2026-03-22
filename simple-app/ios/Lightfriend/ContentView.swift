@@ -4,7 +4,46 @@ import WebKit
 let defaultServerURL = "https://lightfriend.ai"
 let legacyLocalServerURL = "http://localhost:3000"
 
+private func normalizedServerURL(_ rawValue: String?) -> String? {
+    guard var url = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !url.isEmpty else {
+        return nil
+    }
+
+    if !url.hasPrefix("http://") && !url.hasPrefix("https://") {
+        url = "http://" + url
+    }
+    if url.hasSuffix("/") {
+        url.removeLast()
+    }
+
+    return url
+}
+
+private func resolvedLaunchOverrideServerURL() -> String? {
+    let processInfo = ProcessInfo.processInfo
+
+    if let envURL = normalizedServerURL(processInfo.environment["LIGHTFRIEND_SERVER_URL"]) {
+        return envURL
+    }
+
+    let arguments = processInfo.arguments
+    for (index, argument) in arguments.enumerated() {
+        guard argument == "-serverURL" || argument == "--server-url" else { continue }
+        let valueIndex = index + 1
+        guard valueIndex < arguments.count else { break }
+        return normalizedServerURL(arguments[valueIndex])
+    }
+
+    return nil
+}
+
 private func resolvedInitialServerURL() -> String {
+    if let launchOverride = resolvedLaunchOverrideServerURL() {
+        UserDefaults.standard.set(launchOverride, forKey: "server_url")
+        return launchOverride
+    }
+
     let savedURL = UserDefaults.standard.string(forKey: "server_url")?.trimmingCharacters(in: .whitespacesAndNewlines)
 
     guard let savedURL, !savedURL.isEmpty else {
@@ -16,7 +55,7 @@ private func resolvedInitialServerURL() -> String {
         return defaultServerURL
     }
 
-    return savedURL
+    return normalizedServerURL(savedURL) ?? defaultServerURL
 }
 
 struct ContentView: View {
@@ -148,11 +187,7 @@ struct SettingsView: View {
     }
 
     func save() {
-        var url = inputURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !url.hasPrefix("http://") && !url.hasPrefix("https://") {
-            url = "http://" + url
-        }
-        if url.hasSuffix("/") { url.removeLast() }
+        let url = normalizedServerURL(inputURL) ?? defaultServerURL
         serverURL = url
         UserDefaults.standard.set(url, forKey: "server_url")
         dismiss()

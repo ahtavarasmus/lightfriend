@@ -241,6 +241,17 @@
         }
         .tab-panel.active { display: flex; flex-direction: column; }
 
+        /* Explicit touch scrolling for nested panes inside WKWebView */
+        .chat-messages,
+        .contact-dropdown,
+        .chat-input-area textarea,
+        .connections-panel,
+        .settings-list {
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior-y: contain;
+            touch-action: pan-y;
+        }
+
         /* Bottom tabs */
         .bottom-tabs {
             display: flex;
