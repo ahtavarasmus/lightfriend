@@ -1,5 +1,5 @@
-use yew::prelude::*;
 use super::bridge_connect::{BridgeConnect, SIGNAL_CONFIG};
+use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
 pub struct SignalProps {

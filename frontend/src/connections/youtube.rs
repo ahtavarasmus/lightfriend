@@ -1,7 +1,7 @@
-use yew::prelude::*;
+use crate::utils::api::Api;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::MouseEvent;
-use crate::utils::api::Api;
+use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
 pub struct YouTubeConnectProps {
@@ -29,17 +29,20 @@ pub fn youtube_connect(props: &YouTubeConnectProps) -> Html {
                 let youtube_scope = youtube_scope.clone();
                 let youtube_available = youtube_available.clone();
                 spawn_local(async move {
-                    let request = Api::get("/api/auth/youtube/status")
-                        .send()
-                        .await;
+                    let request = Api::get("/api/auth/youtube/status").send().await;
                     if let Ok(response) = request {
                         if response.ok() {
                             if let Ok(data) = response.json::<serde_json::Value>().await {
                                 // Check if YouTube is available for this user
-                                let available = data.get("available").and_then(|v| v.as_bool()).unwrap_or(true);
+                                let available = data
+                                    .get("available")
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(true);
                                 youtube_available.set(available);
 
-                                if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                if let Some(connected) =
+                                    data.get("connected").and_then(|v| v.as_bool())
+                                {
                                     youtube_connected.set(connected);
                                 }
                                 if let Some(scope) = data.get("scope").and_then(|v| v.as_str()) {
@@ -70,20 +73,22 @@ pub fn youtube_connect(props: &YouTubeConnectProps) -> Html {
             error.set(None);
 
             spawn_local(async move {
-                let request = Api::get("/api/auth/youtube/login")
-                    .send()
-                    .await;
+                let request = Api::get("/api/auth/youtube/login").send().await;
                 match request {
                     Ok(response) => {
                         if (200..300).contains(&response.status()) {
                             match response.json::<serde_json::Value>().await {
                                 Ok(data) => {
-                                    if let Some(auth_url) = data.get("auth_url").and_then(|u| u.as_str()) {
+                                    if let Some(auth_url) =
+                                        data.get("auth_url").and_then(|u| u.as_str())
+                                    {
                                         if let Some(window) = web_sys::window() {
                                             let _ = window.location().set_href(auth_url);
                                         }
                                     } else {
-                                        error.set(Some("YouTube integration coming soon".to_string()));
+                                        error.set(Some(
+                                            "YouTube integration coming soon".to_string(),
+                                        ));
                                     }
                                 }
                                 Err(_) => {
@@ -111,9 +116,7 @@ pub fn youtube_connect(props: &YouTubeConnectProps) -> Html {
             let error = error.clone();
 
             spawn_local(async move {
-                let request = Api::delete("/api/auth/youtube/connection")
-                    .send()
-                    .await;
+                let request = Api::delete("/api/auth/youtube/connection").send().await;
                 match request {
                     Ok(response) => {
                         if response.ok() {
@@ -140,14 +143,14 @@ pub fn youtube_connect(props: &YouTubeConnectProps) -> Html {
             error.set(None);
 
             spawn_local(async move {
-                let request = Api::get("/api/auth/youtube/downgrade")
-                    .send()
-                    .await;
+                let request = Api::get("/api/auth/youtube/downgrade").send().await;
                 match request {
                     Ok(response) => {
                         if response.ok() {
                             if let Ok(data) = response.json::<serde_json::Value>().await {
-                                if let Some(auth_url) = data.get("auth_url").and_then(|u| u.as_str()) {
+                                if let Some(auth_url) =
+                                    data.get("auth_url").and_then(|u| u.as_str())
+                                {
                                     if let Some(window) = web_sys::window() {
                                         let _ = window.location().set_href(auth_url);
                                     }

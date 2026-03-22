@@ -1,5 +1,5 @@
-use yew::prelude::*;
 use super::triage_indicator::AttentionItem;
+use yew::prelude::*;
 
 const ITEMS_STATUS_STYLES: &str = r#"
 .items-status {
@@ -502,27 +502,101 @@ struct PlatformVisual {
 fn platform_visual(platform_tag: Option<&str>, desc: &str) -> PlatformVisual {
     if let Some(p) = platform_tag {
         match p {
-            "whatsapp" => return PlatformVisual { name: "WhatsApp", color: "#25D366", glow: "rgba(37,211,102,0.3)", icon: "fa-brands fa-whatsapp" },
-            "email" => return PlatformVisual { name: "Email", color: "#5B9AFF", glow: "rgba(91,154,255,0.25)", icon: "fa-solid fa-envelope" },
-            "telegram" => return PlatformVisual { name: "Telegram", color: "#26A5E4", glow: "rgba(38,165,228,0.3)", icon: "fa-brands fa-telegram" },
-            "signal" => return PlatformVisual { name: "Signal", color: "#3A76F0", glow: "rgba(58,118,240,0.3)", icon: "fa-brands fa-signal-messenger" },
-            "internet" => return PlatformVisual { name: "Web", color: "#e8a838", glow: "rgba(232,168,56,0.25)", icon: "fa-solid fa-globe" },
-            "items" => return PlatformVisual { name: "Web", color: "#e8a838", glow: "rgba(232,168,56,0.25)", icon: "fa-solid fa-globe" },
-            "weather" => return PlatformVisual { name: "Weather", color: "#38bdf8", glow: "rgba(56,189,248,0.25)", icon: "fa-solid fa-cloud-sun" },
+            "whatsapp" => {
+                return PlatformVisual {
+                    name: "WhatsApp",
+                    color: "#25D366",
+                    glow: "rgba(37,211,102,0.3)",
+                    icon: "fa-brands fa-whatsapp",
+                }
+            }
+            "email" => {
+                return PlatformVisual {
+                    name: "Email",
+                    color: "#5B9AFF",
+                    glow: "rgba(91,154,255,0.25)",
+                    icon: "fa-solid fa-envelope",
+                }
+            }
+            "telegram" => {
+                return PlatformVisual {
+                    name: "Telegram",
+                    color: "#26A5E4",
+                    glow: "rgba(38,165,228,0.3)",
+                    icon: "fa-brands fa-telegram",
+                }
+            }
+            "signal" => {
+                return PlatformVisual {
+                    name: "Signal",
+                    color: "#3A76F0",
+                    glow: "rgba(58,118,240,0.3)",
+                    icon: "fa-brands fa-signal-messenger",
+                }
+            }
+            "internet" => {
+                return PlatformVisual {
+                    name: "Web",
+                    color: "#e8a838",
+                    glow: "rgba(232,168,56,0.25)",
+                    icon: "fa-solid fa-globe",
+                }
+            }
+            "items" => {
+                return PlatformVisual {
+                    name: "Web",
+                    color: "#e8a838",
+                    glow: "rgba(232,168,56,0.25)",
+                    icon: "fa-solid fa-globe",
+                }
+            }
+            "weather" => {
+                return PlatformVisual {
+                    name: "Weather",
+                    color: "#38bdf8",
+                    glow: "rgba(56,189,248,0.25)",
+                    icon: "fa-solid fa-cloud-sun",
+                }
+            }
             _ => {}
         }
     }
     let lower = desc.to_lowercase();
     if lower.contains("whatsapp") {
-        PlatformVisual { name: "WhatsApp", color: "#25D366", glow: "rgba(37,211,102,0.3)", icon: "fa-brands fa-whatsapp" }
+        PlatformVisual {
+            name: "WhatsApp",
+            color: "#25D366",
+            glow: "rgba(37,211,102,0.3)",
+            icon: "fa-brands fa-whatsapp",
+        }
     } else if lower.contains("email") {
-        PlatformVisual { name: "Email", color: "#5B9AFF", glow: "rgba(91,154,255,0.25)", icon: "fa-solid fa-envelope" }
+        PlatformVisual {
+            name: "Email",
+            color: "#5B9AFF",
+            glow: "rgba(91,154,255,0.25)",
+            icon: "fa-solid fa-envelope",
+        }
     } else if lower.contains("telegram") {
-        PlatformVisual { name: "Telegram", color: "#26A5E4", glow: "rgba(38,165,228,0.3)", icon: "fa-brands fa-telegram" }
+        PlatformVisual {
+            name: "Telegram",
+            color: "#26A5E4",
+            glow: "rgba(38,165,228,0.3)",
+            icon: "fa-brands fa-telegram",
+        }
     } else if lower.contains("signal") {
-        PlatformVisual { name: "Signal", color: "#3A76F0", glow: "rgba(58,118,240,0.3)", icon: "fa-brands fa-signal-messenger" }
+        PlatformVisual {
+            name: "Signal",
+            color: "#3A76F0",
+            glow: "rgba(58,118,240,0.3)",
+            icon: "fa-brands fa-signal-messenger",
+        }
     } else {
-        PlatformVisual { name: "Monitor", color: "#7EB2FF", glow: "rgba(126,178,255,0.25)", icon: "fa-solid fa-eye" }
+        PlatformVisual {
+            name: "Monitor",
+            color: "#7EB2FF",
+            glow: "rgba(126,178,255,0.25)",
+            icon: "fa-solid fa-eye",
+        }
     }
 }
 
@@ -566,7 +640,9 @@ fn extract_sender(desc: &str) -> Option<String> {
         .or_else(|| rest.find(','))
         .unwrap_or(rest.len());
     let candidate = rest[..end].trim();
-    if !candidate.is_empty() && candidate.len() < 25 && !candidate.contains(' ') || candidate.split_whitespace().count() <= 2 {
+    if !candidate.is_empty() && candidate.len() < 25 && !candidate.contains(' ')
+        || candidate.split_whitespace().count() <= 2
+    {
         Some(candidate.to_string())
     } else {
         None
@@ -586,11 +662,24 @@ fn tracking_topic(desc: &str, sender: Option<&str>) -> String {
     }
     // Strip platform prefixes (case variants)
     for prefix in &[
-        "WhatsApp messages ", "WhatsApp ", "whatsapp messages ", "whatsapp ",
-        "Emails ", "Email ", "emails ", "email ",
-        "Telegram messages ", "telegram messages ", "Telegram ", "telegram ",
-        "Signal messages ", "signal messages ", "Signal ", "signal ",
-        "Messages ", "messages ",
+        "WhatsApp messages ",
+        "WhatsApp ",
+        "whatsapp messages ",
+        "whatsapp ",
+        "Emails ",
+        "Email ",
+        "emails ",
+        "email ",
+        "Telegram messages ",
+        "telegram messages ",
+        "Telegram ",
+        "telegram ",
+        "Signal messages ",
+        "signal messages ",
+        "Signal ",
+        "signal ",
+        "Messages ",
+        "messages ",
     ] {
         if let Some(rest) = s.strip_prefix(prefix) {
             s = rest.to_string();
@@ -637,9 +726,14 @@ fn tracking_topic(desc: &str, sender: Option<&str>) -> String {
     // Filter out generic/contact-profile phrases - these aren't real topics
     let lower = s.to_lowercase();
     let generic = [
-        "anything urgent", "anything important", "anything",
-        "something urgent", "something important", "something",
-        "urgent messages", "important messages",
+        "anything urgent",
+        "anything important",
+        "anything",
+        "something urgent",
+        "something important",
+        "something",
+        "urgent messages",
+        "important messages",
     ];
     if generic.iter().any(|g| lower == *g) {
         return String::new();
@@ -661,7 +755,11 @@ fn extract_tag<'a>(summary: &'a str, key: &str) -> Option<&'a str> {
     let start = first_line.find(&needle)? + needle.len();
     let end = start + first_line[start..].find(']')?;
     let val = first_line[start..end].trim();
-    if val.is_empty() { None } else { Some(val) }
+    if val.is_empty() {
+        None
+    } else {
+        Some(val)
+    }
 }
 
 /// Check if an item is a digest: has both [fetch:] and [notify:] tags,
@@ -686,24 +784,36 @@ fn parse_repeat_hour(summary: &str) -> Option<u32> {
 pub fn digest_sources(summary: &str, description: &str) -> Option<String> {
     // Tagged items: parse [fetch:email,chat,items]
     if let Some(val) = extract_tag(summary, "fetch") {
-        let parts: Vec<&str> = val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        let parts: Vec<&str> = val
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
         if !parts.is_empty() {
-            let labels: Vec<&str> = parts.iter().map(|s| match *s {
-                "email" => "email",
-                "chat" => "messages",
-                "weather" => "weather",
-                "items" => "tracked items",
-                other => other,
-            }).collect();
+            let labels: Vec<&str> = parts
+                .iter()
+                .map(|s| match *s {
+                    "email" => "email",
+                    "chat" => "messages",
+                    "weather" => "weather",
+                    "items" => "tracked items",
+                    other => other,
+                })
+                .collect();
             return Some(labels.join(", "));
         }
     }
     // Legacy items: look for "Sources: x,y,z" in the summary text
-    let text = if summary.len() > description.len() { summary } else { description };
+    let text = if summary.len() > description.len() {
+        summary
+    } else {
+        description
+    };
     if let Some(idx) = text.find("Sources:").or_else(|| text.find("sources:")) {
         let rest = text[idx + 8..].trim();
         // Take until period or "Repeats"
-        let end = rest.find(". ")
+        let end = rest
+            .find(". ")
             .or_else(|| rest.find(".\n"))
             .or_else(|| rest.find(". Repeats"))
             .unwrap_or(rest.len());
@@ -836,10 +946,22 @@ fn build_suggestions(items: &[AttentionItem]) -> Vec<AttentionItem> {
 
 fn example_prefill_prompt(id: i32) -> Option<String> {
     match id {
-        -1 => Some("Set up a daily digest at 8am covering my emails, messages, and tracked items".to_string()),
-        -4 => Some("Set up a daily digest at 1pm covering my emails, messages, and tracked items".to_string()),
-        -5 => Some("Set up a daily digest at 7pm covering my emails, messages, and tracked items".to_string()),
-        -2 => Some("Watch for delivery updates from Amazon in my email and text me when it ships".to_string()),
+        -1 => Some(
+            "Set up a daily digest at 8am covering my emails, messages, and tracked items"
+                .to_string(),
+        ),
+        -4 => Some(
+            "Set up a daily digest at 1pm covering my emails, messages, and tracked items"
+                .to_string(),
+        ),
+        -5 => Some(
+            "Set up a daily digest at 7pm covering my emails, messages, and tracked items"
+                .to_string(),
+        ),
+        -2 => Some(
+            "Watch for delivery updates from Amazon in my email and text me when it ships"
+                .to_string(),
+        ),
         -3 => Some("Remind me to take the cake out of the oven in 2 hours".to_string()),
         _ => None,
     }
@@ -870,10 +992,14 @@ pub fn items_status_section(props: &ItemsStatusProps) -> Html {
     let mut seen_tracking: Vec<String> = Vec::new();
 
     // Build unified list: all items sorted by due_at (soonest first)
-    let mut all_items: Vec<&AttentionItem> = props.items.iter()
+    let mut all_items: Vec<&AttentionItem> = props
+        .items
+        .iter()
         .filter(|i| {
             if i.item_type == "tracking" {
-                let key = i.sender.clone()
+                let key = i
+                    .sender
+                    .clone()
                     .or_else(|| extract_sender(&i.description))
                     .unwrap_or_else(|| i.description.clone());
                 if seen_tracking.contains(&key) {
@@ -963,7 +1089,9 @@ pub fn items_status_section(props: &ItemsStatusProps) -> Html {
             show_info.set(false);
         })
     };
-    let stop_prop = Callback::from(|e: MouseEvent| { e.stop_propagation(); });
+    let stop_prop = Callback::from(|e: MouseEvent| {
+        e.stop_propagation();
+    });
 
     let info_modal = if *show_info {
         html! {
@@ -1089,8 +1217,12 @@ pub fn items_status_section(props: &ItemsStatusProps) -> Html {
 
 fn render_badge(notify: Option<&str>) -> Html {
     match notify {
-        Some("call") => html! { <span class="item-badge badge-call" title="Call (+SMS)"><i class="fa-solid fa-phone"></i></span> },
-        Some("sms") => html! { <span class="item-badge badge-sms" title="SMS"><i class="fa-solid fa-comment-sms"></i></span> },
+        Some("call") => {
+            html! { <span class="item-badge badge-call" title="Call (+SMS)"><i class="fa-solid fa-phone"></i></span> }
+        }
+        Some("sms") => {
+            html! { <span class="item-badge badge-sms" title="SMS"><i class="fa-solid fa-comment-sms"></i></span> }
+        }
         _ => html! { <span class="item-badge badge-silent" title="Silent">{"👀"}</span> },
     }
 }
@@ -1116,10 +1248,18 @@ fn render_scheduled_item(item: &AttentionItem, onclick: Callback<MouseEvent>) ->
     let is_recurring = item.item_type == "recurring" || item.item_type == "tracking" || is_digest;
     let when = match (&item.time_display, &item.relative_display) {
         (Some(t), Some(r)) => {
-            if is_recurring { format!("next {} - {}", t, r) } else { format!("{} - {}", t, r) }
+            if is_recurring {
+                format!("next {} - {}", t, r)
+            } else {
+                format!("{} - {}", t, r)
+            }
         }
         (Some(t), None) => {
-            if is_recurring { format!("next {}", t) } else { t.clone() }
+            if is_recurring {
+                format!("next {}", t)
+            } else {
+                t.clone()
+            }
         }
         (None, Some(r)) => r.clone(),
         (None, None) => String::new(),
@@ -1182,15 +1322,25 @@ fn render_tracking_card(item: &AttentionItem, onclick: Callback<MouseEvent>) -> 
     let tag_style = format!("color: {}; background: {}33;", pv.color, pv.color);
 
     // Sender: from tag, or extract from description, or platform name
-    let sender_display = item.sender.clone()
+    let sender_display = item
+        .sender
+        .clone()
         .or_else(|| extract_sender(&item.description))
         .unwrap_or_else(|| pv.name.to_string());
     let has_sender = item.sender.is_some() || extract_sender(&item.description).is_some();
     let topic = tracking_topic(
         &item.description,
-        if has_sender { Some(&sender_display) } else { None },
+        if has_sender {
+            Some(&sender_display)
+        } else {
+            None
+        },
     );
-    let detail = if !topic.is_empty() { topic } else { String::new() };
+    let detail = if !topic.is_empty() {
+        topic
+    } else {
+        String::new()
+    };
 
     let when = match (&item.time_display, &item.relative_display) {
         (Some(t), Some(r)) if r != "overdue" => format!("{} - {}", t, r),

@@ -6,7 +6,7 @@ use yew_router::prelude::*;
 #[function_component(TrustlessVerification)]
 pub fn trustless_verification() -> Html {
     use_seo(SeoMeta {
-        title: "Trustless Verification - Lightfriend",
+        title: "Verifiably Private - Lightfriend",
         description: "How to verify that the running Lightfriend enclave matches the CI-built EIF, published PCRs, and approved KMS contract state.",
         canonical: "https://lightfriend.ai/trustless",
         og_type: "website",
@@ -14,7 +14,7 @@ pub fn trustless_verification() -> Html {
 
     html! {
         <div class="legal-content trustless-page">
-            <h1>{"Trustless Verification"}</h1>
+            <h1>{"Verifiably Private"}</h1>
 
             <section>
                 <h2>{"What You Can Verify"}</h2>
@@ -29,7 +29,7 @@ pub fn trustless_verification() -> Html {
 
             <section>
                 <h2>{"Architecture"}</h2>
-                <p>{"The trust boundary is intentionally split across CI, chain state, and the enclave:"}</p>
+                <p>{"The privacy and verification boundary is intentionally split across CI, chain state, and the enclave:"}</p>
                 <ul>
                     <li>{"GitHub Actions builds the Docker image, builds the EIF from the immutable image digest, measures PCR0/1/2, and uploads the EIF artifact."}</li>
                     <li>{"The deployment pipeline proposes and activates the measured image in the permanent Lightfriend KMS verification contract."}</li>

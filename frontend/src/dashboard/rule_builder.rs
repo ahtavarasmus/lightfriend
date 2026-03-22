@@ -1,10 +1,10 @@
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
-use yew::prelude::*;
-use web_sys::HtmlInputElement;
-use wasm_bindgen_futures::spawn_local;
-use crate::utils::api::Api;
 use super::rules_section::RuleData;
+use crate::utils::api::Api;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use wasm_bindgen_futures::spawn_local;
+use web_sys::HtmlInputElement;
+use yew::prelude::*;
 
 #[derive(Clone, PartialEq, Deserialize)]
 struct RuleSourceOption {
@@ -18,11 +18,23 @@ struct RuleSourceOption {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum SourceConfig {
     Email,
-    Chat { platform: String, limit: u32 },
-    Weather { #[serde(default)] location: String },
-    Internet { query: String },
+    Chat {
+        platform: String,
+        limit: u32,
+    },
+    Weather {
+        #[serde(default)]
+        location: String,
+    },
+    Internet {
+        query: String,
+    },
     Tesla,
-    Mcp { server: String, tool: String, args: String },
+    Mcp {
+        server: String,
+        tool: String,
+        args: String,
+    },
     Pinned,
 }
 
@@ -54,10 +66,26 @@ pub enum FlowNode {
 impl FlowNode {
     fn condition_depth(&self) -> usize {
         match self {
-            FlowNode::LlmCondition { true_branch, false_branch, .. }
-            | FlowNode::KeywordCondition { true_branch, false_branch, .. } => {
-                let t = true_branch.as_ref().as_ref().map(|n| n.condition_depth()).unwrap_or(0);
-                let f = false_branch.as_ref().as_ref().map(|n| n.condition_depth()).unwrap_or(0);
+            FlowNode::LlmCondition {
+                true_branch,
+                false_branch,
+                ..
+            }
+            | FlowNode::KeywordCondition {
+                true_branch,
+                false_branch,
+                ..
+            } => {
+                let t = true_branch
+                    .as_ref()
+                    .as_ref()
+                    .map(|n| n.condition_depth())
+                    .unwrap_or(0);
+                let f = false_branch
+                    .as_ref()
+                    .as_ref()
+                    .map(|n| n.condition_depth())
+                    .unwrap_or(0);
                 1 + t.max(f)
             }
             FlowNode::Action { .. } => 0,
@@ -965,19 +993,22 @@ pub fn rule_template_picker(props: &TemplatePickerProps) -> Html {
     // Fetch existing rules when picker opens
     {
         let existing_rules = existing_rules.clone();
-        use_effect_with_deps(move |open| {
-            if *open {
-                let existing_rules = existing_rules.clone();
-                spawn_local(async move {
-                    if let Ok(r) = Api::get("/api/rules").send().await {
-                        if let Ok(rules) = r.json::<Vec<RuleData>>().await {
-                            existing_rules.set(rules);
+        use_effect_with_deps(
+            move |open| {
+                if *open {
+                    let existing_rules = existing_rules.clone();
+                    spawn_local(async move {
+                        if let Ok(r) = Api::get("/api/rules").send().await {
+                            if let Ok(rules) = r.json::<Vec<RuleData>>().await {
+                                existing_rules.set(rules);
+                            }
                         }
-                    }
-                });
-            }
-            || ()
-        }, props.is_open);
+                    });
+                }
+                || ()
+            },
+            props.is_open,
+        );
     }
 
     if !props.is_open {
@@ -1003,27 +1034,35 @@ pub fn rule_template_picker(props: &TemplatePickerProps) -> Html {
             && r.logic_type == "llm"
             && r.action_type == "notify"
             && r.status == "active"
-            && r.logic_prompt.as_deref().map(|p| {
-                let p = p.to_lowercase();
-                p.contains("important") || p.contains("urgent") || p.contains("critical")
-            }).unwrap_or(false)
+            && r.logic_prompt
+                .as_deref()
+                .map(|p| {
+                    let p = p.to_lowercase();
+                    p.contains("important") || p.contains("urgent") || p.contains("critical")
+                })
+                .unwrap_or(false)
     });
     let has_tracking = existing_rules.iter().any(|r| {
         r.trigger_type == "ontology_change"
             && r.status == "active"
-            && (r.action_config.contains("pin_message") || r.action_config.contains("update_tracked_item"))
+            && (r.action_config.contains("pin_message")
+                || r.action_config.contains("update_tracked_item"))
     });
 
     // For digest, find existing schedule times to suggest alternatives
-    let existing_digest_times: Vec<String> = existing_rules.iter()
+    let existing_digest_times: Vec<String> = existing_rules
+        .iter()
         .filter(|r| {
             r.trigger_type == "schedule"
                 && r.logic_type == "llm"
                 && r.status == "active"
-                && r.logic_prompt.as_deref().map(|p| {
-                    let p = p.to_lowercase();
-                    p.contains("summar") || p.contains("digest") || p.contains("review")
-                }).unwrap_or(false)
+                && r.logic_prompt
+                    .as_deref()
+                    .map(|p| {
+                        let p = p.to_lowercase();
+                        p.contains("summar") || p.contains("digest") || p.contains("review")
+                    })
+                    .unwrap_or(false)
         })
         .filter_map(|r| {
             // Extract time from trigger_config pattern like "daily 09:00"
@@ -1073,7 +1112,9 @@ pub fn rule_template_picker(props: &TemplatePickerProps) -> Html {
     }
     if let Some(time) = digest_time {
         templates.push((
-            RuleTemplate::DailyDigest { time: time.to_string() },
+            RuleTemplate::DailyDigest {
+                time: time.to_string(),
+            },
             digest_label.to_string(),
             digest_desc.to_string(),
         ));
@@ -1232,9 +1273,10 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
     let event_filter_value = use_state(|| String::new());
     let event_fire_once = use_state(|| true); // default: one-shot
     let event_delay = use_state(|| 300i32); // default: 5 min delay before rule fires
-    // (display_name, platform, is_group, group_mode)
-    // group_mode: None for non-groups, Some("all") or Some("mention_only") for groups
-    let sender_suggestions = use_state(|| Vec::<(String, Option<String>, bool, Option<String>)>::new());
+                                            // (display_name, platform, is_group, group_mode)
+                                            // group_mode: None for non-groups, Some("all") or Some("mention_only") for groups
+    let sender_suggestions =
+        use_state(|| Vec::<(String, Option<String>, bool, Option<String>)>::new());
     let sender_dropdown_open = use_state(|| false);
     let selected_group_mode = use_state(|| None::<String>); // None = not a group, Some("all") or Some("mention_only")
 
@@ -1290,102 +1332,146 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
     // Fetch senders for autocomplete (persons + chat room names + group chats)
     {
         let sender_suggestions = sender_suggestions.clone();
-        use_effect_with_deps(move |open| {
-            if *open {
-                let sender_suggestions = sender_suggestions.clone();
-                spawn_local(async move {
-                    if let Ok(r) = Api::get("/api/dashboard/senders").send().await {
-                        if let Ok(senders) = r.json::<Vec<serde_json::Value>>().await {
-                            let mut suggestions: Vec<(String, Option<String>, bool, Option<String>)> = Vec::new();
-                            for s in &senders {
-                                let name = match s.get("name").and_then(|n| n.as_str()) {
-                                    Some(n) => n.to_string(),
-                                    None => continue,
-                                };
-                                let platform = s.get("platform")
-                                    .and_then(|p| p.as_str())
-                                    .map(|p| p.to_string());
-                                let is_group = s.get("is_group")
-                                    .and_then(|g| g.as_bool())
-                                    .unwrap_or(false);
-                                if is_group {
-                                    // Add two entries for groups: (all) and (mention only)
-                                    suggestions.push((name.clone(), platform.clone(), true, Some("all".to_string())));
-                                    suggestions.push((name, platform, true, Some("mention_only".to_string())));
-                                } else {
-                                    suggestions.push((name, platform, false, None));
+        use_effect_with_deps(
+            move |open| {
+                if *open {
+                    let sender_suggestions = sender_suggestions.clone();
+                    spawn_local(async move {
+                        if let Ok(r) = Api::get("/api/dashboard/senders").send().await {
+                            if let Ok(senders) = r.json::<Vec<serde_json::Value>>().await {
+                                let mut suggestions: Vec<(
+                                    String,
+                                    Option<String>,
+                                    bool,
+                                    Option<String>,
+                                )> = Vec::new();
+                                for s in &senders {
+                                    let name = match s.get("name").and_then(|n| n.as_str()) {
+                                        Some(n) => n.to_string(),
+                                        None => continue,
+                                    };
+                                    let platform = s
+                                        .get("platform")
+                                        .and_then(|p| p.as_str())
+                                        .map(|p| p.to_string());
+                                    let is_group = s
+                                        .get("is_group")
+                                        .and_then(|g| g.as_bool())
+                                        .unwrap_or(false);
+                                    if is_group {
+                                        // Add two entries for groups: (all) and (mention only)
+                                        suggestions.push((
+                                            name.clone(),
+                                            platform.clone(),
+                                            true,
+                                            Some("all".to_string()),
+                                        ));
+                                        suggestions.push((
+                                            name,
+                                            platform,
+                                            true,
+                                            Some("mention_only".to_string()),
+                                        ));
+                                    } else {
+                                        suggestions.push((name, platform, false, None));
+                                    }
                                 }
+                                sender_suggestions.set(suggestions);
                             }
-                            sender_suggestions.set(suggestions);
                         }
-                    }
-                });
-            }
-            || ()
-        }, props.is_open);
+                    });
+                }
+                || ()
+            },
+            props.is_open,
+        );
     }
 
     // Fetch available rule sources
     {
         let available_sources = available_sources.clone();
-        use_effect_with_deps(move |open| {
-            if *open {
-                let available_sources = available_sources.clone();
-                spawn_local(async move {
-                    if let Ok(r) = Api::get("/api/dashboard/rule-sources").send().await {
-                        if let Ok(sources) = r.json::<Vec<RuleSourceOption>>().await {
-                            available_sources.set(sources);
+        use_effect_with_deps(
+            move |open| {
+                if *open {
+                    let available_sources = available_sources.clone();
+                    spawn_local(async move {
+                        if let Ok(r) = Api::get("/api/dashboard/rule-sources").send().await {
+                            if let Ok(sources) = r.json::<Vec<RuleSourceOption>>().await {
+                                available_sources.set(sources);
+                            }
                         }
-                    }
-                });
-            }
-            || ()
-        }, props.is_open);
+                    });
+                }
+                || ()
+            },
+            props.is_open,
+        );
     }
 
     // Fetch MCP tools from enabled servers
     {
         let mcp_tools = mcp_tools.clone();
-        use_effect_with_deps(move |open| {
-            if *open {
-                let mcp_tools = mcp_tools.clone();
-                spawn_local(async move {
-                    // Get all MCP servers
-                    let servers: Vec<serde_json::Value> = match Api::get("/api/mcp/servers").send().await {
-                        Ok(r) if r.ok() => r.json().await.unwrap_or_default(),
-                        _ => vec![],
-                    };
-                    let mut all_tools = Vec::new();
-                    for srv in &servers {
-                        let enabled = srv.get("is_enabled").and_then(|v| v.as_bool()).unwrap_or(false);
-                        if !enabled { continue; }
-                        let srv_id = match srv.get("id").and_then(|v| v.as_i64()) {
-                            Some(id) => id,
-                            None => continue,
-                        };
-                        let srv_name = srv.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
-                        let url = format!("/api/mcp/servers/{}/tools", srv_id);
-                        if let Ok(r) = Api::get(&url).send().await {
-                            if let Ok(resp) = r.json::<serde_json::Value>().await {
-                                if let Some(tools) = resp.get("tools").and_then(|v| v.as_array()) {
-                                    for tool in tools {
-                                        let tool_name = tool.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                                        if tool_name.is_empty() { continue; }
-                                        let value = format!("mcp:{}:{}", srv_name, tool_name);
-                                        let display = format!("MCP: {} - {}", srv_name, tool_name);
-                                        // Extract required fields from input_schema
-                                        let fields = extract_schema_fields(tool.get("input_schema"));
-                                        all_tools.push((value, display, fields));
+        use_effect_with_deps(
+            move |open| {
+                if *open {
+                    let mcp_tools = mcp_tools.clone();
+                    spawn_local(async move {
+                        // Get all MCP servers
+                        let servers: Vec<serde_json::Value> =
+                            match Api::get("/api/mcp/servers").send().await {
+                                Ok(r) if r.ok() => r.json().await.unwrap_or_default(),
+                                _ => vec![],
+                            };
+                        let mut all_tools = Vec::new();
+                        for srv in &servers {
+                            let enabled = srv
+                                .get("is_enabled")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
+                            if !enabled {
+                                continue;
+                            }
+                            let srv_id = match srv.get("id").and_then(|v| v.as_i64()) {
+                                Some(id) => id,
+                                None => continue,
+                            };
+                            let srv_name = srv
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown");
+                            let url = format!("/api/mcp/servers/{}/tools", srv_id);
+                            if let Ok(r) = Api::get(&url).send().await {
+                                if let Ok(resp) = r.json::<serde_json::Value>().await {
+                                    if let Some(tools) =
+                                        resp.get("tools").and_then(|v| v.as_array())
+                                    {
+                                        for tool in tools {
+                                            let tool_name = tool
+                                                .get("name")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("");
+                                            if tool_name.is_empty() {
+                                                continue;
+                                            }
+                                            let value = format!("mcp:{}:{}", srv_name, tool_name);
+                                            let display =
+                                                format!("MCP: {} - {}", srv_name, tool_name);
+                                            // Extract required fields from input_schema
+                                            let fields =
+                                                extract_schema_fields(tool.get("input_schema"));
+                                            all_tools.push((value, display, fields));
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                    mcp_tools.set(all_tools);
-                });
-            }
-            || ()
-        }, props.is_open);
+                        mcp_tools.set(all_tools);
+                    });
+                }
+                || ()
+            },
+            props.is_open,
+        );
     }
 
     // Initialize from editing_rule
@@ -1474,9 +1560,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                             }
                             Some("recurring") => {
                                 schedule_mode.set(ScheduleMode::Recurring);
-                                if let Some(pattern) =
-                                    tc.get("pattern").and_then(|v| v.as_str())
-                                {
+                                if let Some(pattern) = tc.get("pattern").and_then(|v| v.as_str()) {
                                     parse_pattern_into(
                                         pattern,
                                         &recurring_freq,
@@ -1500,15 +1584,20 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                         if let Some(filters) = tc.get("filters").and_then(|v| v.as_object()) {
                             if let Some((k, v)) = filters.iter().next() {
                                 event_filter_key.set(k.clone());
-                                event_filter_value
-                                    .set(v.as_str().unwrap_or("").to_string());
+                                event_filter_value.set(v.as_str().unwrap_or("").to_string());
                             }
                         }
                         // fire_once defaults to true if not explicitly false
-                        let fo = tc.get("fire_once").and_then(|v| v.as_bool()).unwrap_or(true);
+                        let fo = tc
+                            .get("fire_once")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(true);
                         event_fire_once.set(fo);
                         // delay_seconds defaults to 300 if not set
-                        let ds = tc.get("delay_seconds").and_then(|v| v.as_i64()).unwrap_or(300) as i32;
+                        let ds = tc
+                            .get("delay_seconds")
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(300) as i32;
                         event_delay.set(ds);
                         // Restore group_mode if present
                         if let Some(gm) = tc.get("group_mode").and_then(|v| v.as_str()) {
@@ -1522,9 +1611,15 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                     if rule.logic_type == "llm" {
                         logic_mode.set(LogicMode::Llm);
                         // Check flow_config prompt for template IDs
-                        let fc_prompt = rule.flow_config.as_ref()
+                        let fc_prompt = rule
+                            .flow_config
+                            .as_ref()
                             .and_then(|fc| serde_json::from_str::<serde_json::Value>(fc).ok())
-                            .and_then(|v| v.get("prompt").and_then(|p| p.as_str()).map(|s| s.to_string()))
+                            .and_then(|v| {
+                                v.get("prompt")
+                                    .and_then(|p| p.as_str())
+                                    .map(|s| s.to_string())
+                            })
                             .unwrap_or_default();
                         if fc_prompt.starts_with("template:") {
                             match fc_prompt.as_str() {
@@ -1545,7 +1640,8 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                 }
                                 s if s.starts_with("template:check_condition:") => {
                                     selected_template.set(PromptTemplate::CheckCondition);
-                                    let cond = s.strip_prefix("template:check_condition:").unwrap_or("");
+                                    let cond =
+                                        s.strip_prefix("template:check_condition:").unwrap_or("");
                                     condition_input.set(cond.to_string());
                                     logic_prompt.set(String::new());
                                 }
@@ -1557,14 +1653,17 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                             }
                         } else {
                             selected_template.set(PromptTemplate::Custom);
-                            logic_prompt.set(rule.logic_prompt.clone().unwrap_or_else(|| fc_prompt));
+                            logic_prompt
+                                .set(rule.logic_prompt.clone().unwrap_or_else(|| fc_prompt));
                             condition_input.set(String::new());
                         }
                         if let Some(ref fetch_raw) = rule.logic_fetch {
                             let trimmed = fetch_raw.trim();
                             if trimmed.starts_with('[') {
                                 // JSON array format
-                                if let Ok(sources) = serde_json::from_str::<Vec<SourceConfig>>(trimmed) {
+                                if let Ok(sources) =
+                                    serde_json::from_str::<Vec<SourceConfig>>(trimmed)
+                                {
                                     active_sources_init.set(sources);
                                 }
                             } else {
@@ -1573,7 +1672,10 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                 for s in trimmed.split(',').map(|s| s.trim()) {
                                     match s {
                                         "email" => sources.push(SourceConfig::Email),
-                                        "chat" => sources.push(SourceConfig::Chat { platform: "all".to_string(), limit: 50 }),
+                                        "chat" => sources.push(SourceConfig::Chat {
+                                            platform: "all".to_string(),
+                                            limit: 50,
+                                        }),
                                         _ => {}
                                     }
                                 }
@@ -1607,27 +1709,52 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                             if let Some(p) = ac.get("params") {
                                 match t {
                                     "send_chat_message" => {
-                                        if let Some(v) = p.get("platform").and_then(|v| v.as_str()) { tc_platform.set(v.to_string()); }
-                                        if let Some(v) = p.get("chat_name").and_then(|v| v.as_str()) { tc_chat_name.set(v.to_string()); }
-                                        if let Some(v) = p.get("room_id").and_then(|v| v.as_str()) { tc_chat_room_id.set(Some(v.to_string())); }
-                                        if let Some(v) = p.get("message").and_then(|v| v.as_str()) { tc_message.set(v.to_string()); }
+                                        if let Some(v) = p.get("platform").and_then(|v| v.as_str())
+                                        {
+                                            tc_platform.set(v.to_string());
+                                        }
+                                        if let Some(v) = p.get("chat_name").and_then(|v| v.as_str())
+                                        {
+                                            tc_chat_name.set(v.to_string());
+                                        }
+                                        if let Some(v) = p.get("room_id").and_then(|v| v.as_str()) {
+                                            tc_chat_room_id.set(Some(v.to_string()));
+                                        }
+                                        if let Some(v) = p.get("message").and_then(|v| v.as_str()) {
+                                            tc_message.set(v.to_string());
+                                        }
                                     }
                                     "send_email" => {
-                                        if let Some(v) = p.get("to").and_then(|v| v.as_str()) { tc_email_to.set(v.to_string()); }
-                                        if let Some(v) = p.get("subject").and_then(|v| v.as_str()) { tc_email_subject.set(v.to_string()); }
-                                        if let Some(v) = p.get("body").and_then(|v| v.as_str()) { tc_email_body.set(v.to_string()); }
+                                        if let Some(v) = p.get("to").and_then(|v| v.as_str()) {
+                                            tc_email_to.set(v.to_string());
+                                        }
+                                        if let Some(v) = p.get("subject").and_then(|v| v.as_str()) {
+                                            tc_email_subject.set(v.to_string());
+                                        }
+                                        if let Some(v) = p.get("body").and_then(|v| v.as_str()) {
+                                            tc_email_body.set(v.to_string());
+                                        }
                                     }
                                     "respond_to_email" => {
-                                        if let Some(v) = p.get("response_text").and_then(|v| v.as_str()) { tc_reply_text.set(v.to_string()); }
+                                        if let Some(v) =
+                                            p.get("response_text").and_then(|v| v.as_str())
+                                        {
+                                            tc_reply_text.set(v.to_string());
+                                        }
                                     }
                                     "control_tesla" => {
-                                        if let Some(v) = p.get("command").and_then(|v| v.as_str()) { tc_tesla_cmd.set(v.to_string()); }
+                                        if let Some(v) = p.get("command").and_then(|v| v.as_str()) {
+                                            tc_tesla_cmd.set(v.to_string());
+                                        }
                                     }
                                     _ if t.starts_with("mcp:") => {
                                         // Populate MCP params from JSON object
                                         if let Some(obj) = p.as_object() {
-                                            let map: HashMap<String, String> = obj.iter()
-                                                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                                            let map: HashMap<String, String> = obj
+                                                .iter()
+                                                .filter_map(|(k, v)| {
+                                                    v.as_str().map(|s| (k.clone(), s.to_string()))
+                                                })
                                                 .collect();
                                             tc_mcp_params.set(map);
                                         }
@@ -1737,7 +1864,10 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                 logic_prompt.set(String::new());
                                 active_sources_tmpl.set(vec![
                                     SourceConfig::Email,
-                                    SourceConfig::Chat { platform: "all".to_string(), limit: 50 },
+                                    SourceConfig::Chat {
+                                        platform: "all".to_string(),
+                                        limit: 50,
+                                    },
                                     SourceConfig::Pinned,
                                 ]);
                                 action_mode.set(ActionMode::Notify);
@@ -1807,9 +1937,17 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                 }
                 ScheduleMode::Recurring => match recurring_freq {
                     RecurringFreq::Hourly => "every hour".to_string(),
-                    RecurringFreq::Daily => format!("daily at {}", format_time_display(&recurring_time)),
-                    RecurringFreq::Weekdays => format!("weekdays at {}", format_time_display(&recurring_time)),
-                    RecurringFreq::Weekly => format!("{}s at {}", capitalize_first(&recurring_day), format_time_display(&recurring_time)),
+                    RecurringFreq::Daily => {
+                        format!("daily at {}", format_time_display(&recurring_time))
+                    }
+                    RecurringFreq::Weekdays => {
+                        format!("weekdays at {}", format_time_display(&recurring_time))
+                    }
+                    RecurringFreq::Weekly => format!(
+                        "{}s at {}",
+                        capitalize_first(&recurring_day),
+                        format_time_display(&recurring_time)
+                    ),
                 },
             },
             WhenMode::Event => {
@@ -1876,7 +2014,11 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                 "send_chat_message" => {
                     let cn = (*tc_chat_name).clone();
                     let plat = capitalize_first(&*tc_platform);
-                    if cn.is_empty() { format!("{} message", plat) } else { format!("{} msg {}", plat, cn) }
+                    if cn.is_empty() {
+                        format!("{} message", plat)
+                    } else {
+                        format!("{} msg {}", plat, cn)
+                    }
                 }
                 "send_email" => "send email".to_string(),
                 "respond_to_email" => "reply to email".to_string(),
@@ -1890,7 +2032,11 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                     format!("MCP: {}", tool_short)
                 }
                 _ => {
-                    if t.is_empty() { "run tool".to_string() } else { format!("run: {}", t) }
+                    if t.is_empty() {
+                        "run tool".to_string()
+                    } else {
+                        format!("run: {}", t)
+                    }
                 }
             }
         }
@@ -1942,7 +2088,10 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
         Callback::from(move |_: MouseEvent| {
             if has_work {
                 let window = web_sys::window().unwrap();
-                if !window.confirm_with_message("You have unsaved changes. Discard?").unwrap_or(true) {
+                if !window
+                    .confirm_with_message("You have unsaved changes. Discard?")
+                    .unwrap_or(true)
+                {
                     return;
                 }
             }
@@ -1960,7 +2109,10 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                     if class.contains("rule-builder-overlay") {
                         if has_work {
                             let window = web_sys::window().unwrap();
-                            if !window.confirm_with_message("You have unsaved changes. Discard?").unwrap_or(true) {
+                            if !window
+                                .confirm_with_message("You have unsaved changes. Discard?")
+                                .unwrap_or(true)
+                            {
                                 return;
                             }
                         }
@@ -2067,23 +2219,35 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
             let lp = match *logic_mode {
                 LogicMode::Keyword => {
                     let k = (*keyword_input).clone();
-                    if k.is_empty() { None } else { Some(k) }
-                }
-                LogicMode::Llm => {
-                    match *selected_template {
-                        PromptTemplate::Custom => {
-                            let v = (*logic_prompt).clone();
-                            if v.is_empty() { None } else { Some(v) }
-                        }
-                        PromptTemplate::CheckCondition => {
-                            let ci = (*condition_input).clone();
-                            if ci.is_empty() { None } else { Some(format!("template:check_condition:{}", ci)) }
-                        }
-                        PromptTemplate::Summarize => Some("template:summarize".to_string()),
-                        PromptTemplate::FilterImportant => Some("template:filter_important".to_string()),
-                        PromptTemplate::TrackItems => Some("template:track_items".to_string()),
+                    if k.is_empty() {
+                        None
+                    } else {
+                        Some(k)
                     }
                 }
+                LogicMode::Llm => match *selected_template {
+                    PromptTemplate::Custom => {
+                        let v = (*logic_prompt).clone();
+                        if v.is_empty() {
+                            None
+                        } else {
+                            Some(v)
+                        }
+                    }
+                    PromptTemplate::CheckCondition => {
+                        let ci = (*condition_input).clone();
+                        if ci.is_empty() {
+                            None
+                        } else {
+                            Some(format!("template:check_condition:{}", ci))
+                        }
+                    }
+                    PromptTemplate::Summarize => Some("template:summarize".to_string()),
+                    PromptTemplate::FilterImportant => {
+                        Some("template:filter_important".to_string())
+                    }
+                    PromptTemplate::TrackItems => Some("template:track_items".to_string()),
+                },
                 _ => None,
             };
             let lf = if *logic_mode == LogicMode::Llm && !active_sources_submit.is_empty() {
@@ -2119,7 +2283,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                 p["room_id"] = serde_json::json!(rid);
                             }
                             p
-                        },
+                        }
                         "send_email" => serde_json::json!({
                             "to": *tc_email_to,
                             "subject": *tc_email_subject,
@@ -2136,7 +2300,8 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                         _ => {
                             // MCP or unknown - serialize from mcp_params map
                             let map = &*tc_mcp_params;
-                            let obj: serde_json::Map<String, serde_json::Value> = map.iter()
+                            let obj: serde_json::Map<String, serde_json::Value> = map
+                                .iter()
                                 .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
                                 .collect();
                             serde_json::Value::Object(obj)
@@ -2158,7 +2323,8 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
             };
 
             // Build flow_config from logic + action + else branch
-            let action_config_json: serde_json::Value = serde_json::from_str(&action_config).unwrap_or_default();
+            let action_config_json: serde_json::Value =
+                serde_json::from_str(&action_config).unwrap_or_default();
             let action_node = serde_json::json!({
                 "type": "action",
                 "action_type": action_type,
@@ -2170,7 +2336,8 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
             };
             let flow_config = match logic_type {
                 "llm" => {
-                    let fetch_sources: serde_json::Value = lf.as_deref()
+                    let fetch_sources: serde_json::Value = lf
+                        .as_deref()
                         .and_then(|f| serde_json::from_str(f).ok())
                         .unwrap_or(serde_json::json!([]));
                     serde_json::json!({
@@ -2249,7 +2416,8 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
 
     // Pre-compute MCP tool param fields (can't do let bindings inside html! if blocks)
     let mcp_fields_html = if tool_name.starts_with("mcp:") {
-        let fields = mcp_tools.iter()
+        let fields = mcp_tools
+            .iter()
             .find(|(v, _, _)| *v == *tool_name)
             .map(|(_, _, f)| f.clone())
             .unwrap_or_default();
@@ -2290,8 +2458,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
 
     // Tool visibility based on WHEN/IF selections
     let is_event_trigger = *when_mode == WhenMode::Event;
-    let sender_is_email = *event_filter_key == "sender"
-        && event_filter_value.contains('@');
+    let sender_is_email = *event_filter_key == "sender" && event_filter_value.contains('@');
     let no_sender_filter = *event_filter_key == "none" || *event_filter_key == "content";
     let show_respond_email = is_event_trigger && (sender_is_email || no_sender_filter);
     let show_pin_message = is_event_trigger;
@@ -4240,13 +4407,33 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
     };
 
     let (prompt, keyword, fetch, true_branch, false_branch) = match &props.node {
-        FlowNode::LlmCondition { prompt, fetch, true_branch, false_branch } => {
-            (prompt.clone(), String::new(), fetch.clone(), true_branch.clone(), false_branch.clone())
-        }
-        FlowNode::KeywordCondition { keyword, true_branch, false_branch } => {
-            (String::new(), keyword.clone(), vec![], true_branch.clone(), false_branch.clone())
-        }
-        FlowNode::Action { action_type, config } => {
+        FlowNode::LlmCondition {
+            prompt,
+            fetch,
+            true_branch,
+            false_branch,
+        } => (
+            prompt.clone(),
+            String::new(),
+            fetch.clone(),
+            true_branch.clone(),
+            false_branch.clone(),
+        ),
+        FlowNode::KeywordCondition {
+            keyword,
+            true_branch,
+            false_branch,
+        } => (
+            String::new(),
+            keyword.clone(),
+            vec![],
+            true_branch.clone(),
+            false_branch.clone(),
+        ),
+        FlowNode::Action {
+            action_type,
+            config,
+        } => {
             let tb = Box::new(Some(FlowNode::Action {
                 action_type: action_type.clone(),
                 config: config.clone(),
@@ -4256,23 +4443,73 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
     };
 
     let (cur_action_type, cur_action_config) = match true_branch.as_ref() {
-        Some(FlowNode::Action { action_type, config }) => (action_type.clone(), config.clone()),
+        Some(FlowNode::Action {
+            action_type,
+            config,
+        }) => (action_type.clone(), config.clone()),
         _ => ("notify".to_string(), serde_json::json!({"method": "sms"})),
     };
-    let cur_method = cur_action_config.get("method").and_then(|v| v.as_str()).unwrap_or("sms").to_string();
-    let cur_tool = cur_action_config.get("tool").and_then(|v| v.as_str()).unwrap_or("pin_message").to_string();
-    let cur_notify_msg = cur_action_config.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let cur_method = cur_action_config
+        .get("method")
+        .and_then(|v| v.as_str())
+        .unwrap_or("sms")
+        .to_string();
+    let cur_tool = cur_action_config
+        .get("tool")
+        .and_then(|v| v.as_str())
+        .unwrap_or("pin_message")
+        .to_string();
+    let cur_notify_msg = cur_action_config
+        .get("message")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
     // Derive per-tool params from action config
-    let cur_params = cur_action_config.get("params").cloned().unwrap_or(serde_json::json!({}));
-    let cur_tc_platform = cur_params.get("platform").and_then(|v| v.as_str()).unwrap_or("whatsapp").to_string();
-    let cur_tc_chat_name = cur_params.get("chat_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let cur_tc_message = cur_params.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let cur_tc_email_to = cur_params.get("to").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let cur_tc_email_subject = cur_params.get("subject").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let cur_tc_email_body = cur_params.get("body").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let cur_tc_reply_text = cur_params.get("response_text").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let cur_tc_tesla_cmd = cur_params.get("command").and_then(|v| v.as_str()).unwrap_or("lock").to_string();
+    let cur_params = cur_action_config
+        .get("params")
+        .cloned()
+        .unwrap_or(serde_json::json!({}));
+    let cur_tc_platform = cur_params
+        .get("platform")
+        .and_then(|v| v.as_str())
+        .unwrap_or("whatsapp")
+        .to_string();
+    let cur_tc_chat_name = cur_params
+        .get("chat_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let cur_tc_message = cur_params
+        .get("message")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let cur_tc_email_to = cur_params
+        .get("to")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let cur_tc_email_subject = cur_params
+        .get("subject")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let cur_tc_email_body = cur_params
+        .get("body")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let cur_tc_reply_text = cur_params
+        .get("response_text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let cur_tc_tesla_cmd = cur_params
+        .get("command")
+        .and_then(|v| v.as_str())
+        .unwrap_or("lock")
+        .to_string();
     // Derive template/condition from prompt
     let selected_template = if prompt.is_empty() {
         PromptTemplate::Summarize
@@ -4312,27 +4549,33 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
             "call" => "notify via call".to_string(),
             _ => "notify via SMS".to_string(),
         },
-        "tool_call" => {
-            match cur_tool.as_str() {
-                "send_chat_message" => {
-                    let plat = capitalize_first(&cur_tc_platform);
-                    if cur_tc_chat_name.is_empty() { format!("{} message", plat) } else { format!("{} msg {}", plat, cur_tc_chat_name) }
-                }
-                "send_email" => "send email".to_string(),
-                "respond_to_email" => "reply to email".to_string(),
-                "control_tesla" => humanize_tesla_cmd_short(&cur_tc_tesla_cmd).to_string(),
-                "pin_message" => "pin message".to_string(),
-                "update_tracked_item" => "update tracked item".to_string(),
-                t if t.starts_with("mcp:") => {
-                    let parts: Vec<&str> = t.splitn(3, ':').collect();
-                    let tool_short = parts.get(2).unwrap_or(&"tool");
-                    format!("MCP: {}", tool_short)
-                }
-                t => {
-                    if t.is_empty() { "run tool".to_string() } else { format!("run: {}", t) }
+        "tool_call" => match cur_tool.as_str() {
+            "send_chat_message" => {
+                let plat = capitalize_first(&cur_tc_platform);
+                if cur_tc_chat_name.is_empty() {
+                    format!("{} message", plat)
+                } else {
+                    format!("{} msg {}", plat, cur_tc_chat_name)
                 }
             }
-        }
+            "send_email" => "send email".to_string(),
+            "respond_to_email" => "reply to email".to_string(),
+            "control_tesla" => humanize_tesla_cmd_short(&cur_tc_tesla_cmd).to_string(),
+            "pin_message" => "pin message".to_string(),
+            "update_tracked_item" => "update tracked item".to_string(),
+            t if t.starts_with("mcp:") => {
+                let parts: Vec<&str> = t.splitn(3, ':').collect();
+                let tool_short = parts.get(2).unwrap_or(&"tool");
+                format!("MCP: {}", tool_short)
+            }
+            t => {
+                if t.is_empty() {
+                    "run tool".to_string()
+                } else {
+                    format!("run: {}", t)
+                }
+            }
+        },
         _ => "action".to_string(),
     };
 
@@ -4354,7 +4597,9 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
     // --- Remove button ---
     let on_remove = {
         let ou = on_update.clone();
-        Callback::from(move |_: MouseEvent| { ou.emit(None); })
+        Callback::from(move |_: MouseEvent| {
+            ou.emit(None);
+        })
     };
 
     // --- IF card content ---
@@ -4482,7 +4727,8 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
             let wm = props.when_mode.clone();
             Callback::from(move |e: InputEvent| {
                 if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
-                    let new_prompt = get_template_prompt(&PromptTemplate::CheckCondition, &wm, &input.value());
+                    let new_prompt =
+                        get_template_prompt(&PromptTemplate::CheckCondition, &wm, &input.value());
                     ou.emit(Some(FlowNode::LlmCondition {
                         prompt: new_prompt,
                         fetch: f.clone(),
@@ -4658,22 +4904,34 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
         // Notify me / Run tool toggle
         let make_action_mode_cb = |atype: &'static str| {
             let ou = on_update.clone();
-            let p = prompt.clone(); let f = fetch.clone(); let fb = false_branch.clone();
-            let m = mode.to_string(); let kw = keyword.clone();
+            let p = prompt.clone();
+            let f = fetch.clone();
+            let fb = false_branch.clone();
+            let m = mode.to_string();
+            let kw = keyword.clone();
             Callback::from(move |_: MouseEvent| {
                 let action = if atype == "notify" {
-                    FlowNode::Action { action_type: "notify".into(), config: serde_json::json!({"method":"sms"}) }
+                    FlowNode::Action {
+                        action_type: "notify".into(),
+                        config: serde_json::json!({"method":"sms"}),
+                    }
                 } else {
-                    FlowNode::Action { action_type: "tool_call".into(), config: serde_json::json!({"tool":"pin_message"}) }
+                    FlowNode::Action {
+                        action_type: "tool_call".into(),
+                        config: serde_json::json!({"tool":"pin_message"}),
+                    }
                 };
                 let new_node = match m.as_str() {
                     "llm" => FlowNode::LlmCondition {
-                        prompt: p.clone(), fetch: f.clone(),
-                        true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                        prompt: p.clone(),
+                        fetch: f.clone(),
+                        true_branch: Box::new(Some(action)),
+                        false_branch: fb.clone(),
                     },
                     "keyword" => FlowNode::KeywordCondition {
                         keyword: kw.clone(),
-                        true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                        true_branch: Box::new(Some(action)),
+                        false_branch: fb.clone(),
                     },
                     _ => action,
                 };
@@ -4687,21 +4945,32 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
         let radio_name = format!("nested-notify-method-{}", depth);
         let make_method_cb = |method: &'static str| {
             let ou = on_update.clone();
-            let p = prompt.clone(); let f = fetch.clone(); let fb = false_branch.clone();
-            let m = mode.to_string(); let kw = keyword.clone();
+            let p = prompt.clone();
+            let f = fetch.clone();
+            let fb = false_branch.clone();
+            let m = mode.to_string();
+            let kw = keyword.clone();
             let msg = cur_notify_msg.clone();
             Callback::from(move |_: Event| {
                 let mut cfg = serde_json::json!({"method": method});
-                if !msg.is_empty() { cfg["message"] = serde_json::json!(msg); }
-                let action = FlowNode::Action { action_type: "notify".into(), config: cfg };
+                if !msg.is_empty() {
+                    cfg["message"] = serde_json::json!(msg);
+                }
+                let action = FlowNode::Action {
+                    action_type: "notify".into(),
+                    config: cfg,
+                };
                 let new_node = match m.as_str() {
                     "llm" => FlowNode::LlmCondition {
-                        prompt: p.clone(), fetch: f.clone(),
-                        true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                        prompt: p.clone(),
+                        fetch: f.clone(),
+                        true_branch: Box::new(Some(action)),
+                        false_branch: fb.clone(),
                     },
                     "keyword" => FlowNode::KeywordCondition {
                         keyword: kw.clone(),
-                        true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                        true_branch: Box::new(Some(action)),
+                        false_branch: fb.clone(),
                     },
                     _ => action,
                 };
@@ -4714,23 +4983,34 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
         // Message textarea
         let on_msg_change = {
             let ou = on_update.clone();
-            let p = prompt.clone(); let f = fetch.clone(); let fb = false_branch.clone();
-            let m = mode.to_string(); let kw = keyword.clone();
+            let p = prompt.clone();
+            let f = fetch.clone();
+            let fb = false_branch.clone();
+            let m = mode.to_string();
+            let kw = keyword.clone();
             let meth = cur_method.clone();
             Callback::from(move |e: InputEvent| {
                 if let Some(input) = e.target_dyn_into::<web_sys::HtmlTextAreaElement>() {
                     let mut cfg = serde_json::json!({"method": meth});
                     let v = input.value();
-                    if !v.is_empty() { cfg["message"] = serde_json::json!(v); }
-                    let action = FlowNode::Action { action_type: "notify".into(), config: cfg };
+                    if !v.is_empty() {
+                        cfg["message"] = serde_json::json!(v);
+                    }
+                    let action = FlowNode::Action {
+                        action_type: "notify".into(),
+                        config: cfg,
+                    };
                     let new_node = match m.as_str() {
                         "llm" => FlowNode::LlmCondition {
-                            prompt: p.clone(), fetch: f.clone(),
-                            true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                            prompt: p.clone(),
+                            fetch: f.clone(),
+                            true_branch: Box::new(Some(action)),
+                            false_branch: fb.clone(),
                         },
                         "keyword" => FlowNode::KeywordCondition {
                             keyword: kw.clone(),
-                            true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                            true_branch: Box::new(Some(action)),
+                            false_branch: fb.clone(),
                         },
                         _ => action,
                     };
@@ -4742,8 +5022,11 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
         // Tool selector
         let on_tool_change = {
             let ou = on_update.clone();
-            let p = prompt.clone(); let f = fetch.clone(); let fb = false_branch.clone();
-            let m = mode.to_string(); let kw = keyword.clone();
+            let p = prompt.clone();
+            let f = fetch.clone();
+            let fb = false_branch.clone();
+            let m = mode.to_string();
+            let kw = keyword.clone();
             Callback::from(move |e: Event| {
                 if let Some(sel) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
                     let action = FlowNode::Action {
@@ -4752,12 +5035,15 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
                     };
                     let new_node = match m.as_str() {
                         "llm" => FlowNode::LlmCondition {
-                            prompt: p.clone(), fetch: f.clone(),
-                            true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                            prompt: p.clone(),
+                            fetch: f.clone(),
+                            true_branch: Box::new(Some(action)),
+                            false_branch: fb.clone(),
                         },
                         "keyword" => FlowNode::KeywordCondition {
                             keyword: kw.clone(),
-                            true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                            true_branch: Box::new(Some(action)),
+                            false_branch: fb.clone(),
                         },
                         _ => action,
                     };
@@ -4771,8 +5057,11 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
         // send_chat_message: platform change
         let on_chat_platform_change = {
             let ou = on_update.clone();
-            let p = prompt.clone(); let f = fetch.clone(); let fb = false_branch.clone();
-            let m = mode.to_string(); let kw = keyword.clone();
+            let p = prompt.clone();
+            let f = fetch.clone();
+            let fb = false_branch.clone();
+            let m = mode.to_string();
+            let kw = keyword.clone();
             Callback::from(move |e: Event| {
                 if let Some(sel) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
                     let action = FlowNode::Action {
@@ -4781,12 +5070,15 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
                     };
                     let new_node = match m.as_str() {
                         "llm" => FlowNode::LlmCondition {
-                            prompt: p.clone(), fetch: f.clone(),
-                            true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                            prompt: p.clone(),
+                            fetch: f.clone(),
+                            true_branch: Box::new(Some(action)),
+                            false_branch: fb.clone(),
                         },
                         "keyword" => FlowNode::KeywordCondition {
                             keyword: kw.clone(),
-                            true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                            true_branch: Box::new(Some(action)),
+                            false_branch: fb.clone(),
                         },
                         _ => action,
                     };
@@ -4798,8 +5090,11 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
         // send_chat_message: chat name change
         let on_chat_name_change = {
             let ou = on_update.clone();
-            let p = prompt.clone(); let f = fetch.clone(); let fb = false_branch.clone();
-            let m = mode.to_string(); let kw = keyword.clone();
+            let p = prompt.clone();
+            let f = fetch.clone();
+            let fb = false_branch.clone();
+            let m = mode.to_string();
+            let kw = keyword.clone();
             let plat = cur_tc_platform.clone();
             let msg = cur_tc_message.clone();
             Callback::from(move |e: InputEvent| {
@@ -4810,12 +5105,15 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
                     };
                     let new_node = match m.as_str() {
                         "llm" => FlowNode::LlmCondition {
-                            prompt: p.clone(), fetch: f.clone(),
-                            true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                            prompt: p.clone(),
+                            fetch: f.clone(),
+                            true_branch: Box::new(Some(action)),
+                            false_branch: fb.clone(),
                         },
                         "keyword" => FlowNode::KeywordCondition {
                             keyword: kw.clone(),
-                            true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                            true_branch: Box::new(Some(action)),
+                            false_branch: fb.clone(),
                         },
                         _ => action,
                     };
@@ -4827,8 +5125,11 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
         // send_chat_message: message change
         let on_chat_msg_change = {
             let ou = on_update.clone();
-            let p = prompt.clone(); let f = fetch.clone(); let fb = false_branch.clone();
-            let m = mode.to_string(); let kw = keyword.clone();
+            let p = prompt.clone();
+            let f = fetch.clone();
+            let fb = false_branch.clone();
+            let m = mode.to_string();
+            let kw = keyword.clone();
             let plat = cur_tc_platform.clone();
             let cn = cur_tc_chat_name.clone();
             Callback::from(move |e: InputEvent| {
@@ -4839,12 +5140,15 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
                     };
                     let new_node = match m.as_str() {
                         "llm" => FlowNode::LlmCondition {
-                            prompt: p.clone(), fetch: f.clone(),
-                            true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                            prompt: p.clone(),
+                            fetch: f.clone(),
+                            true_branch: Box::new(Some(action)),
+                            false_branch: fb.clone(),
                         },
                         "keyword" => FlowNode::KeywordCondition {
                             keyword: kw.clone(),
-                            true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                            true_branch: Box::new(Some(action)),
+                            false_branch: fb.clone(),
                         },
                         _ => action,
                     };
@@ -4856,8 +5160,11 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
         // send_email: to change
         let on_email_to_change = {
             let ou = on_update.clone();
-            let p = prompt.clone(); let f = fetch.clone(); let fb = false_branch.clone();
-            let m = mode.to_string(); let kw = keyword.clone();
+            let p = prompt.clone();
+            let f = fetch.clone();
+            let fb = false_branch.clone();
+            let m = mode.to_string();
+            let kw = keyword.clone();
             let subj = cur_tc_email_subject.clone();
             let body = cur_tc_email_body.clone();
             Callback::from(move |e: InputEvent| {
@@ -4868,12 +5175,15 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
                     };
                     let new_node = match m.as_str() {
                         "llm" => FlowNode::LlmCondition {
-                            prompt: p.clone(), fetch: f.clone(),
-                            true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                            prompt: p.clone(),
+                            fetch: f.clone(),
+                            true_branch: Box::new(Some(action)),
+                            false_branch: fb.clone(),
                         },
                         "keyword" => FlowNode::KeywordCondition {
                             keyword: kw.clone(),
-                            true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                            true_branch: Box::new(Some(action)),
+                            false_branch: fb.clone(),
                         },
                         _ => action,
                     };
@@ -4885,8 +5195,11 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
         // send_email: subject change
         let on_email_subj_change = {
             let ou = on_update.clone();
-            let p = prompt.clone(); let f = fetch.clone(); let fb = false_branch.clone();
-            let m = mode.to_string(); let kw = keyword.clone();
+            let p = prompt.clone();
+            let f = fetch.clone();
+            let fb = false_branch.clone();
+            let m = mode.to_string();
+            let kw = keyword.clone();
             let to = cur_tc_email_to.clone();
             let body = cur_tc_email_body.clone();
             Callback::from(move |e: InputEvent| {
@@ -4897,12 +5210,15 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
                     };
                     let new_node = match m.as_str() {
                         "llm" => FlowNode::LlmCondition {
-                            prompt: p.clone(), fetch: f.clone(),
-                            true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                            prompt: p.clone(),
+                            fetch: f.clone(),
+                            true_branch: Box::new(Some(action)),
+                            false_branch: fb.clone(),
                         },
                         "keyword" => FlowNode::KeywordCondition {
                             keyword: kw.clone(),
-                            true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                            true_branch: Box::new(Some(action)),
+                            false_branch: fb.clone(),
                         },
                         _ => action,
                     };
@@ -4914,8 +5230,11 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
         // send_email: body change
         let on_email_body_change = {
             let ou = on_update.clone();
-            let p = prompt.clone(); let f = fetch.clone(); let fb = false_branch.clone();
-            let m = mode.to_string(); let kw = keyword.clone();
+            let p = prompt.clone();
+            let f = fetch.clone();
+            let fb = false_branch.clone();
+            let m = mode.to_string();
+            let kw = keyword.clone();
             let to = cur_tc_email_to.clone();
             let subj = cur_tc_email_subject.clone();
             Callback::from(move |e: InputEvent| {
@@ -4926,12 +5245,15 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
                     };
                     let new_node = match m.as_str() {
                         "llm" => FlowNode::LlmCondition {
-                            prompt: p.clone(), fetch: f.clone(),
-                            true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                            prompt: p.clone(),
+                            fetch: f.clone(),
+                            true_branch: Box::new(Some(action)),
+                            false_branch: fb.clone(),
                         },
                         "keyword" => FlowNode::KeywordCondition {
                             keyword: kw.clone(),
-                            true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                            true_branch: Box::new(Some(action)),
+                            false_branch: fb.clone(),
                         },
                         _ => action,
                     };
@@ -4943,8 +5265,11 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
         // respond_to_email: reply text change
         let on_reply_text_change = {
             let ou = on_update.clone();
-            let p = prompt.clone(); let f = fetch.clone(); let fb = false_branch.clone();
-            let m = mode.to_string(); let kw = keyword.clone();
+            let p = prompt.clone();
+            let f = fetch.clone();
+            let fb = false_branch.clone();
+            let m = mode.to_string();
+            let kw = keyword.clone();
             Callback::from(move |e: InputEvent| {
                 if let Some(input) = e.target_dyn_into::<web_sys::HtmlTextAreaElement>() {
                     let action = FlowNode::Action {
@@ -4953,12 +5278,15 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
                     };
                     let new_node = match m.as_str() {
                         "llm" => FlowNode::LlmCondition {
-                            prompt: p.clone(), fetch: f.clone(),
-                            true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                            prompt: p.clone(),
+                            fetch: f.clone(),
+                            true_branch: Box::new(Some(action)),
+                            false_branch: fb.clone(),
                         },
                         "keyword" => FlowNode::KeywordCondition {
                             keyword: kw.clone(),
-                            true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                            true_branch: Box::new(Some(action)),
+                            false_branch: fb.clone(),
                         },
                         _ => action,
                     };
@@ -4970,8 +5298,11 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
         // control_tesla: command change
         let on_tesla_cmd_change = {
             let ou = on_update.clone();
-            let p = prompt.clone(); let f = fetch.clone(); let fb = false_branch.clone();
-            let m = mode.to_string(); let kw = keyword.clone();
+            let p = prompt.clone();
+            let f = fetch.clone();
+            let fb = false_branch.clone();
+            let m = mode.to_string();
+            let kw = keyword.clone();
             Callback::from(move |e: Event| {
                 if let Some(sel) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
                     let action = FlowNode::Action {
@@ -4980,12 +5311,15 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
                     };
                     let new_node = match m.as_str() {
                         "llm" => FlowNode::LlmCondition {
-                            prompt: p.clone(), fetch: f.clone(),
-                            true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                            prompt: p.clone(),
+                            fetch: f.clone(),
+                            true_branch: Box::new(Some(action)),
+                            false_branch: fb.clone(),
                         },
                         "keyword" => FlowNode::KeywordCondition {
                             keyword: kw.clone(),
-                            true_branch: Box::new(Some(action)), false_branch: fb.clone(),
+                            true_branch: Box::new(Some(action)),
+                            false_branch: fb.clone(),
                         },
                         _ => action,
                     };
@@ -5195,25 +5529,32 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
     let can_add_else = depth < 3 && mode != "always";
     let on_add_else = {
         let ou = on_update.clone();
-        let p = prompt.clone(); let f = fetch.clone();
+        let p = prompt.clone();
+        let f = fetch.clone();
         let tb = true_branch.clone();
-        let m = mode.to_string(); let kw = keyword.clone();
+        let m = mode.to_string();
+        let kw = keyword.clone();
         Callback::from(move |_: MouseEvent| {
             let new_else = FlowNode::LlmCondition {
-                prompt: String::new(), fetch: vec![],
+                prompt: String::new(),
+                fetch: vec![],
                 true_branch: Box::new(Some(FlowNode::Action {
-                    action_type: "notify".to_string(), config: serde_json::json!({"method":"sms"}),
+                    action_type: "notify".to_string(),
+                    config: serde_json::json!({"method":"sms"}),
                 })),
                 false_branch: Box::new(None),
             };
             let new_node = match m.as_str() {
                 "llm" => FlowNode::LlmCondition {
-                    prompt: p.clone(), fetch: f.clone(),
-                    true_branch: tb.clone(), false_branch: Box::new(Some(new_else)),
+                    prompt: p.clone(),
+                    fetch: f.clone(),
+                    true_branch: tb.clone(),
+                    false_branch: Box::new(Some(new_else)),
                 },
                 "keyword" => FlowNode::KeywordCondition {
                     keyword: kw.clone(),
-                    true_branch: tb.clone(), false_branch: Box::new(Some(new_else)),
+                    true_branch: tb.clone(),
+                    false_branch: Box::new(Some(new_else)),
                 },
                 _ => return,
             };
@@ -5223,18 +5564,23 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
 
     let on_else_update = {
         let ou = on_update.clone();
-        let p = prompt.clone(); let f = fetch.clone();
+        let p = prompt.clone();
+        let f = fetch.clone();
         let tb = true_branch.clone();
-        let m = mode.to_string(); let kw = keyword.clone();
+        let m = mode.to_string();
+        let kw = keyword.clone();
         Callback::from(move |new_fb: Option<FlowNode>| {
             let new_node = match m.as_str() {
                 "llm" => FlowNode::LlmCondition {
-                    prompt: p.clone(), fetch: f.clone(),
-                    true_branch: tb.clone(), false_branch: Box::new(new_fb),
+                    prompt: p.clone(),
+                    fetch: f.clone(),
+                    true_branch: tb.clone(),
+                    false_branch: Box::new(new_fb),
                 },
                 "keyword" => FlowNode::KeywordCondition {
                     keyword: kw.clone(),
-                    true_branch: tb.clone(), false_branch: Box::new(new_fb),
+                    true_branch: tb.clone(),
+                    false_branch: Box::new(new_fb),
                 },
                 _ => return,
             };
@@ -5340,7 +5686,9 @@ fn build_rule_summary(
         LogicMode::Llm => match selected_template {
             PromptTemplate::Summarize => Some("AI summarizes your updates".to_string()),
             PromptTemplate::FilterImportant => Some("AI checks if it's important".to_string()),
-            PromptTemplate::TrackItems => Some("AI checks if it updates a tracked item".to_string()),
+            PromptTemplate::TrackItems => {
+                Some("AI checks if it updates a tracked item".to_string())
+            }
             PromptTemplate::CheckCondition => {
                 if condition_input.is_empty() {
                     Some("AI checks a condition".to_string())
@@ -5392,7 +5740,12 @@ fn build_rule_summary(
     // ELSE part - recursively describe all nesting levels
     fn describe_node_summary(n: &FlowNode) -> Vec<String> {
         match n {
-            FlowNode::LlmCondition { prompt, true_branch, false_branch, .. } => {
+            FlowNode::LlmCondition {
+                prompt,
+                true_branch,
+                false_branch,
+                ..
+            } => {
                 let check = if prompt.is_empty() {
                     "AI evaluates".to_string()
                 } else if prompt.len() > 30 {
@@ -5401,7 +5754,10 @@ fn build_rule_summary(
                     format!("AI checks: {}", prompt)
                 };
                 let action = match true_branch.as_ref() {
-                    Some(FlowNode::Action { action_type, config }) => describe_action_summary(action_type, config),
+                    Some(FlowNode::Action {
+                        action_type,
+                        config,
+                    }) => describe_action_summary(action_type, config),
                     Some(nested) => {
                         let nested_parts = describe_node_summary(nested);
                         nested_parts.join(", then ")
@@ -5417,9 +5773,17 @@ fn build_rule_summary(
                 }
                 parts
             }
-            FlowNode::KeywordCondition { keyword, true_branch, false_branch, .. } => {
+            FlowNode::KeywordCondition {
+                keyword,
+                true_branch,
+                false_branch,
+                ..
+            } => {
                 let action = match true_branch.as_ref() {
-                    Some(FlowNode::Action { action_type, config }) => describe_action_summary(action_type, config),
+                    Some(FlowNode::Action {
+                        action_type,
+                        config,
+                    }) => describe_action_summary(action_type, config),
                     Some(nested) => {
                         let nested_parts = describe_node_summary(nested);
                         nested_parts.join(", then ")
@@ -5435,7 +5799,10 @@ fn build_rule_summary(
                 }
                 parts
             }
-            FlowNode::Action { action_type, config } => vec![describe_action_summary(action_type, config)],
+            FlowNode::Action {
+                action_type,
+                config,
+            } => vec![describe_action_summary(action_type, config)],
         }
     }
     fn describe_action_summary(action_type: &str, config: &serde_json::Value) -> String {
@@ -5450,7 +5817,8 @@ fn build_rule_summary(
                 Some("send_email") => "sends an email".to_string(),
                 Some("send_chat_message") => "sends a message".to_string(),
                 Some("control_tesla") => {
-                    let cmd = config.get("params")
+                    let cmd = config
+                        .get("params")
                         .and_then(|p| p.get("command"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("command");
@@ -5462,7 +5830,8 @@ fn build_rule_summary(
         }
     }
 
-    let else_lines: Vec<String> = else_flow.as_ref()
+    let else_lines: Vec<String> = else_flow
+        .as_ref()
         .map(|node| describe_node_summary(node))
         .unwrap_or_default();
 
@@ -5589,7 +5958,10 @@ fn auto_generate_name(
     let trigger_part = if trigger_type == "schedule" {
         match tc.get("schedule").and_then(|v| v.as_str()) {
             Some("recurring") => {
-                let pattern = tc.get("pattern").and_then(|v| v.as_str()).unwrap_or("daily");
+                let pattern = tc
+                    .get("pattern")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("daily");
                 let freq = pattern.split_whitespace().next().unwrap_or("daily");
                 capitalize_first(freq)
             }
@@ -5631,13 +6003,25 @@ fn auto_generate_name(
             let tool = ac.get("tool").and_then(|v| v.as_str()).unwrap_or("action");
             match tool {
                 "send_chat_message" => {
-                    let chat = ac.get("params").and_then(|p| p.get("chat_name")).and_then(|v| v.as_str()).unwrap_or("");
-                    if chat.is_empty() { "message".to_string() } else { format!("msg {}", chat) }
+                    let chat = ac
+                        .get("params")
+                        .and_then(|p| p.get("chat_name"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if chat.is_empty() {
+                        "message".to_string()
+                    } else {
+                        format!("msg {}", chat)
+                    }
                 }
                 "send_email" => "email".to_string(),
                 "respond_to_email" => "reply email".to_string(),
                 "control_tesla" => {
-                    let cmd = ac.get("params").and_then(|p| p.get("command")).and_then(|v| v.as_str()).unwrap_or("cmd");
+                    let cmd = ac
+                        .get("params")
+                        .and_then(|p| p.get("command"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("cmd");
                     format!("Tesla {}", cmd)
                 }
                 "pin_message" => "pin".to_string(),
@@ -5649,7 +6033,7 @@ fn auto_generate_name(
                 }
                 _ => tool.to_string(),
             }
-        },
+        }
         _ => "notify".to_string(),
     };
 
@@ -5667,7 +6051,9 @@ fn capitalize_first(s: &str) -> String {
 /// Render a human-readable hint about what extra info the AI will figure out for a tool.
 fn render_llm_params_hint(tool: &str) -> Html {
     let hint = match tool {
-        "update_tracked_item" => Some("AI will pick which tracked item to update and set its new status"),
+        "update_tracked_item" => {
+            Some("AI will pick which tracked item to update and set its new status")
+        }
         _ => None,
     };
     match hint {
@@ -5726,7 +6112,11 @@ fn extract_schema_fields(schema: Option<&serde_json::Value>) -> Vec<String> {
     let required: Vec<String> = schema
         .get("required")
         .and_then(|r| r.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
     // Required fields first, then remaining properties
     let mut fields: Vec<String> = required.clone();
@@ -5816,14 +6206,20 @@ fn render_review(
         LogicMode::Llm => match selected_template {
             PromptTemplate::Summarize => Some("AI summarizes your updates".to_string()),
             PromptTemplate::FilterImportant => Some("AI checks if it's important".to_string()),
-            PromptTemplate::TrackItems => Some("AI checks if it updates a tracked item".to_string()),
+            PromptTemplate::TrackItems => {
+                Some("AI checks if it updates a tracked item".to_string())
+            }
             PromptTemplate::CheckCondition => {
-                if condition_input.is_empty() { None }
-                else { Some(format!("AI checks if it {}", condition_input)) }
+                if condition_input.is_empty() {
+                    None
+                } else {
+                    Some(format!("AI checks if it {}", condition_input))
+                }
             }
             PromptTemplate::Custom => {
-                if logic_prompt.is_empty() { None }
-                else if logic_prompt.len() > 50 {
+                if logic_prompt.is_empty() {
+                    None
+                } else if logic_prompt.len() > 50 {
                     Some(format!("AI checks: {}...", &logic_prompt[..50]))
                 } else {
                     Some(format!("AI checks: {}", logic_prompt))
@@ -5840,8 +6236,11 @@ fn render_review(
         ActionMode::ToolCall => match tool_name {
             "send_chat_message" => {
                 let plat = capitalize_first(tc_platform);
-                if tc_chat_name.is_empty() { format!("Sends a {} message", plat) }
-                else { format!("{} messages {}", plat, tc_chat_name) }
+                if tc_chat_name.is_empty() {
+                    format!("Sends a {} message", plat)
+                } else {
+                    format!("{} messages {}", plat, tc_chat_name)
+                }
             }
             "send_email" => "Sends an email".to_string(),
             "respond_to_email" => "Replies to the email".to_string(),
@@ -5884,7 +6283,12 @@ fn render_review(
 
 fn render_else_review(node: &FlowNode) -> Html {
     match node {
-        FlowNode::LlmCondition { prompt, true_branch, false_branch, .. } => {
+        FlowNode::LlmCondition {
+            prompt,
+            true_branch,
+            false_branch,
+            ..
+        } => {
             let check = if prompt.is_empty() {
                 "AI evaluates".to_string()
             } else if prompt.len() > 40 {
@@ -5893,13 +6297,18 @@ fn render_else_review(node: &FlowNode) -> Html {
                 format!("AI checks: {}", prompt)
             };
             let action = match true_branch.as_ref() {
-                Some(FlowNode::Action { action_type, config }) => review_action_text(action_type, config),
-                Some(nested) => return html! {
-                    <>
-                        <div class="rb-review-step">{check}</div>
-                        {render_else_review(nested)}
-                    </>
-                },
+                Some(FlowNode::Action {
+                    action_type,
+                    config,
+                }) => review_action_text(action_type, config),
+                Some(nested) => {
+                    return html! {
+                        <>
+                            <div class="rb-review-step">{check}</div>
+                            {render_else_review(nested)}
+                        </>
+                    }
+                }
                 None => "runs an action".to_string(),
             };
             html! {
@@ -5914,15 +6323,25 @@ fn render_else_review(node: &FlowNode) -> Html {
                 </>
             }
         }
-        FlowNode::KeywordCondition { keyword, true_branch, false_branch, .. } => {
+        FlowNode::KeywordCondition {
+            keyword,
+            true_branch,
+            false_branch,
+            ..
+        } => {
             let action = match true_branch.as_ref() {
-                Some(FlowNode::Action { action_type, config }) => review_action_text(action_type, config),
-                Some(nested) => return html! {
-                    <>
-                        <div class="rb-review-step">{format!("Checks for '{}'", keyword)}</div>
-                        {render_else_review(nested)}
-                    </>
-                },
+                Some(FlowNode::Action {
+                    action_type,
+                    config,
+                }) => review_action_text(action_type, config),
+                Some(nested) => {
+                    return html! {
+                        <>
+                            <div class="rb-review-step">{format!("Checks for '{}'", keyword)}</div>
+                            {render_else_review(nested)}
+                        </>
+                    }
+                }
                 None => "runs an action".to_string(),
             };
             html! {
@@ -5937,7 +6356,10 @@ fn render_else_review(node: &FlowNode) -> Html {
                 </>
             }
         }
-        FlowNode::Action { action_type, config } => {
+        FlowNode::Action {
+            action_type,
+            config,
+        } => {
             html! { <div class="rb-review-step">{review_action_text(action_type, config)}</div> }
         }
     }
@@ -5954,11 +6376,13 @@ fn review_action_text(action_type: &str, config: &serde_json::Value) -> String {
             Some("update_tracked_item") => "Updates the tracked item".to_string(),
             Some("send_email") => "Sends an email".to_string(),
             Some("send_chat_message") => {
-                let plat = config.get("params")
+                let plat = config
+                    .get("params")
                     .and_then(|p| p.get("platform"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("chat");
-                let chat = config.get("params")
+                let chat = config
+                    .get("params")
                     .and_then(|p| p.get("chat_name"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
@@ -5969,7 +6393,8 @@ fn review_action_text(action_type: &str, config: &serde_json::Value) -> String {
                 }
             }
             Some("control_tesla") => {
-                let cmd = config.get("params")
+                let cmd = config
+                    .get("params")
                     .and_then(|p| p.get("command"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("command");
@@ -6030,17 +6455,57 @@ fn auto_detect_sources(prompt: &str, available: &[RuleSourceOption]) -> Vec<Sour
     let mut detected = Vec::new();
 
     let mappings: Vec<(&[&str], &str, SourceConfig)> = vec![
-        (&["weather", "temperature", "rain", "forecast", "cold", "hot"], "weather", SourceConfig::Weather { location: String::new() }),
-        (&["email", "inbox", "mail", "sent"], "email", SourceConfig::Email),
-        (&["chat", "message", "whatsapp", "telegram", "signal", "conversation"], "chat", SourceConfig::Chat { platform: "all".to_string(), limit: 50 }),
-        (&["tesla", "car", "charge", "drive", "vehicle", "battery"], "tesla", SourceConfig::Tesla),
-        (&["tracked", "pinned", "delivery", "package", "invoice"], "pinned", SourceConfig::Pinned),
-        (&["search", "look up", "find online", "news"], "internet", SourceConfig::Internet { query: String::new() }),
+        (
+            &["weather", "temperature", "rain", "forecast", "cold", "hot"],
+            "weather",
+            SourceConfig::Weather {
+                location: String::new(),
+            },
+        ),
+        (
+            &["email", "inbox", "mail", "sent"],
+            "email",
+            SourceConfig::Email,
+        ),
+        (
+            &[
+                "chat",
+                "message",
+                "whatsapp",
+                "telegram",
+                "signal",
+                "conversation",
+            ],
+            "chat",
+            SourceConfig::Chat {
+                platform: "all".to_string(),
+                limit: 50,
+            },
+        ),
+        (
+            &["tesla", "car", "charge", "drive", "vehicle", "battery"],
+            "tesla",
+            SourceConfig::Tesla,
+        ),
+        (
+            &["tracked", "pinned", "delivery", "package", "invoice"],
+            "pinned",
+            SourceConfig::Pinned,
+        ),
+        (
+            &["search", "look up", "find online", "news"],
+            "internet",
+            SourceConfig::Internet {
+                query: String::new(),
+            },
+        ),
     ];
 
     for (keywords, source_type, source_config) in mappings {
         // Check if this source is available
-        let is_available = available.iter().any(|s| s.source_type == source_type && s.available);
+        let is_available = available
+            .iter()
+            .any(|s| s.source_type == source_type && s.available);
         if !is_available {
             continue;
         }
@@ -6062,9 +6527,18 @@ fn format_datetime_short_local(at: &str) -> String {
         let parts: Vec<&str> = month_day.split('-').collect();
         if parts.len() == 2 {
             let month = match parts[0] {
-                "01" => "Jan", "02" => "Feb", "03" => "Mar", "04" => "Apr",
-                "05" => "May", "06" => "Jun", "07" => "Jul", "08" => "Aug",
-                "09" => "Sep", "10" => "Oct", "11" => "Nov", "12" => "Dec",
+                "01" => "Jan",
+                "02" => "Feb",
+                "03" => "Mar",
+                "04" => "Apr",
+                "05" => "May",
+                "06" => "Jun",
+                "07" => "Jul",
+                "08" => "Aug",
+                "09" => "Sep",
+                "10" => "Oct",
+                "11" => "Nov",
+                "12" => "Dec",
                 _ => parts[0],
             };
             let day: u32 = parts[1].parse().unwrap_or(0);

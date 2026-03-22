@@ -1,7 +1,7 @@
+use js_sys::{Object, Promise, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::PublicKeyCredential;
-use js_sys::{Object, Reflect, Uint8Array, Promise};
 
 // JavaScript interop for WebAuthn
 #[wasm_bindgen]
@@ -65,7 +65,11 @@ pub fn array_to_base64url(array: &Uint8Array) -> String {
     let bytes: Vec<u8> = array.to_vec();
     let base64 = base64_encode(&bytes);
     // Convert to base64url
-    base64.replace('+', "-").replace('/', "_").trim_end_matches('=').to_string()
+    base64
+        .replace('+', "-")
+        .replace('/', "_")
+        .trim_end_matches('=')
+        .to_string()
 }
 
 /// Simple base64 encoding
@@ -99,7 +103,9 @@ fn base64_encode(data: &[u8]) -> String {
 
 /// Create a credential (registration)
 /// Takes the options JSON from the backend and calls navigator.credentials.create()
-pub async fn create_credential(options_json: &serde_json::Value) -> Result<serde_json::Value, String> {
+pub async fn create_credential(
+    options_json: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
     if !is_webauthn_supported() {
         return Err("WebAuthn not supported".to_string());
     }
@@ -109,11 +115,13 @@ pub async fn create_credential(options_json: &serde_json::Value) -> Result<serde
 
     // Call navigator.credentials.create()
     let promise = credentials_create(&options);
-    let result = JsFuture::from(promise).await
+    let result = JsFuture::from(promise)
+        .await
         .map_err(|e| format!("Credential creation failed: {:?}", e))?;
 
     // Convert the result to our response format
-    let credential: PublicKeyCredential = result.dyn_into()
+    let credential: PublicKeyCredential = result
+        .dyn_into()
         .map_err(|_| "Failed to cast to PublicKeyCredential".to_string())?;
 
     serialize_attestation_response(&credential)
@@ -131,11 +139,13 @@ pub async fn get_credential(options_json: &serde_json::Value) -> Result<serde_js
 
     // Call navigator.credentials.get()
     let promise = credentials_get(&options);
-    let result = JsFuture::from(promise).await
+    let result = JsFuture::from(promise)
+        .await
         .map_err(|e| format!("Credential get failed: {:?}", e))?;
 
     // Convert the result to our response format
-    let credential: PublicKeyCredential = result.dyn_into()
+    let credential: PublicKeyCredential = result
+        .dyn_into()
         .map_err(|_| "Failed to cast to PublicKeyCredential".to_string())?;
 
     serialize_assertion_response(&credential)
@@ -167,16 +177,15 @@ fn build_creation_options(json: &serde_json::Value) -> Result<JsValue, String> {
             Reflect::set(&rp_obj, &"id".into(), &JsValue::from_str(id))
                 .map_err(|_| "Failed to set rp.id")?;
         }
-        Reflect::set(&public_key, &"rp".into(), &rp_obj)
-            .map_err(|_| "Failed to set rp")?;
+        Reflect::set(&public_key, &"rp".into(), &rp_obj).map_err(|_| "Failed to set rp")?;
     }
 
     // Set user
     if let Some(user) = pk_json.get("user") {
         let user_obj = Object::new();
         if let Some(id) = user.get("id").and_then(|i| i.as_str()) {
-            let id_array = base64url_to_array(id)
-                .map_err(|e| format!("Failed to decode user id: {:?}", e))?;
+            let id_array =
+                base64url_to_array(id).map_err(|e| format!("Failed to decode user id: {:?}", e))?;
             Reflect::set(&user_obj, &"id".into(), &id_array)
                 .map_err(|_| "Failed to set user.id")?;
         }
@@ -185,11 +194,14 @@ fn build_creation_options(json: &serde_json::Value) -> Result<JsValue, String> {
                 .map_err(|_| "Failed to set user.name")?;
         }
         if let Some(display_name) = user.get("displayName").and_then(|d| d.as_str()) {
-            Reflect::set(&user_obj, &"displayName".into(), &JsValue::from_str(display_name))
-                .map_err(|_| "Failed to set user.displayName")?;
+            Reflect::set(
+                &user_obj,
+                &"displayName".into(),
+                &JsValue::from_str(display_name),
+            )
+            .map_err(|_| "Failed to set user.displayName")?;
         }
-        Reflect::set(&public_key, &"user".into(), &user_obj)
-            .map_err(|_| "Failed to set user")?;
+        Reflect::set(&public_key, &"user".into(), &user_obj).map_err(|_| "Failed to set user")?;
     }
 
     // Set pubKeyCredParams
@@ -213,30 +225,53 @@ fn build_creation_options(json: &serde_json::Value) -> Result<JsValue, String> {
 
     // Set timeout
     if let Some(timeout) = pk_json.get("timeout").and_then(|t| t.as_u64()) {
-        Reflect::set(&public_key, &"timeout".into(), &JsValue::from_f64(timeout as f64))
-            .map_err(|_| "Failed to set timeout")?;
+        Reflect::set(
+            &public_key,
+            &"timeout".into(),
+            &JsValue::from_f64(timeout as f64),
+        )
+        .map_err(|_| "Failed to set timeout")?;
     }
 
     // Set attestation
     if let Some(attestation) = pk_json.get("attestation").and_then(|a| a.as_str()) {
-        Reflect::set(&public_key, &"attestation".into(), &JsValue::from_str(attestation))
-            .map_err(|_| "Failed to set attestation")?;
+        Reflect::set(
+            &public_key,
+            &"attestation".into(),
+            &JsValue::from_str(attestation),
+        )
+        .map_err(|_| "Failed to set attestation")?;
     }
 
     // Set authenticatorSelection
     if let Some(auth_sel) = pk_json.get("authenticatorSelection") {
         let auth_sel_obj = Object::new();
-        if let Some(attachment) = auth_sel.get("authenticatorAttachment").and_then(|a| a.as_str()) {
-            Reflect::set(&auth_sel_obj, &"authenticatorAttachment".into(), &JsValue::from_str(attachment))
-                .map_err(|_| "Failed to set authenticatorAttachment")?;
+        if let Some(attachment) = auth_sel
+            .get("authenticatorAttachment")
+            .and_then(|a| a.as_str())
+        {
+            Reflect::set(
+                &auth_sel_obj,
+                &"authenticatorAttachment".into(),
+                &JsValue::from_str(attachment),
+            )
+            .map_err(|_| "Failed to set authenticatorAttachment")?;
         }
         if let Some(resident_key) = auth_sel.get("residentKey").and_then(|r| r.as_str()) {
-            Reflect::set(&auth_sel_obj, &"residentKey".into(), &JsValue::from_str(resident_key))
-                .map_err(|_| "Failed to set residentKey")?;
+            Reflect::set(
+                &auth_sel_obj,
+                &"residentKey".into(),
+                &JsValue::from_str(resident_key),
+            )
+            .map_err(|_| "Failed to set residentKey")?;
         }
         if let Some(user_verification) = auth_sel.get("userVerification").and_then(|u| u.as_str()) {
-            Reflect::set(&auth_sel_obj, &"userVerification".into(), &JsValue::from_str(user_verification))
-                .map_err(|_| "Failed to set userVerification")?;
+            Reflect::set(
+                &auth_sel_obj,
+                &"userVerification".into(),
+                &JsValue::from_str(user_verification),
+            )
+            .map_err(|_| "Failed to set userVerification")?;
         }
         Reflect::set(&public_key, &"authenticatorSelection".into(), &auth_sel_obj)
             .map_err(|_| "Failed to set authenticatorSelection")?;
@@ -286,8 +321,12 @@ fn build_request_options(json: &serde_json::Value) -> Result<JsValue, String> {
 
     // Set timeout
     if let Some(timeout) = pk_json.get("timeout").and_then(|t| t.as_u64()) {
-        Reflect::set(&public_key, &"timeout".into(), &JsValue::from_f64(timeout as f64))
-            .map_err(|_| "Failed to set timeout")?;
+        Reflect::set(
+            &public_key,
+            &"timeout".into(),
+            &JsValue::from_f64(timeout as f64),
+        )
+        .map_err(|_| "Failed to set timeout")?;
     }
 
     // Set rpId
@@ -298,8 +337,12 @@ fn build_request_options(json: &serde_json::Value) -> Result<JsValue, String> {
 
     // Set userVerification
     if let Some(user_verification) = pk_json.get("userVerification").and_then(|u| u.as_str()) {
-        Reflect::set(&public_key, &"userVerification".into(), &JsValue::from_str(user_verification))
-            .map_err(|_| "Failed to set userVerification")?;
+        Reflect::set(
+            &public_key,
+            &"userVerification".into(),
+            &JsValue::from_str(user_verification),
+        )
+        .map_err(|_| "Failed to set userVerification")?;
     }
 
     // Set allowCredentials
@@ -340,9 +383,12 @@ fn build_request_options(json: &serde_json::Value) -> Result<JsValue, String> {
 }
 
 /// Serialize attestation response (from registration) for sending to backend
-fn serialize_attestation_response(credential: &PublicKeyCredential) -> Result<serde_json::Value, String> {
+fn serialize_attestation_response(
+    credential: &PublicKeyCredential,
+) -> Result<serde_json::Value, String> {
     let response = credential.response();
-    let attestation_response: web_sys::AuthenticatorAttestationResponse = response.dyn_into()
+    let attestation_response: web_sys::AuthenticatorAttestationResponse = response
+        .dyn_into()
         .map_err(|_| "Failed to cast to AuthenticatorAttestationResponse".to_string())?;
 
     // Get raw ID
@@ -369,9 +415,12 @@ fn serialize_attestation_response(credential: &PublicKeyCredential) -> Result<se
 }
 
 /// Serialize assertion response (from authentication) for sending to backend
-fn serialize_assertion_response(credential: &PublicKeyCredential) -> Result<serde_json::Value, String> {
+fn serialize_assertion_response(
+    credential: &PublicKeyCredential,
+) -> Result<serde_json::Value, String> {
     let response = credential.response();
-    let assertion_response: web_sys::AuthenticatorAssertionResponse = response.dyn_into()
+    let assertion_response: web_sys::AuthenticatorAssertionResponse = response
+        .dyn_into()
         .map_err(|_| "Failed to cast to AuthenticatorAssertionResponse".to_string())?;
 
     // Get raw ID
@@ -391,11 +440,10 @@ fn serialize_assertion_response(credential: &PublicKeyCredential) -> Result<serd
     let signature_b64 = array_to_base64url(&signature);
 
     // Get user handle (optional)
-    let user_handle = assertion_response.user_handle()
-        .map(|uh| {
-            let uh_array = Uint8Array::new(&uh);
-            array_to_base64url(&uh_array)
-        });
+    let user_handle = assertion_response.user_handle().map(|uh| {
+        let uh_array = Uint8Array::new(&uh);
+        array_to_base64url(&uh_array)
+    });
 
     let mut response_obj = serde_json::json!({
         "clientDataJSON": client_data_b64,

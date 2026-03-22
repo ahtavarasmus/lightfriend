@@ -1,9 +1,9 @@
-use yew::prelude::*;
-use web_sys::{MouseEvent, HtmlInputElement, Event};
+use crate::utils::api::Api;
+use gloo_timers::future::TimeoutFuture;
 use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
-use gloo_timers::future::TimeoutFuture;
-use crate::utils::api::Api;
+use web_sys::{Event, HtmlInputElement, MouseEvent};
+use yew::prelude::*;
 #[derive(Properties, PartialEq)]
 pub struct EmailProps {
     pub user_id: i32,
@@ -27,8 +27,18 @@ pub fn email_connect(props: &EmailProps) -> Html {
         ("gmail", "Gmail", "imap.gmail.com", "993"),
         ("gmx", "GMX", "imap.gmx.com", "993"),
         ("icloud", "iCloud", "imap.mail.me.com", "993"),
-        ("outlook", "Outlook / Hotmail", "outlook.office365.com", "993"),
-        ("privateemail", "PrivateEmail (Namecheap)", "mail.privateemail.com", "993"),
+        (
+            "outlook",
+            "Outlook / Hotmail",
+            "outlook.office365.com",
+            "993",
+        ),
+        (
+            "privateemail",
+            "PrivateEmail (Namecheap)",
+            "mail.privateemail.com",
+            "993",
+        ),
         ("yahoo", "Yahoo Mail", "imap.mail.yahoo.com", "993"),
         ("yandex", "Yandex", "imap.yandex.com", "993"),
         ("zoho", "Zoho Mail", "imap.zoho.com", "993"),
@@ -48,16 +58,20 @@ pub fn email_connect(props: &EmailProps) -> Html {
             move |_| {
                 // Auth handled by cookies
                 spawn_local(async move {
-                    let request = Api::get("/api/auth/imap/status")
-                        .send()
-                        .await;
+                    let request = Api::get("/api/auth/imap/status").send().await;
                     if let Ok(response) = request {
                         if response.ok() {
                             if let Ok(data) = response.json::<serde_json::Value>().await {
-                                if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                if let Some(connected) =
+                                    data.get("connected").and_then(|v| v.as_bool())
+                                {
                                     imap_connected.set(connected);
                                     if connected {
-                                        connected_email.set(data.get("email").and_then(|e| e.as_str()).map(String::from));
+                                        connected_email.set(
+                                            data.get("email")
+                                                .and_then(|e| e.as_str())
+                                                .map(String::from),
+                                        );
                                     } else {
                                         connected_email.set(None);
                                     }
@@ -96,7 +110,8 @@ pub fn email_connect(props: &EmailProps) -> Html {
             let value = select.value();
             imap_provider.set(value.clone());
             // Auto-fill server and port for predefined providers
-            if let Some((_, _, server, port)) = providers.iter().find(|(id, _, _, _)| *id == value) {
+            if let Some((_, _, server, port)) = providers.iter().find(|(id, _, _, _)| *id == value)
+            {
                 imap_server.set(server.to_string());
                 imap_port.set(port.to_string());
             } else {
@@ -175,10 +190,15 @@ pub fn email_connect(props: &EmailProps) -> Html {
                             });
                         } else {
                             if let Ok(error_data) = response.json::<serde_json::Value>().await {
-                                if let Some(error_msg) = error_data.get("error").and_then(|e| e.as_str()) {
+                                if let Some(error_msg) =
+                                    error_data.get("error").and_then(|e| e.as_str())
+                                {
                                     error.set(Some(error_msg.to_string()));
                                 } else {
-                                    error.set(Some(format!("Failed to connect: {}", response.status())));
+                                    error.set(Some(format!(
+                                        "Failed to connect: {}",
+                                        response.status()
+                                    )));
                                 }
                             }
                         }
@@ -200,9 +220,7 @@ pub fn email_connect(props: &EmailProps) -> Html {
             let connected_email = connected_email.clone();
             // Auth handled by cookies
             spawn_local(async move {
-                let request = Api::delete("/api/auth/imap/disconnect")
-                    .send()
-                    .await;
+                let request = Api::delete("/api/auth/imap/disconnect").send().await;
                 match request {
                     Ok(response) => {
                         if response.ok() {
@@ -211,10 +229,15 @@ pub fn email_connect(props: &EmailProps) -> Html {
                             error.set(None);
                         } else {
                             if let Ok(error_data) = response.json::<serde_json::Value>().await {
-                                if let Some(error_msg) = error_data.get("error").and_then(|e| e.as_str()) {
+                                if let Some(error_msg) =
+                                    error_data.get("error").and_then(|e| e.as_str())
+                                {
                                     error.set(Some(error_msg.to_string()));
                                 } else {
-                                    error.set(Some(format!("Failed to disconnect: {}", response.status())));
+                                    error.set(Some(format!(
+                                        "Failed to disconnect: {}",
+                                        response.status()
+                                    )));
                                 }
                             }
                         }
@@ -245,7 +268,7 @@ pub fn email_connect(props: &EmailProps) -> Html {
                     {
                         let display = element.get_attribute("style")
                             .unwrap_or_else(|| "display: none".to_string());
-                      
+
                         if display.contains("none") {
                             let _ = element.set_attribute("style", "display: block");
                         } else {

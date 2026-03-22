@@ -1,5 +1,5 @@
-use yew::prelude::*;
 use super::bridge_connect::{BridgeConnect, WHATSAPP_CONFIG};
+use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
 pub struct WhatsappProps {

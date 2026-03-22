@@ -1,11 +1,11 @@
-use yew::prelude::*;
-use wasm_bindgen::JsCast;
-use web_sys::MouseEvent;
+use super::people_list::PeopleList;
 use crate::auth::connect::Connect;
-use crate::profile::settings::SettingsPage;
 use crate::profile::billing_credits::BillingPage;
 use crate::profile::billing_models::UserProfile;
-use super::people_list::PeopleList;
+use crate::profile::settings::SettingsPage;
+use wasm_bindgen::JsCast;
+use web_sys::MouseEvent;
+use yew::prelude::*;
 
 const SETTINGS_STYLES: &str = r#"
 .settings-panel-overlay {
@@ -135,17 +135,26 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
         let is_open = props.is_open;
         use_effect_with_deps(
             move |is_open: &bool| {
-                let closure_holder: std::rc::Rc<std::cell::RefCell<Option<wasm_bindgen::closure::Closure<dyn Fn(web_sys::KeyboardEvent)>>>> =
-                    std::rc::Rc::new(std::cell::RefCell::new(None));
+                let closure_holder: std::rc::Rc<
+                    std::cell::RefCell<
+                        Option<wasm_bindgen::closure::Closure<dyn Fn(web_sys::KeyboardEvent)>>,
+                    >,
+                > = std::rc::Rc::new(std::cell::RefCell::new(None));
                 if *is_open {
                     let on_close = on_close.clone();
-                    let closure = wasm_bindgen::closure::Closure::<dyn Fn(web_sys::KeyboardEvent)>::new(move |e: web_sys::KeyboardEvent| {
-                        if e.key() == "Escape" {
-                            on_close.emit(());
-                        }
-                    });
+                    let closure =
+                        wasm_bindgen::closure::Closure::<dyn Fn(web_sys::KeyboardEvent)>::new(
+                            move |e: web_sys::KeyboardEvent| {
+                                if e.key() == "Escape" {
+                                    on_close.emit(());
+                                }
+                            },
+                        );
                     if let Some(document) = web_sys::window().and_then(|w| w.document()) {
-                        let _ = document.add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
+                        let _ = document.add_event_listener_with_callback(
+                            "keydown",
+                            closure.as_ref().unchecked_ref(),
+                        );
                     }
                     *closure_holder.borrow_mut() = Some(closure);
                 }
@@ -153,7 +162,10 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                 move || {
                     if let Some(closure) = holder.borrow_mut().take() {
                         if let Some(document) = web_sys::window().and_then(|w| w.document()) {
-                            let _ = document.remove_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
+                            let _ = document.remove_event_listener_with_callback(
+                                "keydown",
+                                closure.as_ref().unchecked_ref(),
+                            );
                         }
                     }
                 }

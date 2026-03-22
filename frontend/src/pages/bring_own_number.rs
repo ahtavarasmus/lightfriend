@@ -1,12 +1,12 @@
-use yew::prelude::*;
-use crate::Route;
-use yew_router::prelude::*;
-use web_sys::{MouseEvent, window, Event};
-use gloo_net::http::Request;
-use wasm_bindgen_futures::spawn_local;
-use serde_json::json;
 use crate::utils::api::Api;
 use crate::utils::seo::{use_seo, SeoMeta};
+use crate::Route;
+use gloo_net::http::Request;
+use serde_json::json;
+use wasm_bindgen_futures::spawn_local;
+use web_sys::{window, Event, MouseEvent};
+use yew::prelude::*;
+use yew_router::prelude::*;
 
 #[derive(Properties, PartialEq)]
 pub struct TwilioHostedInstructionsProps {
@@ -750,7 +750,9 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                     wasm_bindgen_futures::spawn_local(async move {
                         if let Ok(response) = Request::get("https://ipapi.co/json/").send().await {
                             if let Ok(json) = response.json::<serde_json::Value>().await {
-                                if let Some(code) = json.get("country_code").and_then(|c| c.as_str()) {
+                                if let Some(code) =
+                                    json.get("country_code").and_then(|c| c.as_str())
+                                {
                                     selected_country.set(code.to_lowercase());
                                 }
                             }
@@ -848,7 +850,12 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             let phone_number = phone_number.clone();
             let phone_save_status = phone_save_status.clone();
             let val = (*phone_number).clone();
-            if val.is_empty() || !val.starts_with('+') || val.len() < 10 || !val[1..].chars().all(|c| c.is_ascii_digit()) || val.starts_with("...") {
+            if val.is_empty()
+                || !val.starts_with('+')
+                || val.len() < 10
+                || !val[1..].chars().all(|c| c.is_ascii_digit())
+                || val.starts_with("...")
+            {
                 phone_save_status.set(Some(Err("Invalid phone number format".to_string())));
                 return;
             }
@@ -856,26 +863,32 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             spawn_local(async move {
                 let result = Api::post("/api/profile/twilio-phone")
                     .header("Content-Type", "application/json")
-                    .body(serde_json::to_string(&json!({
-                        "twilio_phone": *phone_number
-                    })).unwrap())
+                    .body(
+                        serde_json::to_string(&json!({
+                            "twilio_phone": *phone_number
+                        }))
+                        .unwrap(),
+                    )
                     .send()
                     .await;
                 match result {
-                        Ok(response) => {
-                            if response.status() == 401 {
-                                if let Some(window) = window() {
-                                    if let Ok(Some(storage)) = window.local_storage() {
-                                        let _ = storage.remove_item("token");
-                                    }
+                    Ok(response) => {
+                        if response.status() == 401 {
+                            if let Some(window) = window() {
+                                if let Ok(Some(storage)) = window.local_storage() {
+                                    let _ = storage.remove_item("token");
                                 }
-                                phone_save_status.set(Some(Err("Session expired. Please log in again.".to_string())));
-                            } else if response.ok() {
-                                phone_save_status.set(Some(Ok(())));
-                            } else {
-                                phone_save_status.set(Some(Err("Failed to save Twilio phone".to_string())));
                             }
+                            phone_save_status.set(Some(Err(
+                                "Session expired. Please log in again.".to_string(),
+                            )));
+                        } else if response.ok() {
+                            phone_save_status.set(Some(Ok(())));
+                        } else {
+                            phone_save_status
+                                .set(Some(Err("Failed to save Twilio phone".to_string())));
                         }
+                    }
                     Err(_) => {
                         phone_save_status.set(Some(Err("Network error occurred".to_string())));
                     }
@@ -892,12 +905,19 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             let auth_token = auth_token.clone();
             let creds_save_status = creds_save_status.clone();
             let sid_val = (*account_sid).clone();
-            if sid_val.len() != 34 || !sid_val.starts_with("AC") || !sid_val[2..].chars().all(|c| c.is_ascii_hexdigit()) || sid_val.starts_with("...") {
+            if sid_val.len() != 34
+                || !sid_val.starts_with("AC")
+                || !sid_val[2..].chars().all(|c| c.is_ascii_hexdigit())
+                || sid_val.starts_with("...")
+            {
                 creds_save_status.set(Some(Err("Invalid Account SID format".to_string())));
                 return;
             }
             let token_val = (*auth_token).clone();
-            if token_val.len() != 32 || !token_val.chars().all(|c| c.is_ascii_hexdigit()) || token_val.starts_with("...") {
+            if token_val.len() != 32
+                || !token_val.chars().all(|c| c.is_ascii_hexdigit())
+                || token_val.starts_with("...")
+            {
                 creds_save_status.set(Some(Err("Invalid Auth Token format".to_string())));
                 return;
             }
@@ -905,27 +925,33 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             spawn_local(async move {
                 let result = Api::post("/api/profile/twilio-creds")
                     .header("Content-Type", "application/json")
-                    .body(serde_json::to_string(&json!({
-                        "account_sid": *account_sid,
-                        "auth_token": *auth_token
-                    })).unwrap())
+                    .body(
+                        serde_json::to_string(&json!({
+                            "account_sid": *account_sid,
+                            "auth_token": *auth_token
+                        }))
+                        .unwrap(),
+                    )
                     .send()
                     .await;
                 match result {
-                        Ok(response) => {
-                            if response.status() == 401 {
-                                if let Some(window) = window() {
-                                    if let Ok(Some(storage)) = window.local_storage() {
-                                        let _ = storage.remove_item("token");
-                                    }
+                    Ok(response) => {
+                        if response.status() == 401 {
+                            if let Some(window) = window() {
+                                if let Ok(Some(storage)) = window.local_storage() {
+                                    let _ = storage.remove_item("token");
                                 }
-                                creds_save_status.set(Some(Err("Session expired. Please log in again.".to_string())));
-                            } else if response.ok() {
-                                creds_save_status.set(Some(Ok(())));
-                            } else {
-                                creds_save_status.set(Some(Err("Failed to save Twilio credentials".to_string())));
                             }
+                            creds_save_status.set(Some(Err(
+                                "Session expired. Please log in again.".to_string(),
+                            )));
+                        } else if response.ok() {
+                            creds_save_status.set(Some(Ok(())));
+                        } else {
+                            creds_save_status
+                                .set(Some(Err("Failed to save Twilio credentials".to_string())));
                         }
+                    }
                     Err(_) => {
                         creds_save_status.set(Some(Err("Network error occurred".to_string())));
                     }
@@ -943,9 +969,7 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             let auth_token = auth_token.clone();
             creds_save_status.set(None);
             spawn_local(async move {
-                let result = Api::delete("/api/profile/twilio-creds")
-                    .send()
-                    .await;
+                let result = Api::delete("/api/profile/twilio-creds").send().await;
                 match result {
                     Ok(response) => {
                         if response.status() == 401 {
@@ -954,14 +978,17 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                                     let _ = storage.remove_item("token");
                                 }
                             }
-                            creds_save_status.set(Some(Err("Session expired. Please log in again.".to_string())));
+                            creds_save_status.set(Some(Err(
+                                "Session expired. Please log in again.".to_string(),
+                            )));
                         } else if response.ok() {
                             // Clear the input fields
                             account_sid.set(String::new());
                             auth_token.set(String::new());
                             creds_save_status.set(Some(Ok(())));
                         } else {
-                            creds_save_status.set(Some(Err("Failed to remove credentials".to_string())));
+                            creds_save_status
+                                .set(Some(Err("Failed to remove credentials".to_string())));
                         }
                     }
                     Err(_) => {
@@ -989,20 +1016,27 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
     // 1. Tier 2 users (existing behavior)
     // 2. Users from non-local-number countries (BYOT eligibility)
     // Local number countries: US, CA, FI, NL, GB, AU - these have Lightfriend-provided numbers
-    let is_local_number_country = props.country.as_deref().map(|c| {
-        matches!(c, "US" | "CA" | "FI" | "NL" | "GB" | "AU")
-    }).unwrap_or(true); // Default to true if no country (block access until country is known)
+    let is_local_number_country = props
+        .country
+        .as_deref()
+        .map(|c| matches!(c, "US" | "CA" | "FI" | "NL" | "GB" | "AU"))
+        .unwrap_or(true); // Default to true if no country (block access until country is known)
 
-    let can_edit = props.is_logged_in && (
-        props.sub_tier.is_some() || !is_local_number_country
-    );
+    let can_edit = props.is_logged_in && (props.sub_tier.is_some() || !is_local_number_country);
     let is_phone_valid = {
         let val = &*phone_number;
-        !val.is_empty() && val.starts_with('+') && val.len() >= 10 && val[1..].chars().all(|c| c.is_ascii_digit()) && !val.starts_with("...")
+        !val.is_empty()
+            && val.starts_with('+')
+            && val.len() >= 10
+            && val[1..].chars().all(|c| c.is_ascii_digit())
+            && !val.starts_with("...")
     };
     let is_sid_valid = {
         let val = &*account_sid;
-        val.len() == 34 && val.starts_with("AC") && val[2..].chars().all(|c| c.is_ascii_hexdigit()) && !val.starts_with("...")
+        val.len() == 34
+            && val.starts_with("AC")
+            && val[2..].chars().all(|c| c.is_ascii_hexdigit())
+            && !val.starts_with("...")
     };
     let is_token_valid = {
         let val = &*auth_token;

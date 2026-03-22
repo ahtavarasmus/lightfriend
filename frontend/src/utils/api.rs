@@ -1,9 +1,9 @@
+use crate::config;
 use gloo_net::http::Request;
 use gloo_net::Error as GlooError;
-use web_sys::RequestCredentials;
-use crate::config;
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
+use web_sys::RequestCredentials;
 
 // Global flag to prevent redirect loops
 static REDIRECTING_TO_LOGIN: AtomicBool = AtomicBool::new(false);
@@ -86,7 +86,9 @@ impl RequestWrapper {
                     .await
                 {
                     if refresh_resp.ok() {
-                        gloo_console::log!("Token refresh succeeded, retrying auth status check...");
+                        gloo_console::log!(
+                            "Token refresh succeeded, retrying auth status check..."
+                        );
                         let full_url = format!("{}/api/auth/status", config::get_backend_url());
                         if let Ok(retry) = Request::get(&full_url)
                             .credentials(RequestCredentials::Include)
@@ -110,10 +112,11 @@ impl RequestWrapper {
             gloo_console::log!("Got 401, attempting token refresh...");
 
             // Try to refresh the token
-            let refresh_result = Request::post(&format!("{}/api/auth/refresh", config::get_backend_url()))
-                .credentials(RequestCredentials::Include)
-                .send()
-                .await;
+            let refresh_result =
+                Request::post(&format!("{}/api/auth/refresh", config::get_backend_url()))
+                    .credentials(RequestCredentials::Include)
+                    .send()
+                    .await;
 
             match refresh_result {
                 Ok(refresh_resp) if refresh_resp.ok() => {
@@ -141,7 +144,9 @@ impl RequestWrapper {
 
                     // If retry also returns 401, refresh token is invalid - redirect to login
                     if retry_response.status() == 401 {
-                        gloo_console::log!("Retry also returned 401, refresh token invalid, redirecting to login");
+                        gloo_console::log!(
+                            "Retry also returned 401, refresh token invalid, redirecting to login"
+                        );
                         REDIRECTING_TO_LOGIN.store(true, Ordering::Relaxed);
                         if let Some(window) = web_sys::window() {
                             let _ = window.location().set_href("/login");

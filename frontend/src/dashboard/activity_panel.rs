@@ -1,10 +1,10 @@
-use yew::prelude::*;
-use wasm_bindgen::JsCast;
-use web_sys::MouseEvent;
-use wasm_bindgen_futures::spawn_local;
-use serde::Deserialize;
+use super::timeline_view::{UpcomingDigest, UpcomingItem};
 use crate::utils::api::Api;
-use super::timeline_view::{UpcomingItem, UpcomingDigest};
+use serde::Deserialize;
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::spawn_local;
+use web_sys::MouseEvent;
+use yew::prelude::*;
 
 const ACTIVITY_STYLES: &str = r#"
 .activity-panel-overlay {
@@ -328,17 +328,26 @@ pub fn activity_panel(props: &ActivityPanelProps) -> Html {
         let is_open = props.is_open;
         use_effect_with_deps(
             move |is_open: &bool| {
-                let closure_holder: std::rc::Rc<std::cell::RefCell<Option<wasm_bindgen::closure::Closure<dyn Fn(web_sys::KeyboardEvent)>>>> =
-                    std::rc::Rc::new(std::cell::RefCell::new(None));
+                let closure_holder: std::rc::Rc<
+                    std::cell::RefCell<
+                        Option<wasm_bindgen::closure::Closure<dyn Fn(web_sys::KeyboardEvent)>>,
+                    >,
+                > = std::rc::Rc::new(std::cell::RefCell::new(None));
                 if *is_open {
                     let on_close = on_close.clone();
-                    let closure = wasm_bindgen::closure::Closure::<dyn Fn(web_sys::KeyboardEvent)>::new(move |e: web_sys::KeyboardEvent| {
-                        if e.key() == "Escape" {
-                            on_close.emit(());
-                        }
-                    });
+                    let closure =
+                        wasm_bindgen::closure::Closure::<dyn Fn(web_sys::KeyboardEvent)>::new(
+                            move |e: web_sys::KeyboardEvent| {
+                                if e.key() == "Escape" {
+                                    on_close.emit(());
+                                }
+                            },
+                        );
                     if let Some(document) = web_sys::window().and_then(|w| w.document()) {
-                        let _ = document.add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
+                        let _ = document.add_event_listener_with_callback(
+                            "keydown",
+                            closure.as_ref().unchecked_ref(),
+                        );
                     }
                     *closure_holder.borrow_mut() = Some(closure);
                 }
@@ -346,7 +355,10 @@ pub fn activity_panel(props: &ActivityPanelProps) -> Html {
                 move || {
                     if let Some(closure) = holder.borrow_mut().take() {
                         if let Some(document) = web_sys::window().and_then(|w| w.document()) {
-                            let _ = document.remove_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
+                            let _ = document.remove_event_listener_with_callback(
+                                "keydown",
+                                closure.as_ref().unchecked_ref(),
+                            );
                         }
                     }
                 }
@@ -533,7 +545,9 @@ fn render_upcoming(props: &ActivityPanelProps) -> Html {
     let mut current_day_start: Option<i64> = None;
 
     for entry in &entries {
-        let entry_date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(entry.timestamp() as f64 * 1000.0));
+        let entry_date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(
+            entry.timestamp() as f64 * 1000.0,
+        ));
         let entry_day_start = {
             let d = entry_date.clone();
             d.set_hours(0);
@@ -557,19 +571,37 @@ fn render_upcoming(props: &ActivityPanelProps) -> Html {
             } else {
                 let day_of_week = entry_date.get_day();
                 let day_str = match day_of_week {
-                    0 => "Sun", 1 => "Mon", 2 => "Tue", 3 => "Wed",
-                    4 => "Thu", 5 => "Fri", 6 => "Sat", _ => "",
+                    0 => "Sun",
+                    1 => "Mon",
+                    2 => "Tue",
+                    3 => "Wed",
+                    4 => "Thu",
+                    5 => "Fri",
+                    6 => "Sat",
+                    _ => "",
                 };
                 let month = entry_date.get_month();
                 let month_str = match month {
-                    0 => "Jan", 1 => "Feb", 2 => "Mar", 3 => "Apr",
-                    4 => "May", 5 => "Jun", 6 => "Jul", 7 => "Aug",
-                    8 => "Sep", 9 => "Oct", 10 => "Nov", 11 => "Dec",
+                    0 => "Jan",
+                    1 => "Feb",
+                    2 => "Mar",
+                    3 => "Apr",
+                    4 => "May",
+                    5 => "Jun",
+                    6 => "Jul",
+                    7 => "Aug",
+                    8 => "Sep",
+                    9 => "Oct",
+                    10 => "Nov",
+                    11 => "Dec",
                     _ => "",
                 };
                 format!("{} {} {}", day_str, month_str, entry_date.get_date())
             };
-            groups.push(DayGroup { label, entries: vec![entry.clone()] });
+            groups.push(DayGroup {
+                label,
+                entries: vec![entry.clone()],
+            });
             current_day_start = Some(entry_day_start);
         } else {
             if let Some(group) = groups.last_mut() {
@@ -607,28 +639,29 @@ fn render_upcoming_entry(
     on_item_click: &Option<Callback<UpcomingItem>>,
     on_item_delete: &Option<Callback<i32>>,
 ) -> Html {
-    let (is_digest, time_display, description, item_type, notify, sources, item_id, timestamp) = match entry {
-        UpcomingEntry::Item(t) => (
-            false,
-            t.time_display.clone(),
-            t.description.clone(),
-            t.item_type.clone(),
-            t.notify.clone(),
-            t.sources_display.clone(),
-            t.item_id,
-            t.timestamp,
-        ),
-        UpcomingEntry::Digest(d) => (
-            true,
-            d.time_display.clone(),
-            format!("Digest: {}", d.sources.as_deref().unwrap_or("all sources")),
-            Some("recurring".to_string()),
-            None,
-            None,
-            d.item_id,
-            d.timestamp,
-        ),
-    };
+    let (is_digest, time_display, description, item_type, notify, sources, item_id, timestamp) =
+        match entry {
+            UpcomingEntry::Item(t) => (
+                false,
+                t.time_display.clone(),
+                t.description.clone(),
+                t.item_type.clone(),
+                t.notify.clone(),
+                t.sources_display.clone(),
+                t.item_id,
+                t.timestamp,
+            ),
+            UpcomingEntry::Digest(d) => (
+                true,
+                d.time_display.clone(),
+                format!("Digest: {}", d.sources.as_deref().unwrap_or("all sources")),
+                Some("recurring".to_string()),
+                None,
+                None,
+                d.item_id,
+                d.timestamp,
+            ),
+        };
     let is_tracking = item_type.as_deref() == Some("tracking");
 
     // Relative time
@@ -641,7 +674,11 @@ fn render_upcoming_entry(
         format!("in {}h", diff_secs / 3600)
     } else {
         let days = diff_secs / 86400;
-        if days == 1 { "in 1 day".to_string() } else { format!("in {} days", days) }
+        if days == 1 {
+            "in 1 day".to_string()
+        } else {
+            format!("in {} days", days)
+        }
     };
 
     // Border-left color based on time of day
@@ -666,7 +703,10 @@ fn render_upcoming_entry(
                             item_id: d.item_id,
                             timestamp: d.timestamp,
                             time_display: d.time_display.clone(),
-                            description: format!("Digest: {}", d.sources.as_deref().unwrap_or("all sources")),
+                            description: format!(
+                                "Digest: {}",
+                                d.sources.as_deref().unwrap_or("all sources")
+                            ),
                             date_display: String::new(),
                             relative_display: String::new(),
                             item_type: Some("recurring".to_string()),
@@ -739,17 +779,29 @@ fn get_time_color(timestamp: i32, sunrise: f32, sunset: f32) -> String {
     let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(timestamp as f64 * 1000.0));
     let hour = date.get_hours() as f32 + (date.get_minutes() as f32 / 60.0);
 
-    if hour < (sunrise - 2.0).max(0.0) { "#1a1a2e".to_string() }
-    else if hour < (sunrise - 1.5).max(0.0) { "#2d1f3d".to_string() }
-    else if hour < (sunrise - 1.0).max(0.0) { "#4a3050".to_string() }
-    else if hour < (sunrise - 0.5).max(0.0) { "#6b4a5e".to_string() }
-    else if hour < sunrise + 1.0 { "#87616b".to_string() }
-    else if hour < sunset - 1.0 { "#3d4f6f".to_string() }
-    else if hour < sunset - 0.5 { "#5a5070".to_string() }
-    else if hour < sunset { "#6b4a5e".to_string() }
-    else if hour < sunset + 1.0 { "#4a3050".to_string() }
-    else if hour < sunset + 2.0 { "#2d1f3d".to_string() }
-    else { "#1a1a2e".to_string() }
+    if hour < (sunrise - 2.0).max(0.0) {
+        "#1a1a2e".to_string()
+    } else if hour < (sunrise - 1.5).max(0.0) {
+        "#2d1f3d".to_string()
+    } else if hour < (sunrise - 1.0).max(0.0) {
+        "#4a3050".to_string()
+    } else if hour < (sunrise - 0.5).max(0.0) {
+        "#6b4a5e".to_string()
+    } else if hour < sunrise + 1.0 {
+        "#87616b".to_string()
+    } else if hour < sunset - 1.0 {
+        "#3d4f6f".to_string()
+    } else if hour < sunset - 0.5 {
+        "#5a5070".to_string()
+    } else if hour < sunset {
+        "#6b4a5e".to_string()
+    } else if hour < sunset + 1.0 {
+        "#4a3050".to_string()
+    } else if hour < sunset + 2.0 {
+        "#2d1f3d".to_string()
+    } else {
+        "#1a1a2e".to_string()
+    }
 }
 
 fn format_activity(activity: &ActivityEntry) -> String {

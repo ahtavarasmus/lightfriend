@@ -1,14 +1,14 @@
-use yew::prelude::*;
-use yew_router::prelude::*;
-use crate::Route;
+use crate::dashboard::dashboard_view::DashboardView;
+use crate::pages::landing::Landing;
+use crate::profile::billing_models::UserProfile;
 use crate::utils::api::Api;
-use web_sys::window;
+use crate::Route;
 use serde::Deserialize;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
-use crate::pages::landing::Landing;
-use crate::profile::billing_models::UserProfile;
-use crate::dashboard::dashboard_view::DashboardView;
+use web_sys::window;
+use yew::prelude::*;
+use yew_router::prelude::*;
 
 #[derive(Deserialize)]
 struct TotpStatusResponse {
@@ -111,7 +111,10 @@ pub fn Home() -> Html {
                                     error.set(None);
                                 }
                                 Err(e) => {
-                                    gloo_console::log!("Failed to parse profile data:", format!("{:?}", e));
+                                    gloo_console::log!(
+                                        "Failed to parse profile data:",
+                                        format!("{:?}", e)
+                                    );
                                     auth_status.set(Some(false));
                                     error.set(Some("Failed to parse profile data".to_string()));
                                 }
@@ -327,11 +330,7 @@ pub fn Home() -> Html {
 fn clean_url() {
     if let Some(window) = window() {
         if let Ok(history) = window.history() {
-            let _ = history.replace_state_with_url(
-                &wasm_bindgen::JsValue::NULL,
-                "",
-                Some("/")
-            );
+            let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some("/"));
         }
     }
 }

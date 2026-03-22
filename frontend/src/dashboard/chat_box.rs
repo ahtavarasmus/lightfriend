@@ -1,12 +1,12 @@
-use yew::prelude::*;
-use web_sys::HtmlTextAreaElement;
-use wasm_bindgen_futures::spawn_local;
-use serde_json::{json, Value};
-use crate::utils::api::Api;
-use crate::dashboard::media_panel::{MediaPanel, MediaItem, extract_video_id};
+use super::timeline_view::UpcomingItem;
+use crate::dashboard::media_panel::{extract_video_id, MediaItem, MediaPanel};
 use crate::dashboard::tesla_quick_panel::TeslaQuickPanel;
 use crate::dashboard::youtube_quick_panel::{YouTubeQuickPanel, YtBrowseState};
-use super::timeline_view::UpcomingItem;
+use crate::utils::api::Api;
+use serde_json::{json, Value};
+use wasm_bindgen_futures::spawn_local;
+use web_sys::HtmlTextAreaElement;
+use yew::prelude::*;
 
 // @mention system - available mentions
 const MENTION_OPTIONS: &[(&str, &str, &str)] = &[
@@ -453,7 +453,8 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                     if let Some(input) = chat_input_ref.cast::<HtmlTextAreaElement>() {
                         let _ = input.focus();
                     }
-                }).forget();
+                })
+                .forget();
                 || ()
             },
             (),
@@ -479,10 +480,13 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                 let el: &web_sys::HtmlElement = input.unchecked_ref();
                                 let _ = el.style().set_property("height", "auto");
                                 let scroll_h = el.scroll_height();
-                                let _ = el.style().set_property("height", &format!("{}px", scroll_h));
+                                let _ = el
+                                    .style()
+                                    .set_property("height", &format!("{}px", scroll_h));
                             }
                         }
-                    }).forget();
+                    })
+                    .forget();
                     if let Some(cb) = &on_prefill_consumed {
                         cb.emit(());
                     }
@@ -594,195 +598,263 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                 let focused_item_sse = focused_item.clone();
                 let chat_input_ref_sse = chat_input_ref.clone();
                 spawn_local(async move {
-                use wasm_bindgen::JsCast;
-                use wasm_bindgen::closure::Closure;
+                    use wasm_bindgen::closure::Closure;
+                    use wasm_bindgen::JsCast;
 
-                // Pre-flight: ensure auth tokens are fresh before SSE connection
-                let _ = crate::utils::api::Api::get("/api/auth/status").send().await;
+                    // Pre-flight: ensure auth tokens are fresh before SSE connection
+                    let _ = crate::utils::api::Api::get("/api/auth/status").send().await;
 
-                let encoded_msg = js_sys::encode_uri_component(&message).as_string().unwrap_or_default();
-                let url = if let Some(ref item) = focused_item_sse {
-                    if let Some(id) = item.item_id {
-                        format!("{}/api/items/{}/edit-ai-stream?instruction={}", crate::config::get_backend_url(), id, encoded_msg)
-                    } else {
-                        // No item ID - can't edit
-                        chat_error.set(Some("Item has no ID".to_string()));
-                        chat_loading.set(false);
-                        return;
-                    }
-                } else {
-                    format!("{}/api/chat/web-stream?message={}", crate::config::get_backend_url(), encoded_msg)
-                };
-
-                let mut init = web_sys::EventSourceInit::new();
-                init.set_with_credentials(true);
-                let es = match web_sys::EventSource::new_with_event_source_init_dict(&url, &init) {
-                    Ok(es) => es,
-                    Err(_) => {
-                        // Fall back to POST if EventSource creation fails
-                        chat_status.set("...".to_string());
-                        let chat_bot_reply = chat_bot_reply.clone();
-                        let chat_loading = chat_loading.clone();
-                        let chat_error = chat_error.clone();
-                        let refetch_usage = refetch_usage.clone();
-                        let detected_media = detected_media.clone();
-                        let media_playing = media_playing.clone();
-                        let on_item_created = on_item_created.clone();
-                        let chat_input_ref_post = chat_input_ref_sse.clone();
-                        spawn_local(async move {
-                            match Api::post("/api/chat/web")
-                                .json(&json!({ "message": message })).unwrap()
-                                .send().await
-                            {
-                                Ok(response) if response.ok() => {
-                                    if let Ok(data) = response.json::<Value>().await {
-                                        let reply = data["message"].as_str().unwrap_or("No response").to_string();
-                                        chat_bot_reply.set(Some(reply));
-                                        refetch_usage.emit(());
-                                        if let Some(item_id) = data["created_item_id"].as_i64() {
-                                            on_item_created.emit(item_id as i32);
-                                        }
-                                    }
-                                }
-                                Ok(response) => {
-                                    if let Ok(data) = response.json::<Value>().await {
-                                        let err = data["error"].as_str().unwrap_or("Request failed").to_string();
-                                        chat_error.set(Some(err));
-                                    }
-                                }
-                                Err(_) => {
-                                    chat_error.set(Some("Network error".to_string()));
-                                }
-                            }
+                    let encoded_msg = js_sys::encode_uri_component(&message)
+                        .as_string()
+                        .unwrap_or_default();
+                    let url = if let Some(ref item) = focused_item_sse {
+                        if let Some(id) = item.item_id {
+                            format!(
+                                "{}/api/items/{}/edit-ai-stream?instruction={}",
+                                crate::config::get_backend_url(),
+                                id,
+                                encoded_msg
+                            )
+                        } else {
+                            // No item ID - can't edit
+                            chat_error.set(Some("Item has no ID".to_string()));
                             chat_loading.set(false);
-                            if let Some(input) = chat_input_ref_post.cast::<web_sys::HtmlTextAreaElement>() {
-                                let _ = input.focus();
-                            }
-                        });
-                        return;
-                    }
-                };
+                            return;
+                        }
+                    } else {
+                        format!(
+                            "{}/api/chat/web-stream?message={}",
+                            crate::config::get_backend_url(),
+                            encoded_msg
+                        )
+                    };
 
-                // onmessage handler for SSE events
-                let chat_status_msg = chat_status.clone();
-                let chat_bot_reply_msg = chat_bot_reply.clone();
-                let chat_user_msg_msg = chat_user_msg.clone();
-                let chat_loading_msg = chat_loading.clone();
-                let chat_error_msg = chat_error.clone();
-                let refetch_usage_msg = refetch_usage.clone();
-                let detected_media_msg = detected_media.clone();
-                let media_playing_msg = media_playing.clone();
-                let on_item_created_msg = on_item_created.clone();
-                let chat_input_ref_msg = chat_input_ref_sse.clone();
-                let es_ref = es.clone();
-
-                let onmessage = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
-                    if let Some(data_str) = event.data().as_string() {
-                        if let Ok(data) = serde_json::from_str::<Value>(&data_str) {
-                            let step = data["step"].as_str().unwrap_or("");
-                            match step {
-                                "thinking" | "tool_call" | "retry" | "reasoning" => {
-                                    if let Some(msg) = data["message"].as_str() {
-                                        chat_status_msg.set(msg.to_string());
-                                    }
-                                }
-                                "complete" => {
-                                    let reply = data["message"].as_str().unwrap_or("No response").to_string();
-                                    chat_bot_reply_msg.set(Some(reply));
-                                    refetch_usage_msg.emit(());
-
-                                    // Check for media results
-                                    if let Some(media_arr) = data["media"].as_array() {
-                                        let media_items: Vec<MediaItem> = media_arr.iter().filter_map(|m| {
-                                            Some(MediaItem {
-                                                platform: m["platform"].as_str()?.to_string(),
-                                                video_id: m["video_id"].as_str()?.to_string(),
-                                                title: m["title"].as_str().unwrap_or("").to_string(),
-                                                thumbnail: m["thumbnail"].as_str().unwrap_or("").to_string(),
-                                                duration: m["duration"].as_str().map(|s| s.to_string()),
-                                                channel: m["channel"].as_str().map(|s| s.to_string()),
-                                                original_url: None,
-                                            })
-                                        }).collect();
-                                        if !media_items.is_empty() {
-                                            detected_media_msg.set(media_items);
-                                            media_playing_msg.set(false);
-                                        }
-                                    }
-
-                                    // If a rule was created, dispatch event for preview highlight
-                                    if let Some(rule_id) = data["created_item_id"].as_i64() {
-                                        if let Some(window) = web_sys::window() {
-                                            let detail = wasm_bindgen::JsValue::from_f64(rule_id as f64);
-                                            let mut init = web_sys::CustomEventInit::new();
-                                            init.set_detail(&detail);
-                                            if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict("lightfriend-rule-created", &init) {
-                                                let _ = window.dispatch_event(&event);
+                    let mut init = web_sys::EventSourceInit::new();
+                    init.set_with_credentials(true);
+                    let es =
+                        match web_sys::EventSource::new_with_event_source_init_dict(&url, &init) {
+                            Ok(es) => es,
+                            Err(_) => {
+                                // Fall back to POST if EventSource creation fails
+                                chat_status.set("...".to_string());
+                                let chat_bot_reply = chat_bot_reply.clone();
+                                let chat_loading = chat_loading.clone();
+                                let chat_error = chat_error.clone();
+                                let refetch_usage = refetch_usage.clone();
+                                let detected_media = detected_media.clone();
+                                let media_playing = media_playing.clone();
+                                let on_item_created = on_item_created.clone();
+                                let chat_input_ref_post = chat_input_ref_sse.clone();
+                                spawn_local(async move {
+                                    match Api::post("/api/chat/web")
+                                        .json(&json!({ "message": message }))
+                                        .unwrap()
+                                        .send()
+                                        .await
+                                    {
+                                        Ok(response) if response.ok() => {
+                                            if let Ok(data) = response.json::<Value>().await {
+                                                let reply = data["message"]
+                                                    .as_str()
+                                                    .unwrap_or("No response")
+                                                    .to_string();
+                                                chat_bot_reply.set(Some(reply));
+                                                refetch_usage.emit(());
+                                                if let Some(item_id) =
+                                                    data["created_item_id"].as_i64()
+                                                {
+                                                    on_item_created.emit(item_id as i32);
+                                                }
                                             }
                                         }
+                                        Ok(response) => {
+                                            if let Ok(data) = response.json::<Value>().await {
+                                                let err = data["error"]
+                                                    .as_str()
+                                                    .unwrap_or("Request failed")
+                                                    .to_string();
+                                                chat_error.set(Some(err));
+                                            }
+                                        }
+                                        Err(_) => {
+                                            chat_error.set(Some("Network error".to_string()));
+                                        }
                                     }
-
-                                    // Dispatch event for other components
-                                    if let Some(window) = web_sys::window() {
-                                        let event = web_sys::CustomEvent::new("lightfriend-chat-sent").unwrap();
-                                        let _ = window.dispatch_event(&event);
-                                    }
-
-                                    chat_loading_msg.set(false);
-                                    if let Some(input) = chat_input_ref_msg.cast::<web_sys::HtmlTextAreaElement>() {
+                                    chat_loading.set(false);
+                                    if let Some(input) =
+                                        chat_input_ref_post.cast::<web_sys::HtmlTextAreaElement>()
+                                    {
                                         let _ = input.focus();
                                     }
-                                    es_ref.close();
-                                }
-                                "error" => {
-                                    let msg = data["message"].as_str().unwrap_or("An error occurred").to_string();
-                                    chat_error_msg.set(Some(msg));
-                                    chat_loading_msg.set(false);
-                                    if let Some(input) = chat_input_ref_msg.cast::<web_sys::HtmlTextAreaElement>() {
-                                        let _ = input.focus();
+                                });
+                                return;
+                            }
+                        };
+
+                    // onmessage handler for SSE events
+                    let chat_status_msg = chat_status.clone();
+                    let chat_bot_reply_msg = chat_bot_reply.clone();
+                    let chat_user_msg_msg = chat_user_msg.clone();
+                    let chat_loading_msg = chat_loading.clone();
+                    let chat_error_msg = chat_error.clone();
+                    let refetch_usage_msg = refetch_usage.clone();
+                    let detected_media_msg = detected_media.clone();
+                    let media_playing_msg = media_playing.clone();
+                    let on_item_created_msg = on_item_created.clone();
+                    let chat_input_ref_msg = chat_input_ref_sse.clone();
+                    let es_ref = es.clone();
+
+                    let onmessage = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
+                        if let Some(data_str) = event.data().as_string() {
+                            if let Ok(data) = serde_json::from_str::<Value>(&data_str) {
+                                let step = data["step"].as_str().unwrap_or("");
+                                match step {
+                                    "thinking" | "tool_call" | "retry" | "reasoning" => {
+                                        if let Some(msg) = data["message"].as_str() {
+                                            chat_status_msg.set(msg.to_string());
+                                        }
                                     }
-                                    // Refresh dashboard in case tools made changes before the error
-                                    if let Some(window) = web_sys::window() {
-                                        let event = web_sys::CustomEvent::new("lightfriend-chat-sent").unwrap();
-                                        let _ = window.dispatch_event(&event);
+                                    "complete" => {
+                                        let reply = data["message"]
+                                            .as_str()
+                                            .unwrap_or("No response")
+                                            .to_string();
+                                        chat_bot_reply_msg.set(Some(reply));
+                                        refetch_usage_msg.emit(());
+
+                                        // Check for media results
+                                        if let Some(media_arr) = data["media"].as_array() {
+                                            let media_items: Vec<MediaItem> = media_arr
+                                                .iter()
+                                                .filter_map(|m| {
+                                                    Some(MediaItem {
+                                                        platform: m["platform"]
+                                                            .as_str()?
+                                                            .to_string(),
+                                                        video_id: m["video_id"]
+                                                            .as_str()?
+                                                            .to_string(),
+                                                        title: m["title"]
+                                                            .as_str()
+                                                            .unwrap_or("")
+                                                            .to_string(),
+                                                        thumbnail: m["thumbnail"]
+                                                            .as_str()
+                                                            .unwrap_or("")
+                                                            .to_string(),
+                                                        duration: m["duration"]
+                                                            .as_str()
+                                                            .map(|s| s.to_string()),
+                                                        channel: m["channel"]
+                                                            .as_str()
+                                                            .map(|s| s.to_string()),
+                                                        original_url: None,
+                                                    })
+                                                })
+                                                .collect();
+                                            if !media_items.is_empty() {
+                                                detected_media_msg.set(media_items);
+                                                media_playing_msg.set(false);
+                                            }
+                                        }
+
+                                        // If a rule was created, dispatch event for preview highlight
+                                        if let Some(rule_id) = data["created_item_id"].as_i64() {
+                                            if let Some(window) = web_sys::window() {
+                                                let detail =
+                                                    wasm_bindgen::JsValue::from_f64(rule_id as f64);
+                                                let mut init = web_sys::CustomEventInit::new();
+                                                init.set_detail(&detail);
+                                                if let Ok(event) =
+                                                    web_sys::CustomEvent::new_with_event_init_dict(
+                                                        "lightfriend-rule-created",
+                                                        &init,
+                                                    )
+                                                {
+                                                    let _ = window.dispatch_event(&event);
+                                                }
+                                            }
+                                        }
+
+                                        // Dispatch event for other components
+                                        if let Some(window) = web_sys::window() {
+                                            let event =
+                                                web_sys::CustomEvent::new("lightfriend-chat-sent")
+                                                    .unwrap();
+                                            let _ = window.dispatch_event(&event);
+                                        }
+
+                                        chat_loading_msg.set(false);
+                                        if let Some(input) = chat_input_ref_msg
+                                            .cast::<web_sys::HtmlTextAreaElement>()
+                                        {
+                                            let _ = input.focus();
+                                        }
+                                        es_ref.close();
                                     }
-                                    es_ref.close();
+                                    "error" => {
+                                        let msg = data["message"]
+                                            .as_str()
+                                            .unwrap_or("An error occurred")
+                                            .to_string();
+                                        chat_error_msg.set(Some(msg));
+                                        chat_loading_msg.set(false);
+                                        if let Some(input) = chat_input_ref_msg
+                                            .cast::<web_sys::HtmlTextAreaElement>()
+                                        {
+                                            let _ = input.focus();
+                                        }
+                                        // Refresh dashboard in case tools made changes before the error
+                                        if let Some(window) = web_sys::window() {
+                                            let event =
+                                                web_sys::CustomEvent::new("lightfriend-chat-sent")
+                                                    .unwrap();
+                                            let _ = window.dispatch_event(&event);
+                                        }
+                                        es_ref.close();
+                                    }
+                                    _ => {}
                                 }
-                                _ => {}
                             }
                         }
-                    }
-                }) as Box<dyn FnMut(web_sys::MessageEvent)>);
+                    })
+                        as Box<dyn FnMut(web_sys::MessageEvent)>);
 
-                es.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
-                onmessage.forget();
+                    es.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
+                    onmessage.forget();
 
-                // onerror handler
-                let chat_error_err = chat_error.clone();
-                let chat_loading_err = chat_loading.clone();
-                let es_err = es.clone();
-                let onerror = Closure::wrap(Box::new(move |_: web_sys::Event| {
-                    // Only set error if we haven't received a complete/error event yet
-                    if *chat_loading_err {
-                        chat_error_err.set(Some("Connection lost. Please try again.".to_string()));
-                        chat_loading_err.set(false);
-                    }
-                    es_err.close();
-                }) as Box<dyn FnMut(web_sys::Event)>);
+                    // onerror handler
+                    let chat_error_err = chat_error.clone();
+                    let chat_loading_err = chat_loading.clone();
+                    let es_err = es.clone();
+                    let onerror = Closure::wrap(Box::new(move |_: web_sys::Event| {
+                        // Only set error if we haven't received a complete/error event yet
+                        if *chat_loading_err {
+                            chat_error_err
+                                .set(Some("Connection lost. Please try again.".to_string()));
+                            chat_loading_err.set(false);
+                        }
+                        es_err.close();
+                    })
+                        as Box<dyn FnMut(web_sys::Event)>);
 
-                es.set_onerror(Some(onerror.as_ref().unchecked_ref()));
-                onerror.forget();
+                    es.set_onerror(Some(onerror.as_ref().unchecked_ref()));
+                    onerror.forget();
                 }); // end spawn_local for SSE path
             } else {
                 // POST path for image uploads
                 spawn_local(async move {
                     let result = if let Some(file) = image_file {
                         // Send with image
-                        let array_buffer = wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await;
+                        let array_buffer =
+                            wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await;
                         if let Ok(buffer) = array_buffer {
                             let uint8_array = js_sys::Uint8Array::new(&buffer);
                             let bytes: Vec<u8> = uint8_array.to_vec();
-                            let base64_image = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+                            let base64_image = base64::Engine::encode(
+                                &base64::engine::general_purpose::STANDARD,
+                                &bytes,
+                            );
                             let content_type = file.type_();
 
                             Api::post("/api/chat/web")
@@ -795,7 +867,9 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                 .send()
                                 .await
                         } else {
-                            Err(gloo_net::Error::GlooError("Failed to read image".to_string()))
+                            Err(gloo_net::Error::GlooError(
+                                "Failed to read image".to_string(),
+                            ))
                         }
                     } else {
                         // Shouldn't happen (SSE path handles text-only), but fallback
@@ -815,22 +889,42 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             if response.ok() {
                                 match response.json::<Value>().await {
                                     Ok(data) => {
-                                        let reply = data["message"].as_str().unwrap_or("No response").to_string();
+                                        let reply = data["message"]
+                                            .as_str()
+                                            .unwrap_or("No response")
+                                            .to_string();
                                         chat_bot_reply.set(Some(reply));
                                         refetch_usage.emit(());
 
                                         if let Some(media_arr) = data["media"].as_array() {
-                                            let media_items: Vec<MediaItem> = media_arr.iter().filter_map(|m| {
-                                                Some(MediaItem {
-                                                    platform: m["platform"].as_str()?.to_string(),
-                                                    video_id: m["video_id"].as_str()?.to_string(),
-                                                    title: m["title"].as_str().unwrap_or("").to_string(),
-                                                    thumbnail: m["thumbnail"].as_str().unwrap_or("").to_string(),
-                                                    duration: m["duration"].as_str().map(|s| s.to_string()),
-                                                    channel: m["channel"].as_str().map(|s| s.to_string()),
-                                                    original_url: None,
+                                            let media_items: Vec<MediaItem> = media_arr
+                                                .iter()
+                                                .filter_map(|m| {
+                                                    Some(MediaItem {
+                                                        platform: m["platform"]
+                                                            .as_str()?
+                                                            .to_string(),
+                                                        video_id: m["video_id"]
+                                                            .as_str()?
+                                                            .to_string(),
+                                                        title: m["title"]
+                                                            .as_str()
+                                                            .unwrap_or("")
+                                                            .to_string(),
+                                                        thumbnail: m["thumbnail"]
+                                                            .as_str()
+                                                            .unwrap_or("")
+                                                            .to_string(),
+                                                        duration: m["duration"]
+                                                            .as_str()
+                                                            .map(|s| s.to_string()),
+                                                        channel: m["channel"]
+                                                            .as_str()
+                                                            .map(|s| s.to_string()),
+                                                        original_url: None,
+                                                    })
                                                 })
-                                            }).collect();
+                                                .collect();
                                             if !media_items.is_empty() {
                                                 detected_media.set(media_items);
                                                 media_playing.set(false);
@@ -842,23 +936,32 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                         }
 
                                         if let Some(window) = web_sys::window() {
-                                            let event = web_sys::CustomEvent::new("lightfriend-chat-sent").unwrap();
+                                            let event =
+                                                web_sys::CustomEvent::new("lightfriend-chat-sent")
+                                                    .unwrap();
                                             let _ = window.dispatch_event(&event);
                                         }
                                     }
                                     Err(_) => {
-                                        chat_error.set(Some("Failed to parse response".to_string()));
+                                        chat_error
+                                            .set(Some("Failed to parse response".to_string()));
                                     }
                                 }
                             } else {
                                 let status = response.status();
                                 match response.json::<Value>().await {
                                     Ok(data) => {
-                                        let err = data["error"].as_str().unwrap_or("Request failed").to_string();
+                                        let err = data["error"]
+                                            .as_str()
+                                            .unwrap_or("Request failed")
+                                            .to_string();
                                         chat_error.set(Some(err));
                                     }
                                     Err(e) => {
-                                        chat_error.set(Some(format!("Request failed ({}): {}", status, e)));
+                                        chat_error.set(Some(format!(
+                                            "Request failed ({}): {}",
+                                            status, e
+                                        )));
                                     }
                                 }
                             }
@@ -901,9 +1004,16 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                     if let Some(signed_url) = data["signed_url"].as_str() {
                                         let overrides = data
                                             .get("agent_overrides")
-                                            .map(|v| serde_wasm_bindgen::to_value(v).unwrap_or(wasm_bindgen::JsValue::NULL))
+                                            .map(|v| {
+                                                serde_wasm_bindgen::to_value(v)
+                                                    .unwrap_or(wasm_bindgen::JsValue::NULL)
+                                            })
                                             .unwrap_or(wasm_bindgen::JsValue::NULL);
-                                        let result = crate::utils::elevenlabs_web::start_elevenlabs_call(signed_url, overrides).await;
+                                        let result =
+                                            crate::utils::elevenlabs_web::start_elevenlabs_call(
+                                                signed_url, overrides,
+                                            )
+                                            .await;
                                         if result.is_truthy() {
                                             call_active.set(true);
                                             call_duration.set(0);
@@ -911,17 +1021,22 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                             call_error.set(Some("Failed to start call. Check microphone permissions.".to_string()));
                                         }
                                     } else {
-                                        call_error.set(Some("Invalid response from server".to_string()));
+                                        call_error
+                                            .set(Some("Invalid response from server".to_string()));
                                     }
                                 }
                                 Err(_) => {
-                                    call_error.set(Some("Failed to parse server response".to_string()));
+                                    call_error
+                                        .set(Some("Failed to parse server response".to_string()));
                                 }
                             }
                         } else {
                             match response.json::<Value>().await {
                                 Ok(data) => {
-                                    let err = data["error"].as_str().unwrap_or("Failed to start call").to_string();
+                                    let err = data["error"]
+                                        .as_str()
+                                        .unwrap_or("Failed to start call")
+                                        .to_string();
                                     call_error.set(Some(err));
                                 }
                                 Err(_) => {
@@ -964,8 +1079,8 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
     };
 
     // Connection shortcut icon callbacks
-    let show_shortcuts = props.focused_item.is_none()
-        && (props.tesla_connected || props.youtube_connected);
+    let show_shortcuts =
+        props.focused_item.is_none() && (props.tesla_connected || props.youtube_connected);
     let tesla_shortcut_click = {
         let chat_input = chat_input.clone();
         let active_mention = active_mention.clone();
@@ -978,7 +1093,8 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                 if let Some(input) = chat_input_ref.cast::<HtmlTextAreaElement>() {
                     let _ = input.focus();
                 }
-            }).forget();
+            })
+            .forget();
         })
     };
     let youtube_shortcut_click = {
@@ -993,7 +1109,8 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                 if let Some(input) = chat_input_ref.cast::<HtmlTextAreaElement>() {
                     let _ = input.focus();
                 }
-            }).forget();
+            })
+            .forget();
         })
     };
 
@@ -1005,23 +1122,27 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
             "What's the weather?",
             "Check my messages",
         ];
-        let chips: Vec<Html> = suggestions.into_iter().map(|text| {
-            let chat_input = chat_input.clone();
-            let chat_input_ref = chat_input_ref.clone();
-            let text_owned = text.to_string();
-            let on_chip = Callback::from(move |_: MouseEvent| {
-                chat_input.set(text_owned.clone());
+        let chips: Vec<Html> = suggestions
+            .into_iter()
+            .map(|text| {
+                let chat_input = chat_input.clone();
                 let chat_input_ref = chat_input_ref.clone();
-                gloo_timers::callback::Timeout::new(50, move || {
-                    if let Some(input) = chat_input_ref.cast::<HtmlTextAreaElement>() {
-                        let _ = input.focus();
-                    }
-                }).forget();
-            });
-            html! {
-                <button class="chat-suggestion-chip" onclick={on_chip}>{text}</button>
-            }
-        }).collect();
+                let text_owned = text.to_string();
+                let on_chip = Callback::from(move |_: MouseEvent| {
+                    chat_input.set(text_owned.clone());
+                    let chat_input_ref = chat_input_ref.clone();
+                    gloo_timers::callback::Timeout::new(50, move || {
+                        if let Some(input) = chat_input_ref.cast::<HtmlTextAreaElement>() {
+                            let _ = input.focus();
+                        }
+                    })
+                    .forget();
+                });
+                html! {
+                    <button class="chat-suggestion-chip" onclick={on_chip}>{text}</button>
+                }
+            })
+            .collect();
         html! { <div class="chat-suggestions">{for chips}</div> }
     };
 

@@ -1,5 +1,5 @@
-use yew::prelude::*;
 use crate::utils::api::Api;
+use yew::prelude::*;
 
 /// Simple page shown after guest checkout completes
 /// If user is logged in, redirects to home. Otherwise shows "check email" message.
@@ -9,22 +9,25 @@ pub fn subscription_success() -> Html {
     let checking_clone = checking.clone();
 
     // Check if user is logged in via API
-    use_effect_with_deps(move |_| {
-        wasm_bindgen_futures::spawn_local(async move {
-            if let Ok(response) = Api::get("/api/auth/status").send().await {
-                if response.ok() {
-                    // User is logged in - redirect to home
-                    if let Some(window) = web_sys::window() {
-                        let _ = window.location().set_href("/?subscription=success");
+    use_effect_with_deps(
+        move |_| {
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Ok(response) = Api::get("/api/auth/status").send().await {
+                    if response.ok() {
+                        // User is logged in - redirect to home
+                        if let Some(window) = web_sys::window() {
+                            let _ = window.location().set_href("/?subscription=success");
+                        }
+                        return;
                     }
-                    return;
                 }
-            }
-            // Not logged in - show the page
-            checking_clone.set(false);
-        });
-        || ()
-    }, ());
+                // Not logged in - show the page
+                checking_clone.set(false);
+            });
+            || ()
+        },
+        (),
+    );
 
     // Show loading while checking auth
     if *checking {

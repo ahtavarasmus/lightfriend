@@ -1,9 +1,9 @@
-use yew::prelude::*;
-use wasm_bindgen_futures::spawn_local;
-use wasm_bindgen::JsCast;
-use web_sys::{MouseEvent, Event};
-use serde::{Deserialize, Serialize};
 use crate::utils::api::Api;
+use serde::{Deserialize, Serialize};
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::spawn_local;
+use web_sys::{Event, MouseEvent};
+use yew::prelude::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct McpServer {
@@ -56,29 +56,32 @@ pub fn mcp_connect(props: &McpConnectProps) -> Html {
         let servers = servers.clone();
         let loading = loading.clone();
         let error = error.clone();
-        use_effect_with_deps(move |_| {
-            let servers = servers.clone();
-            let loading = loading.clone();
-            let error = error.clone();
-            spawn_local(async move {
-                match Api::get("/api/mcp/servers").send().await {
-                    Ok(response) => {
-                        if response.ok() {
-                            if let Ok(data) = response.json::<Vec<McpServer>>().await {
-                                servers.set(data);
+        use_effect_with_deps(
+            move |_| {
+                let servers = servers.clone();
+                let loading = loading.clone();
+                let error = error.clone();
+                spawn_local(async move {
+                    match Api::get("/api/mcp/servers").send().await {
+                        Ok(response) => {
+                            if response.ok() {
+                                if let Ok(data) = response.json::<Vec<McpServer>>().await {
+                                    servers.set(data);
+                                }
+                            } else {
+                                error.set(Some("Failed to fetch MCP servers".to_string()));
                             }
-                        } else {
-                            error.set(Some("Failed to fetch MCP servers".to_string()));
+                        }
+                        Err(e) => {
+                            error.set(Some(format!("Network error: {}", e)));
                         }
                     }
-                    Err(e) => {
-                        error.set(Some(format!("Network error: {}", e)));
-                    }
-                }
-                loading.set(false);
-            });
-            || ()
-        }, ());
+                    loading.set(false);
+                });
+                || ()
+            },
+            (),
+        );
     }
 
     let on_add_server = {
@@ -144,10 +147,11 @@ pub fn mcp_connect(props: &McpConnectProps) -> Html {
                             }
                         } else if let Ok(err_data) = response.json::<serde_json::Value>().await {
                             error.set(Some(
-                                err_data.get("error")
+                                err_data
+                                    .get("error")
                                     .and_then(|e| e.as_str())
                                     .unwrap_or("Failed to add server")
-                                    .to_string()
+                                    .to_string(),
                             ));
                         }
                     }
@@ -226,9 +230,13 @@ pub fn mcp_connect(props: &McpConnectProps) -> Html {
                 {
                     if response.ok() {
                         if let Ok(result) = response.json::<serde_json::Value>().await {
-                            if let Some(is_enabled) = result.get("is_enabled").and_then(|v| v.as_bool()) {
+                            if let Some(is_enabled) =
+                                result.get("is_enabled").and_then(|v| v.as_bool())
+                            {
                                 let mut new_servers = (*servers).clone();
-                                if let Some(server) = new_servers.iter_mut().find(|s| s.id == server_id) {
+                                if let Some(server) =
+                                    new_servers.iter_mut().find(|s| s.id == server_id)
+                                {
                                     server.is_enabled = is_enabled;
                                 }
                                 servers.set(new_servers);

@@ -1,11 +1,11 @@
-use yew::prelude::*;
-use std::collections::HashMap;
-use wasm_bindgen_futures;
-use web_sys::{Request, RequestInit, window, Response};
-use wasm_bindgen::JsCast;
-use wasm_bindgen_futures::JsFuture;
-use serde_json::Value;
 use crate::utils::seo::{use_seo, SeoMeta};
+use serde_json::Value;
+use std::collections::HashMap;
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures;
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{window, Request, RequestInit, Response};
+use yew::prelude::*;
 
 #[derive(Clone, PartialEq)]
 enum FeatureStatus {
@@ -38,50 +38,62 @@ pub fn supported_countries() -> Html {
 
     let countries = use_state(|| {
         let mut map: HashMap<String, CountryFeatureAvailability> = HashMap::new();
-        map.insert("United States".to_string(), CountryFeatureAvailability {
-            lightfriend_can_provide_local_number: FeatureStatus::Available,
-            user_can_bring_their_own_number: FeatureStatus::Unavailable,
-            local_number: FeatureStatus::Available,
-            inbound_calling: FeatureStatus::Available,
-            outbound_calling: FeatureStatus::Available,
-            inbound_sms: FeatureStatus::Available,
-            outbound_sms: FeatureStatus::Available,
-            mms_messages: FeatureStatus::Available,
-            notes: Some("Full support including MMS".to_string()),
-        });
-        map.insert("United Kingdom".to_string(), CountryFeatureAvailability {
-            lightfriend_can_provide_local_number: FeatureStatus::Available,
-            user_can_bring_their_own_number: FeatureStatus::Unavailable,
-            local_number: FeatureStatus::Available,
-            inbound_calling: FeatureStatus::Available,
-            outbound_calling: FeatureStatus::Available,
-            inbound_sms: FeatureStatus::Available,
-            outbound_sms: FeatureStatus::Available,
-            mms_messages: FeatureStatus::Unavailable,
-            notes: Some("MMS messages are only not supported in Europe".to_string()),
-        });
-        map.insert("Finland".to_string(), CountryFeatureAvailability {
-            lightfriend_can_provide_local_number: FeatureStatus::Available,
-            user_can_bring_their_own_number: FeatureStatus::Unavailable,
-            local_number: FeatureStatus::Available,
-            inbound_calling: FeatureStatus::Available,
-            outbound_calling: FeatureStatus::Available,
-            inbound_sms: FeatureStatus::Available,
-            outbound_sms: FeatureStatus::Available,
-            mms_messages: FeatureStatus::Unavailable,
-            notes: Some("MMS messages are not supported in Europe".to_string()),
-        });
-        map.insert("Australia".to_string(), CountryFeatureAvailability {
-            lightfriend_can_provide_local_number: FeatureStatus::Available,
-            user_can_bring_their_own_number: FeatureStatus::Unavailable,
-            local_number: FeatureStatus::Available,
-            inbound_calling: FeatureStatus::Available,
-            outbound_calling: FeatureStatus::Available,
-            inbound_sms: FeatureStatus::Available,
-            outbound_sms: FeatureStatus::Available,
-            mms_messages: FeatureStatus::Available,
-            notes: Some("Full support including MMS".to_string()),
-        });
+        map.insert(
+            "United States".to_string(),
+            CountryFeatureAvailability {
+                lightfriend_can_provide_local_number: FeatureStatus::Available,
+                user_can_bring_their_own_number: FeatureStatus::Unavailable,
+                local_number: FeatureStatus::Available,
+                inbound_calling: FeatureStatus::Available,
+                outbound_calling: FeatureStatus::Available,
+                inbound_sms: FeatureStatus::Available,
+                outbound_sms: FeatureStatus::Available,
+                mms_messages: FeatureStatus::Available,
+                notes: Some("Full support including MMS".to_string()),
+            },
+        );
+        map.insert(
+            "United Kingdom".to_string(),
+            CountryFeatureAvailability {
+                lightfriend_can_provide_local_number: FeatureStatus::Available,
+                user_can_bring_their_own_number: FeatureStatus::Unavailable,
+                local_number: FeatureStatus::Available,
+                inbound_calling: FeatureStatus::Available,
+                outbound_calling: FeatureStatus::Available,
+                inbound_sms: FeatureStatus::Available,
+                outbound_sms: FeatureStatus::Available,
+                mms_messages: FeatureStatus::Unavailable,
+                notes: Some("MMS messages are only not supported in Europe".to_string()),
+            },
+        );
+        map.insert(
+            "Finland".to_string(),
+            CountryFeatureAvailability {
+                lightfriend_can_provide_local_number: FeatureStatus::Available,
+                user_can_bring_their_own_number: FeatureStatus::Unavailable,
+                local_number: FeatureStatus::Available,
+                inbound_calling: FeatureStatus::Available,
+                outbound_calling: FeatureStatus::Available,
+                inbound_sms: FeatureStatus::Available,
+                outbound_sms: FeatureStatus::Available,
+                mms_messages: FeatureStatus::Unavailable,
+                notes: Some("MMS messages are not supported in Europe".to_string()),
+            },
+        );
+        map.insert(
+            "Australia".to_string(),
+            CountryFeatureAvailability {
+                lightfriend_can_provide_local_number: FeatureStatus::Available,
+                user_can_bring_their_own_number: FeatureStatus::Unavailable,
+                local_number: FeatureStatus::Available,
+                inbound_calling: FeatureStatus::Available,
+                outbound_calling: FeatureStatus::Available,
+                inbound_sms: FeatureStatus::Available,
+                outbound_sms: FeatureStatus::Available,
+                mms_messages: FeatureStatus::Available,
+                notes: Some("Full support including MMS".to_string()),
+            },
+        );
         map.insert("Denmark".to_string(), CountryFeatureAvailability {
             lightfriend_can_provide_local_number: FeatureStatus::Available,
             user_can_bring_their_own_number: FeatureStatus::Available,
@@ -156,27 +168,36 @@ pub fn supported_countries() -> Html {
                 wasm_bindgen_futures::spawn_local(async move {
                     let opts = RequestInit::new();
                     opts.set_method("GET");
-                    
-                    let request = Request::new_with_str_and_init(
-                        "https://ipapi.co/json/",
-                        &opts,
-                    ).unwrap();
-                    
+
+                    let request =
+                        Request::new_with_str_and_init("https://ipapi.co/json/", &opts).unwrap();
+
                     let window = window().unwrap();
-                    if let Ok(resp_value) = JsFuture::from(window.fetch_with_request(&request)).await
+                    if let Ok(resp_value) =
+                        JsFuture::from(window.fetch_with_request(&request)).await
                     {
                         let response: Response = resp_value.dyn_into().unwrap();
                         if let Ok(json_value) = JsFuture::from(response.json().unwrap()).await {
                             let json: Value = serde_wasm_bindgen::from_value(json_value).unwrap();
-                            if let Some(country) = json.get("country_name").and_then(|c| c.as_str()) {
+                            if let Some(country) = json.get("country_name").and_then(|c| c.as_str())
+                            {
                                 let country_str = country.to_string();
                                 detected_country_name.set(Some(country_str.clone()));
-                                
+
                                 // Try to find a matching country ignoring case
-                                let found_country = ["United States", "United Kingdom", "Finland", "Australia", "Denmark", "United Arab Emirates", "Israel", "Germany"]
-                                    .iter()
-                                    .find(|&&k| k.to_lowercase() == country_str.to_lowercase());
-                                
+                                let found_country = [
+                                    "United States",
+                                    "United Kingdom",
+                                    "Finland",
+                                    "Australia",
+                                    "Denmark",
+                                    "United Arab Emirates",
+                                    "Israel",
+                                    "Germany",
+                                ]
+                                .iter()
+                                .find(|&&k| k.to_lowercase() == country_str.to_lowercase());
+
                                 if let Some(&found_country) = found_country {
                                     selected_country.set(found_country.to_string());
                                 } else {
@@ -208,9 +229,9 @@ pub fn supported_countries() -> Html {
             <div class="header">
                 <h1>{"Service Availability by Country"}</h1>
                 <p>{"Select a country to view feature availability."}</p>
-                <select 
-                    onchange={on_country_change} 
-                    value={(*selected_country).clone()} 
+                <select
+                    onchange={on_country_change}
+                    value={(*selected_country).clone()}
                     class="country-select"
                 >
                     {for ["United States", "United Kingdom", "Finland", "Australia", "Denmark", "United Arab Emirates", "Israel", "Germany", "Other Countries"].iter().map(|country| {
@@ -367,4 +388,3 @@ pub fn supported_countries() -> Html {
         </div>
     }
 }
-

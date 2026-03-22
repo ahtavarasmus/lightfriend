@@ -1,8 +1,8 @@
-use yew::prelude::*;
-use web_sys::HtmlInputElement;
+use crate::config;
 use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
-use crate::config;
+use web_sys::HtmlInputElement;
+use yew::prelude::*;
 
 #[derive(Serialize)]
 struct SetPasswordRequest {
@@ -56,143 +56,159 @@ pub fn SetPassword(props: &SetPasswordProps) -> Html {
         let check_email = check_email.clone();
         let prop_token = props.token.clone();
 
-        use_effect_with_deps(move |prop_token| {
-            let token = token.clone();
-            let loading = loading.clone();
-            let error = error.clone();
-            let needs_password = needs_password.clone();
-            let check_email = check_email.clone();
-            let prop_token = prop_token.clone();
+        use_effect_with_deps(
+            move |prop_token| {
+                let token = token.clone();
+                let loading = loading.clone();
+                let error = error.clone();
+                let needs_password = needs_password.clone();
+                let check_email = check_email.clone();
+                let prop_token = prop_token.clone();
 
-            wasm_bindgen_futures::spawn_local(async move {
-                // Get token from props or query string
-                let final_token = if let Some(t) = prop_token {
-                    t
-                } else {
-                    // Try to get session_id from query string
-                    if let Some(window) = web_sys::window() {
-                        if let Ok(search) = window.location().search() {
-                            let params = web_sys::UrlSearchParams::new_with_str(&search).ok();
-                            if let Some(params) = params {
-                                if let Some(session_id) = params.get("session_id") {
-                                    // Fetch token from session_id
-                                    match Request::get(&format!(
-                                        "{}/api/auth/session-token/{}",
-                                        config::get_backend_url(),
-                                        session_id
-                                    ))
-                                    .send()
-                                    .await
-                                    {
-                                        Ok(response) => {
-                                            if response.ok() {
-                                                if let Ok(resp) = response.json::<SessionTokenResponse>().await {
-                                                    // Check if this is an existing user checkout
-                                                    if resp.existing_user {
-                                                        // Redirect to login instead of auto-logging in
-                                                        if let Some(window) = web_sys::window() {
-                                                            let _ = window.location().set_href("/login?subscription=activated");
+                wasm_bindgen_futures::spawn_local(async move {
+                    // Get token from props or query string
+                    let final_token = if let Some(t) = prop_token {
+                        t
+                    } else {
+                        // Try to get session_id from query string
+                        if let Some(window) = web_sys::window() {
+                            if let Ok(search) = window.location().search() {
+                                let params = web_sys::UrlSearchParams::new_with_str(&search).ok();
+                                if let Some(params) = params {
+                                    if let Some(session_id) = params.get("session_id") {
+                                        // Fetch token from session_id
+                                        match Request::get(&format!(
+                                            "{}/api/auth/session-token/{}",
+                                            config::get_backend_url(),
+                                            session_id
+                                        ))
+                                        .send()
+                                        .await
+                                        {
+                                            Ok(response) => {
+                                                if response.ok() {
+                                                    if let Ok(resp) = response
+                                                        .json::<SessionTokenResponse>()
+                                                        .await
+                                                    {
+                                                        // Check if this is an existing user checkout
+                                                        if resp.existing_user {
+                                                            // Redirect to login instead of auto-logging in
+                                                            if let Some(window) = web_sys::window()
+                                                            {
+                                                                let _ = window.location().set_href(
+                                                                    "/login?subscription=activated",
+                                                                );
+                                                            }
+                                                            return;
                                                         }
-                                                        return;
-                                                    }
-                                                    // Check if this is a new user who needs to check email
-                                                    if resp.new_user_check_email {
-                                                        check_email.set(true);
-                                                        loading.set(false);
-                                                        return;
-                                                    }
-                                                    if let Some(token) = resp.token {
-                                                        token
+                                                        // Check if this is a new user who needs to check email
+                                                        if resp.new_user_check_email {
+                                                            check_email.set(true);
+                                                            loading.set(false);
+                                                            return;
+                                                        }
+                                                        if let Some(token) = resp.token {
+                                                            token
+                                                        } else {
+                                                            error.set(Some(
+                                                                "No token in response".to_string(),
+                                                            ));
+                                                            loading.set(false);
+                                                            return;
+                                                        }
                                                     } else {
-                                                        error.set(Some("No token in response".to_string()));
+                                                        error.set(Some(
+                                                            "Failed to parse session response"
+                                                                .to_string(),
+                                                        ));
                                                         loading.set(false);
                                                         return;
                                                     }
                                                 } else {
-                                                    error.set(Some("Failed to parse session response".to_string()));
+                                                    error.set(Some("Session not found. Try clicking the link in your email.".to_string()));
                                                     loading.set(false);
                                                     return;
                                                 }
-                                            } else {
-                                                error.set(Some("Session not found. Try clicking the link in your email.".to_string()));
+                                            }
+                                            Err(e) => {
+                                                error.set(Some(format!("Request failed: {}", e)));
                                                 loading.set(false);
                                                 return;
                                             }
                                         }
-                                        Err(e) => {
-                                            error.set(Some(format!("Request failed: {}", e)));
-                                            loading.set(false);
-                                            return;
-                                        }
+                                    } else {
+                                        error.set(Some(
+                                            "No token or session_id provided".to_string(),
+                                        ));
+                                        loading.set(false);
+                                        return;
                                     }
                                 } else {
-                                    error.set(Some("No token or session_id provided".to_string()));
+                                    error.set(Some("Invalid URL parameters".to_string()));
                                     loading.set(false);
                                     return;
                                 }
                             } else {
-                                error.set(Some("Invalid URL parameters".to_string()));
+                                error.set(Some("Could not read URL".to_string()));
                                 loading.set(false);
                                 return;
                             }
                         } else {
-                            error.set(Some("Could not read URL".to_string()));
+                            error.set(Some("No window object".to_string()));
                             loading.set(false);
                             return;
                         }
-                    } else {
-                        error.set(Some("No window object".to_string()));
-                        loading.set(false);
-                        return;
-                    }
-                };
+                    };
 
-                token.set(final_token.clone());
+                    token.set(final_token.clone());
 
-                // Validate the token
-                match Request::get(&format!(
-                    "{}/api/auth/magic/{}",
-                    config::get_backend_url(),
-                    final_token
-                ))
-                .credentials(web_sys::RequestCredentials::Include)
-                .send()
-                .await
-                {
-                    Ok(response) => {
-                        if response.ok() {
-                            if let Ok(resp) = response.json::<MagicLinkResponse>().await {
-                                if resp.needs_password {
-                                    needs_password.set(true);
-                                    loading.set(false);
-                                } else {
-                                    // Already has password - user is now logged in, redirect to home
-                                    if let Some(window) = web_sys::window() {
-                                        let _ = window.location().set_href("/");
+                    // Validate the token
+                    match Request::get(&format!(
+                        "{}/api/auth/magic/{}",
+                        config::get_backend_url(),
+                        final_token
+                    ))
+                    .credentials(web_sys::RequestCredentials::Include)
+                    .send()
+                    .await
+                    {
+                        Ok(response) => {
+                            if response.ok() {
+                                if let Ok(resp) = response.json::<MagicLinkResponse>().await {
+                                    if resp.needs_password {
+                                        needs_password.set(true);
+                                        loading.set(false);
+                                    } else {
+                                        // Already has password - user is now logged in, redirect to home
+                                        if let Some(window) = web_sys::window() {
+                                            let _ = window.location().set_href("/");
+                                        }
                                     }
+                                } else {
+                                    error.set(Some("Failed to parse response".to_string()));
+                                    loading.set(false);
                                 }
                             } else {
-                                error.set(Some("Failed to parse response".to_string()));
+                                if let Ok(err_resp) = response.json::<ErrorResponse>().await {
+                                    error.set(Some(err_resp.error));
+                                } else {
+                                    error.set(Some("Invalid or expired link".to_string()));
+                                }
                                 loading.set(false);
                             }
-                        } else {
-                            if let Ok(err_resp) = response.json::<ErrorResponse>().await {
-                                error.set(Some(err_resp.error));
-                            } else {
-                                error.set(Some("Invalid or expired link".to_string()));
-                            }
+                        }
+                        Err(e) => {
+                            error.set(Some(format!("Request failed: {}", e)));
                             loading.set(false);
                         }
                     }
-                    Err(e) => {
-                        error.set(Some(format!("Request failed: {}", e)));
-                        loading.set(false);
-                    }
-                }
-            });
+                });
 
-            || ()
-        }, prop_token);
+                || ()
+            },
+            prop_token,
+        );
     }
 
     let onsubmit = {
@@ -224,20 +240,25 @@ pub fn SetPassword(props: &SetPasswordProps) -> Html {
             is_submitting.set(true);
 
             wasm_bindgen_futures::spawn_local(async move {
-                match Request::post(&format!("{}/api/auth/set-password", config::get_backend_url()))
-                    .credentials(web_sys::RequestCredentials::Include)
-                    .json(&SetPasswordRequest {
-                        token: tok,
-                        password: pwd,
-                    })
-                    .unwrap()
-                    .send()
-                    .await
+                match Request::post(&format!(
+                    "{}/api/auth/set-password",
+                    config::get_backend_url()
+                ))
+                .credentials(web_sys::RequestCredentials::Include)
+                .json(&SetPasswordRequest {
+                    token: tok,
+                    password: pwd,
+                })
+                .unwrap()
+                .send()
+                .await
                 {
                     Ok(response) => {
                         if response.ok() {
                             error.set(None);
-                            success.set(Some("Password set successfully! Redirecting...".to_string()));
+                            success.set(Some(
+                                "Password set successfully! Redirecting...".to_string(),
+                            ));
 
                             // Redirect to home after success
                             if let Some(window) = web_sys::window() {
@@ -300,7 +321,7 @@ pub fn SetPassword(props: &SetPasswordProps) -> Html {
     left: 0;
     width: 100%;
     height: 100vh;
-    background-image: url('/assets/rain.gif');
+    background-image: url('/assets/aurora-bg.jpg');
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;

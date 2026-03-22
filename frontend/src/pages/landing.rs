@@ -1,16 +1,16 @@
 use crate::components::notification::AnimationComponent;
-use crate::Route;
 use crate::utils::api::Api;
 use crate::utils::seo::{use_seo, SeoMeta};
+use crate::Route;
+use gloo_timers::callback::Timeout;
+use js_sys;
 use serde::Deserialize;
+use serde_json::json;
 use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::JsCast;
+use web_sys::HtmlInputElement;
 use yew::prelude::*;
 use yew_router::components::Link;
-use web_sys::HtmlInputElement;
-use serde_json::json;
-use js_sys;
-use gloo_timers::callback::Timeout;
 
 #[derive(Deserialize, Clone)]
 struct SmartphoneFreeDaysResponse {
@@ -24,7 +24,6 @@ pub fn landing() -> Html {
         canonical: "https://lightfriend.ai",
         og_type: "website",
     });
-
 
     // Waitlist form state
     let waitlist_email = use_state(String::new);
@@ -130,13 +129,13 @@ pub fn landing() -> Html {
         );
     }
 
-
     // Set up IntersectionObserver for scroll animations
     {
         use_effect_with_deps(
             move |_| {
                 let setup = Closure::<dyn Fn()>::new(move || {
-                    let _ = js_sys::eval(r#"
+                    let _ = js_sys::eval(
+                        r#"
                         if (!window._scrollObserver) {
                             var delay = 0;
                             window._scrollObserver = new IntersectionObserver(function(entries) {
@@ -159,7 +158,8 @@ pub fn landing() -> Html {
                             el.dataset.stagger = groups[key]++;
                             window._scrollObserver.observe(el);
                         });
-                    "#);
+                    "#,
+                    );
                 });
                 if let Some(window) = web_sys::window() {
                     let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
@@ -567,7 +567,7 @@ pub fn landing() -> Html {
                             {" | "}
                             <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
                             {" | "}
-                            <Link<Route> to={Route::Trustless}>{"Trustless"}</Link<Route>>
+                            <Link<Route> to={Route::Trustless}>{"Verifiably Private"}</Link<Route>>
                             {" | "}
                             <Link<Route> to={Route::Changelog}>{"Updates"}</Link<Route>>
                         </div>

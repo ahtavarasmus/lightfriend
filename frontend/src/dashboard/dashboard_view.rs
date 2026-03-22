@@ -1,15 +1,15 @@
-use yew::prelude::*;
+use crate::profile::billing_models::UserProfile;
+use crate::utils::api::Api;
+use serde::Deserialize;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
-use serde::Deserialize;
-use crate::utils::api::Api;
-use crate::profile::billing_models::UserProfile;
+use yew::prelude::*;
 
-use super::chat_box::ChatBox;
-use super::settings_panel::{SettingsPanel, SettingsTab};
-use super::rules_section::RulesSection;
-use super::rule_builder::{RuleBuilder, RuleTemplate, RuleTemplatePicker};
 use super::activity_feed::ActivityFeed;
+use super::chat_box::ChatBox;
+use super::rule_builder::{RuleBuilder, RuleTemplate, RuleTemplatePicker};
+use super::rules_section::RulesSection;
+use super::settings_panel::{SettingsPanel, SettingsTab};
 
 const DASHBOARD_STYLES: &str = r#"
 .palantir-dashboard {
@@ -408,7 +408,11 @@ fn dismiss_message(id: i64) {
         if let Ok(Some(storage)) = window.local_storage() {
             let mut ids = get_dismissed_ids();
             ids.insert(id);
-            let val: String = ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+            let val: String = ids
+                .iter()
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
             let _ = storage.set_item("lf_dismissed_messages", &val);
         }
     }
@@ -437,7 +441,9 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                         if let Ok(params) = web_sys::UrlSearchParams::new_with_str(&search) {
                             if let Some(tab) = params.get("settings") {
                                 let tab_enum = match tab.to_lowercase().as_str() {
-                                    "capabilities" | "connections" => Some(SettingsTab::Capabilities),
+                                    "capabilities" | "connections" => {
+                                        Some(SettingsTab::Capabilities)
+                                    }
                                     "account" => Some(SettingsTab::Account),
                                     "billing" => Some(SettingsTab::Billing),
                                     _ => None,
@@ -447,7 +453,9 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                     settings_open.set(true);
                                     if let Ok(history) = window.history() {
                                         let _ = history.replace_state_with_url(
-                                            &wasm_bindgen::JsValue::NULL, "", Some("/"),
+                                            &wasm_bindgen::JsValue::NULL,
+                                            "",
+                                            Some("/"),
                                         );
                                     }
                                 }
@@ -472,11 +480,13 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 let callback = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
                     settings_initial_tab.set(SettingsTab::Account);
                     settings_open.set(true);
-                }) as Box<dyn FnMut()>);
+                })
+                    as Box<dyn FnMut()>);
 
                 if let Some(window) = web_sys::window() {
                     let _ = window.add_event_listener_with_callback(
-                        "open-settings", callback.as_ref().unchecked_ref(),
+                        "open-settings",
+                        callback.as_ref().unchecked_ref(),
                     );
                 }
 
@@ -484,7 +494,8 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 move || {
                     if let Some(window) = web_sys::window() {
                         let _ = window.remove_event_listener_with_callback(
-                            "open-settings", cleanup.as_ref().unchecked_ref(),
+                            "open-settings",
+                            cleanup.as_ref().unchecked_ref(),
                         );
                     }
                 }
@@ -503,33 +514,39 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     // Fetch YouTube/Tesla status
     {
         let youtube_connected = youtube_connected.clone();
-        use_effect_with_deps(move |_| {
-            spawn_local(async move {
-                if let Ok(r) = Api::get("/api/auth/youtube/status").send().await {
-                    if let Ok(data) = r.json::<serde_json::Value>().await {
-                        if let Some(c) = data.get("connected").and_then(|v| v.as_bool()) {
-                            youtube_connected.set(c);
+        use_effect_with_deps(
+            move |_| {
+                spawn_local(async move {
+                    if let Ok(r) = Api::get("/api/auth/youtube/status").send().await {
+                        if let Ok(data) = r.json::<serde_json::Value>().await {
+                            if let Some(c) = data.get("connected").and_then(|v| v.as_bool()) {
+                                youtube_connected.set(c);
+                            }
                         }
                     }
-                }
-            });
-            || ()
-        }, ());
+                });
+                || ()
+            },
+            (),
+        );
     }
     {
         let tesla_connected = tesla_connected.clone();
-        use_effect_with_deps(move |_| {
-            spawn_local(async move {
-                if let Ok(r) = Api::get("/api/auth/tesla/status").send().await {
-                    if let Ok(data) = r.json::<serde_json::Value>().await {
-                        if let Some(c) = data.get("has_tesla").and_then(|v| v.as_bool()) {
-                            tesla_connected.set(c);
+        use_effect_with_deps(
+            move |_| {
+                spawn_local(async move {
+                    if let Ok(r) = Api::get("/api/auth/tesla/status").send().await {
+                        if let Ok(data) = r.json::<serde_json::Value>().await {
+                            if let Some(c) = data.get("has_tesla").and_then(|v| v.as_bool()) {
+                                tesla_connected.set(c);
+                            }
                         }
                     }
-                }
-            });
-            || ()
-        }, ());
+                });
+                || ()
+            },
+            (),
+        );
     }
 
     // Fetch dashboard summary
@@ -561,7 +578,13 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     // Fetch on mount
     {
         let fetch_summary = fetch_summary.clone();
-        use_effect_with_deps(move |_| { fetch_summary.emit(()); || () }, ());
+        use_effect_with_deps(
+            move |_| {
+                fetch_summary.emit(());
+                || ()
+            },
+            (),
+        );
     }
 
     // Refresh on chat events
@@ -576,14 +599,16 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 }) as Box<dyn Fn()>);
                 if let Some(window) = web_sys::window() {
                     let _ = window.add_event_listener_with_callback(
-                        "lightfriend-chat-sent", callback.as_ref().unchecked_ref(),
+                        "lightfriend-chat-sent",
+                        callback.as_ref().unchecked_ref(),
                     );
                 }
                 let cleanup = callback;
                 move || {
                     if let Some(window) = web_sys::window() {
                         let _ = window.remove_event_listener_with_callback(
-                            "lightfriend-chat-sent", cleanup.as_ref().unchecked_ref(),
+                            "lightfriend-chat-sent",
+                            cleanup.as_ref().unchecked_ref(),
                         );
                     }
                 }
@@ -658,7 +683,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     // Build visible action items
     let visible_action_items: Vec<&ActionItemResponse> = (*summary)
         .as_ref()
-        .map(|s| s.action_items.iter().filter(|i| !dismissed_ids.contains(&i.message_id)).collect())
+        .map(|s| {
+            s.action_items
+                .iter()
+                .filter(|i| !dismissed_ids.contains(&i.message_id))
+                .collect()
+        })
         .unwrap_or_default();
 
     let has_action_items = !visible_action_items.is_empty();
@@ -667,8 +697,14 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         .map(|s| s.pinned_messages.iter().collect())
         .unwrap_or_default();
     let has_pinned = !pinned_messages.is_empty();
-    let messages_handled = (*summary).as_ref().map(|s| s.messages_handled_today).unwrap_or(0);
-    let notifications_sent = (*summary).as_ref().map(|s| s.notifications_sent_today).unwrap_or(0);
+    let messages_handled = (*summary)
+        .as_ref()
+        .map(|s| s.messages_handled_today)
+        .unwrap_or(0);
+    let notifications_sent = (*summary)
+        .as_ref()
+        .map(|s| s.notifications_sent_today)
+        .unwrap_or(0);
     let rules_active = (*summary).as_ref().map(|s| s.rules_active).unwrap_or(0);
     let filtered_count = (*summary).as_ref().map(|s| s.filtered_count).unwrap_or(0);
 

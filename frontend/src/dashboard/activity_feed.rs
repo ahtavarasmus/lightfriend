@@ -1,8 +1,8 @@
-use yew::prelude::*;
+use crate::utils::api::Api;
+use serde::Deserialize;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
-use serde::Deserialize;
-use crate::utils::api::Api;
+use yew::prelude::*;
 
 const FEED_STYLES: &str = r#"
 .activity-feed {
@@ -194,7 +194,10 @@ pub fn activity_feed(props: &ActivityFeedProps) -> Html {
                 let entries = entries.clone();
                 let loading = loading.clone();
                 spawn_local(async move {
-                    match Api::get("/api/dashboard/activity-feed?limit=100").send().await {
+                    match Api::get("/api/dashboard/activity-feed?limit=100")
+                        .send()
+                        .await
+                    {
                         Ok(response) => {
                             if response.ok() {
                                 if let Ok(data) = response.json::<Vec<ActivityFeedEntry>>().await {
@@ -296,7 +299,12 @@ pub fn activity_feed(props: &ActivityFeedProps) -> Html {
     }
 }
 
-fn render_grouped_entries(entries: &[ActivityFeedEntry], now_secs: i32, expanded_id: &Option<String>, expanded_handle: &UseStateHandle<Option<String>>) -> Html {
+fn render_grouped_entries(
+    entries: &[ActivityFeedEntry],
+    now_secs: i32,
+    expanded_id: &Option<String>,
+    expanded_handle: &UseStateHandle<Option<String>>,
+) -> Html {
     if entries.is_empty() {
         return html! {};
     }
@@ -319,11 +327,20 @@ fn render_grouped_entries(entries: &[ActivityFeedEntry], now_secs: i32, expanded
     html! { <>{for result}</> }
 }
 
-fn render_entry(entry: &ActivityFeedEntry, now_secs: i32, is_expanded: bool, expanded_handle: &UseStateHandle<Option<String>>) -> Html {
+fn render_entry(
+    entry: &ActivityFeedEntry,
+    now_secs: i32,
+    is_expanded: bool,
+    expanded_handle: &UseStateHandle<Option<String>>,
+) -> Html {
     let icon_class = format!(
         "feed-icon type-{}{}",
         entry.entry_type,
-        if entry.success == Some(false) { " failed" } else { "" }
+        if entry.success == Some(false) {
+            " failed"
+        } else {
+            ""
+        }
     );
 
     let time_str = relative_time(entry.timestamp, now_secs);
@@ -342,14 +359,24 @@ fn render_entry(entry: &ActivityFeedEntry, now_secs: i32, is_expanded: bool, exp
 
     // Full timestamp for expanded view
     let full_time = {
-        let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(entry.timestamp as f64 * 1000.0));
-        let month_names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(
+            entry.timestamp as f64 * 1000.0,
+        ));
+        let month_names = [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ];
         let month = month_names.get(date.get_month() as usize).unwrap_or(&"?");
         let day = date.get_date();
         let hours = date.get_hours();
         let minutes = date.get_minutes();
         let ampm = if hours < 12 { "am" } else { "pm" };
-        let h = if hours == 0 { 12 } else if hours > 12 { hours - 12 } else { hours };
+        let h = if hours == 0 {
+            12
+        } else if hours > 12 {
+            hours - 12
+        } else {
+            hours
+        };
         format!("{} {}, {}:{:02}{}", month, day, h, minutes, ampm)
     };
 
@@ -430,8 +457,7 @@ fn date_group_label(timestamp: i32, now_secs: i32) -> String {
     } else {
         let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(timestamp as f64 * 1000.0));
         let month_names = [
-            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
         ];
         let month_idx = date.get_month() as usize;
         let day = date.get_date();
@@ -455,11 +481,23 @@ fn relative_time(timestamp: i32, now_secs: i32) -> String {
         let minutes = date.get_minutes();
         if minutes == 0 {
             let ampm = if hours < 12 { "am" } else { "pm" };
-            let h = if hours == 0 { 12 } else if hours > 12 { hours - 12 } else { hours };
+            let h = if hours == 0 {
+                12
+            } else if hours > 12 {
+                hours - 12
+            } else {
+                hours
+            };
             format!("{}{}", h, ampm)
         } else {
             let ampm = if hours < 12 { "am" } else { "pm" };
-            let h = if hours == 0 { 12 } else if hours > 12 { hours - 12 } else { hours };
+            let h = if hours == 0 {
+                12
+            } else if hours > 12 {
+                hours - 12
+            } else {
+                hours
+            };
             format!("{}:{:02}{}", h, minutes, ampm)
         }
     }

@@ -1,13 +1,13 @@
-use yew::prelude::*;
+use crate::proactive::contact_profiles::{
+    ContactProfile, ContactProfilesResponse, CreateProfileRequest, ExceptionRequest,
+    ProfileException, Room, SearchResponse, UpdateDefaultModeRequest,
+    UpdatePhoneContactModeRequest,
+};
+use crate::utils::api::Api;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
-use web_sys::{HtmlInputElement, HtmlSelectElement, Event, MouseEvent, InputEvent};
-use crate::utils::api::Api;
-use crate::proactive::contact_profiles::{
-    ContactProfile, ContactProfilesResponse, ProfileException,
-    CreateProfileRequest, ExceptionRequest, UpdateDefaultModeRequest,
-    UpdatePhoneContactModeRequest, Room, SearchResponse,
-};
+use web_sys::{Event, HtmlInputElement, HtmlSelectElement, InputEvent, MouseEvent};
+use yew::prelude::*;
 // ---------------------------------------------------------------------------
 // Styles
 // ---------------------------------------------------------------------------
@@ -544,12 +544,13 @@ const AVATAR_ROW_STYLES: &str = r#"
 // ---------------------------------------------------------------------------
 
 const AVATAR_COLORS: [&str; 8] = [
-    "#6366f1", "#8b5cf6", "#ec4899", "#f59e0b",
-    "#10b981", "#3b82f6", "#ef4444", "#14b8a6",
+    "#6366f1", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981", "#3b82f6", "#ef4444", "#14b8a6",
 ];
 
 fn color_for_name(name: &str) -> &'static str {
-    let hash: u32 = name.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
+    let hash: u32 = name
+        .bytes()
+        .fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
     AVATAR_COLORS[(hash as usize) % AVATAR_COLORS.len()]
 }
 
@@ -561,24 +562,64 @@ struct PlatformInfo {
 }
 
 const PLATFORMS: [PlatformInfo; 4] = [
-    PlatformInfo { key: "whatsapp", icon: "fa-brands fa-whatsapp", color: "#25D366", label: "WhatsApp" },
-    PlatformInfo { key: "telegram", icon: "fa-brands fa-telegram", color: "#0088CC", label: "Telegram" },
-    PlatformInfo { key: "signal", icon: "fa-brands fa-signal-messenger", color: "#3A76F1", label: "Signal" },
-    PlatformInfo { key: "email", icon: "fa-solid fa-envelope", color: "#7EB2FF", label: "Email" },
+    PlatformInfo {
+        key: "whatsapp",
+        icon: "fa-brands fa-whatsapp",
+        color: "#25D366",
+        label: "WhatsApp",
+    },
+    PlatformInfo {
+        key: "telegram",
+        icon: "fa-brands fa-telegram",
+        color: "#0088CC",
+        label: "Telegram",
+    },
+    PlatformInfo {
+        key: "signal",
+        icon: "fa-brands fa-signal-messenger",
+        color: "#3A76F1",
+        label: "Signal",
+    },
+    PlatformInfo {
+        key: "email",
+        icon: "fa-solid fa-envelope",
+        color: "#7EB2FF",
+        label: "Email",
+    },
 ];
 
 fn connected_platforms(profile: &ContactProfile) -> Vec<&'static PlatformInfo> {
     let mut out = Vec::new();
-    if profile.whatsapp_chat.as_ref().map(|s| !s.is_empty()).unwrap_or(false) {
+    if profile
+        .whatsapp_chat
+        .as_ref()
+        .map(|s| !s.is_empty())
+        .unwrap_or(false)
+    {
         out.push(&PLATFORMS[0]);
     }
-    if profile.telegram_chat.as_ref().map(|s| !s.is_empty()).unwrap_or(false) {
+    if profile
+        .telegram_chat
+        .as_ref()
+        .map(|s| !s.is_empty())
+        .unwrap_or(false)
+    {
         out.push(&PLATFORMS[1]);
     }
-    if profile.signal_chat.as_ref().map(|s| !s.is_empty()).unwrap_or(false) {
+    if profile
+        .signal_chat
+        .as_ref()
+        .map(|s| !s.is_empty())
+        .unwrap_or(false)
+    {
         out.push(&PLATFORMS[2]);
     }
-    if profile.email_addresses.as_ref().map(|s| !s.is_empty()).unwrap_or(false) {
+    if profile
+        .email_addresses
+        .as_ref()
+        .map(|s| !s.is_empty())
+        .unwrap_or(false)
+    {
         out.push(&PLATFORMS[3]);
     }
     out
@@ -683,8 +724,12 @@ fn render_flying_icons(profile: &ContactProfile) -> Html {
             let delay_class = format!("fly-delay-{}", delay_idx % 4);
 
             let badge_html = match mode {
-                "critical" => html! { <span class="fly-mode-badge" style="color:#f59e0b;">{"!"}</span> },
-                "mention" => html! { <span class="fly-mode-badge" style="color:#3b82f6;">{"@"}</span> },
+                "critical" => {
+                    html! { <span class="fly-mode-badge" style="color:#f59e0b;">{"!"}</span> }
+                }
+                "mention" => {
+                    html! { <span class="fly-mode-badge" style="color:#3b82f6;">{"@"}</span> }
+                }
                 _ => html! {},
             };
 
@@ -744,12 +789,15 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
     {
         let modal = modal.clone();
         let seq = props.open_info_seq;
-        use_effect_with_deps(move |s: &u32| {
-            if *s > 0 {
-                modal.set(Some(ModalType::PeopleInfo));
-            }
-            || ()
-        }, seq);
+        use_effect_with_deps(
+            move |s: &u32| {
+                if *s > 0 {
+                    modal.set(Some(ModalType::PeopleInfo));
+                }
+                || ()
+            },
+            seq,
+        );
     }
 
     // Modal form state
@@ -881,10 +929,13 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
     // Initial load
     {
         let fetch = fetch_profiles.clone();
-        use_effect_with_deps(move |_| {
-            fetch.emit(());
-            || ()
-        }, ());
+        use_effect_with_deps(
+            move |_| {
+                fetch.emit(());
+                || ()
+            },
+            (),
+        );
     }
 
     // Listen for cross-component sync events
@@ -894,7 +945,8 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
             move |_| {
                 let callback = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
                     fetch.emit(());
-                }) as Box<dyn FnMut()>);
+                })
+                    as Box<dyn FnMut()>);
 
                 if let Some(window) = web_sys::window() {
                     let _ = window.add_event_listener_with_callback(
@@ -925,7 +977,9 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                     let doc = web_sys::window().unwrap().document().unwrap();
                     // Find the actual SMS and Call target circle positions
                     let targets = doc.query_selector_all(".target-circle").unwrap();
-                    if targets.length() < 2 { return; }
+                    if targets.length() < 2 {
+                        return;
+                    }
                     let sms_el: web_sys::Element = targets.item(0).unwrap().unchecked_into();
                     let call_el: web_sys::Element = targets.item(1).unwrap().unchecked_into();
                     let sms_rect = sms_el.get_bounding_client_rect();
@@ -957,14 +1011,23 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                             let fly_x = (target_x - item_center_x) as i32;
                             // +15 to compensate for icon starting above figure center
                             let fly_y = (target_y - item_center_y) as i32 + 15;
-                            let _ = icon_html.style().set_property("--fly-x", &format!("{}px", fly_x));
-                            let _ = icon_html.style().set_property("--fly-y", &format!("{}px", fly_y));
+                            let _ = icon_html
+                                .style()
+                                .set_property("--fly-x", &format!("{}px", fly_x));
+                            let _ = icon_html
+                                .style()
+                                .set_property("--fly-y", &format!("{}px", fly_y));
                         }
                     }
-                }) as Box<dyn FnMut()>);
+                })
+                    as Box<dyn FnMut()>);
 
                 // Run once on mount
-                update_fn.as_ref().unchecked_ref::<js_sys::Function>().call0(&wasm_bindgen::JsValue::NULL).ok();
+                update_fn
+                    .as_ref()
+                    .unchecked_ref::<js_sys::Function>()
+                    .call0(&wasm_bindgen::JsValue::NULL)
+                    .ok();
 
                 // Attach scroll listener
                 let doc = web_sys::window().unwrap().document().unwrap();
@@ -976,11 +1039,14 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                 }
 
                 // Also run periodically to catch initial render
-                let interval_fn = update_fn.as_ref().unchecked_ref::<js_sys::Function>().clone();
+                let interval_fn = update_fn
+                    .as_ref()
+                    .unchecked_ref::<js_sys::Function>()
+                    .clone();
                 let window = web_sys::window().unwrap();
-                let interval_id = window.set_interval_with_callback_and_timeout_and_arguments_0(
-                    &interval_fn, 500
-                ).unwrap_or(0);
+                let interval_id = window
+                    .set_interval_with_callback_and_timeout_and_arguments_0(&interval_fn, 500)
+                    .unwrap_or(0);
 
                 let cleanup = update_fn;
                 move || {
@@ -1030,9 +1096,24 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
         Callback::from(move |(service, query): (String, String)| {
             if query.trim().len() < 2 {
                 match service.as_str() {
-                    "whatsapp" => { whatsapp_results.set(vec![]); show_whatsapp_suggestions.set(false); searching_whatsapp.set(false); search_error_whatsapp.set(None); }
-                    "telegram" => { telegram_results.set(vec![]); show_telegram_suggestions.set(false); searching_telegram.set(false); search_error_telegram.set(None); }
-                    "signal" => { signal_results.set(vec![]); show_signal_suggestions.set(false); searching_signal.set(false); search_error_signal.set(None); }
+                    "whatsapp" => {
+                        whatsapp_results.set(vec![]);
+                        show_whatsapp_suggestions.set(false);
+                        searching_whatsapp.set(false);
+                        search_error_whatsapp.set(None);
+                    }
+                    "telegram" => {
+                        telegram_results.set(vec![]);
+                        show_telegram_suggestions.set(false);
+                        searching_telegram.set(false);
+                        search_error_telegram.set(None);
+                    }
+                    "signal" => {
+                        signal_results.set(vec![]);
+                        show_signal_suggestions.set(false);
+                        searching_signal.set(false);
+                        search_error_signal.set(None);
+                    }
                     _ => {}
                 }
                 return;
@@ -1053,30 +1134,57 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
             let service = service.clone();
 
             match service.as_str() {
-                "whatsapp" => { searching_whatsapp.set(true); show_whatsapp_suggestions.set(true); search_error_whatsapp.set(None); }
-                "telegram" => { searching_telegram.set(true); show_telegram_suggestions.set(true); search_error_telegram.set(None); }
-                "signal" => { searching_signal.set(true); show_signal_suggestions.set(true); search_error_signal.set(None); }
+                "whatsapp" => {
+                    searching_whatsapp.set(true);
+                    show_whatsapp_suggestions.set(true);
+                    search_error_whatsapp.set(None);
+                }
+                "telegram" => {
+                    searching_telegram.set(true);
+                    show_telegram_suggestions.set(true);
+                    search_error_telegram.set(None);
+                }
+                "signal" => {
+                    searching_signal.set(true);
+                    show_signal_suggestions.set(true);
+                    search_error_signal.set(None);
+                }
                 _ => {}
             }
 
             spawn_local(async move {
                 let encoded_query = js_sys::encode_uri_component(&query);
-                let url = format!("/api/contact-profiles/search/{}?q={}", service, encoded_query);
+                let url = format!(
+                    "/api/contact-profiles/search/{}?q={}",
+                    service, encoded_query
+                );
                 match Api::get(&url).send().await {
                     Ok(response) => {
                         if response.ok() {
                             if let Ok(data) = response.json::<SearchResponse>().await {
                                 match service.as_str() {
-                                    "whatsapp" => { whatsapp_results.set(data.results); searching_whatsapp.set(false); }
-                                    "telegram" => { telegram_results.set(data.results); searching_telegram.set(false); }
-                                    "signal" => { signal_results.set(data.results); searching_signal.set(false); }
+                                    "whatsapp" => {
+                                        whatsapp_results.set(data.results);
+                                        searching_whatsapp.set(false);
+                                    }
+                                    "telegram" => {
+                                        telegram_results.set(data.results);
+                                        searching_telegram.set(false);
+                                    }
+                                    "signal" => {
+                                        signal_results.set(data.results);
+                                        searching_signal.set(false);
+                                    }
                                     _ => {}
                                 }
                             }
                         } else {
                             let error_msg = if let Ok(text) = response.text().await {
                                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                                    json.get("error").and_then(|e| e.as_str()).unwrap_or("Search failed").to_string()
+                                    json.get("error")
+                                        .and_then(|e| e.as_str())
+                                        .unwrap_or("Search failed")
+                                        .to_string()
                                 } else {
                                     "Search failed".to_string()
                                 }
@@ -1084,21 +1192,37 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                                 "Search failed".to_string()
                             };
                             match service.as_str() {
-                                "whatsapp" => { searching_whatsapp.set(false); search_error_whatsapp.set(Some(error_msg)); }
-                                "telegram" => { searching_telegram.set(false); search_error_telegram.set(Some(error_msg)); }
-                                "signal" => { searching_signal.set(false); search_error_signal.set(Some(error_msg)); }
+                                "whatsapp" => {
+                                    searching_whatsapp.set(false);
+                                    search_error_whatsapp.set(Some(error_msg));
+                                }
+                                "telegram" => {
+                                    searching_telegram.set(false);
+                                    search_error_telegram.set(Some(error_msg));
+                                }
+                                "signal" => {
+                                    searching_signal.set(false);
+                                    search_error_signal.set(Some(error_msg));
+                                }
                                 _ => {}
                             }
                         }
                     }
-                    Err(_) => {
-                        match service.as_str() {
-                            "whatsapp" => { searching_whatsapp.set(false); search_error_whatsapp.set(Some("Network error".to_string())); }
-                            "telegram" => { searching_telegram.set(false); search_error_telegram.set(Some("Network error".to_string())); }
-                            "signal" => { searching_signal.set(false); search_error_signal.set(Some("Network error".to_string())); }
-                            _ => {}
+                    Err(_) => match service.as_str() {
+                        "whatsapp" => {
+                            searching_whatsapp.set(false);
+                            search_error_whatsapp.set(Some("Network error".to_string()));
                         }
-                    }
+                        "telegram" => {
+                            searching_telegram.set(false);
+                            search_error_telegram.set(Some("Network error".to_string()));
+                        }
+                        "signal" => {
+                            searching_signal.set(false);
+                            search_error_signal.set(Some("Network error".to_string()));
+                        }
+                        _ => {}
+                    },
                 }
             });
         })
@@ -1169,10 +1293,22 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                         (String::new(), String::new())
                     };
                     match *plat {
-                        "whatsapp" => { exc_wa_mode.set(mode_val); exc_wa_type.set(type_val); }
-                        "telegram" => { exc_tg_mode.set(mode_val); exc_tg_type.set(type_val); }
-                        "signal" => { exc_sg_mode.set(mode_val); exc_sg_type.set(type_val); }
-                        "email" => { exc_em_mode.set(mode_val); exc_em_type.set(type_val); }
+                        "whatsapp" => {
+                            exc_wa_mode.set(mode_val);
+                            exc_wa_type.set(type_val);
+                        }
+                        "telegram" => {
+                            exc_tg_mode.set(mode_val);
+                            exc_tg_type.set(type_val);
+                        }
+                        "signal" => {
+                            exc_sg_mode.set(mode_val);
+                            exc_sg_type.set(type_val);
+                        }
+                        "email" => {
+                            exc_em_mode.set(mode_val);
+                            exc_em_type.set(type_val);
+                        }
                         _ => {}
                     }
                 }
@@ -1454,7 +1590,8 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
 
             if (!wa.is_empty() && !*form_whatsapp_selected)
                 || (!tg.is_empty() && !*form_telegram_selected)
-                || (!sg.is_empty() && !*form_signal_selected) {
+                || (!sg.is_empty() && !*form_signal_selected)
+            {
                 error_msg.set(Some("Select a chat from the search results.".to_string()));
                 return;
             }
@@ -1472,14 +1609,24 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
             ] {
                 // Non-empty mode or type means this platform has an override
                 if !exc_m.is_empty() || !exc_t.is_empty() {
-                    let existing_call = profile.exceptions.iter()
+                    let existing_call = profile
+                        .exceptions
+                        .iter()
                         .find(|e| e.platform == plat)
                         .map(|e| e.notify_on_call)
                         .unwrap_or(default_call_val);
                     exceptions.push(ExceptionRequest {
                         platform: plat.to_string(),
-                        notification_mode: if exc_m.is_empty() { default_mode_val.clone() } else { exc_m },
-                        notification_type: if exc_t.is_empty() { default_type_val.clone() } else { exc_t },
+                        notification_mode: if exc_m.is_empty() {
+                            default_mode_val.clone()
+                        } else {
+                            exc_m
+                        },
+                        notification_type: if exc_t.is_empty() {
+                            default_type_val.clone()
+                        } else {
+                            exc_t
+                        },
                         notify_on_call: existing_call,
                     });
                 }
@@ -1500,7 +1647,11 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                 whatsapp_room_id: (*form_whatsapp_room_id).clone(),
                 telegram_room_id: (*form_telegram_room_id).clone(),
                 signal_room_id: (*form_signal_room_id).clone(),
-                notes: if notes_val.is_empty() { None } else { Some(notes_val) },
+                notes: if notes_val.is_empty() {
+                    None
+                } else {
+                    Some(notes_val)
+                },
             };
 
             let modal = modal.clone();
@@ -1510,7 +1661,9 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
 
             saving.set(true);
             spawn_local(async move {
-                if let Ok(req) = Api::put(&format!("/api/contact-profiles/{}", profile_id)).json(&request) {
+                if let Ok(req) =
+                    Api::put(&format!("/api/contact-profiles/{}", profile_id)).json(&request)
+                {
                     if let Ok(response) = req.send().await {
                         if response.ok() {
                             dispatch_sync_event();
@@ -1547,7 +1700,10 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
 
             saving.set(true);
             spawn_local(async move {
-                if let Ok(response) = Api::delete(&format!("/api/contact-profiles/{}", profile_id)).send().await {
+                if let Ok(response) = Api::delete(&format!("/api/contact-profiles/{}", profile_id))
+                    .send()
+                    .await
+                {
                     if response.ok() {
                         dispatch_sync_event();
                         fetch_profiles.emit(());
@@ -1607,7 +1763,9 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
             }
 
             // Build exceptions list, replacing the one for this platform
-            let mut exceptions: Vec<ExceptionRequest> = profile.exceptions.iter()
+            let mut exceptions: Vec<ExceptionRequest> = profile
+                .exceptions
+                .iter()
                 .filter(|e| e.platform != platform)
                 .map(|e| ExceptionRequest {
                     platform: e.platform.clone(),
@@ -1627,19 +1785,34 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
             // Use form state for the current platform's chat, profile values for others
             let (wa_chat, wa_rid) = if platform == "whatsapp" {
                 let v = (*form_whatsapp).clone();
-                (if v.is_empty() { None } else { Some(v) }, (*form_whatsapp_room_id).clone())
+                (
+                    if v.is_empty() { None } else { Some(v) },
+                    (*form_whatsapp_room_id).clone(),
+                )
             } else {
-                (profile.whatsapp_chat.clone(), profile.whatsapp_room_id.clone())
+                (
+                    profile.whatsapp_chat.clone(),
+                    profile.whatsapp_room_id.clone(),
+                )
             };
             let (tg_chat, tg_rid) = if platform == "telegram" {
                 let v = (*form_telegram).clone();
-                (if v.is_empty() { None } else { Some(v) }, (*form_telegram_room_id).clone())
+                (
+                    if v.is_empty() { None } else { Some(v) },
+                    (*form_telegram_room_id).clone(),
+                )
             } else {
-                (profile.telegram_chat.clone(), profile.telegram_room_id.clone())
+                (
+                    profile.telegram_chat.clone(),
+                    profile.telegram_room_id.clone(),
+                )
             };
             let (sg_chat, sg_rid) = if platform == "signal" {
                 let v = (*form_signal).clone();
-                (if v.is_empty() { None } else { Some(v) }, (*form_signal_room_id).clone())
+                (
+                    if v.is_empty() { None } else { Some(v) },
+                    (*form_signal_room_id).clone(),
+                )
             } else {
                 (profile.signal_chat.clone(), profile.signal_room_id.clone())
             };
@@ -1653,7 +1826,11 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                 notification_mode: profile.notification_mode.clone(),
                 notification_type: profile.notification_type.clone(),
                 notify_on_call: profile.notify_on_call,
-                exceptions: if exceptions.is_empty() { None } else { Some(exceptions) },
+                exceptions: if exceptions.is_empty() {
+                    None
+                } else {
+                    Some(exceptions)
+                },
                 whatsapp_room_id: wa_rid,
                 telegram_room_id: tg_rid,
                 signal_room_id: sg_rid,
@@ -1667,7 +1844,9 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
 
             saving.set(true);
             spawn_local(async move {
-                if let Ok(req) = Api::put(&format!("/api/contact-profiles/{}", profile_id)).json(&request) {
+                if let Ok(req) =
+                    Api::put(&format!("/api/contact-profiles/{}", profile_id)).json(&request)
+                {
                     if let Ok(response) = req.send().await {
                         if response.ok() {
                             dispatch_sync_event();
@@ -1726,7 +1905,9 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
             }
 
             // Keep existing exceptions but exclude this platform (override mode is off)
-            let exceptions: Vec<ExceptionRequest> = profile.exceptions.iter()
+            let exceptions: Vec<ExceptionRequest> = profile
+                .exceptions
+                .iter()
                 .filter(|e| e.platform != platform)
                 .map(|e| ExceptionRequest {
                     platform: e.platform.clone(),
@@ -1739,19 +1920,34 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
             // Use form state for the current platform's chat, profile values for others
             let (wa_chat, wa_rid) = if platform == "whatsapp" {
                 let v = (*form_whatsapp).clone();
-                (if v.is_empty() { None } else { Some(v) }, (*form_whatsapp_room_id).clone())
+                (
+                    if v.is_empty() { None } else { Some(v) },
+                    (*form_whatsapp_room_id).clone(),
+                )
             } else {
-                (profile.whatsapp_chat.clone(), profile.whatsapp_room_id.clone())
+                (
+                    profile.whatsapp_chat.clone(),
+                    profile.whatsapp_room_id.clone(),
+                )
             };
             let (tg_chat, tg_rid) = if platform == "telegram" {
                 let v = (*form_telegram).clone();
-                (if v.is_empty() { None } else { Some(v) }, (*form_telegram_room_id).clone())
+                (
+                    if v.is_empty() { None } else { Some(v) },
+                    (*form_telegram_room_id).clone(),
+                )
             } else {
-                (profile.telegram_chat.clone(), profile.telegram_room_id.clone())
+                (
+                    profile.telegram_chat.clone(),
+                    profile.telegram_room_id.clone(),
+                )
             };
             let (sg_chat, sg_rid) = if platform == "signal" {
                 let v = (*form_signal).clone();
-                (if v.is_empty() { None } else { Some(v) }, (*form_signal_room_id).clone())
+                (
+                    if v.is_empty() { None } else { Some(v) },
+                    (*form_signal_room_id).clone(),
+                )
             } else {
                 (profile.signal_chat.clone(), profile.signal_room_id.clone())
             };
@@ -1780,7 +1976,9 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
 
             saving.set(true);
             spawn_local(async move {
-                if let Ok(req) = Api::put(&format!("/api/contact-profiles/{}", profile_id)).json(&request) {
+                if let Ok(req) =
+                    Api::put(&format!("/api/contact-profiles/{}", profile_id)).json(&request)
+                {
                     if let Ok(response) = req.send().await {
                         if response.ok() {
                             dispatch_sync_event();
@@ -1812,7 +2010,9 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
             let Some(profile) = profile else { return };
 
             // Remove exception for this platform too (no chat = no exception needed)
-            let exceptions: Vec<ExceptionRequest> = profile.exceptions.iter()
+            let exceptions: Vec<ExceptionRequest> = profile
+                .exceptions
+                .iter()
                 .filter(|e| e.platform != platform)
                 .map(|e| ExceptionRequest {
                     platform: e.platform.clone(),
@@ -1826,12 +2026,18 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
             let (whatsapp_chat, whatsapp_room_id) = if platform == "whatsapp" {
                 (None, None)
             } else {
-                (profile.whatsapp_chat.clone(), profile.whatsapp_room_id.clone())
+                (
+                    profile.whatsapp_chat.clone(),
+                    profile.whatsapp_room_id.clone(),
+                )
             };
             let (telegram_chat, telegram_room_id) = if platform == "telegram" {
                 (None, None)
             } else {
-                (profile.telegram_chat.clone(), profile.telegram_room_id.clone())
+                (
+                    profile.telegram_chat.clone(),
+                    profile.telegram_room_id.clone(),
+                )
             };
             let (signal_chat, signal_room_id) = if platform == "signal" {
                 (None, None)
@@ -1848,7 +2054,11 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                 notification_mode: profile.notification_mode.clone(),
                 notification_type: profile.notification_type.clone(),
                 notify_on_call: profile.notify_on_call,
-                exceptions: if exceptions.is_empty() { None } else { Some(exceptions) },
+                exceptions: if exceptions.is_empty() {
+                    None
+                } else {
+                    Some(exceptions)
+                },
                 whatsapp_room_id,
                 telegram_room_id,
                 signal_room_id,
@@ -1862,7 +2072,9 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
 
             saving.set(true);
             spawn_local(async move {
-                if let Ok(req) = Api::put(&format!("/api/contact-profiles/{}", profile_id)).json(&request) {
+                if let Ok(req) =
+                    Api::put(&format!("/api/contact-profiles/{}", profile_id)).json(&request)
+                {
                     if let Ok(response) = req.send().await {
                         if response.ok() {
                             dispatch_sync_event();
@@ -1962,7 +2174,8 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                     noti_type: Some(new_type.clone()),
                     notify_on_call: Some(new_call),
                 };
-                if let Ok(req) = Api::put("/api/contact-profiles/phone-contact-mode").json(&request) {
+                if let Ok(req) = Api::put("/api/contact-profiles/phone-contact-mode").json(&request)
+                {
                     if let Ok(response) = req.send().await {
                         if response.ok() {
                             phone_contact_mode.set(new_mode);
@@ -2029,31 +2242,72 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
             let sg = (*add_signal).clone();
             if (!wa.is_empty() && !*add_whatsapp_selected)
                 || (!tg.is_empty() && !*add_telegram_selected)
-                || (!sg.is_empty() && !*add_signal_selected) {
+                || (!sg.is_empty() && !*add_signal_selected)
+            {
                 error_msg.set(Some("Select a chat from the search results.".to_string()));
                 return;
             }
 
-            let whatsapp = if add_whatsapp.is_empty() { None } else { Some((*add_whatsapp).clone()) };
-            let telegram = if add_telegram.is_empty() { None } else { Some((*add_telegram).clone()) };
-            let signal = if add_signal.is_empty() { None } else { Some((*add_signal).clone()) };
-            let email = if add_email.is_empty() { None } else { Some((*add_email).clone()) };
+            let whatsapp = if add_whatsapp.is_empty() {
+                None
+            } else {
+                Some((*add_whatsapp).clone())
+            };
+            let telegram = if add_telegram.is_empty() {
+                None
+            } else {
+                Some((*add_telegram).clone())
+            };
+            let signal = if add_signal.is_empty() {
+                None
+            } else {
+                Some((*add_signal).clone())
+            };
+            let email = if add_email.is_empty() {
+                None
+            } else {
+                Some((*add_email).clone())
+            };
 
             let default_mode_val = (*add_mode).clone();
             let default_type_val = (*add_type).clone();
             let default_call_val = *add_notify_call;
             let mut exceptions: Vec<ExceptionRequest> = Vec::new();
             for (plat, exc_m, exc_t) in [
-                ("whatsapp", (*add_exc_wa_mode).clone(), (*add_exc_wa_type).clone()),
-                ("telegram", (*add_exc_tg_mode).clone(), (*add_exc_tg_type).clone()),
-                ("signal", (*add_exc_sg_mode).clone(), (*add_exc_sg_type).clone()),
-                ("email", (*add_exc_em_mode).clone(), (*add_exc_em_type).clone()),
+                (
+                    "whatsapp",
+                    (*add_exc_wa_mode).clone(),
+                    (*add_exc_wa_type).clone(),
+                ),
+                (
+                    "telegram",
+                    (*add_exc_tg_mode).clone(),
+                    (*add_exc_tg_type).clone(),
+                ),
+                (
+                    "signal",
+                    (*add_exc_sg_mode).clone(),
+                    (*add_exc_sg_type).clone(),
+                ),
+                (
+                    "email",
+                    (*add_exc_em_mode).clone(),
+                    (*add_exc_em_type).clone(),
+                ),
             ] {
                 if !exc_m.is_empty() || !exc_t.is_empty() {
                     exceptions.push(ExceptionRequest {
                         platform: plat.to_string(),
-                        notification_mode: if exc_m.is_empty() { default_mode_val.clone() } else { exc_m },
-                        notification_type: if exc_t.is_empty() { default_type_val.clone() } else { exc_t },
+                        notification_mode: if exc_m.is_empty() {
+                            default_mode_val.clone()
+                        } else {
+                            exc_m
+                        },
+                        notification_type: if exc_t.is_empty() {
+                            default_type_val.clone()
+                        } else {
+                            exc_t
+                        },
                         notify_on_call: default_call_val,
                     });
                 }
@@ -2074,7 +2328,11 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                 whatsapp_room_id: (*add_whatsapp_room_id).clone(),
                 telegram_room_id: (*add_telegram_room_id).clone(),
                 signal_room_id: (*add_signal_room_id).clone(),
-                notes: if notes_val.is_empty() { None } else { Some(notes_val) },
+                notes: if notes_val.is_empty() {
+                    None
+                } else {
+                    Some(notes_val)
+                },
             };
 
             let modal = modal.clone();
@@ -2181,12 +2439,16 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                 close.emit(());
             })
         };
-        let stop_prop = Callback::from(|e: MouseEvent| { e.stop_propagation(); });
+        let stop_prop = Callback::from(|e: MouseEvent| {
+            e.stop_propagation();
+        });
 
         match modal_type {
             ModalType::ContactSettings(pid) => {
                 let profile = profiles.iter().find(|p| p.id == pid).cloned();
-                let Some(profile) = profile else { return html! {} };
+                let Some(profile) = profile else {
+                    return html! {};
+                };
                 let err = (*error_msg).clone();
                 let is_saving = *saving;
 
@@ -2486,19 +2748,25 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
 
                 let on_save = {
                     let save = save_contact.clone();
-                    Callback::from(move |_: MouseEvent| { save.emit(pid); })
+                    Callback::from(move |_: MouseEvent| {
+                        save.emit(pid);
+                    })
                 };
 
                 let on_delete = {
                     let del = delete_contact.clone();
-                    Callback::from(move |_: MouseEvent| { del.emit(pid); })
+                    Callback::from(move |_: MouseEvent| {
+                        del.emit(pid);
+                    })
                 };
 
                 let current_mode = (*form_mode).clone();
 
                 // Build each platform row via helper function to reduce locals
                 let wa_row_html = render_platform_row(
-                    "fa-brands fa-whatsapp", "#25D366", true,
+                    "fa-brands fa-whatsapp",
+                    "#25D366",
+                    true,
                     html! {
                         <div class="input-with-suggestions">
                             <input type="text" value={(*form_whatsapp).clone()} oninput={on_form_whatsapp_input}
@@ -2507,12 +2775,27 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                             {settings_wa_suggestions}
                         </div>
                     },
-                    (*exc_wa_mode).clone(), (*exc_wa_type).clone(),
-                    { let s = exc_wa_mode.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
-                    { let s = exc_wa_type.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                    (*exc_wa_mode).clone(),
+                    (*exc_wa_type).clone(),
+                    {
+                        let s = exc_wa_mode.clone();
+                        Callback::from(move |e: Event| {
+                            let t: HtmlSelectElement = e.target_unchecked_into();
+                            s.set(t.value());
+                        })
+                    },
+                    {
+                        let s = exc_wa_type.clone();
+                        Callback::from(move |e: Event| {
+                            let t: HtmlSelectElement = e.target_unchecked_into();
+                            s.set(t.value());
+                        })
+                    },
                 );
                 let tg_row_html = render_platform_row(
-                    "fa-brands fa-telegram", "#0088CC", true,
+                    "fa-brands fa-telegram",
+                    "#0088CC",
+                    true,
                     html! {
                         <div class="input-with-suggestions">
                             <input type="text" value={(*form_telegram).clone()} oninput={on_form_telegram_input}
@@ -2521,12 +2804,27 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                             {settings_tg_suggestions}
                         </div>
                     },
-                    (*exc_tg_mode).clone(), (*exc_tg_type).clone(),
-                    { let s = exc_tg_mode.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
-                    { let s = exc_tg_type.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                    (*exc_tg_mode).clone(),
+                    (*exc_tg_type).clone(),
+                    {
+                        let s = exc_tg_mode.clone();
+                        Callback::from(move |e: Event| {
+                            let t: HtmlSelectElement = e.target_unchecked_into();
+                            s.set(t.value());
+                        })
+                    },
+                    {
+                        let s = exc_tg_type.clone();
+                        Callback::from(move |e: Event| {
+                            let t: HtmlSelectElement = e.target_unchecked_into();
+                            s.set(t.value());
+                        })
+                    },
                 );
                 let sg_row_html = render_platform_row(
-                    "fa-brands fa-signal-messenger", "#3A76F1", true,
+                    "fa-brands fa-signal-messenger",
+                    "#3A76F1",
+                    true,
                     html! {
                         <div class="input-with-suggestions">
                             <input type="text" value={(*form_signal).clone()} oninput={on_form_signal_input}
@@ -2535,20 +2833,48 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                             {settings_sg_suggestions}
                         </div>
                     },
-                    (*exc_sg_mode).clone(), (*exc_sg_type).clone(),
-                    { let s = exc_sg_mode.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
-                    { let s = exc_sg_type.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                    (*exc_sg_mode).clone(),
+                    (*exc_sg_type).clone(),
+                    {
+                        let s = exc_sg_mode.clone();
+                        Callback::from(move |e: Event| {
+                            let t: HtmlSelectElement = e.target_unchecked_into();
+                            s.set(t.value());
+                        })
+                    },
+                    {
+                        let s = exc_sg_type.clone();
+                        Callback::from(move |e: Event| {
+                            let t: HtmlSelectElement = e.target_unchecked_into();
+                            s.set(t.value());
+                        })
+                    },
                 );
                 let em_row_html = render_platform_row(
-                    "fa-solid fa-envelope", "#7EB2FF", false,
+                    "fa-solid fa-envelope",
+                    "#7EB2FF",
+                    false,
                     html! {
                         <input type="text" class="platform-email-input"
                             value={(*form_email).clone()} oninput={on_form_email_input}
                             placeholder="email@example.com" />
                     },
-                    (*exc_em_mode).clone(), (*exc_em_type).clone(),
-                    { let s = exc_em_mode.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
-                    { let s = exc_em_type.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                    (*exc_em_mode).clone(),
+                    (*exc_em_type).clone(),
+                    {
+                        let s = exc_em_mode.clone();
+                        Callback::from(move |e: Event| {
+                            let t: HtmlSelectElement = e.target_unchecked_into();
+                            s.set(t.value());
+                        })
+                    },
+                    {
+                        let s = exc_em_type.clone();
+                        Callback::from(move |e: Event| {
+                            let t: HtmlSelectElement = e.target_unchecked_into();
+                            s.set(t.value());
+                        })
+                    },
                 );
 
                 html! {
@@ -2626,7 +2952,9 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
             ModalType::PlatformException(pid, ref platform) => {
                 let platform = platform.clone();
                 let profile = profiles.iter().find(|p| p.id == pid).cloned();
-                let Some(profile) = profile else { return html! {} };
+                let Some(profile) = profile else {
+                    return html! {};
+                };
 
                 let pi = PLATFORMS.iter().find(|p| p.key == platform.as_str());
                 let Some(pi) = pi else { return html! {} };
@@ -2636,7 +2964,12 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                 let is_bridge = platform != "email";
 
                 // Chat search input for this platform
-                let (exc_chat_value, exc_chat_not_selected, exc_chat_suggestions, on_exc_chat_input) = if is_bridge {
+                let (
+                    exc_chat_value,
+                    exc_chat_not_selected,
+                    exc_chat_suggestions,
+                    on_exc_chat_input,
+                ) = if is_bridge {
                     let (chat_val, not_selected) = match platform.as_str() {
                         "whatsapp" => ((*form_whatsapp).clone(), !*form_whatsapp_selected),
                         "telegram" => ((*form_telegram).clone(), !*form_telegram_selected),
@@ -2660,9 +2993,21 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                             let target: HtmlInputElement = e.target_unchecked_into();
                             let value = target.value();
                             match platform.as_str() {
-                                "whatsapp" => { form_whatsapp.set(value.clone()); form_whatsapp_room_id.set(None); form_whatsapp_selected.set(false); }
-                                "telegram" => { form_telegram.set(value.clone()); form_telegram_room_id.set(None); form_telegram_selected.set(false); }
-                                "signal" => { form_signal.set(value.clone()); form_signal_room_id.set(None); form_signal_selected.set(false); }
+                                "whatsapp" => {
+                                    form_whatsapp.set(value.clone());
+                                    form_whatsapp_room_id.set(None);
+                                    form_whatsapp_selected.set(false);
+                                }
+                                "telegram" => {
+                                    form_telegram.set(value.clone());
+                                    form_telegram_room_id.set(None);
+                                    form_telegram_selected.set(false);
+                                }
+                                "signal" => {
+                                    form_signal.set(value.clone());
+                                    form_signal_room_id.set(None);
+                                    form_signal_selected.set(false);
+                                }
                                 _ => {}
                             }
                             search_chats.emit((platform.clone(), value));
@@ -2670,192 +3015,204 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                     };
 
                     let suggestions = match platform.as_str() {
-                        "whatsapp" => if *show_whatsapp_suggestions {
-                            let results = (*whatsapp_results).clone();
-                            let searching = *searching_whatsapp;
-                            let err = (*search_error_whatsapp).clone();
-                            html! {
-                                <div class="suggestions-dropdown">
-                                    if searching {
-                                        <div class="suggestion-item searching">{"Searching..."}</div>
-                                    } else if let Some(err) = err {
-                                        <div class="suggestion-item error">{err}</div>
-                                    } else if results.is_empty() {
-                                        <div class="suggestion-item no-results">{"No chats found"}</div>
-                                    } else {
-                                        { for results.iter().map(|room| {
-                                            let name = room.display_name.clone();
-                                            let rid = room.room_id.clone();
-                                            let is_group = room.is_group;
-                                            let attached = room.attached_to.clone();
-                                            let is_disabled = attached.is_some();
-                                            let form_whatsapp = form_whatsapp.clone();
-                                            let form_whatsapp_room_id = form_whatsapp_room_id.clone();
-                                            let form_whatsapp_selected = form_whatsapp_selected.clone();
-                                            let show_whatsapp_suggestions = show_whatsapp_suggestions.clone();
-                                            let item_class = if is_disabled { "suggestion-item disabled" } else { "suggestion-item" };
-                                            let on_click = if is_disabled {
-                                                Callback::noop()
-                                            } else {
-                                                let name = name.clone();
-                                                let rid = rid.clone();
-                                                Callback::from(move |_: MouseEvent| {
-                                                    form_whatsapp.set(name.clone());
-                                                    let rid_opt = if rid.is_empty() { None } else { Some(rid.clone()) };
-                                                    form_whatsapp_room_id.set(rid_opt);
-                                                    form_whatsapp_selected.set(true);
-                                                    show_whatsapp_suggestions.set(false);
-                                                })
-                                            };
-                                            let right_text = if let Some(ref owner) = attached {
-                                                format!("Attached to {}", owner)
-                                            } else {
-                                                String::new()
-                                            };
-                                            html! {
-                                                <div class={item_class} onclick={on_click}>
-                                                    <span>{&room.display_name}</span>
-                                                    if is_group {
-                                                        <span class="group-tag">{"Group"}</span>
-                                                    }
-                                                    if room.is_phone_contact == Some(true) {
-                                                        <span class="contact-tag">{"Saved contact"}</span>
-                                                    }
-                                                    if room.is_phone_contact == Some(false) {
-                                                        <span class="contact-tag push-name">{"Push name"}</span>
-                                                    }
-                                                    <span style="color:#666;font-size:0.75rem;margin-left:auto;padding-left:0.5rem;">{right_text}</span>
-                                                </div>
-                                            }
-                                        })}
-                                    }
-                                </div>
+                        "whatsapp" => {
+                            if *show_whatsapp_suggestions {
+                                let results = (*whatsapp_results).clone();
+                                let searching = *searching_whatsapp;
+                                let err = (*search_error_whatsapp).clone();
+                                html! {
+                                    <div class="suggestions-dropdown">
+                                        if searching {
+                                            <div class="suggestion-item searching">{"Searching..."}</div>
+                                        } else if let Some(err) = err {
+                                            <div class="suggestion-item error">{err}</div>
+                                        } else if results.is_empty() {
+                                            <div class="suggestion-item no-results">{"No chats found"}</div>
+                                        } else {
+                                            { for results.iter().map(|room| {
+                                                let name = room.display_name.clone();
+                                                let rid = room.room_id.clone();
+                                                let is_group = room.is_group;
+                                                let attached = room.attached_to.clone();
+                                                let is_disabled = attached.is_some();
+                                                let form_whatsapp = form_whatsapp.clone();
+                                                let form_whatsapp_room_id = form_whatsapp_room_id.clone();
+                                                let form_whatsapp_selected = form_whatsapp_selected.clone();
+                                                let show_whatsapp_suggestions = show_whatsapp_suggestions.clone();
+                                                let item_class = if is_disabled { "suggestion-item disabled" } else { "suggestion-item" };
+                                                let on_click = if is_disabled {
+                                                    Callback::noop()
+                                                } else {
+                                                    let name = name.clone();
+                                                    let rid = rid.clone();
+                                                    Callback::from(move |_: MouseEvent| {
+                                                        form_whatsapp.set(name.clone());
+                                                        let rid_opt = if rid.is_empty() { None } else { Some(rid.clone()) };
+                                                        form_whatsapp_room_id.set(rid_opt);
+                                                        form_whatsapp_selected.set(true);
+                                                        show_whatsapp_suggestions.set(false);
+                                                    })
+                                                };
+                                                let right_text = if let Some(ref owner) = attached {
+                                                    format!("Attached to {}", owner)
+                                                } else {
+                                                    String::new()
+                                                };
+                                                html! {
+                                                    <div class={item_class} onclick={on_click}>
+                                                        <span>{&room.display_name}</span>
+                                                        if is_group {
+                                                            <span class="group-tag">{"Group"}</span>
+                                                        }
+                                                        if room.is_phone_contact == Some(true) {
+                                                            <span class="contact-tag">{"Saved contact"}</span>
+                                                        }
+                                                        if room.is_phone_contact == Some(false) {
+                                                            <span class="contact-tag push-name">{"Push name"}</span>
+                                                        }
+                                                        <span style="color:#666;font-size:0.75rem;margin-left:auto;padding-left:0.5rem;">{right_text}</span>
+                                                    </div>
+                                                }
+                                            })}
+                                        }
+                                    </div>
+                                }
+                            } else {
+                                html! {}
                             }
-                        } else { html! {} },
-                        "telegram" => if *show_telegram_suggestions {
-                            let results = (*telegram_results).clone();
-                            let searching = *searching_telegram;
-                            let err = (*search_error_telegram).clone();
-                            html! {
-                                <div class="suggestions-dropdown">
-                                    if searching {
-                                        <div class="suggestion-item searching">{"Searching..."}</div>
-                                    } else if let Some(err) = err {
-                                        <div class="suggestion-item error">{err}</div>
-                                    } else if results.is_empty() {
-                                        <div class="suggestion-item no-results">{"No chats found"}</div>
-                                    } else {
-                                        { for results.iter().map(|room| {
-                                            let name = room.display_name.clone();
-                                            let rid = room.room_id.clone();
-                                            let is_group = room.is_group;
-                                            let attached = room.attached_to.clone();
-                                            let is_disabled = attached.is_some();
-                                            let form_telegram = form_telegram.clone();
-                                            let form_telegram_room_id = form_telegram_room_id.clone();
-                                            let form_telegram_selected = form_telegram_selected.clone();
-                                            let show_telegram_suggestions = show_telegram_suggestions.clone();
-                                            let item_class = if is_disabled { "suggestion-item disabled" } else { "suggestion-item" };
-                                            let on_click = if is_disabled {
-                                                Callback::noop()
-                                            } else {
-                                                let name = name.clone();
-                                                let rid = rid.clone();
-                                                Callback::from(move |_: MouseEvent| {
-                                                    form_telegram.set(name.clone());
-                                                    let rid_opt = if rid.is_empty() { None } else { Some(rid.clone()) };
-                                                    form_telegram_room_id.set(rid_opt);
-                                                    form_telegram_selected.set(true);
-                                                    show_telegram_suggestions.set(false);
-                                                })
-                                            };
-                                            let right_text = if let Some(ref owner) = attached {
-                                                format!("Attached to {}", owner)
-                                            } else {
-                                                String::new()
-                                            };
-                                            html! {
-                                                <div class={item_class} onclick={on_click}>
-                                                    <span>{&room.display_name}</span>
-                                                    if is_group {
-                                                        <span class="group-tag">{"Group"}</span>
-                                                    }
-                                                    if room.is_phone_contact == Some(true) {
-                                                        <span class="contact-tag">{"Saved contact"}</span>
-                                                    }
-                                                    if room.is_phone_contact == Some(false) {
-                                                        <span class="contact-tag push-name">{"Push name"}</span>
-                                                    }
-                                                    <span style="color:#666;font-size:0.75rem;margin-left:auto;padding-left:0.5rem;">{right_text}</span>
-                                                </div>
-                                            }
-                                        })}
-                                    }
-                                </div>
+                        }
+                        "telegram" => {
+                            if *show_telegram_suggestions {
+                                let results = (*telegram_results).clone();
+                                let searching = *searching_telegram;
+                                let err = (*search_error_telegram).clone();
+                                html! {
+                                    <div class="suggestions-dropdown">
+                                        if searching {
+                                            <div class="suggestion-item searching">{"Searching..."}</div>
+                                        } else if let Some(err) = err {
+                                            <div class="suggestion-item error">{err}</div>
+                                        } else if results.is_empty() {
+                                            <div class="suggestion-item no-results">{"No chats found"}</div>
+                                        } else {
+                                            { for results.iter().map(|room| {
+                                                let name = room.display_name.clone();
+                                                let rid = room.room_id.clone();
+                                                let is_group = room.is_group;
+                                                let attached = room.attached_to.clone();
+                                                let is_disabled = attached.is_some();
+                                                let form_telegram = form_telegram.clone();
+                                                let form_telegram_room_id = form_telegram_room_id.clone();
+                                                let form_telegram_selected = form_telegram_selected.clone();
+                                                let show_telegram_suggestions = show_telegram_suggestions.clone();
+                                                let item_class = if is_disabled { "suggestion-item disabled" } else { "suggestion-item" };
+                                                let on_click = if is_disabled {
+                                                    Callback::noop()
+                                                } else {
+                                                    let name = name.clone();
+                                                    let rid = rid.clone();
+                                                    Callback::from(move |_: MouseEvent| {
+                                                        form_telegram.set(name.clone());
+                                                        let rid_opt = if rid.is_empty() { None } else { Some(rid.clone()) };
+                                                        form_telegram_room_id.set(rid_opt);
+                                                        form_telegram_selected.set(true);
+                                                        show_telegram_suggestions.set(false);
+                                                    })
+                                                };
+                                                let right_text = if let Some(ref owner) = attached {
+                                                    format!("Attached to {}", owner)
+                                                } else {
+                                                    String::new()
+                                                };
+                                                html! {
+                                                    <div class={item_class} onclick={on_click}>
+                                                        <span>{&room.display_name}</span>
+                                                        if is_group {
+                                                            <span class="group-tag">{"Group"}</span>
+                                                        }
+                                                        if room.is_phone_contact == Some(true) {
+                                                            <span class="contact-tag">{"Saved contact"}</span>
+                                                        }
+                                                        if room.is_phone_contact == Some(false) {
+                                                            <span class="contact-tag push-name">{"Push name"}</span>
+                                                        }
+                                                        <span style="color:#666;font-size:0.75rem;margin-left:auto;padding-left:0.5rem;">{right_text}</span>
+                                                    </div>
+                                                }
+                                            })}
+                                        }
+                                    </div>
+                                }
+                            } else {
+                                html! {}
                             }
-                        } else { html! {} },
-                        "signal" => if *show_signal_suggestions {
-                            let results = (*signal_results).clone();
-                            let searching = *searching_signal;
-                            let err = (*search_error_signal).clone();
-                            html! {
-                                <div class="suggestions-dropdown">
-                                    if searching {
-                                        <div class="suggestion-item searching">{"Searching..."}</div>
-                                    } else if let Some(err) = err {
-                                        <div class="suggestion-item error">{err}</div>
-                                    } else if results.is_empty() {
-                                        <div class="suggestion-item no-results">{"No chats found"}</div>
-                                    } else {
-                                        { for results.iter().map(|room| {
-                                            let name = room.display_name.clone();
-                                            let rid = room.room_id.clone();
-                                            let is_group = room.is_group;
-                                            let attached = room.attached_to.clone();
-                                            let is_disabled = attached.is_some();
-                                            let form_signal = form_signal.clone();
-                                            let form_signal_room_id = form_signal_room_id.clone();
-                                            let form_signal_selected = form_signal_selected.clone();
-                                            let show_signal_suggestions = show_signal_suggestions.clone();
-                                            let item_class = if is_disabled { "suggestion-item disabled" } else { "suggestion-item" };
-                                            let on_click = if is_disabled {
-                                                Callback::noop()
-                                            } else {
-                                                let name = name.clone();
-                                                let rid = rid.clone();
-                                                Callback::from(move |_: MouseEvent| {
-                                                    form_signal.set(name.clone());
-                                                    let rid_opt = if rid.is_empty() { None } else { Some(rid.clone()) };
-                                                    form_signal_room_id.set(rid_opt);
-                                                    form_signal_selected.set(true);
-                                                    show_signal_suggestions.set(false);
-                                                })
-                                            };
-                                            let right_text = if let Some(ref owner) = attached {
-                                                format!("Attached to {}", owner)
-                                            } else {
-                                                String::new()
-                                            };
-                                            html! {
-                                                <div class={item_class} onclick={on_click}>
-                                                    <span>{&room.display_name}</span>
-                                                    if is_group {
-                                                        <span class="group-tag">{"Group"}</span>
-                                                    }
-                                                    if room.is_phone_contact == Some(true) {
-                                                        <span class="contact-tag">{"Saved contact"}</span>
-                                                    }
-                                                    if room.is_phone_contact == Some(false) {
-                                                        <span class="contact-tag push-name">{"Push name"}</span>
-                                                    }
-                                                    <span style="color:#666;font-size:0.75rem;margin-left:auto;padding-left:0.5rem;">{right_text}</span>
-                                                </div>
-                                            }
-                                        })}
-                                    }
-                                </div>
+                        }
+                        "signal" => {
+                            if *show_signal_suggestions {
+                                let results = (*signal_results).clone();
+                                let searching = *searching_signal;
+                                let err = (*search_error_signal).clone();
+                                html! {
+                                    <div class="suggestions-dropdown">
+                                        if searching {
+                                            <div class="suggestion-item searching">{"Searching..."}</div>
+                                        } else if let Some(err) = err {
+                                            <div class="suggestion-item error">{err}</div>
+                                        } else if results.is_empty() {
+                                            <div class="suggestion-item no-results">{"No chats found"}</div>
+                                        } else {
+                                            { for results.iter().map(|room| {
+                                                let name = room.display_name.clone();
+                                                let rid = room.room_id.clone();
+                                                let is_group = room.is_group;
+                                                let attached = room.attached_to.clone();
+                                                let is_disabled = attached.is_some();
+                                                let form_signal = form_signal.clone();
+                                                let form_signal_room_id = form_signal_room_id.clone();
+                                                let form_signal_selected = form_signal_selected.clone();
+                                                let show_signal_suggestions = show_signal_suggestions.clone();
+                                                let item_class = if is_disabled { "suggestion-item disabled" } else { "suggestion-item" };
+                                                let on_click = if is_disabled {
+                                                    Callback::noop()
+                                                } else {
+                                                    let name = name.clone();
+                                                    let rid = rid.clone();
+                                                    Callback::from(move |_: MouseEvent| {
+                                                        form_signal.set(name.clone());
+                                                        let rid_opt = if rid.is_empty() { None } else { Some(rid.clone()) };
+                                                        form_signal_room_id.set(rid_opt);
+                                                        form_signal_selected.set(true);
+                                                        show_signal_suggestions.set(false);
+                                                    })
+                                                };
+                                                let right_text = if let Some(ref owner) = attached {
+                                                    format!("Attached to {}", owner)
+                                                } else {
+                                                    String::new()
+                                                };
+                                                html! {
+                                                    <div class={item_class} onclick={on_click}>
+                                                        <span>{&room.display_name}</span>
+                                                        if is_group {
+                                                            <span class="group-tag">{"Group"}</span>
+                                                        }
+                                                        if room.is_phone_contact == Some(true) {
+                                                            <span class="contact-tag">{"Saved contact"}</span>
+                                                        }
+                                                        if room.is_phone_contact == Some(false) {
+                                                            <span class="contact-tag push-name">{"Push name"}</span>
+                                                        }
+                                                        <span style="color:#666;font-size:0.75rem;margin-left:auto;padding-left:0.5rem;">{right_text}</span>
+                                                    </div>
+                                                }
+                                            })}
+                                        }
+                                    </div>
+                                }
+                            } else {
+                                html! {}
                             }
-                        } else { html! {} },
+                        }
                         _ => html! {},
                     };
 
@@ -2894,11 +3251,15 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                 let on_save = if is_override {
                     let save = save_exception.clone();
                     let platform = platform.clone();
-                    Callback::from(move |_: MouseEvent| { save.emit((pid, platform.clone())); })
+                    Callback::from(move |_: MouseEvent| {
+                        save.emit((pid, platform.clone()));
+                    })
                 } else {
                     let save = save_chat_only.clone();
                     let platform = platform.clone();
-                    Callback::from(move |_: MouseEvent| { save.emit((pid, platform.clone())); })
+                    Callback::from(move |_: MouseEvent| {
+                        save.emit((pid, platform.clone()));
+                    })
                 };
 
                 let on_customize = {
@@ -2928,7 +3289,9 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                 let on_remove_chat = {
                     let remove = remove_chat.clone();
                     let platform = platform.clone();
-                    Callback::from(move |_: MouseEvent| { remove.emit((pid, platform.clone())); })
+                    Callback::from(move |_: MouseEvent| {
+                        remove.emit((pid, platform.clone()));
+                    })
                 };
 
                 let has_chat = match platform.as_str() {
@@ -3058,7 +3421,9 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
 
                 let on_save = {
                     let save = save_phone_contact_defaults.clone();
-                    Callback::from(move |_: MouseEvent| { save.emit(()); })
+                    Callback::from(move |_: MouseEvent| {
+                        save.emit(());
+                    })
                 };
 
                 let current_pc_mode = (*pc_form_mode).clone();
@@ -3137,7 +3502,9 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
 
                 let on_save = {
                     let save = save_defaults.clone();
-                    Callback::from(move |_: MouseEvent| { save.emit(()); })
+                    Callback::from(move |_: MouseEvent| {
+                        save.emit(());
+                    })
                 };
 
                 let current_def_mode = (*def_form_mode).clone();
@@ -3423,7 +3790,9 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
 
                 let on_create = {
                     let save = save_new_contact.clone();
-                    Callback::from(move |_: MouseEvent| { save.emit(()); })
+                    Callback::from(move |_: MouseEvent| {
+                        save.emit(());
+                    })
                 };
 
                 let on_notes_input = {
@@ -3635,7 +4004,9 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                 };
 
                 let add_wa_row = render_platform_row(
-                    "fa-brands fa-whatsapp", "#25D366", true,
+                    "fa-brands fa-whatsapp",
+                    "#25D366",
+                    true,
                     html! {
                         <div class="input-with-suggestions">
                             <input type="text" value={(*add_whatsapp).clone()} oninput={on_whatsapp_input}
@@ -3644,12 +4015,27 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                             {wa_suggestions}
                         </div>
                     },
-                    (*add_exc_wa_mode).clone(), (*add_exc_wa_type).clone(),
-                    { let s = add_exc_wa_mode.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
-                    { let s = add_exc_wa_type.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                    (*add_exc_wa_mode).clone(),
+                    (*add_exc_wa_type).clone(),
+                    {
+                        let s = add_exc_wa_mode.clone();
+                        Callback::from(move |e: Event| {
+                            let t: HtmlSelectElement = e.target_unchecked_into();
+                            s.set(t.value());
+                        })
+                    },
+                    {
+                        let s = add_exc_wa_type.clone();
+                        Callback::from(move |e: Event| {
+                            let t: HtmlSelectElement = e.target_unchecked_into();
+                            s.set(t.value());
+                        })
+                    },
                 );
                 let add_tg_row = render_platform_row(
-                    "fa-brands fa-telegram", "#0088CC", true,
+                    "fa-brands fa-telegram",
+                    "#0088CC",
+                    true,
                     html! {
                         <div class="input-with-suggestions">
                             <input type="text" value={(*add_telegram).clone()} oninput={on_telegram_input}
@@ -3658,12 +4044,27 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                             {tg_suggestions}
                         </div>
                     },
-                    (*add_exc_tg_mode).clone(), (*add_exc_tg_type).clone(),
-                    { let s = add_exc_tg_mode.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
-                    { let s = add_exc_tg_type.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                    (*add_exc_tg_mode).clone(),
+                    (*add_exc_tg_type).clone(),
+                    {
+                        let s = add_exc_tg_mode.clone();
+                        Callback::from(move |e: Event| {
+                            let t: HtmlSelectElement = e.target_unchecked_into();
+                            s.set(t.value());
+                        })
+                    },
+                    {
+                        let s = add_exc_tg_type.clone();
+                        Callback::from(move |e: Event| {
+                            let t: HtmlSelectElement = e.target_unchecked_into();
+                            s.set(t.value());
+                        })
+                    },
                 );
                 let add_sg_row = render_platform_row(
-                    "fa-brands fa-signal-messenger", "#3A76F1", true,
+                    "fa-brands fa-signal-messenger",
+                    "#3A76F1",
+                    true,
                     html! {
                         <div class="input-with-suggestions">
                             <input type="text" value={(*add_signal).clone()} oninput={on_signal_input}
@@ -3672,20 +4073,48 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                             {sg_suggestions}
                         </div>
                     },
-                    (*add_exc_sg_mode).clone(), (*add_exc_sg_type).clone(),
-                    { let s = add_exc_sg_mode.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
-                    { let s = add_exc_sg_type.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                    (*add_exc_sg_mode).clone(),
+                    (*add_exc_sg_type).clone(),
+                    {
+                        let s = add_exc_sg_mode.clone();
+                        Callback::from(move |e: Event| {
+                            let t: HtmlSelectElement = e.target_unchecked_into();
+                            s.set(t.value());
+                        })
+                    },
+                    {
+                        let s = add_exc_sg_type.clone();
+                        Callback::from(move |e: Event| {
+                            let t: HtmlSelectElement = e.target_unchecked_into();
+                            s.set(t.value());
+                        })
+                    },
                 );
                 let add_em_row = render_platform_row(
-                    "fa-solid fa-envelope", "#7EB2FF", false,
+                    "fa-solid fa-envelope",
+                    "#7EB2FF",
+                    false,
                     html! {
                         <input type="text" class="platform-email-input"
                             value={(*add_email).clone()} oninput={on_email}
                             placeholder="email@example.com" />
                     },
-                    (*add_exc_em_mode).clone(), (*add_exc_em_type).clone(),
-                    { let s = add_exc_em_mode.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
-                    { let s = add_exc_em_type.clone(); Callback::from(move |e: Event| { let t: HtmlSelectElement = e.target_unchecked_into(); s.set(t.value()); }) },
+                    (*add_exc_em_mode).clone(),
+                    (*add_exc_em_type).clone(),
+                    {
+                        let s = add_exc_em_mode.clone();
+                        Callback::from(move |e: Event| {
+                            let t: HtmlSelectElement = e.target_unchecked_into();
+                            s.set(t.value());
+                        })
+                    },
+                    {
+                        let s = add_exc_em_type.clone();
+                        Callback::from(move |e: Event| {
+                            let t: HtmlSelectElement = e.target_unchecked_into();
+                            s.set(t.value());
+                        })
+                    },
                 );
 
                 html! {
@@ -3747,7 +4176,6 @@ pub fn contact_avatar_row(props: &ContactAvatarRowProps) -> Html {
                     </div>
                 }
             }
-
         }
     };
 

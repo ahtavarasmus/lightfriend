@@ -1,8 +1,8 @@
-use yew::prelude::*;
-use web_sys::HtmlInputElement;
-use wasm_bindgen_futures::spawn_local;
-use serde::Deserialize;
 use crate::utils::api::Api;
+use serde::Deserialize;
+use wasm_bindgen_futures::spawn_local;
+use web_sys::HtmlInputElement;
+use yew::prelude::*;
 
 const PEOPLE_STYLES: &str = r#"
 .people-section {
@@ -461,17 +461,15 @@ pub fn people_list() -> Html {
     };
 
     // Channel search input helper macro - renders an input with suggestions dropdown
-    let render_channel_input = |
-        icon_class: &str,
-        platform: &str,
-        placeholder: &str,
-        value: UseStateHandle<String>,
-        room_id: UseStateHandle<Option<String>>,
-        do_search: &Callback<(String, String)>,
-        search_active: &UseStateHandle<Option<String>>,
-        search_results: &UseStateHandle<Vec<SearchRoom>>,
-        searching: &UseStateHandle<bool>,
-    | {
+    let render_channel_input = |icon_class: &str,
+                                platform: &str,
+                                placeholder: &str,
+                                value: UseStateHandle<String>,
+                                room_id: UseStateHandle<Option<String>>,
+                                do_search: &Callback<(String, String)>,
+                                search_active: &UseStateHandle<Option<String>>,
+                                search_results: &UseStateHandle<Vec<SearchRoom>>,
+                                searching: &UseStateHandle<bool>| {
         let plat = platform.to_string();
         let plat2 = platform.to_string();
         let is_active = search_active.as_ref() == Some(&plat);
@@ -510,7 +508,8 @@ pub fn people_list() -> Html {
                 let search_active = search_active.clone();
                 gloo_timers::callback::Timeout::new(200, move || {
                     search_active.set(None);
-                }).forget();
+                })
+                .forget();
             })
         };
 

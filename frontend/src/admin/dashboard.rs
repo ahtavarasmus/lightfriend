@@ -1,10 +1,10 @@
-use yew::prelude::*;
 use crate::utils::api::Api;
-use serde::{Deserialize, Serialize};
-use yew_router::prelude::*;
 use crate::Route;
-use chrono::{Utc, TimeZone};
+use chrono::{TimeZone, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use yew::prelude::*;
+use yew_router::prelude::*;
 
 #[derive(Serialize)]
 struct EmailBroadcastMessage {
@@ -176,7 +176,6 @@ struct ChangePasswordRequest {
     new_password: String,
 }
 
-
 #[derive(Deserialize, Clone, Debug)]
 struct UserInfo {
     id: i32,
@@ -255,7 +254,9 @@ fn render_message_stats(
         let filtered_messages: Vec<_> = if show_all {
             stats.recent_messages.clone()
         } else {
-            stats.recent_messages.iter()
+            stats
+                .recent_messages
+                .iter()
                 .filter(|m| m.status == "failed" || m.status == "undelivered")
                 .cloned()
                 .collect()
@@ -370,10 +371,11 @@ pub fn admin_dashboard() -> Html {
     let new_password = use_state(|| String::new());
     let password_status = use_state(|| None::<String>);
     // Message stats state
-    let message_stats: UseStateHandle<HashMap<i32, MessageStatsResponse>> = use_state(|| HashMap::new());
+    let message_stats: UseStateHandle<HashMap<i32, MessageStatsResponse>> =
+        use_state(|| HashMap::new());
     let loading_stats = use_state(|| None::<i32>);
     let show_all_messages = use_state(|| false); // Default: show only failed/undelivered
-    // Global message stats state
+                                                 // Global message stats state
     let global_stats: UseStateHandle<Option<GlobalMessageStatsResponse>> = use_state(|| None);
     // Cost and usage stats state
     let cost_stats: UseStateHandle<Option<CostStatsResponse>> = use_state(|| None);
@@ -399,1489 +401,1482 @@ pub fn admin_dashboard() -> Html {
     let disabled_types_effect = disabled_alert_types.clone();
     let alert_count_effect = alert_count.clone();
 
-    use_effect_with_deps(move |_| {
-        let users = users_effect;
-        let error = error_effect;
-        let global_stats = global_stats_effect;
-        let cost_stats = cost_stats_effect;
-        let usage_stats = usage_stats_effect;
-        let stats_days = stats_days_effect;
-        let admin_alerts = admin_alerts_effect;
-        let disabled_types = disabled_types_effect;
-        let alert_count = alert_count_effect;
+    use_effect_with_deps(
+        move |_| {
+            let users = users_effect;
+            let error = error_effect;
+            let global_stats = global_stats_effect;
+            let cost_stats = cost_stats_effect;
+            let usage_stats = usage_stats_effect;
+            let stats_days = stats_days_effect;
+            let admin_alerts = admin_alerts_effect;
+            let disabled_types = disabled_types_effect;
+            let alert_count = alert_count_effect;
 
-        wasm_bindgen_futures::spawn_local(async move {
-            // Fetch users
-            match Api::get("/api/admin/users")
-                .send()
-                .await
-            {
-                Ok(response) => {
-                    if response.ok() {
-                        match response.json::<Vec<UserInfo>>().await {
-                            Ok(data) => {
-                                users.set(data);
+            wasm_bindgen_futures::spawn_local(async move {
+                // Fetch users
+                match Api::get("/api/admin/users").send().await {
+                    Ok(response) => {
+                        if response.ok() {
+                            match response.json::<Vec<UserInfo>>().await {
+                                Ok(data) => {
+                                    users.set(data);
+                                }
+                                Err(_) => {
+                                    error.set(Some("Failed to parse users data".to_string()));
+                                }
                             }
-                            Err(_) => {
-                                error.set(Some("Failed to parse users data".to_string()));
-                            }
+                        } else {
+                            error.set(Some("Not authorized to view this page".to_string()));
                         }
-                    } else {
-                        error.set(Some("Not authorized to view this page".to_string()));
+                    }
+                    Err(_) => {
+                        error.set(Some("Failed to fetch users".to_string()));
                     }
                 }
-                Err(_) => {
-                    error.set(Some("Failed to fetch users".to_string()));
-                }
-            }
 
-            // Fetch global message stats
-            if let Ok(response) = Api::get("/api/admin/global-message-stats")
-                .send()
-                .await
-            {
-                if response.ok() {
-                    if let Ok(data) = response.json::<GlobalMessageStatsResponse>().await {
-                        global_stats.set(Some(data));
+                // Fetch global message stats
+                if let Ok(response) = Api::get("/api/admin/global-message-stats").send().await {
+                    if response.ok() {
+                        if let Ok(data) = response.json::<GlobalMessageStatsResponse>().await {
+                            global_stats.set(Some(data));
+                        }
                     }
                 }
-            }
 
-            // Fetch cost stats
-            if let Ok(response) = Api::get(&format!("/api/admin/stats/costs?days={}", stats_days))
-                .send()
-                .await
-            {
-                if response.ok() {
-                    if let Ok(data) = response.json::<CostStatsResponse>().await {
-                        cost_stats.set(Some(data));
+                // Fetch cost stats
+                if let Ok(response) =
+                    Api::get(&format!("/api/admin/stats/costs?days={}", stats_days))
+                        .send()
+                        .await
+                {
+                    if response.ok() {
+                        if let Ok(data) = response.json::<CostStatsResponse>().await {
+                            cost_stats.set(Some(data));
+                        }
                     }
                 }
-            }
 
-            // Fetch usage stats
-            if let Ok(response) = Api::get(&format!("/api/admin/stats/usage?days={}", stats_days))
-                .send()
-                .await
-            {
-                if response.ok() {
-                    if let Ok(data) = response.json::<UsageStatsResponse>().await {
-                        usage_stats.set(Some(data));
+                // Fetch usage stats
+                if let Ok(response) =
+                    Api::get(&format!("/api/admin/stats/usage?days={}", stats_days))
+                        .send()
+                        .await
+                {
+                    if response.ok() {
+                        if let Ok(data) = response.json::<UsageStatsResponse>().await {
+                            usage_stats.set(Some(data));
+                        }
                     }
                 }
-            }
 
-            // Fetch admin alerts
-            if let Ok(response) = Api::get("/api/admin/alerts?limit=50")
-                .send()
-                .await
-            {
-                if response.ok() {
-                    if let Ok(data) = response.json::<AlertsResponse>().await {
-                        admin_alerts.set(data.alerts);
-                        alert_count.set(data.unacknowledged_count);
+                // Fetch admin alerts
+                if let Ok(response) = Api::get("/api/admin/alerts?limit=50").send().await {
+                    if response.ok() {
+                        if let Ok(data) = response.json::<AlertsResponse>().await {
+                            admin_alerts.set(data.alerts);
+                            alert_count.set(data.unacknowledged_count);
+                        }
                     }
                 }
-            }
 
-            // Fetch disabled alert types
-            if let Ok(response) = Api::get("/api/admin/alerts/disabled-types")
-                .send()
-                .await
-            {
-                if response.ok() {
-                    if let Ok(data) = response.json::<DisabledTypesResponse>().await {
-                        disabled_types.set(data.disabled_types);
+                // Fetch disabled alert types
+                if let Ok(response) = Api::get("/api/admin/alerts/disabled-types").send().await {
+                    if response.ok() {
+                        if let Ok(data) = response.json::<DisabledTypesResponse>().await {
+                            disabled_types.set(data.disabled_types);
+                        }
                     }
                 }
-            }
-        });
-        || ()
-    }, ());
+            });
+            || ()
+        },
+        (),
+    );
 
     let toggle_user_details = {
         let selected_user_id = selected_user_id.clone();
         Callback::from(move |user_id: i32| {
             selected_user_id.set(Some(match *selected_user_id {
                 Some(current_id) if current_id == user_id => return selected_user_id.set(None),
-                _ => user_id
+                _ => user_id,
             }));
         })
     };
 
     html! {
-        <div class="dashboard-container">
-            <div class="dashboard-panel">
-                <div class="panel-header">
-                    <h1 class="panel-title">{"Admin Dashboard"}</h1>
-                    <Link<Route> to={Route::Home} classes="back-link">
-                        {"Back to Home"}
-                    </Link<Route>>
-                </div>
-
-                <div class="collapsible-section broadcast-section">
-                    <div class="collapsible-header" onclick={{
-                        let show_broadcast_section = show_broadcast_section.clone();
-                        Callback::from(move |_| {
-                            show_broadcast_section.set(!*show_broadcast_section);
-                        })
-                    }}>
-                        <h2>{"Email Broadcast"}</h2>
-                        <span class="toggle-indicator">{if *show_broadcast_section { "▼" } else { "▶" }}</span>
+            <div class="dashboard-container">
+                <div class="dashboard-panel">
+                    <div class="panel-header">
+                        <h1 class="panel-title">{"Admin Dashboard"}</h1>
+                        <Link<Route> to={Route::Home} classes="back-link">
+                            {"Back to Home"}
+                        </Link<Route>>
                     </div>
-                    {
-                        if *show_broadcast_section {
-                            html! {
-                                <div class="collapsible-content">
-                                    <input
-                                        type="text"
-                                        value={(*email_subject).clone()}
-                                        onchange={{
-                                            let email_subject = email_subject.clone();
-                                            Callback::from(move |e: Event| {
-                                                let input: web_sys::HtmlInputElement = e.target_unchecked_into();
-                                                email_subject.set(input.value());
-                                            })
-                                        }}
-                                        placeholder="Enter email subject..."
-                                        class="email-subject-input"
-                                    />
-                                    <textarea
-                                        value={(*email_message).clone()}
-                                        onchange={{
-                                            let email_message = email_message.clone();
-                                            Callback::from(move |e: Event| {
-                                                let input: web_sys::HtmlTextAreaElement = e.target_unchecked_into();
-                                                email_message.set(input.value());
-                                            })
-                                        }}
-                                        placeholder="Enter email message to broadcast..."
-                                        class="broadcast-textarea"
-                                    />
-                                    <button
-                                        onclick={{
-                                            let email_subject = email_subject.clone();
-                                            let email_message = email_message.clone();
-                                            let error = error.clone();
-                                            Callback::from(move |_| {
-                                                let email_subject = email_subject.clone();
-                                                let email_message = email_message.clone();
-                                                let error = error.clone();
 
-                                                if email_subject.is_empty() || email_message.is_empty() {
-                                                    error.set(Some("Subject and message cannot be empty".to_string()));
-                                                    return;
-                                                }
-
-                                                wasm_bindgen_futures::spawn_local(async move {
-                                                    let broadcast_message = EmailBroadcastMessage {
-                                                        subject: (*email_subject).clone(),
-                                                        message: (*email_message).clone(),
-                                                    };
-
-                                                    match Api::post("/api/admin/broadcast-email")
-                                                        .json(&broadcast_message)
-                                                        .unwrap()
-                                                        .send()
-                                                        .await
-                                                    {
-                                                        Ok(response) => {
-                                                            if response.ok() {
-                                                                email_subject.set(String::new());
-                                                                email_message.set(String::new());
-                                                                error.set(Some("Email broadcast sent successfully".to_string()));
-                                                            } else {
-                                                                error.set(Some("Failed to send email broadcast".to_string()));
-                                                            }
-                                                        }
-                                                        Err(_) => {
-                                                            error.set(Some("Failed to send email broadcast request".to_string()));
-                                                        }
-                                                    }
-                                                });
-                                            })
-                                        }}
-                                        class="broadcast-button email"
-                                    >
-                                        {"Send Email Broadcast"}
-                                    </button>
-                                </div>
-                            }
-                        } else {
-                            html! {}
-                        }
-                    }
-                </div>
-
-                // Change Password Section
-                <div class="collapsible-section password-section">
-                    <div class="collapsible-header" onclick={{
-                        let show_password_section = show_password_section.clone();
-                        Callback::from(move |_| {
-                            show_password_section.set(!*show_password_section);
-                        })
-                    }}>
-                        <h2>{"Change Admin Password"}</h2>
-                        <span class="toggle-indicator">{if *show_password_section { "▼" } else { "▶" }}</span>
-                    </div>
-                    {
-                        if *show_password_section {
-                            html! {
-                                <div class="collapsible-content">
-                                    <div class="password-form">
+                    <div class="collapsible-section broadcast-section">
+                        <div class="collapsible-header" onclick={{
+                            let show_broadcast_section = show_broadcast_section.clone();
+                            Callback::from(move |_| {
+                                show_broadcast_section.set(!*show_broadcast_section);
+                            })
+                        }}>
+                            <h2>{"Email Broadcast"}</h2>
+                            <span class="toggle-indicator">{if *show_broadcast_section { "▼" } else { "▶" }}</span>
+                        </div>
+                        {
+                            if *show_broadcast_section {
+                                html! {
+                                    <div class="collapsible-content">
                                         <input
-                                            type="password"
-                                            value={(*new_password).clone()}
+                                            type="text"
+                                            value={(*email_subject).clone()}
                                             onchange={{
-                                                let new_password = new_password.clone();
+                                                let email_subject = email_subject.clone();
                                                 Callback::from(move |e: Event| {
                                                     let input: web_sys::HtmlInputElement = e.target_unchecked_into();
-                                                    new_password.set(input.value());
+                                                    email_subject.set(input.value());
                                                 })
                                             }}
-                                            placeholder="Enter new password (min 6 characters)..."
-                                            class="password-input"
+                                            placeholder="Enter email subject..."
+                                            class="email-subject-input"
+                                        />
+                                        <textarea
+                                            value={(*email_message).clone()}
+                                            onchange={{
+                                                let email_message = email_message.clone();
+                                                Callback::from(move |e: Event| {
+                                                    let input: web_sys::HtmlTextAreaElement = e.target_unchecked_into();
+                                                    email_message.set(input.value());
+                                                })
+                                            }}
+                                            placeholder="Enter email message to broadcast..."
+                                            class="broadcast-textarea"
                                         />
                                         <button
                                             onclick={{
-                                                let new_password = new_password.clone();
-                                                let password_status = password_status.clone();
+                                                let email_subject = email_subject.clone();
+                                                let email_message = email_message.clone();
+                                                let error = error.clone();
                                                 Callback::from(move |_| {
-                                                    let password_value = (*new_password).clone();
-                                                    let new_password = new_password.clone();
-                                                    let password_status = password_status.clone();
+                                                    let email_subject = email_subject.clone();
+                                                    let email_message = email_message.clone();
+                                                    let error = error.clone();
 
-                                                    if password_value.len() < 6 {
-                                                        password_status.set(Some("Password must be at least 6 characters".to_string()));
+                                                    if email_subject.is_empty() || email_message.is_empty() {
+                                                        error.set(Some("Subject and message cannot be empty".to_string()));
                                                         return;
                                                     }
 
                                                     wasm_bindgen_futures::spawn_local(async move {
-                                                        let request = ChangePasswordRequest {
-                                                            new_password: password_value,
+                                                        let broadcast_message = EmailBroadcastMessage {
+                                                            subject: (*email_subject).clone(),
+                                                            message: (*email_message).clone(),
                                                         };
 
-                                                        match Api::post("/api/admin/change-password")
-                                                            .json(&request)
+                                                        match Api::post("/api/admin/broadcast-email")
+                                                            .json(&broadcast_message)
                                                             .unwrap()
                                                             .send()
                                                             .await
                                                         {
                                                             Ok(response) => {
                                                                 if response.ok() {
-                                                                    new_password.set(String::new());
-                                                                    password_status.set(Some("Password updated successfully!".to_string()));
-                                                                    let password_status = password_status.clone();
-                                                                    gloo_timers::callback::Timeout::new(3000, move || {
-                                                                        password_status.set(None);
-                                                                    }).forget();
+                                                                    email_subject.set(String::new());
+                                                                    email_message.set(String::new());
+                                                                    error.set(Some("Email broadcast sent successfully".to_string()));
                                                                 } else {
-                                                                    password_status.set(Some("Failed to update password".to_string()));
+                                                                    error.set(Some("Failed to send email broadcast".to_string()));
                                                                 }
                                                             }
                                                             Err(_) => {
-                                                                password_status.set(Some("Failed to send request".to_string()));
+                                                                error.set(Some("Failed to send email broadcast request".to_string()));
                                                             }
                                                         }
                                                     });
                                                 })
                                             }}
-                                            class="broadcast-button"
+                                            class="broadcast-button email"
                                         >
-                                            {"Change Password"}
+                                            {"Send Email Broadcast"}
                                         </button>
+                                    </div>
+                                }
+                            } else {
+                                html! {}
+                            }
+                        }
+                    </div>
+
+                    // Change Password Section
+                    <div class="collapsible-section password-section">
+                        <div class="collapsible-header" onclick={{
+                            let show_password_section = show_password_section.clone();
+                            Callback::from(move |_| {
+                                show_password_section.set(!*show_password_section);
+                            })
+                        }}>
+                            <h2>{"Change Admin Password"}</h2>
+                            <span class="toggle-indicator">{if *show_password_section { "▼" } else { "▶" }}</span>
+                        </div>
+                        {
+                            if *show_password_section {
+                                html! {
+                                    <div class="collapsible-content">
+                                        <div class="password-form">
+                                            <input
+                                                type="password"
+                                                value={(*new_password).clone()}
+                                                onchange={{
+                                                    let new_password = new_password.clone();
+                                                    Callback::from(move |e: Event| {
+                                                        let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+                                                        new_password.set(input.value());
+                                                    })
+                                                }}
+                                                placeholder="Enter new password (min 6 characters)..."
+                                                class="password-input"
+                                            />
+                                            <button
+                                                onclick={{
+                                                    let new_password = new_password.clone();
+                                                    let password_status = password_status.clone();
+                                                    Callback::from(move |_| {
+                                                        let password_value = (*new_password).clone();
+                                                        let new_password = new_password.clone();
+                                                        let password_status = password_status.clone();
+
+                                                        if password_value.len() < 6 {
+                                                            password_status.set(Some("Password must be at least 6 characters".to_string()));
+                                                            return;
+                                                        }
+
+                                                        wasm_bindgen_futures::spawn_local(async move {
+                                                            let request = ChangePasswordRequest {
+                                                                new_password: password_value,
+                                                            };
+
+                                                            match Api::post("/api/admin/change-password")
+                                                                .json(&request)
+                                                                .unwrap()
+                                                                .send()
+                                                                .await
+                                                            {
+                                                                Ok(response) => {
+                                                                    if response.ok() {
+                                                                        new_password.set(String::new());
+                                                                        password_status.set(Some("Password updated successfully!".to_string()));
+                                                                        let password_status = password_status.clone();
+                                                                        gloo_timers::callback::Timeout::new(3000, move || {
+                                                                            password_status.set(None);
+                                                                        }).forget();
+                                                                    } else {
+                                                                        password_status.set(Some("Failed to update password".to_string()));
+                                                                    }
+                                                                }
+                                                                Err(_) => {
+                                                                    password_status.set(Some("Failed to send request".to_string()));
+                                                                }
+                                                            }
+                                                        });
+                                                    })
+                                                }}
+                                                class="broadcast-button"
+                                            >
+                                                {"Change Password"}
+                                            </button>
+                                            {
+                                                if let Some(status) = (*password_status).as_ref() {
+                                                    html! {
+                                                        <span class={classes!(
+                                                            "password-status",
+                                                            if status.contains("success") { "success" } else { "error" }
+                                                        )}>
+                                                            {status}
+                                                        </span>
+                                                    }
+                                                } else {
+                                                    html! {}
+                                                }
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                            } else {
+                                html! {}
+                            }
+                        }
+                    </div>
+
+                    // Cost & Usage Statistics Section
+                    <div class="collapsible-section cost-usage-stats-section">
+                        <div class="collapsible-header" onclick={{
+                            let show_stats_section = show_stats_section.clone();
+                            Callback::from(move |_| {
+                                show_stats_section.set(!*show_stats_section);
+                            })
+                        }}>
+                            <h2>
+                                {"Cost & Usage Stats "}
+                                {
+                                    if let Some(costs) = (*cost_stats).as_ref() {
+                                        html! {
+                                            <span class="header-stat">
+                                                {format!("(Avg: ${:.4}/user Intl, ${:.4}/user US)",
+                                                    costs.avg_cost_per_intl_user_30d,
+                                                    costs.avg_cost_per_us_ca_user_30d
+                                                )}
+                                            </span>
+                                        }
+                                    } else {
+                                        html! {}
+                                    }
+                                }
+                            </h2>
+                            <span class="toggle-indicator">{if *show_stats_section { "▼" } else { "▶" }}</span>
+                        </div>
+                        {
+                            if *show_stats_section {
+                                html! {
+                                    <div class="collapsible-content">
+                        <div class="stats-period-selector">
+                            <span>{"Period: "}</span>
+                            <select
+                                value={format!("{}", *stats_days)}
+                                onchange={{
+                                    let stats_days = stats_days.clone();
+                                    let cost_stats = cost_stats.clone();
+                                    let usage_stats = usage_stats.clone();
+                                    Callback::from(move |e: Event| {
+                                        let select: web_sys::HtmlSelectElement = e.target_unchecked_into();
+                                        let days: i32 = select.value().parse().unwrap_or(30);
+                                        stats_days.set(days);
+                                        // Refetch stats with new period
+                                        let cost_stats = cost_stats.clone();
+                                        let usage_stats = usage_stats.clone();
+                                        wasm_bindgen_futures::spawn_local(async move {
+                                            if let Ok(response) = Api::get(&format!("/api/admin/stats/costs?days={}", days))
+                                                .send()
+                                                .await
+                                            {
+                                                if response.ok() {
+                                                    if let Ok(data) = response.json::<CostStatsResponse>().await {
+                                                        cost_stats.set(Some(data));
+                                                    }
+                                                }
+                                            }
+                                            if let Ok(response) = Api::get(&format!("/api/admin/stats/usage?days={}", days))
+                                                .send()
+                                                .await
+                                            {
+                                                if response.ok() {
+                                                    if let Ok(data) = response.json::<UsageStatsResponse>().await {
+                                                        usage_stats.set(Some(data));
+                                                    }
+                                                }
+                                            }
+                                        });
+                                    })
+                                }}
+                            >
+                                <option value="7">{"7 days"}</option>
+                                <option value="30" selected=true>{"30 days"}</option>
+                                <option value="90">{"90 days"}</option>
+                            </select>
+                        </div>
+
+                        // Cost Stats
+                        {
+                            if let Some(costs) = (*cost_stats).as_ref() {
+                                html! {
+                                    <div class="cost-stats">
+                                        <h3>{"Avg Cost Per User (30 days)"}</h3>
+                                        <div class="key-metrics-row">
+                                            <div class="key-metric intl">
+                                                <span class="key-label">{"International"}</span>
+                                                <span class="key-number">{format!("${:.4}", costs.avg_cost_per_intl_user_30d)}</span>
+                                                <span class="key-context">{format!("{} users", costs.intl_user_count)}</span>
+                                            </div>
+                                            <div class="key-metric us-ca">
+                                                <span class="key-label">{"US/CA"}</span>
+                                                <span class="key-number">{format!("${:.4}", costs.avg_cost_per_us_ca_user_30d)}</span>
+                                                <span class="key-context">{format!("{} users", costs.us_ca_user_count)}</span>
+                                            </div>
+                                        </div>
+
                                         {
-                                            if let Some(status) = (*password_status).as_ref() {
+                                            if !costs.costs_per_user.is_empty() {
+                                                let max_cost = costs.costs_per_user.iter()
+                                                    .map(|u| u.sms_cost)
+                                                    .fold(0.0f32, |a, b| a.max(b));
+
                                                 html! {
-                                                    <span class={classes!(
-                                                        "password-status",
-                                                        if status.contains("success") { "success" } else { "error" }
-                                                    )}>
-                                                        {status}
-                                                    </span>
+                                                    <>
+                                                        <h4>{"Cost Per User"}</h4>
+                                                        <div class="user-cost-chart">
+                                                            {
+                                                                costs.costs_per_user.iter().map(|u| {
+                                                                    let bar_width = if max_cost > 0.0 {
+                                                                        (u.sms_cost / max_cost * 100.0) as i32
+                                                                    } else {
+                                                                        0
+                                                                    };
+                                                                    let bar_class = if u.is_international { "bar intl" } else { "bar us-ca" };
+                                                                    html! {
+                                                                        <div class="chart-row" key={u.user_id}>
+                                                                            <span class="chart-label">{format!("#{} ({})", u.user_id, u.country_code)}</span>
+                                                                            <div class="chart-bar-container">
+                                                                                <div class={bar_class} style={format!("width: {}%", bar_width)}></div>
+                                                                            </div>
+                                                                            <span class="chart-value">{format!("${:.4} ({} msgs)", u.sms_cost, u.sms_count)}</span>
+                                                                        </div>
+                                                                    }
+                                                                }).collect::<Html>()
+                                                            }
+                                                        </div>
+                                                    </>
+                                                }
+                                            } else {
+                                                html! { <p class="no-data">{"No user cost data"}</p> }
+                                            }
+                                        }
+
+                                        // Collapsible details section
+                                        <details class="cost-details">
+                                            <summary>{"Details"}</summary>
+                                            <div class="details-content">
+                                                <div class="detail-row">
+                                                    <span>{"7d projected (Intl):"}</span>
+                                                    <span>{format!("${:.4}", costs.avg_cost_per_intl_user_7d_projected)}</span>
+                                                </div>
+                                                <div class="detail-row">
+                                                    <span>{"7d projected (US/CA):"}</span>
+                                                    <span>{format!("${:.4}", costs.avg_cost_per_us_ca_user_7d_projected)}</span>
+                                                </div>
+                                                <div class="detail-row">
+                                                    <span>{"Total Intl SMS cost:"}</span>
+                                                    <span>{format!("${:.4}", costs.international_sms_cost)}</span>
+                                                </div>
+                                                <div class="detail-row">
+                                                    <span>{"Total US/CA SMS cost:"}</span>
+                                                    <span>{format!("${:.4}", costs.us_ca_sms_cost)}</span>
+                                                </div>
+                                                <div class="detail-row">
+                                                    <span>{"Total cost (SMS+Voice):"}</span>
+                                                    <span>{format!("${:.4}", costs.total_cost)}</span>
+                                                </div>
+                                            </div>
+                                        </details>
+                                    </div>
+                                }
+                            } else {
+                                html! { <p class="loading">{"Loading cost stats..."}</p> }
+                            }
+                        }
+
+                        // Usage Stats
+                        {
+                            if let Some(usage) = (*usage_stats).as_ref() {
+                                html! {
+                                    <div class="usage-stats">
+                                        <h3>{"Usage Trends"}</h3>
+                                        <div class="stats-summary usage-summary">
+                                            <div class="stat-card growth">
+                                                <span class="stat-number">{usage.total_messages_7d}</span>
+                                                <span class="stat-label">{format!("Messages (7d) {}%", if usage.growth_rate_7d >= 0.0 { format!("+{:.1}", usage.growth_rate_7d) } else { format!("{:.1}", usage.growth_rate_7d) })}</span>
+                                            </div>
+                                            <div class="stat-card growth">
+                                                <span class="stat-number">{usage.total_messages_30d}</span>
+                                                <span class="stat-label">{format!("Messages (30d) {}%", if usage.growth_rate_30d >= 0.0 { format!("+{:.1}", usage.growth_rate_30d) } else { format!("{:.1}", usage.growth_rate_30d) })}</span>
+                                            </div>
+                                            <div class="stat-card active-users">
+                                                <span class="stat-number">{usage.active_users_7d}</span>
+                                                <span class="stat-label">{"Active Users (7d)"}</span>
+                                            </div>
+                                            <div class="stat-card active-users">
+                                                <span class="stat-number">{usage.active_users_30d}</span>
+                                                <span class="stat-label">{"Active Users (30d)"}</span>
+                                            </div>
+                                        </div>
+
+                                        {
+                                            // Only show activity breakdown if any item has non-zero credits
+                                            if usage.breakdown_by_type.iter().any(|a| a.total_credits > 0.0) {
+                                                html! {
+                                                    <>
+                                                        <h4>{"Activity Breakdown"}</h4>
+                                                        <div class="activity-breakdown">
+                                                            {
+                                                                usage.breakdown_by_type.iter().map(|a| {
+                                                                    html! {
+                                                                        <span class="activity-item" key={a.activity_type.clone()}>
+                                                                            {format!("{}: {} ({:.4} credits)", a.activity_type, a.count, a.total_credits)}
+                                                                        </span>
+                                                                    }
+                                                                }).collect::<Html>()
+                                                            }
+                                                        </div>
+                                                    </>
+                                                }
+                                            } else {
+                                                html! {}
+                                            }
+                                        }
+
+                                        {
+                                            if !usage.daily_stats.is_empty() {
+                                                html! {
+                                                    <>
+                                                        <h4>{"Daily Stats (Recent)"}</h4>
+                                                        <table class="daily-stats-table">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th>{"Date"}</th>
+                                                                    <th>{"SMS"}</th>
+                                                                    <th>{"Calls"}</th>
+                                                                    <th>{"Cost"}</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {
+                                                                    usage.daily_stats.iter().rev().take(14).map(|d| {
+                                                                        html! {
+                                                                            <tr key={d.date.clone()}>
+                                                                                <td>{&d.date}</td>
+                                                                                <td>{d.sms_count}</td>
+                                                                                <td>{d.call_count}</td>
+                                                                                <td>{format!("${:.4}", d.total_cost)}</td>
+                                                                            </tr>
+                                                                        }
+                                                                    }).collect::<Html>()
+                                                                }
+                                                            </tbody>
+                                                        </table>
+                                                    </>
                                                 }
                                             } else {
                                                 html! {}
                                             }
                                         }
                                     </div>
-                                </div>
-                            }
-                        } else {
-                            html! {}
-                        }
-                    }
-                </div>
-
-                // Cost & Usage Statistics Section
-                <div class="collapsible-section cost-usage-stats-section">
-                    <div class="collapsible-header" onclick={{
-                        let show_stats_section = show_stats_section.clone();
-                        Callback::from(move |_| {
-                            show_stats_section.set(!*show_stats_section);
-                        })
-                    }}>
-                        <h2>
-                            {"Cost & Usage Stats "}
-                            {
-                                if let Some(costs) = (*cost_stats).as_ref() {
-                                    html! {
-                                        <span class="header-stat">
-                                            {format!("(Avg: ${:.4}/user Intl, ${:.4}/user US)",
-                                                costs.avg_cost_per_intl_user_30d,
-                                                costs.avg_cost_per_us_ca_user_30d
-                                            )}
-                                        </span>
-                                    }
-                                } else {
-                                    html! {}
                                 }
+                            } else {
+                                html! { <p class="loading">{"Loading usage stats..."}</p> }
                             }
-                        </h2>
-                        <span class="toggle-indicator">{if *show_stats_section { "▼" } else { "▶" }}</span>
-                    </div>
-                    {
-                        if *show_stats_section {
-                            html! {
-                                <div class="collapsible-content">
-                    <div class="stats-period-selector">
-                        <span>{"Period: "}</span>
-                        <select
-                            value={format!("{}", *stats_days)}
-                            onchange={{
-                                let stats_days = stats_days.clone();
-                                let cost_stats = cost_stats.clone();
-                                let usage_stats = usage_stats.clone();
-                                Callback::from(move |e: Event| {
-                                    let select: web_sys::HtmlSelectElement = e.target_unchecked_into();
-                                    let days: i32 = select.value().parse().unwrap_or(30);
-                                    stats_days.set(days);
-                                    // Refetch stats with new period
-                                    let cost_stats = cost_stats.clone();
-                                    let usage_stats = usage_stats.clone();
-                                    wasm_bindgen_futures::spawn_local(async move {
-                                        if let Ok(response) = Api::get(&format!("/api/admin/stats/costs?days={}", days))
-                                            .send()
-                                            .await
-                                        {
-                                            if response.ok() {
-                                                if let Ok(data) = response.json::<CostStatsResponse>().await {
-                                                    cost_stats.set(Some(data));
-                                                }
-                                            }
-                                        }
-                                        if let Ok(response) = Api::get(&format!("/api/admin/stats/usage?days={}", days))
-                                            .send()
-                                            .await
-                                        {
-                                            if response.ok() {
-                                                if let Ok(data) = response.json::<UsageStatsResponse>().await {
-                                                    usage_stats.set(Some(data));
-                                                }
-                                            }
-                                        }
-                                    });
-                                })
-                            }}
-                        >
-                            <option value="7">{"7 days"}</option>
-                            <option value="30" selected=true>{"30 days"}</option>
-                            <option value="90">{"90 days"}</option>
-                        </select>
-                    </div>
-
-                    // Cost Stats
-                    {
-                        if let Some(costs) = (*cost_stats).as_ref() {
-                            html! {
-                                <div class="cost-stats">
-                                    <h3>{"Avg Cost Per User (30 days)"}</h3>
-                                    <div class="key-metrics-row">
-                                        <div class="key-metric intl">
-                                            <span class="key-label">{"International"}</span>
-                                            <span class="key-number">{format!("${:.4}", costs.avg_cost_per_intl_user_30d)}</span>
-                                            <span class="key-context">{format!("{} users", costs.intl_user_count)}</span>
-                                        </div>
-                                        <div class="key-metric us-ca">
-                                            <span class="key-label">{"US/CA"}</span>
-                                            <span class="key-number">{format!("${:.4}", costs.avg_cost_per_us_ca_user_30d)}</span>
-                                            <span class="key-context">{format!("{} users", costs.us_ca_user_count)}</span>
-                                        </div>
-                                    </div>
-
-                                    {
-                                        if !costs.costs_per_user.is_empty() {
-                                            let max_cost = costs.costs_per_user.iter()
-                                                .map(|u| u.sms_cost)
-                                                .fold(0.0f32, |a, b| a.max(b));
-
-                                            html! {
-                                                <>
-                                                    <h4>{"Cost Per User"}</h4>
-                                                    <div class="user-cost-chart">
-                                                        {
-                                                            costs.costs_per_user.iter().map(|u| {
-                                                                let bar_width = if max_cost > 0.0 {
-                                                                    (u.sms_cost / max_cost * 100.0) as i32
-                                                                } else {
-                                                                    0
-                                                                };
-                                                                let bar_class = if u.is_international { "bar intl" } else { "bar us-ca" };
-                                                                html! {
-                                                                    <div class="chart-row" key={u.user_id}>
-                                                                        <span class="chart-label">{format!("#{} ({})", u.user_id, u.country_code)}</span>
-                                                                        <div class="chart-bar-container">
-                                                                            <div class={bar_class} style={format!("width: {}%", bar_width)}></div>
-                                                                        </div>
-                                                                        <span class="chart-value">{format!("${:.4} ({} msgs)", u.sms_cost, u.sms_count)}</span>
-                                                                    </div>
-                                                                }
-                                                            }).collect::<Html>()
-                                                        }
-                                                    </div>
-                                                </>
-                                            }
-                                        } else {
-                                            html! { <p class="no-data">{"No user cost data"}</p> }
-                                        }
-                                    }
-
-                                    // Collapsible details section
-                                    <details class="cost-details">
-                                        <summary>{"Details"}</summary>
-                                        <div class="details-content">
-                                            <div class="detail-row">
-                                                <span>{"7d projected (Intl):"}</span>
-                                                <span>{format!("${:.4}", costs.avg_cost_per_intl_user_7d_projected)}</span>
-                                            </div>
-                                            <div class="detail-row">
-                                                <span>{"7d projected (US/CA):"}</span>
-                                                <span>{format!("${:.4}", costs.avg_cost_per_us_ca_user_7d_projected)}</span>
-                                            </div>
-                                            <div class="detail-row">
-                                                <span>{"Total Intl SMS cost:"}</span>
-                                                <span>{format!("${:.4}", costs.international_sms_cost)}</span>
-                                            </div>
-                                            <div class="detail-row">
-                                                <span>{"Total US/CA SMS cost:"}</span>
-                                                <span>{format!("${:.4}", costs.us_ca_sms_cost)}</span>
-                                            </div>
-                                            <div class="detail-row">
-                                                <span>{"Total cost (SMS+Voice):"}</span>
-                                                <span>{format!("${:.4}", costs.total_cost)}</span>
-                                            </div>
-                                        </div>
-                                    </details>
-                                </div>
-                            }
-                        } else {
-                            html! { <p class="loading">{"Loading cost stats..."}</p> }
                         }
-                    }
-
-                    // Usage Stats
-                    {
-                        if let Some(usage) = (*usage_stats).as_ref() {
-                            html! {
-                                <div class="usage-stats">
-                                    <h3>{"Usage Trends"}</h3>
-                                    <div class="stats-summary usage-summary">
-                                        <div class="stat-card growth">
-                                            <span class="stat-number">{usage.total_messages_7d}</span>
-                                            <span class="stat-label">{format!("Messages (7d) {}%", if usage.growth_rate_7d >= 0.0 { format!("+{:.1}", usage.growth_rate_7d) } else { format!("{:.1}", usage.growth_rate_7d) })}</span>
-                                        </div>
-                                        <div class="stat-card growth">
-                                            <span class="stat-number">{usage.total_messages_30d}</span>
-                                            <span class="stat-label">{format!("Messages (30d) {}%", if usage.growth_rate_30d >= 0.0 { format!("+{:.1}", usage.growth_rate_30d) } else { format!("{:.1}", usage.growth_rate_30d) })}</span>
-                                        </div>
-                                        <div class="stat-card active-users">
-                                            <span class="stat-number">{usage.active_users_7d}</span>
-                                            <span class="stat-label">{"Active Users (7d)"}</span>
-                                        </div>
-                                        <div class="stat-card active-users">
-                                            <span class="stat-number">{usage.active_users_30d}</span>
-                                            <span class="stat-label">{"Active Users (30d)"}</span>
-                                        </div>
                                     </div>
+                                }
+                            } else {
+                                html! {}
+                            }
+                        }
+                    </div>
 
-                                    {
-                                        // Only show activity breakdown if any item has non-zero credits
-                                        if usage.breakdown_by_type.iter().any(|a| a.total_credits > 0.0) {
-                                            html! {
-                                                <>
-                                                    <h4>{"Activity Breakdown"}</h4>
-                                                    <div class="activity-breakdown">
-                                                        {
-                                                            usage.breakdown_by_type.iter().map(|a| {
-                                                                html! {
-                                                                    <span class="activity-item" key={a.activity_type.clone()}>
-                                                                        {format!("{}: {} ({:.4} credits)", a.activity_type, a.count, a.total_credits)}
-                                                                    </span>
-                                                                }
-                                                            }).collect::<Html>()
-                                                        }
-                                                    </div>
-                                                </>
-                                            }
-                                        } else {
-                                            html! {}
-                                        }
+                    // Admin Alerts Section
+                    <div class="alerts-section">
+                        <div class="alerts-header" onclick={{
+                            let show_alerts_section = show_alerts_section.clone();
+                            Callback::from(move |_| {
+                                show_alerts_section.set(!*show_alerts_section);
+                            })
+                        }}>
+                            <h2>
+                                {"System Alerts "}
+                                {
+                                    if *alert_count > 0 {
+                                        html! { <span class="alert-badge">{*alert_count}</span> }
+                                    } else {
+                                        html! {}
                                     }
+                                }
+                            </h2>
+                            <span class="toggle-indicator">{if *show_alerts_section { "▼" } else { "▶" }}</span>
+                        </div>
 
-                                    {
-                                        if !usage.daily_stats.is_empty() {
-                                            html! {
-                                                <>
-                                                    <h4>{"Daily Stats (Recent)"}</h4>
-                                                    <table class="daily-stats-table">
-                                                        <thead>
-                                                            <tr>
-                                                                <th>{"Date"}</th>
-                                                                <th>{"SMS"}</th>
-                                                                <th>{"Calls"}</th>
-                                                                <th>{"Cost"}</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
+                        {
+                            if *show_alerts_section {
+                                let admin_alerts_for_actions = admin_alerts.clone();
+                                let disabled_types_for_actions = disabled_alert_types.clone();
+                                let alert_count_for_actions = alert_count.clone();
+
+                                html! {
+                                    <div class="alerts-content">
+                                        // Acknowledge all button
+                                        {
+                                            if *alert_count > 0 {
+                                                let admin_alerts_ack = admin_alerts_for_actions.clone();
+                                                let alert_count_ack = alert_count_for_actions.clone();
+                                                html! {
+                                                    <button class="acknowledge-all-btn" onclick={Callback::from(move |_| {
+                                                        let admin_alerts = admin_alerts_ack.clone();
+                                                        let alert_count = alert_count_ack.clone();
+                                                        wasm_bindgen_futures::spawn_local(async move {
+                                                            if let Ok(response) = Api::post("/api/admin/alerts/acknowledge-all")
+                                                                .send()
+                                                                .await
                                                             {
-                                                                usage.daily_stats.iter().rev().take(14).map(|d| {
-                                                                    html! {
-                                                                        <tr key={d.date.clone()}>
-                                                                            <td>{&d.date}</td>
-                                                                            <td>{d.sms_count}</td>
-                                                                            <td>{d.call_count}</td>
-                                                                            <td>{format!("${:.4}", d.total_cost)}</td>
-                                                                        </tr>
-                                                                    }
-                                                                }).collect::<Html>()
-                                                            }
-                                                        </tbody>
-                                                    </table>
-                                                </>
-                                            }
-                                        } else {
-                                            html! {}
-                                        }
-                                    }
-                                </div>
-                            }
-                        } else {
-                            html! { <p class="loading">{"Loading usage stats..."}</p> }
-                        }
-                    }
-                                </div>
-                            }
-                        } else {
-                            html! {}
-                        }
-                    }
-                </div>
-
-                // Admin Alerts Section
-                <div class="alerts-section">
-                    <div class="alerts-header" onclick={{
-                        let show_alerts_section = show_alerts_section.clone();
-                        Callback::from(move |_| {
-                            show_alerts_section.set(!*show_alerts_section);
-                        })
-                    }}>
-                        <h2>
-                            {"System Alerts "}
-                            {
-                                if *alert_count > 0 {
-                                    html! { <span class="alert-badge">{*alert_count}</span> }
-                                } else {
-                                    html! {}
-                                }
-                            }
-                        </h2>
-                        <span class="toggle-indicator">{if *show_alerts_section { "▼" } else { "▶" }}</span>
-                    </div>
-
-                    {
-                        if *show_alerts_section {
-                            let admin_alerts_for_actions = admin_alerts.clone();
-                            let disabled_types_for_actions = disabled_alert_types.clone();
-                            let alert_count_for_actions = alert_count.clone();
-
-                            html! {
-                                <div class="alerts-content">
-                                    // Acknowledge all button
-                                    {
-                                        if *alert_count > 0 {
-                                            let admin_alerts_ack = admin_alerts_for_actions.clone();
-                                            let alert_count_ack = alert_count_for_actions.clone();
-                                            html! {
-                                                <button class="acknowledge-all-btn" onclick={Callback::from(move |_| {
-                                                    let admin_alerts = admin_alerts_ack.clone();
-                                                    let alert_count = alert_count_ack.clone();
-                                                    wasm_bindgen_futures::spawn_local(async move {
-                                                        if let Ok(response) = Api::post("/api/admin/alerts/acknowledge-all")
-                                                            .send()
-                                                            .await
-                                                        {
-                                                            if response.ok() {
-                                                                // Mark all as acknowledged locally
-                                                                let updated: Vec<AdminAlert> = (*admin_alerts).iter().map(|a| {
-                                                                    let mut new_alert = a.clone();
-                                                                    new_alert.acknowledged = 1;
-                                                                    new_alert
-                                                                }).collect();
-                                                                admin_alerts.set(updated);
-                                                                alert_count.set(0);
-                                                            }
-                                                        }
-                                                    });
-                                                })}>
-                                                    {"Acknowledge All"}
-                                                </button>
-                                            }
-                                        } else {
-                                            html! {}
-                                        }
-                                    }
-
-                                    // Disabled alert types section
-                                    {
-                                        if !(*disabled_types_for_actions).is_empty() {
-                                            let disabled_types_display = disabled_types_for_actions.clone();
-                                            html! {
-                                                <div class="disabled-types-section">
-                                                    <h3>{"Disabled Alert Types"}</h3>
-                                                    <div class="disabled-types-list">
-                                                        {
-                                                            (*disabled_types_display).iter().map(|dt| {
-                                                                let alert_type = dt.alert_type.clone();
-                                                                let disabled_types_enable = disabled_types_for_actions.clone();
-                                                                let encoded_type = urlencoding::encode(&alert_type).into_owned();
-                                                                html! {
-                                                                    <div class="disabled-type-item" key={alert_type.clone()}>
-                                                                        <span class="disabled-type-name">{&alert_type}</span>
-                                                                        <button class="enable-btn" onclick={Callback::from(move |_| {
-                                                                            let disabled_types = disabled_types_enable.clone();
-                                                                            let encoded = encoded_type.clone();
-                                                                            let alert_type_to_remove = alert_type.clone();
-                                                                            wasm_bindgen_futures::spawn_local(async move {
-                                                                                if let Ok(response) = Api::post(&format!("/api/admin/alerts/enable/{}", encoded))
-                                                                                    .send()
-                                                                                    .await
-                                                                                {
-                                                                                    if response.ok() {
-                                                                                        let updated: Vec<DisabledAlertType> = (*disabled_types)
-                                                                                            .iter()
-                                                                                            .filter(|d| d.alert_type != alert_type_to_remove)
-                                                                                            .cloned()
-                                                                                            .collect();
-                                                                                        disabled_types.set(updated);
-                                                                                    }
-                                                                                }
-                                                                            });
-                                                                        })}>
-                                                                            {"Enable"}
-                                                                        </button>
-                                                                    </div>
+                                                                if response.ok() {
+                                                                    // Mark all as acknowledged locally
+                                                                    let updated: Vec<AdminAlert> = (*admin_alerts).iter().map(|a| {
+                                                                        let mut new_alert = a.clone();
+                                                                        new_alert.acknowledged = 1;
+                                                                        new_alert
+                                                                    }).collect();
+                                                                    admin_alerts.set(updated);
+                                                                    alert_count.set(0);
                                                                 }
-                                                            }).collect::<Html>()
-                                                        }
-                                                    </div>
-                                                </div>
+                                                            }
+                                                        });
+                                                    })}>
+                                                        {"Acknowledge All"}
+                                                    </button>
+                                                }
+                                            } else {
+                                                html! {}
                                             }
-                                        } else {
-                                            html! {}
                                         }
-                                    }
 
-                                    // Alerts table
-                                    {
-                                        if (*admin_alerts_for_actions).is_empty() {
-                                            html! { <p class="no-alerts">{"No alerts recorded."}</p> }
-                                        } else {
-                                            let alerts_display = admin_alerts_for_actions.clone();
-                                            let disabled_types_for_disable = disabled_alert_types.clone();
-                                            let admin_alerts_ack = admin_alerts.clone();
-                                            let alert_count_ack = alert_count.clone();
-                                            html! {
-                                                <table class="alerts-table">
-                                                    <thead>
-                                                        <tr>
-                                                            <th>{"Severity"}</th>
-                                                            <th>{"Type"}</th>
-                                                            <th>{"Location"}</th>
-                                                            <th>{"Time"}</th>
-                                                            <th>{"Actions"}</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {
-                                                            (*alerts_display).iter().map(|alert| {
-                                                                let alert_id = alert.id.unwrap_or(0);
-                                                                let alert_type = alert.alert_type.clone();
-                                                                let severity_class = match alert.severity.as_str() {
-                                                                    "Critical" => "severity-critical",
-                                                                    "Error" => "severity-error",
-                                                                    "Warning" => "severity-warning",
-                                                                    _ => "severity-info",
-                                                                };
-                                                                let row_class = if alert.acknowledged == 0 {
-                                                                    "alert-row unacknowledged"
-                                                                } else {
-                                                                    "alert-row acknowledged"
-                                                                };
-                                                                let timestamp = Utc.timestamp_opt(alert.created_at as i64, 0)
-                                                                    .single()
-                                                                    .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
-                                                                    .unwrap_or_else(|| "Unknown".to_string());
-
-                                                                let admin_alerts_row = admin_alerts_ack.clone();
-                                                                let alert_count_row = alert_count_ack.clone();
-                                                                let disabled_types_row = disabled_types_for_disable.clone();
-                                                                let encoded_type = urlencoding::encode(&alert_type).into_owned();
-
-                                                                html! {
-                                                                    <tr class={row_class} key={alert_id}>
-                                                                        <td class={severity_class}>{&alert.severity}</td>
-                                                                        <td class="alert-type-cell" title={alert.message.clone()}>{&alert.alert_type}</td>
-                                                                        <td class="location-cell">{&alert.location}</td>
-                                                                        <td>{timestamp}</td>
-                                                                        <td class="actions-cell">
-                                                                            {
-                                                                                if alert.acknowledged == 0 {
-                                                                                    let admin_alerts_ack_btn = admin_alerts_row.clone();
-                                                                                    let alert_count_ack_btn = alert_count_row.clone();
-                                                                                    html! {
-                                                                                        <button class="ack-btn" onclick={Callback::from(move |_| {
-                                                                                            let admin_alerts = admin_alerts_ack_btn.clone();
-                                                                                            let alert_count = alert_count_ack_btn.clone();
-                                                                                            wasm_bindgen_futures::spawn_local(async move {
-                                                                                                if let Ok(response) = Api::post(&format!("/api/admin/alerts/{}/acknowledge", alert_id))
-                                                                                                    .send()
-                                                                                                    .await
-                                                                                                {
-                                                                                                    if response.ok() {
-                                                                                                        let updated: Vec<AdminAlert> = (*admin_alerts).iter().map(|a| {
-                                                                                                            if a.id == Some(alert_id) {
-                                                                                                                let mut new_alert = a.clone();
-                                                                                                                new_alert.acknowledged = 1;
-                                                                                                                new_alert
-                                                                                                            } else {
-                                                                                                                a.clone()
-                                                                                                            }
-                                                                                                        }).collect();
-                                                                                                        admin_alerts.set(updated);
-                                                                                                        alert_count.set((*alert_count - 1).max(0));
-                                                                                                    }
-                                                                                                }
-                                                                                            });
-                                                                                        })}>
-                                                                                            {"Ack"}
-                                                                                        </button>
-                                                                                    }
-                                                                                } else {
-                                                                                    html! {}
-                                                                                }
-                                                                            }
-                                                                            <button class="disable-btn" onclick={Callback::from(move |_| {
-                                                                                let disabled_types = disabled_types_row.clone();
+                                        // Disabled alert types section
+                                        {
+                                            if !(*disabled_types_for_actions).is_empty() {
+                                                let disabled_types_display = disabled_types_for_actions.clone();
+                                                html! {
+                                                    <div class="disabled-types-section">
+                                                        <h3>{"Disabled Alert Types"}</h3>
+                                                        <div class="disabled-types-list">
+                                                            {
+                                                                (*disabled_types_display).iter().map(|dt| {
+                                                                    let alert_type = dt.alert_type.clone();
+                                                                    let disabled_types_enable = disabled_types_for_actions.clone();
+                                                                    let encoded_type = urlencoding::encode(&alert_type).into_owned();
+                                                                    html! {
+                                                                        <div class="disabled-type-item" key={alert_type.clone()}>
+                                                                            <span class="disabled-type-name">{&alert_type}</span>
+                                                                            <button class="enable-btn" onclick={Callback::from(move |_| {
+                                                                                let disabled_types = disabled_types_enable.clone();
                                                                                 let encoded = encoded_type.clone();
-                                                                                let alert_type_clone = alert_type.clone();
+                                                                                let alert_type_to_remove = alert_type.clone();
                                                                                 wasm_bindgen_futures::spawn_local(async move {
-                                                                                    if let Ok(response) = Api::post(&format!("/api/admin/alerts/disable/{}", encoded))
+                                                                                    if let Ok(response) = Api::post(&format!("/api/admin/alerts/enable/{}", encoded))
                                                                                         .send()
                                                                                         .await
                                                                                     {
                                                                                         if response.ok() {
-                                                                                            let current_time = chrono::Utc::now().timestamp() as i32;
-                                                                                            let mut updated = (*disabled_types).clone();
-                                                                                            updated.push(DisabledAlertType {
-                                                                                                id: None,
-                                                                                                alert_type: alert_type_clone,
-                                                                                                disabled_at: current_time,
-                                                                                            });
+                                                                                            let updated: Vec<DisabledAlertType> = (*disabled_types)
+                                                                                                .iter()
+                                                                                                .filter(|d| d.alert_type != alert_type_to_remove)
+                                                                                                .cloned()
+                                                                                                .collect();
                                                                                             disabled_types.set(updated);
                                                                                         }
                                                                                     }
                                                                                 });
                                                                             })}>
-                                                                                {"Disable"}
+                                                                                {"Enable"}
                                                                             </button>
-                                                                        </td>
-                                                                    </tr>
-                                                                }
-                                                            }).collect::<Html>()
-                                                        }
-                                                    </tbody>
-                                                </table>
+                                                                        </div>
+                                                                    }
+                                                                }).collect::<Html>()
+                                                            }
+                                                        </div>
+                                                    </div>
+                                                }
+                                            } else {
+                                                html! {}
                                             }
                                         }
-                                    }
-                                </div>
-                            }
-                        } else {
-                            html! {}
-                        }
-                    }
-                </div>
 
-                // Global SMS Stats Section
-                <div class="global-stats-section">
-                    <h2>{"Global SMS Delivery Stats"}</h2>
-                    {
-                        if let Some(stats) = (*global_stats).as_ref() {
-                            html! {
-                                <>
-                                    <div class="stats-summary global">
-                                        <div class="stat-card total">
-                                            <span class="stat-number">{stats.total_messages}</span>
-                                            <span class="stat-label">{"Total"}</span>
-                                        </div>
-                                        <div class="stat-card delivered">
-                                            <span class="stat-number">{stats.delivered}</span>
-                                            <span class="stat-label">{"Delivered"}</span>
-                                        </div>
-                                        <div class="stat-card failed">
-                                            <span class="stat-number">{stats.failed}</span>
-                                            <span class="stat-label">{"Failed"}</span>
-                                        </div>
-                                        <div class="stat-card undelivered">
-                                            <span class="stat-number">{stats.undelivered}</span>
-                                            <span class="stat-label">{"Undelivered"}</span>
-                                        </div>
-                                        <div class="stat-card sent">
-                                            <span class="stat-number">{stats.sent}</span>
-                                            <span class="stat-label">{"Sent"}</span>
-                                        </div>
-                                    </div>
-                                    {
-                                        if !stats.recent_failed.is_empty() {
-                                            html! {
-                                                <>
-                                                    <h3>{"Recent Failed/Undelivered Messages"}</h3>
-                                                    <table class="message-log-table global-failed">
+                                        // Alerts table
+                                        {
+                                            if (*admin_alerts_for_actions).is_empty() {
+                                                html! { <p class="no-alerts">{"No alerts recorded."}</p> }
+                                            } else {
+                                                let alerts_display = admin_alerts_for_actions.clone();
+                                                let disabled_types_for_disable = disabled_alert_types.clone();
+                                                let admin_alerts_ack = admin_alerts.clone();
+                                                let alert_count_ack = alert_count.clone();
+                                                html! {
+                                                    <table class="alerts-table">
                                                         <thead>
                                                             <tr>
-                                                                <th>{"User"}</th>
-                                                                <th>{"Status"}</th>
-                                                                <th>{"To"}</th>
-                                                                <th>{"From"}</th>
-                                                                <th>{"Error"}</th>
+                                                                <th>{"Severity"}</th>
+                                                                <th>{"Type"}</th>
+                                                                <th>{"Location"}</th>
                                                                 <th>{"Time"}</th>
+                                                                <th>{"Actions"}</th>
                                                             </tr>
                                                         </thead>
                                                         <tbody>
                                                             {
-                                                                stats.recent_failed.iter().map(|msg| {
-                                                                    let status_class = match msg.status.as_str() {
-                                                                        "failed" => "status-failed",
-                                                                        "undelivered" => "status-undelivered",
-                                                                        _ => "status-queued",
+                                                                (*alerts_display).iter().map(|alert| {
+                                                                    let alert_id = alert.id.unwrap_or(0);
+                                                                    let alert_type = alert.alert_type.clone();
+                                                                    let severity_class = match alert.severity.as_str() {
+                                                                        "Critical" => "severity-critical",
+                                                                        "Error" => "severity-error",
+                                                                        "Warning" => "severity-warning",
+                                                                        _ => "severity-info",
                                                                     };
-                                                                    let user_str = msg.user_email.clone()
-                                                                        .unwrap_or_else(|| format!("User {}", msg.user_id));
-                                                                    let error_str = msg.error_code.clone()
-                                                                        .map(|c| format!("{}: {}", c, msg.error_message.as_deref().unwrap_or("")))
-                                                                        .unwrap_or_else(|| "-".to_string());
-                                                                    let time_str = Utc.timestamp_opt(msg.created_at as i64, 0)
+                                                                    let row_class = if alert.acknowledged == 0 {
+                                                                        "alert-row unacknowledged"
+                                                                    } else {
+                                                                        "alert-row acknowledged"
+                                                                    };
+                                                                    let timestamp = Utc.timestamp_opt(alert.created_at as i64, 0)
                                                                         .single()
                                                                         .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
-                                                                        .unwrap_or_else(|| "Invalid".to_string());
-                                                                    let from_str = msg.from_number.clone().unwrap_or_else(|| "-".to_string());
+                                                                        .unwrap_or_else(|| "Unknown".to_string());
+
+                                                                    let admin_alerts_row = admin_alerts_ack.clone();
+                                                                    let alert_count_row = alert_count_ack.clone();
+                                                                    let disabled_types_row = disabled_types_for_disable.clone();
+                                                                    let encoded_type = urlencoding::encode(&alert_type).into_owned();
+
                                                                     html! {
-                                                                        <tr key={msg.message_sid.clone()}>
-                                                                            <td class="user-cell">{user_str}</td>
-                                                                            <td><span class={classes!("status-badge", status_class)}>{&msg.status}</span></td>
-                                                                            <td>{&msg.to_number}</td>
-                                                                            <td>{from_str}</td>
-                                                                            <td class="error-cell">{error_str}</td>
-                                                                            <td>{time_str}</td>
+                                                                        <tr class={row_class} key={alert_id}>
+                                                                            <td class={severity_class}>{&alert.severity}</td>
+                                                                            <td class="alert-type-cell" title={alert.message.clone()}>{&alert.alert_type}</td>
+                                                                            <td class="location-cell">{&alert.location}</td>
+                                                                            <td>{timestamp}</td>
+                                                                            <td class="actions-cell">
+                                                                                {
+                                                                                    if alert.acknowledged == 0 {
+                                                                                        let admin_alerts_ack_btn = admin_alerts_row.clone();
+                                                                                        let alert_count_ack_btn = alert_count_row.clone();
+                                                                                        html! {
+                                                                                            <button class="ack-btn" onclick={Callback::from(move |_| {
+                                                                                                let admin_alerts = admin_alerts_ack_btn.clone();
+                                                                                                let alert_count = alert_count_ack_btn.clone();
+                                                                                                wasm_bindgen_futures::spawn_local(async move {
+                                                                                                    if let Ok(response) = Api::post(&format!("/api/admin/alerts/{}/acknowledge", alert_id))
+                                                                                                        .send()
+                                                                                                        .await
+                                                                                                    {
+                                                                                                        if response.ok() {
+                                                                                                            let updated: Vec<AdminAlert> = (*admin_alerts).iter().map(|a| {
+                                                                                                                if a.id == Some(alert_id) {
+                                                                                                                    let mut new_alert = a.clone();
+                                                                                                                    new_alert.acknowledged = 1;
+                                                                                                                    new_alert
+                                                                                                                } else {
+                                                                                                                    a.clone()
+                                                                                                                }
+                                                                                                            }).collect();
+                                                                                                            admin_alerts.set(updated);
+                                                                                                            alert_count.set((*alert_count - 1).max(0));
+                                                                                                        }
+                                                                                                    }
+                                                                                                });
+                                                                                            })}>
+                                                                                                {"Ack"}
+                                                                                            </button>
+                                                                                        }
+                                                                                    } else {
+                                                                                        html! {}
+                                                                                    }
+                                                                                }
+                                                                                <button class="disable-btn" onclick={Callback::from(move |_| {
+                                                                                    let disabled_types = disabled_types_row.clone();
+                                                                                    let encoded = encoded_type.clone();
+                                                                                    let alert_type_clone = alert_type.clone();
+                                                                                    wasm_bindgen_futures::spawn_local(async move {
+                                                                                        if let Ok(response) = Api::post(&format!("/api/admin/alerts/disable/{}", encoded))
+                                                                                            .send()
+                                                                                            .await
+                                                                                        {
+                                                                                            if response.ok() {
+                                                                                                let current_time = chrono::Utc::now().timestamp() as i32;
+                                                                                                let mut updated = (*disabled_types).clone();
+                                                                                                updated.push(DisabledAlertType {
+                                                                                                    id: None,
+                                                                                                    alert_type: alert_type_clone,
+                                                                                                    disabled_at: current_time,
+                                                                                                });
+                                                                                                disabled_types.set(updated);
+                                                                                            }
+                                                                                        }
+                                                                                    });
+                                                                                })}>
+                                                                                    {"Disable"}
+                                                                                </button>
+                                                                            </td>
                                                                         </tr>
                                                                     }
                                                                 }).collect::<Html>()
                                                             }
                                                         </tbody>
                                                     </table>
-                                                </>
+                                                }
                                             }
-                                        } else {
-                                            html! { <p class="no-messages">{"No failed messages - all messages delivered successfully!"}</p> }
                                         }
-                                    }
-                                </>
+                                    </div>
+                                }
+                            } else {
+                                html! {}
+                            }
+                        }
+                    </div>
+
+                    // Global SMS Stats Section
+                    <div class="global-stats-section">
+                        <h2>{"Global SMS Delivery Stats"}</h2>
+                        {
+                            if let Some(stats) = (*global_stats).as_ref() {
+                                html! {
+                                    <>
+                                        <div class="stats-summary global">
+                                            <div class="stat-card total">
+                                                <span class="stat-number">{stats.total_messages}</span>
+                                                <span class="stat-label">{"Total"}</span>
+                                            </div>
+                                            <div class="stat-card delivered">
+                                                <span class="stat-number">{stats.delivered}</span>
+                                                <span class="stat-label">{"Delivered"}</span>
+                                            </div>
+                                            <div class="stat-card failed">
+                                                <span class="stat-number">{stats.failed}</span>
+                                                <span class="stat-label">{"Failed"}</span>
+                                            </div>
+                                            <div class="stat-card undelivered">
+                                                <span class="stat-number">{stats.undelivered}</span>
+                                                <span class="stat-label">{"Undelivered"}</span>
+                                            </div>
+                                            <div class="stat-card sent">
+                                                <span class="stat-number">{stats.sent}</span>
+                                                <span class="stat-label">{"Sent"}</span>
+                                            </div>
+                                        </div>
+                                        {
+                                            if !stats.recent_failed.is_empty() {
+                                                html! {
+                                                    <>
+                                                        <h3>{"Recent Failed/Undelivered Messages"}</h3>
+                                                        <table class="message-log-table global-failed">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th>{"User"}</th>
+                                                                    <th>{"Status"}</th>
+                                                                    <th>{"To"}</th>
+                                                                    <th>{"From"}</th>
+                                                                    <th>{"Error"}</th>
+                                                                    <th>{"Time"}</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {
+                                                                    stats.recent_failed.iter().map(|msg| {
+                                                                        let status_class = match msg.status.as_str() {
+                                                                            "failed" => "status-failed",
+                                                                            "undelivered" => "status-undelivered",
+                                                                            _ => "status-queued",
+                                                                        };
+                                                                        let user_str = msg.user_email.clone()
+                                                                            .unwrap_or_else(|| format!("User {}", msg.user_id));
+                                                                        let error_str = msg.error_code.clone()
+                                                                            .map(|c| format!("{}: {}", c, msg.error_message.as_deref().unwrap_or("")))
+                                                                            .unwrap_or_else(|| "-".to_string());
+                                                                        let time_str = Utc.timestamp_opt(msg.created_at as i64, 0)
+                                                                            .single()
+                                                                            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                                                                            .unwrap_or_else(|| "Invalid".to_string());
+                                                                        let from_str = msg.from_number.clone().unwrap_or_else(|| "-".to_string());
+                                                                        html! {
+                                                                            <tr key={msg.message_sid.clone()}>
+                                                                                <td class="user-cell">{user_str}</td>
+                                                                                <td><span class={classes!("status-badge", status_class)}>{&msg.status}</span></td>
+                                                                                <td>{&msg.to_number}</td>
+                                                                                <td>{from_str}</td>
+                                                                                <td class="error-cell">{error_str}</td>
+                                                                                <td>{time_str}</td>
+                                                                            </tr>
+                                                                        }
+                                                                    }).collect::<Html>()
+                                                                }
+                                                            </tbody>
+                                                        </table>
+                                                    </>
+                                                }
+                                            } else {
+                                                html! { <p class="no-messages">{"No failed messages - all messages delivered successfully!"}</p> }
+                                            }
+                                        }
+                                    </>
+                                }
+                            } else {
+                                html! { <p class="loading">{"Loading global stats..."}</p> }
+                            }
+                        }
+                    </div>
+
+                    {
+                        if let Some(error_msg) = (*error).as_ref() {
+                            html! {
+                                <div class="info-section error">
+                                    <span class="error-message">{error_msg}</span>
+                                </div>
                             }
                         } else {
-                            html! { <p class="loading">{"Loading global stats..."}</p> }
-                        }
-                    }
-                </div>
+                            html! {
+                                <div class="info-section">
+                                    <h2 class="section-title">{"Users List"}</h2>
+                                    <div class="users-table-container">
+                                        <table class="users-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>{"ID"}</th>
+                                                    <th>{"Email"}</th>
+                                                    <th>{"Phone"}</th>
+                                                    <th>{"Overage Credits"}</th>
+                                                    <th>{"Monthly Credits"}</th>
+                                                    <th>{"Tier"}</th>
+                                                    <th>{"Plan"}</th>
+                                                    <th>{"Twilio"}</th>
+                                                    <th>{"Notify"}</th>
+                                                    <th>{"Joined"}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {
+                                                    users.iter().map(|user| {
+                                                        let is_selected = selected_user_id.as_ref() == Some(&user.id);
+                                                        let user_id = user.id;
+                                                        let onclick = toggle_user_details.reform(move |_| user_id);
 
-                {
-                    if let Some(error_msg) = (*error).as_ref() {
-                        html! {
-                            <div class="info-section error">
-                                <span class="error-message">{error_msg}</span>
-                            </div>
-                        }
-                    } else {
-                        html! {
-                            <div class="info-section">
-                                <h2 class="section-title">{"Users List"}</h2>
-                                <div class="users-table-container">
-                                    <table class="users-table">
-                                        <thead>
-                                            <tr>
-                                                <th>{"ID"}</th>
-                                                <th>{"Email"}</th>
-                                                <th>{"Phone"}</th>
-                                                <th>{"Overage Credits"}</th>
-                                                <th>{"Monthly Credits"}</th>
-                                                <th>{"Tier"}</th>
-                                                <th>{"Plan"}</th>
-                                                <th>{"Twilio"}</th>
-                                                <th>{"Notify"}</th>
-                                                <th>{"Joined"}</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {
-                                                users.iter().map(|user| {
-                                                    let is_selected = selected_user_id.as_ref() == Some(&user.id);
-                                                    let user_id = user.id;
-                                                    let onclick = toggle_user_details.reform(move |_| user_id);
-                                                    
-                                                    html! {
-                                                        <>
-                                                            <tr onclick={onclick} key={user.id} class={classes!(
-                                                                "user-row",
-                                                                is_selected.then(|| "selected"),
-                                                                match user.sub_tier.as_deref() {
-                                                                    Some("tier 2") => "gold-user",
-                                                                    _ => ""
-                                                                }
-                                                            )}>
-                                                                <td>{user.id}</td>
-                                                                <td>
-                                                                    <div class="user-email-container">
-                                                                        {&user.email}
-                                                                        {
+                                                        html! {
+                                                            <>
+                                                                <tr onclick={onclick} key={user.id} class={classes!(
+                                                                    "user-row",
+                                                                    is_selected.then(|| "selected"),
+                                                                    match user.sub_tier.as_deref() {
+                                                                        Some("tier 2") => "gold-user",
+                                                                        _ => ""
+                                                                    }
+                                                                )}>
+                                                                    <td>{user.id}</td>
+                                                                    <td>
+                                                                        <div class="user-email-container">
+                                                                            {&user.email}
+                                                                            {
+                                                                                match user.sub_tier.as_deref() {
+                                                                                    Some("tier 2") => html! {
+                                                                                        <span class="gold-badge">{"★"}</span>
+                                                                                    },
+                                                                                    _ => html! {}
+                                                                                }
+                                                                            }
+                                                                        </div>
+                                                                    </td>
+                                                                    <td>{&user.phone_number}</td>
+                                                                    <td>{format!("{:.2}€", user.credits)}</td>
+                                                                    <td>{format!("{:.2}€", user.credits_left)}</td>
+                                                                    <td>
+                                                                        <span class={classes!(
+                                                                            "tier-badge",
                                                                             match user.sub_tier.as_deref() {
-                                                                                Some("tier 2") => html! {
-                                                                                    <span class="gold-badge">{"★"}</span>
-                                                                                },
-                                                                                _ => html! {}
+                                                                                Some("tier 2") => "gold",
+                                                                                _ => "none"
+                                                                            }
+                                                                        )}>
+                                                                            {user.sub_tier.clone().unwrap_or_else(|| "None".to_string())}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td>
+                                                                        <span class={classes!(
+                                                                            "plan-badge",
+                                                                            match user.plan_type.as_deref() {
+                                                                                Some("byot") => "byot",
+                                                                                Some("autopilot") => "autopilot",
+                                                                                Some("assistant") => "assistant",
+                                                                                _ => "none"
+                                                                            }
+                                                                        )}>
+                                                                            {user.plan_type.clone().unwrap_or_else(|| "None".to_string()).to_uppercase()}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td>
+                                                                        {
+                                                                            // Only show Twilio status for BYOT users
+                                                                            if user.plan_type.as_deref() == Some("byot") {
+                                                                                html! {
+                                                                                    <span class={classes!(
+                                                                                        "status-badge",
+                                                                                        if user.has_twilio_credentials { "verified" } else { "unverified" }
+                                                                                    )}>
+                                                                                        {if user.has_twilio_credentials { "Yes" } else { "No" }}
+                                                                                    </span>
+                                                                                }
+                                                                            } else {
+                                                                                html! { <span class="status-badge disabled">{"-"}</span> }
                                                                             }
                                                                         }
-                                                                    </div>
-                                                                </td>
-                                                                <td>{&user.phone_number}</td>
-                                                                <td>{format!("{:.2}€", user.credits)}</td>
-                                                                <td>{format!("{:.2}€", user.credits_left)}</td>
-                                                                <td>
-                                                                    <span class={classes!(
-                                                                        "tier-badge",
-                                                                        match user.sub_tier.as_deref() {
-                                                                            Some("tier 2") => "gold",
-                                                                            _ => "none"
+                                                                    </td>
+                                                                    <td>
+                                                                        <span class={classes!(
+                                                                            "status-badge",
+                                                                            if user.notify { "enabled" } else { "disabled" }
+                                                                        )}>
+                                                                            {if user.notify { "Yes" } else { "No" }}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td>
+                                                                        {
+                                                                            user.time_to_live.map_or("N/A".to_string(), |ttl| {
+                                                                                Utc.timestamp_opt(ttl as i64, 0)
+                                                                                    .single()
+                                                                                    .map(|dt| dt.format("%Y-%m-%d").to_string())
+                                                                                    .unwrap_or_else(|| "Invalid".to_string())
+                                                                            })
                                                                         }
-                                                                    )}>
-                                                                        {user.sub_tier.clone().unwrap_or_else(|| "None".to_string())}
-                                                                    </span>
-                                                                </td>
-                                                                <td>
-                                                                    <span class={classes!(
-                                                                        "plan-badge",
-                                                                        match user.plan_type.as_deref() {
-                                                                            Some("byot") => "byot",
-                                                                            Some("autopilot") => "autopilot",
-                                                                            Some("assistant") => "assistant",
-                                                                            _ => "none"
-                                                                        }
-                                                                    )}>
-                                                                        {user.plan_type.clone().unwrap_or_else(|| "None".to_string()).to_uppercase()}
-                                                                    </span>
-                                                                </td>
-                                                                <td>
-                                                                    {
-                                                                        // Only show Twilio status for BYOT users
-                                                                        if user.plan_type.as_deref() == Some("byot") {
-                                                                            html! {
-                                                                                <span class={classes!(
-                                                                                    "status-badge",
-                                                                                    if user.has_twilio_credentials { "verified" } else { "unverified" }
-                                                                                )}>
-                                                                                    {if user.has_twilio_credentials { "Yes" } else { "No" }}
-                                                                                </span>
-                                                                            }
-                                                                        } else {
-                                                                            html! { <span class="status-badge disabled">{"-"}</span> }
-                                                                        }
-                                                                    }
-                                                                </td>
-                                                                <td>
-                                                                    <span class={classes!(
-                                                                        "status-badge",
-                                                                        if user.notify { "enabled" } else { "disabled" }
-                                                                    )}>
-                                                                        {if user.notify { "Yes" } else { "No" }}
-                                                                    </span>
-                                                                </td>
-                                                                <td>
-                                                                    {
-                                                                        user.time_to_live.map_or("N/A".to_string(), |ttl| {
-                                                                            Utc.timestamp_opt(ttl as i64, 0)
-                                                                                .single()
-                                                                                .map(|dt| dt.format("%Y-%m-%d").to_string())
-                                                                                .unwrap_or_else(|| "Invalid".to_string())
-                                                                        })
-                                                                    }
-                                                                </td>
-                                                            </tr>
-                                                            if is_selected {
-                                                                <tr class="details-row">
-                                                                    <td colspan="4">
-                                                                        <div class="user-details">
-                                                                            <div class="preferred-number-section">
-                                                                                <p><strong>{"Current Preferred Number: "}</strong>{user.preferred_number.clone().unwrap_or_else(|| "Not set".to_string())}</p>
-                                                                            </div>
+                                                                    </td>
+                                                                </tr>
+                                                                if is_selected {
+                                                                    <tr class="details-row">
+                                                                        <td colspan="4">
+                                                                            <div class="user-details">
+                                                                                <div class="preferred-number-section">
+                                                                                    <p><strong>{"Current Preferred Number: "}</strong>{user.preferred_number.clone().unwrap_or_else(|| "Not set".to_string())}</p>
+                                                                                </div>
 
-                                                                            // Message Stats Section
-                                                                            {render_message_stats(
-                                                                                user.id,
-                                                                                message_stats.get(&user.id),
-                                                                                *loading_stats == Some(user.id),
-                                                                                *show_all_messages,
-                                                                                message_stats.clone(),
-                                                                                loading_stats.clone(),
-                                                                                show_all_messages.clone(),
-                                                                            )}
+                                                                                // Message Stats Section
+                                                                                {render_message_stats(
+                                                                                    user.id,
+                                                                                    message_stats.get(&user.id),
+                                                                                    *loading_stats == Some(user.id),
+                                                                                    *show_all_messages,
+                                                                                    message_stats.clone(),
+                                                                                    loading_stats.clone(),
+                                                                                    show_all_messages.clone(),
+                                                                                )}
 
-                                                                        <button 
-                                                                            onclick={{
-                                                                                let users = users.clone();
-                                                                                let error = error.clone();
-                                                                                let user_id = user.id;
-                                                                                Callback::from(move |_| {
+                                                                            <button
+                                                                                onclick={{
                                                                                     let users = users.clone();
                                                                                     let error = error.clone();
-                                                                                    wasm_bindgen_futures::spawn_local(async move {
-                                                                                        match Api::post(&format!("/api/billing/increase-credits/{}", user_id))
-                                                                                            .send()
-                                                                                            .await
-                                                                                        {
-                                                                                            Ok(response) => {
-                                                                                                if response.ok() {
-                                                                                                    // Refresh the users list after increasing credits
-                                                                                                    if let Ok(response) = Api::get("/api/admin/users")
-                                                                                                        .send()
-                                                                                                        .await
-                                                                                                    {
-                                                                                                        if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
-                                                                                                            users.set(updated_users);
+                                                                                    let user_id = user.id;
+                                                                                    Callback::from(move |_| {
+                                                                                        let users = users.clone();
+                                                                                        let error = error.clone();
+                                                                                        wasm_bindgen_futures::spawn_local(async move {
+                                                                                            match Api::post(&format!("/api/billing/increase-credits/{}", user_id))
+                                                                                                .send()
+                                                                                                .await
+                                                                                            {
+                                                                                                Ok(response) => {
+                                                                                                    if response.ok() {
+                                                                                                        // Refresh the users list after increasing credits
+                                                                                                        if let Ok(response) = Api::get("/api/admin/users")
+                                                                                                            .send()
+                                                                                                            .await
+                                                                                                        {
+                                                                                                            if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
+                                                                                                                users.set(updated_users);
+                                                                                                            }
                                                                                                         }
+                                                                                                    } else {
+                                                                                                        error.set(Some("Failed to increase Credits".to_string()));
                                                                                                     }
-                                                                                                } else {
-                                                                                                    error.set(Some("Failed to increase Credits".to_string()));
+                                                                                                }
+                                                                                                Err(_) => {
+                                                                                                    error.set(Some("Failed to send request".to_string()));
                                                                                                 }
                                                                                             }
-                                                                                            Err(_) => {
-                                                                                                error.set(Some("Failed to send request".to_string()));
-                                                                                            }
-                                                                                        }
-                                                                                    });
-                                                                                })
-                                                                            }}
-                                                                            class="iq-button"
-                                                                        >
-                                                                            {"+1€ Credits"}
-                                                                        </button>
-                                                                        <button 
-                                                                            onclick={{
-                                                                                let users = users.clone();
-                                                                                let error = error.clone();
-                                                                                let user_id = user.id;
-                                                                                Callback::from(move |_| {
+                                                                                        });
+                                                                                    })
+                                                                                }}
+                                                                                class="iq-button"
+                                                                            >
+                                                                                {"+1€ Credits"}
+                                                                            </button>
+                                                                            <button
+                                                                                onclick={{
                                                                                     let users = users.clone();
                                                                                     let error = error.clone();
-                                                                                    wasm_bindgen_futures::spawn_local(async move {
-                                                                                        match Api::post(&format!("/api/billing/reset-credits/{}", user_id))
-                                                                                            .send()
-                                                                                            .await
-                                                                                        {
-                                                                                            Ok(response) => {
-                                                                                                if response.ok() {
-                                                                                                    // Refresh the users list after resetting credits
-                                                                                                    if let Ok(response) = Api::get("/api/admin/users")
-                                                                                                        .send()
-                                                                                                        .await
-                                                                                                    {
-                                                                                                        if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
-                                                                                                            users.set(updated_users);
+                                                                                    let user_id = user.id;
+                                                                                    Callback::from(move |_| {
+                                                                                        let users = users.clone();
+                                                                                        let error = error.clone();
+                                                                                        wasm_bindgen_futures::spawn_local(async move {
+                                                                                            match Api::post(&format!("/api/billing/reset-credits/{}", user_id))
+                                                                                                .send()
+                                                                                                .await
+                                                                                            {
+                                                                                                Ok(response) => {
+                                                                                                    if response.ok() {
+                                                                                                        // Refresh the users list after resetting credits
+                                                                                                        if let Ok(response) = Api::get("/api/admin/users")
+                                                                                                            .send()
+                                                                                                            .await
+                                                                                                        {
+                                                                                                            if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
+                                                                                                                users.set(updated_users);
+                                                                                                            }
                                                                                                         }
+                                                                                                    } else {
+                                                                                                        error.set(Some("Failed to reset credits".to_string()));
                                                                                                     }
-                                                                                                } else {
-                                                                                                    error.set(Some("Failed to reset credits".to_string()));
+                                                                                                }
+                                                                                                Err(_) => {
+                                                                                                    error.set(Some("Failed to send request".to_string()));
                                                                                                 }
                                                                                             }
-                                                                                            Err(_) => {
-                                                                                                error.set(Some("Failed to send request".to_string()));
-                                                                                            }
-                                                                                        }
-                                                                                    });
-                                                                                })
-                                                                            }}
-                                                                            class="iq-button reset"
-                                                                        >
-                                                                            {"Reset Credits"}
-                                                                        </button>
+                                                                                        });
+                                                                                    })
+                                                                                }}
+                                                                                class="iq-button reset"
+                                                                            >
+                                                                                {"Reset Credits"}
+                                                                            </button>
 
-                                                                        <button 
-                                                                            onclick={{
-                                                                                let users = users.clone();
-                                                                                let error = error.clone();
-                                                                                let user_id = user.id;
-                                                                                Callback::from(move |_| {
+                                                                            <button
+                                                                                onclick={{
                                                                                     let users = users.clone();
                                                                                     let error = error.clone();
-                                                                                    wasm_bindgen_futures::spawn_local(async move {
-                                                                                        match Api::post(&format!("/api/admin/monthly-credits/{}/{}", user_id, 10.0))
-                                                                                            .send()
-                                                                                            .await
-                                                                                        {
-                                                                                            Ok(response) => {
-                                                                                                if response.ok() {
-                                                                                                    // Refresh the users list
-                                                                                                    if let Ok(response) = Api::get("/api/admin/users")
-                                                                                                        .send()
-                                                                                                        .await
-                                                                                                    {
-                                                                                                        if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
-                                                                                                            users.set(updated_users);
+                                                                                    let user_id = user.id;
+                                                                                    Callback::from(move |_| {
+                                                                                        let users = users.clone();
+                                                                                        let error = error.clone();
+                                                                                        wasm_bindgen_futures::spawn_local(async move {
+                                                                                            match Api::post(&format!("/api/admin/monthly-credits/{}/{}", user_id, 10.0))
+                                                                                                .send()
+                                                                                                .await
+                                                                                            {
+                                                                                                Ok(response) => {
+                                                                                                    if response.ok() {
+                                                                                                        // Refresh the users list
+                                                                                                        if let Ok(response) = Api::get("/api/admin/users")
+                                                                                                            .send()
+                                                                                                            .await
+                                                                                                        {
+                                                                                                            if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
+                                                                                                                users.set(updated_users);
+                                                                                                            }
                                                                                                         }
+                                                                                                    } else {
+                                                                                                        error.set(Some("Failed to add monthly credits".to_string()));
                                                                                                     }
-                                                                                                } else {
-                                                                                                    error.set(Some("Failed to add monthly credits".to_string()));
+                                                                                                }
+                                                                                                Err(_) => {
+                                                                                                    error.set(Some("Failed to send request".to_string()));
                                                                                                 }
                                                                                             }
-                                                                                            Err(_) => {
-                                                                                                error.set(Some("Failed to send request".to_string()));
-                                                                                            }
-                                                                                        }
-                                                                                    });
-                                                                                })
-                                                                            }}
-                                                                            class="iq-button"
-                                                                        >
-                                                                            {"+10 Messages"}
-                                                                        </button>
-                                                                        <button 
-                                                                            onclick={{
-                                                                                let users = users.clone();
-                                                                                let error = error.clone();
-                                                                                let user_id = user.id;
-                                                                                Callback::from(move |_| {
+                                                                                        });
+                                                                                    })
+                                                                                }}
+                                                                                class="iq-button"
+                                                                            >
+                                                                                {"+10 Messages"}
+                                                                            </button>
+                                                                            <button
+                                                                                onclick={{
                                                                                     let users = users.clone();
                                                                                     let error = error.clone();
-                                                                                    wasm_bindgen_futures::spawn_local(async move {
-                                                                                        match Api::post(&format!("/api/admin/monthly-credits/{}/{}", user_id, -10.0))
-                                                                                            .send()
-                                                                                            .await
-                                                                                        {
-                                                                                            Ok(response) => {
-                                                                                                if response.ok() {
-                                                                                                    // Refresh the users list
-                                                                                                    if let Ok(response) = Api::get("/api/admin/users")
-                                                                                                        .send()
-                                                                                                        .await
-                                                                                                    {
-                                                                                                        if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
-                                                                                                            users.set(updated_users);
+                                                                                    let user_id = user.id;
+                                                                                    Callback::from(move |_| {
+                                                                                        let users = users.clone();
+                                                                                        let error = error.clone();
+                                                                                        wasm_bindgen_futures::spawn_local(async move {
+                                                                                            match Api::post(&format!("/api/admin/monthly-credits/{}/{}", user_id, -10.0))
+                                                                                                .send()
+                                                                                                .await
+                                                                                            {
+                                                                                                Ok(response) => {
+                                                                                                    if response.ok() {
+                                                                                                        // Refresh the users list
+                                                                                                        if let Ok(response) = Api::get("/api/admin/users")
+                                                                                                            .send()
+                                                                                                            .await
+                                                                                                        {
+                                                                                                            if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
+                                                                                                                users.set(updated_users);
+                                                                                                            }
                                                                                                         }
+                                                                                                    } else {
+                                                                                                        error.set(Some("Failed to remove monthly credits".to_string()));
                                                                                                     }
-                                                                                                } else {
-                                                                                                    error.set(Some("Failed to remove monthly credits".to_string()));
+                                                                                                }
+                                                                                                Err(_) => {
+                                                                                                    error.set(Some("Failed to send request".to_string()));
                                                                                                 }
                                                                                             }
-                                                                                            Err(_) => {
-                                                                                                error.set(Some("Failed to send request".to_string()));
-                                                                                            }
-                                                                                        }
-                                                                                    });
-                                                                                })
-                                                                            }}
-                                                                            class="iq-button reset"
-                                                                        >
-                                                                            {"-10 Messages"}
-                                                                        </button>
-                                                                        <button 
-                                                                            onclick={{
-                                                                                let users = users.clone();
-                                                                                let error = error.clone();
-                                                                                let user_id = user.id;
-                                                                                let current_tier = user.sub_tier.clone();
-                                                                                Callback::from(move |_| {
+                                                                                        });
+                                                                                    })
+                                                                                }}
+                                                                                class="iq-button reset"
+                                                                            >
+                                                                                {"-10 Messages"}
+                                                                            </button>
+                                                                            <button
+                                                                                onclick={{
                                                                                     let users = users.clone();
                                                                                     let error = error.clone();
-                                                                                let new_tier = match current_tier.as_deref() {
-                                                                                    None => "tier 2",
-                                                                                    Some("tier 2") | _ => "tier 0",
-                                                                                };
-                                                                                    
-                                                                                    wasm_bindgen_futures::spawn_local(async move {
-                                                                                        match Api::post(&format!("/api/admin/subscription/{}/{}", user_id, urlencoding::encode(new_tier).trim_end_matches('/')))
-                                                                                            .send()
-                                                                                            .await
-                                                                                        {
-                                                                                            Ok(response) => {
-                                                                                                if response.ok() {
-                                                                                                    // Refresh the users list
-                                                                                                    if let Ok(response) = Api::get("/api/admin/users")
-                                                                                                        .send()
-                                                                                                        .await
-                                                                                                    {
-                                                                                                        if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
-                                                                                                            users.set(updated_users);
-
-                                                                                                        }
-                                                                                                    }
-                                                                                                } else {
-                                                                                                    error.set(Some("Failed to update subscription tier".to_string()));
-                                                                                                }
-                                                                                            }
-                                                                                            Err(_) => {
-                                                                                                error.set(Some("Failed to send request".to_string()));
-                                                                                            }
-                                                                                        }
-                                                                                    });
-                                                                                })
-                                                                            }}
-                                                                            class="iq-button"
-                                                                        >
-                                                                            {match user.sub_tier.as_deref() {
-                                                                                None => "Set Tier 2",
-                                                                                Some("tier 2") => "Remove Subscription",
-                                                                                _ => "Set Tier 2"
-                                                                            }}
-                                                                        </button>
-                                                                        <button
-                                                                            onclick={{
-                                                                                let users = users.clone();
-                                                                                let error = error.clone();
-                                                                                let user_id = user.id;
-                                                                                let current_plan = user.plan_type.clone();
-                                                                                Callback::from(move |_| {
-                                                                                    let users = users.clone();
-                                                                                    let error = error.clone();
-                                                                                    // Cycle: None -> byot -> autopilot -> assistant -> None
-                                                                                    let new_plan = match current_plan.as_deref() {
-                                                                                        None => "byot",
-                                                                                        Some("byot") => "autopilot",
-                                                                                        Some("autopilot") => "assistant",
-                                                                                        Some("assistant") | _ => "none",
+                                                                                    let user_id = user.id;
+                                                                                    let current_tier = user.sub_tier.clone();
+                                                                                    Callback::from(move |_| {
+                                                                                        let users = users.clone();
+                                                                                        let error = error.clone();
+                                                                                    let new_tier = match current_tier.as_deref() {
+                                                                                        None => "tier 2",
+                                                                                        Some("tier 2") | _ => "tier 0",
                                                                                     };
 
-                                                                                    wasm_bindgen_futures::spawn_local(async move {
-                                                                                        match Api::post(&format!("/api/admin/plan-type/{}/{}", user_id, new_plan))
-                                                                                            .send()
-                                                                                            .await
-                                                                                        {
-                                                                                            Ok(response) => {
-                                                                                                if response.ok() {
-                                                                                                    // Refresh the users list
-                                                                                                    if let Ok(response) = Api::get("/api/admin/users")
-                                                                                                        .send()
-                                                                                                        .await
-                                                                                                    {
-                                                                                                        if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
-                                                                                                            users.set(updated_users);
-                                                                                                        }
-                                                                                                    }
-                                                                                                } else {
-                                                                                                    error.set(Some("Failed to update plan type".to_string()));
-                                                                                                }
-                                                                                            }
-                                                                                            Err(_) => {
-                                                                                                error.set(Some("Failed to send request".to_string()));
-                                                                                            }
-                                                                                        }
-                                                                                    });
-                                                                                })
-                                                                            }}
-                                                                            class="iq-button plan-type"
-                                                                        >
-                                                                            {match user.plan_type.as_deref() {
-                                                                                None => "Set BYOT",
-                                                                                Some("byot") => "Set Autopilot",
-                                                                                Some("autopilot") => "Set Assistant",
-                                                                                Some("assistant") => "Remove Plan",
-                                                                                _ => "Set BYOT"
-                                                                            }}
-                                                                        </button>
+                                                                                        wasm_bindgen_futures::spawn_local(async move {
+                                                                                            match Api::post(&format!("/api/admin/subscription/{}/{}", user_id, urlencoding::encode(new_tier).trim_end_matches('/')))
+                                                                                                .send()
+                                                                                                .await
+                                                                                            {
+                                                                                                Ok(response) => {
+                                                                                                    if response.ok() {
+                                                                                                        // Refresh the users list
+                                                                                                        if let Ok(response) = Api::get("/api/admin/users")
+                                                                                                            .send()
+                                                                                                            .await
+                                                                                                        {
+                                                                                                            if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
+                                                                                                                users.set(updated_users);
 
-                                                                        // Send Password Reset Link button
-                                                                        <button
-                                                                            onclick={{
-                                                                                let user_id = user.id;
-                                                                                let user_email = user.email.clone();
-                                                                                let reset_link_status = reset_link_status.clone();
-                                                                                Callback::from(move |_| {
-                                                                                    let user_id = user_id;
-                                                                                    let user_email = user_email.clone();
-                                                                                    let reset_link_status = reset_link_status.clone();
-                                                                                    reset_link_status.set(Some((user_id, "Sending...".to_string())));
-                                                                                    wasm_bindgen_futures::spawn_local(async move {
-                                                                                        match Api::post(&format!("/api/admin/send-password-reset/{}", user_id))
-                                                                                            .send()
-                                                                                            .await
-                                                                                        {
-                                                                                            Ok(response) => {
-                                                                                                if response.ok() {
-                                                                                                    reset_link_status.set(Some((user_id, format!("Reset link sent to {}", user_email))));
-                                                                                                    // Clear message after 3 seconds
-                                                                                                    let reset_link_status = reset_link_status.clone();
-                                                                                                    gloo_timers::callback::Timeout::new(3000, move || {
-                                                                                                        reset_link_status.set(None);
-                                                                                                    }).forget();
-                                                                                                } else {
-                                                                                                    reset_link_status.set(Some((user_id, "Failed to send reset link".to_string())));
+                                                                                                            }
+                                                                                                        }
+                                                                                                    } else {
+                                                                                                        error.set(Some("Failed to update subscription tier".to_string()));
+                                                                                                    }
+                                                                                                }
+                                                                                                Err(_) => {
+                                                                                                    error.set(Some("Failed to send request".to_string()));
                                                                                                 }
                                                                                             }
-                                                                                            Err(e) => {
-                                                                                                reset_link_status.set(Some((user_id, format!("Error: {}", e))));
+                                                                                        });
+                                                                                    })
+                                                                                }}
+                                                                                class="iq-button"
+                                                                            >
+                                                                                {match user.sub_tier.as_deref() {
+                                                                                    None => "Set Tier 2",
+                                                                                    Some("tier 2") => "Remove Subscription",
+                                                                                    _ => "Set Tier 2"
+                                                                                }}
+                                                                            </button>
+                                                                            <button
+                                                                                onclick={{
+                                                                                    let users = users.clone();
+                                                                                    let error = error.clone();
+                                                                                    let user_id = user.id;
+                                                                                    let current_plan = user.plan_type.clone();
+                                                                                    Callback::from(move |_| {
+                                                                                        let users = users.clone();
+                                                                                        let error = error.clone();
+                                                                                        // Cycle: None -> byot -> autopilot -> assistant -> None
+                                                                                        let new_plan = match current_plan.as_deref() {
+                                                                                            None => "byot",
+                                                                                            Some("byot") => "autopilot",
+                                                                                            Some("autopilot") => "assistant",
+                                                                                            Some("assistant") | _ => "none",
+                                                                                        };
+
+                                                                                        wasm_bindgen_futures::spawn_local(async move {
+                                                                                            match Api::post(&format!("/api/admin/plan-type/{}/{}", user_id, new_plan))
+                                                                                                .send()
+                                                                                                .await
+                                                                                            {
+                                                                                                Ok(response) => {
+                                                                                                    if response.ok() {
+                                                                                                        // Refresh the users list
+                                                                                                        if let Ok(response) = Api::get("/api/admin/users")
+                                                                                                            .send()
+                                                                                                            .await
+                                                                                                        {
+                                                                                                            if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
+                                                                                                                users.set(updated_users);
+                                                                                                            }
+                                                                                                        }
+                                                                                                    } else {
+                                                                                                        error.set(Some("Failed to update plan type".to_string()));
+                                                                                                    }
+                                                                                                }
+                                                                                                Err(_) => {
+                                                                                                    error.set(Some("Failed to send request".to_string()));
+                                                                                                }
                                                                                             }
+                                                                                        });
+                                                                                    })
+                                                                                }}
+                                                                                class="iq-button plan-type"
+                                                                            >
+                                                                                {match user.plan_type.as_deref() {
+                                                                                    None => "Set BYOT",
+                                                                                    Some("byot") => "Set Autopilot",
+                                                                                    Some("autopilot") => "Set Assistant",
+                                                                                    Some("assistant") => "Remove Plan",
+                                                                                    _ => "Set BYOT"
+                                                                                }}
+                                                                            </button>
+
+                                                                            // Send Password Reset Link button
+                                                                            <button
+                                                                                onclick={{
+                                                                                    let user_id = user.id;
+                                                                                    let user_email = user.email.clone();
+                                                                                    let reset_link_status = reset_link_status.clone();
+                                                                                    Callback::from(move |_| {
+                                                                                        let user_id = user_id;
+                                                                                        let user_email = user_email.clone();
+                                                                                        let reset_link_status = reset_link_status.clone();
+                                                                                        reset_link_status.set(Some((user_id, "Sending...".to_string())));
+                                                                                        wasm_bindgen_futures::spawn_local(async move {
+                                                                                            match Api::post(&format!("/api/admin/send-password-reset/{}", user_id))
+                                                                                                .send()
+                                                                                                .await
+                                                                                            {
+                                                                                                Ok(response) => {
+                                                                                                    if response.ok() {
+                                                                                                        reset_link_status.set(Some((user_id, format!("Reset link sent to {}", user_email))));
+                                                                                                        // Clear message after 3 seconds
+                                                                                                        let reset_link_status = reset_link_status.clone();
+                                                                                                        gloo_timers::callback::Timeout::new(3000, move || {
+                                                                                                            reset_link_status.set(None);
+                                                                                                        }).forget();
+                                                                                                    } else {
+                                                                                                        reset_link_status.set(Some((user_id, "Failed to send reset link".to_string())));
+                                                                                                    }
+                                                                                                }
+                                                                                                Err(e) => {
+                                                                                                    reset_link_status.set(Some((user_id, format!("Error: {}", e))));
+                                                                                                }
+                                                                                            }
+                                                                                        });
+                                                                                    })
+                                                                                }}
+                                                                                class="iq-button"
+                                                                                style="background: #4ade80;"
+                                                                            >
+                                                                                {"Send Reset Link"}
+                                                                            </button>
+                                                                            // Show reset link status for this user
+                                                                            {
+                                                                                if let Some((status_user_id, status_msg)) = (*reset_link_status).as_ref() {
+                                                                                    if *status_user_id == user.id {
+                                                                                        html! {
+                                                                                            <span style="margin-left: 8px; font-size: 0.85rem; color: #4ade80;">
+                                                                                                {status_msg}
+                                                                                            </span>
                                                                                         }
-                                                                                    });
-                                                                                })
-                                                                            }}
-                                                                            class="iq-button"
-                                                                            style="background: #4ade80;"
-                                                                        >
-                                                                            {"Send Reset Link"}
-                                                                        </button>
-                                                                        // Show reset link status for this user
-                                                                        {
-                                                                            if let Some((status_user_id, status_msg)) = (*reset_link_status).as_ref() {
-                                                                                if *status_user_id == user.id {
-                                                                                    html! {
-                                                                                        <span style="margin-left: 8px; font-size: 0.85rem; color: #4ade80;">
-                                                                                            {status_msg}
-                                                                                        </span>
+                                                                                    } else {
+                                                                                        html! {}
                                                                                     }
                                                                                 } else {
                                                                                     html! {}
                                                                                 }
-                                                                            } else {
-                                                                                html! {}
                                                                             }
-                                                                        }
 
-                                                                        <button
-                                                                            onclick={{
-                                                                                let delete_modal = delete_modal.clone();
-                                                                                let user_id = user.id;
-                                                                                let user_email = user.email.clone();
-                                                                                Callback::from(move |_| {
-                                                                                    delete_modal.set(DeleteModalState {
-                                                                                        show: true,
-                                                                                        user_id: Some(user_id),
-                                                                                        user_email: Some(user_email.clone()),
-                                                                                    });
-                                                                                })
-                                                                            }}
-                                                                            class="iq-button delete"
-                                                                        >
-                                                                            {"Delete User"}
-                                                                        </button>
+                                                                            <button
+                                                                                onclick={{
+                                                                                    let delete_modal = delete_modal.clone();
+                                                                                    let user_id = user.id;
+                                                                                    let user_email = user.email.clone();
+                                                                                    Callback::from(move |_| {
+                                                                                        delete_modal.set(DeleteModalState {
+                                                                                            show: true,
+                                                                                            user_id: Some(user_id),
+                                                                                            user_email: Some(user_email.clone()),
+                                                                                        });
+                                                                                    })
+                                                                                }}
+                                                                                class="iq-button delete"
+                                                                            >
+                                                                                {"Delete User"}
+                                                                            </button>
 
-                                                                        </div>
-                                                                    </td>
-                                                                </tr>
-                                                            }
-                                                        </>
-                                                    }
-                                                }).collect::<Html>()
-                                            }
-                                        </tbody>
-                                    </table>
-                                </div>
-            {
-                if (*delete_modal).show {
-                    html! {
-                        <div class="modal-overlay">
-                            <div class="modal-content">
-                                <h2>{"Confirm Delete"}</h2>
-                                <p>{format!("Are you sure you want to delete user {}?", delete_modal.user_email.clone().unwrap_or_default())}</p>
-                                <p class="warning">{"This action cannot be undone!"}</p>
-                                <div class="modal-buttons">
-                                    <button 
-                                        onclick={{
-                                            let delete_modal = delete_modal.clone();
-                                            Callback::from(move |_| {
-                                                delete_modal.set(DeleteModalState {
-                                                    show: false,
-                                                    user_id: None,
-                                                    user_email: None,
-                                                });
-                                            })
-                                        }}
-                                        class="modal-button cancel"
-                                    >
-                                        {"Cancel"}
-                                    </button>
-                                    <button 
-                                        onclick={{
-                                            let delete_modal = delete_modal.clone();
-                                            let users = users.clone();
-                                            let error = error.clone();
-                                            Callback::from(move |_| {
+                                                                            </div>
+                                                                        </td>
+                                                                    </tr>
+                                                                }
+                                                            </>
+                                                        }
+                                                    }).collect::<Html>()
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                {
+                    if (*delete_modal).show {
+                        html! {
+                            <div class="modal-overlay">
+                                <div class="modal-content">
+                                    <h2>{"Confirm Delete"}</h2>
+                                    <p>{format!("Are you sure you want to delete user {}?", delete_modal.user_email.clone().unwrap_or_default())}</p>
+                                    <p class="warning">{"This action cannot be undone!"}</p>
+                                    <div class="modal-buttons">
+                                        <button
+                                            onclick={{
+                                                let delete_modal = delete_modal.clone();
+                                                Callback::from(move |_| {
+                                                    delete_modal.set(DeleteModalState {
+                                                        show: false,
+                                                        user_id: None,
+                                                        user_email: None,
+                                                    });
+                                                })
+                                            }}
+                                            class="modal-button cancel"
+                                        >
+                                            {"Cancel"}
+                                        </button>
+                                        <button
+                                            onclick={{
+                                                let delete_modal = delete_modal.clone();
                                                 let users = users.clone();
                                                 let error = error.clone();
-                                                let delete_modal = delete_modal.clone();
-                                                let user_id = delete_modal.user_id.unwrap();
-                                                
-                                                wasm_bindgen_futures::spawn_local(async move {
-                                                    match Api::delete(&format!("/api/profile/delete/{}", user_id))
-                                                        .send()
-                                                        .await
-                                                    {
-                                                        Ok(response) => {
-                                                            if response.ok() {
-                                                                // Remove the deleted user from the users list
-                                                                users.set((*users).clone().into_iter().filter(|u| u.id != user_id).collect());
-                                                                delete_modal.set(DeleteModalState {
-                                                                    show: false,
-                                                                    user_id: None,
-                                                                    user_email: None,
-                                                                });
-                                                                error.set(Some("User deleted successfully".to_string()));
-                                                            } else {
-                                                                error.set(Some("Failed to delete user".to_string()));
+                                                Callback::from(move |_| {
+                                                    let users = users.clone();
+                                                    let error = error.clone();
+                                                    let delete_modal = delete_modal.clone();
+                                                    let user_id = delete_modal.user_id.unwrap();
+
+                                                    wasm_bindgen_futures::spawn_local(async move {
+                                                        match Api::delete(&format!("/api/profile/delete/{}", user_id))
+                                                            .send()
+                                                            .await
+                                                        {
+                                                            Ok(response) => {
+                                                                if response.ok() {
+                                                                    // Remove the deleted user from the users list
+                                                                    users.set((*users).clone().into_iter().filter(|u| u.id != user_id).collect());
+                                                                    delete_modal.set(DeleteModalState {
+                                                                        show: false,
+                                                                        user_id: None,
+                                                                        user_email: None,
+                                                                    });
+                                                                    error.set(Some("User deleted successfully".to_string()));
+                                                                } else {
+                                                                    error.set(Some("Failed to delete user".to_string()));
+                                                                }
+                                                            }
+                                                            Err(_) => {
+                                                                error.set(Some("Failed to send delete request".to_string()));
                                                             }
                                                         }
-                                                        Err(_) => {
-                                                            error.set(Some("Failed to send delete request".to_string()));
-                                                        }
-                                                    }
-                                                });
-                                            })
-                                        }}
-                                        class="modal-button delete"
-                                    >
-                                        {"Delete"}
-                                    </button>
+                                                    });
+                                                })
+                                            }}
+                                            class="modal-button delete"
+                                        >
+                                            {"Delete"}
+                                        </button>
+                                    </div>
                                 </div>
-                            </div>
 
-                                                    </div>
+                                                        </div>
+                        }
+                    } else {
+                        html! {}
                     }
-                } else {
-                    html! {}
-                }
-            }
-        </div>
-    }
-}
                 }
             </div>
-            <style>
-                {r#"
+        }
+    }
+                    }
+                </div>
+                <style>
+                    {r#"
                 .password-section {
                     margin: 2rem 0;
                     padding: 1.5rem;
@@ -1934,7 +1929,7 @@ pub fn admin_dashboard() -> Html {
                     color: #FF6B6B;
                 }
                 "#}
-                {r#"
+                    {r#"
                 .judgment-processed {
                     font-size: 0.8rem;
                     color: #666;
@@ -3236,7 +3231,7 @@ pub fn admin_dashboard() -> Html {
                     }
 
                 "#}
-            </style>
-        </div>
-    }
+                </style>
+            </div>
+        }
 }

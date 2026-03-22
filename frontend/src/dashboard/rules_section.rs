@@ -1,7 +1,7 @@
-use yew::prelude::*;
-use wasm_bindgen_futures::spawn_local;
-use serde::Deserialize;
 use crate::utils::api::Api;
+use serde::Deserialize;
+use wasm_bindgen_futures::spawn_local;
+use yew::prelude::*;
 
 const RULES_STYLES: &str = r#"
 @keyframes ruleFlashIn {
@@ -217,9 +217,11 @@ pub fn rules_section(props: &RulesSectionProps) -> Html {
                         let new_rule_id_clear = new_rule_id.clone();
                         gloo_timers::callback::Timeout::new(2500, move || {
                             new_rule_id_clear.set(None);
-                        }).forget();
+                        })
+                        .forget();
                     }
-                }) as Box<dyn Fn(web_sys::CustomEvent)>);
+                })
+                    as Box<dyn Fn(web_sys::CustomEvent)>);
 
                 if let Some(window) = web_sys::window() {
                     let _ = window.add_event_listener_with_callback(
@@ -365,7 +367,12 @@ pub fn rules_section(props: &RulesSectionProps) -> Html {
     }
 }
 
-fn render_rule_card(rule: &RuleData, on_edit: &Callback<RuleData>, is_new: bool, rules_state: &UseStateHandle<Vec<RuleData>>) -> Html {
+fn render_rule_card(
+    rule: &RuleData,
+    on_edit: &Callback<RuleData>,
+    is_new: bool,
+    rules_state: &UseStateHandle<Vec<RuleData>>,
+) -> Html {
     let rule_id = rule.id;
     let status = rule.status.clone();
     let is_active = status == "active";
@@ -376,23 +383,31 @@ fn render_rule_card(rule: &RuleData, on_edit: &Callback<RuleData>, is_new: bool,
         "rule-icon event fa-solid fa-bolt"
     };
 
-    let trigger_desc = describe_trigger(&rule.trigger_type, &rule.trigger_config, rule.next_fire_at);
+    let trigger_desc =
+        describe_trigger(&rule.trigger_type, &rule.trigger_config, rule.next_fire_at);
     let action_desc = describe_action(&rule.action_type, &rule.action_config);
 
     // Countdown: use next_fire_at, or parse datetime from trigger_config as fallback
     let effective_fire_at = rule.next_fire_at.or_else(|| {
         if rule.trigger_type == "schedule" {
-            let parsed: serde_json::Value = serde_json::from_str(&rule.trigger_config).unwrap_or_default();
+            let parsed: serde_json::Value =
+                serde_json::from_str(&rule.trigger_config).unwrap_or_default();
             // Try "at" field first, then "schedule" field if it contains a datetime
-            let datetime_str = parsed.get("at").and_then(|v| v.as_str())
-                .or_else(|| {
-                    parsed.get("schedule").and_then(|v| v.as_str()).filter(|s| s.contains('T'))
-                });
+            let datetime_str = parsed.get("at").and_then(|v| v.as_str()).or_else(|| {
+                parsed
+                    .get("schedule")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| s.contains('T'))
+            });
             datetime_str.and_then(|dt| {
                 // Parse "YYYY-MM-DDTHH:MM" using JS Date
                 let js_date = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(dt));
                 let ts = js_date.get_time();
-                if ts.is_nan() { None } else { Some((ts / 1000.0) as i32) }
+                if ts.is_nan() {
+                    None
+                } else {
+                    Some((ts / 1000.0) as i32)
+                }
             })
         } else {
             None
@@ -466,11 +481,18 @@ fn render_rule_card(rule: &RuleData, on_edit: &Callback<RuleData>, is_new: bool,
         Callback::from(move |e: MouseEvent| {
             e.stop_propagation();
             let window = web_sys::window().unwrap();
-            if !window.confirm_with_message("Delete this rule?").unwrap_or(false) {
+            if !window
+                .confirm_with_message("Delete this rule?")
+                .unwrap_or(false)
+            {
                 return;
             }
             // Optimistic local removal
-            let updated: Vec<RuleData> = (*rules_state).iter().filter(|r| r.id != rule_id).cloned().collect();
+            let updated: Vec<RuleData> = (*rules_state)
+                .iter()
+                .filter(|r| r.id != rule_id)
+                .cloned()
+                .collect();
             rules_state.set(updated);
             spawn_local(async move {
                 let _ = Api::delete(&format!("/api/rules/{}", rule_id)).send().await;
@@ -491,16 +513,24 @@ fn render_rule_card(rule: &RuleData, on_edit: &Callback<RuleData>, is_new: bool,
         })
     };
 
-    let toggle_icon = if is_active { "fa-solid fa-pause" } else { "fa-solid fa-play" };
+    let toggle_icon = if is_active {
+        "fa-solid fa-pause"
+    } else {
+        "fa-solid fa-play"
+    };
 
     // Determine if rule is recurring (permanent) or one-shot (temporary)
     let is_recurring = {
-        let parsed: serde_json::Value = serde_json::from_str(&rule.trigger_config).unwrap_or_default();
+        let parsed: serde_json::Value =
+            serde_json::from_str(&rule.trigger_config).unwrap_or_default();
         if rule.trigger_type == "schedule" {
             parsed.get("schedule").and_then(|v| v.as_str()) == Some("recurring")
         } else {
             // monitoring rules: check fire_once flag (defaults to true = one-shot)
-            let fire_once = parsed.get("fire_once").and_then(|v| v.as_bool()).unwrap_or(true);
+            let fire_once = parsed
+                .get("fire_once")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
             !fire_once
         }
     };
@@ -579,7 +609,9 @@ fn describe_trigger(trigger_type: &str, trigger_config: &str, next_fire_at: Opti
             _ => {
                 // Fallback: use next_fire_at to show when it fires
                 if let Some(fire_at) = next_fire_at {
-                    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(fire_at as f64 * 1000.0));
+                    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(
+                        fire_at as f64 * 1000.0,
+                    ));
                     let hours = date.get_hours();
                     let minutes = date.get_minutes();
                     let time_str = format!("{:02}:{:02}", hours, minutes);

@@ -1,7 +1,7 @@
+use crate::utils::seo::{use_seo, SeoMeta};
+use crate::Route;
 use yew::prelude::*;
 use yew_router::prelude::*;
-use crate::Route;
-use crate::utils::seo::{use_seo, SeoMeta};
 
 #[function_component(PrivacyPolicy)]
 pub fn privacy_policy() -> Html {
@@ -180,7 +180,7 @@ pub fn privacy_policy() -> Html {
                 {" | "}
                 <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
                 {" | "}
-                <Link<Route> to={Route::Trustless}>{"Trustless"}</Link<Route>>
+                <Link<Route> to={Route::Trustless}>{"Verifiably Private"}</Link<Route>>
             </div>
         </div>
     }
@@ -374,7 +374,7 @@ pub fn terms_and_conditions() -> Html {
                 {" | "}
                 <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
                 {" | "}
-                <Link<Route> to={Route::Trustless}>{"Trustless"}</Link<Route>>
+                <Link<Route> to={Route::Trustless}>{"Verifiably Private"}</Link<Route>>
             </div>
         </div>
 
