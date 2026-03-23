@@ -76,6 +76,32 @@ fn get_sender_prefix(service: &str) -> String {
     format!("{}_", service)
 }
 
+fn room_name_matches_service(room_name: &str, service: &str) -> bool {
+    let room_name = room_name.trim().to_lowercase();
+    match service {
+        "whatsapp" => room_name.contains("(wa)") || room_name.contains("(wa~)"),
+        "telegram" => room_name.contains("(telegram)") || room_name.contains("(tg)"),
+        "signal" => room_name.contains("(signal)") || room_name.contains("(signal~)"),
+        _ => false,
+    }
+}
+
+fn has_service_member(service: &str, member_localparts: &[String]) -> bool {
+    let sender_prefix = get_sender_prefix(service);
+    member_localparts
+        .iter()
+        .any(|localpart| localpart.starts_with(&sender_prefix))
+}
+
+fn is_group_room(service: &str, member_localparts: &[String]) -> bool {
+    let sender_prefix = get_sender_prefix(service);
+    member_localparts
+        .iter()
+        .filter(|localpart| localpart.starts_with(&sender_prefix))
+        .count()
+        > 1
+}
+
 pub fn remove_bridge_suffix(chat_name: &str) -> String {
     for suffix in &["(WA~)", "(WA)", "(Signal~)", "(Signal)", "(Telegram)"] {
         if chat_name.ends_with(suffix) {
@@ -133,7 +159,6 @@ fn infer_service(room_name: &str, sender_localpart: &str) -> Option<String> {
 
 pub async fn get_service_rooms(client: &MatrixClient, service: &str) -> Result<Vec<BridgeRoom>> {
     let joined_rooms = client.joined_rooms();
-    let sender_prefix = get_sender_prefix(service);
     let service_cap = capitalize(service);
     let skip_terms = [
         format!("{}bot", service),
@@ -143,8 +168,8 @@ pub async fn get_service_rooms(client: &MatrixClient, service: &str) -> Result<V
     ];
     let mut futures = Vec::new();
     for room in joined_rooms {
-        let sender_prefix = sender_prefix.clone();
         let skip_terms = skip_terms.clone();
+        let service = service.to_string();
         futures.push(async move {
             let display_name = match room.display_name().await {
                 Ok(name) => name.to_string(),
@@ -158,13 +183,16 @@ pub async fn get_service_rooms(client: &MatrixClient, service: &str) -> Result<V
                 Ok(m) => m,
                 Err(_) => return None,
             };
-            let has_service_member = members
+            let member_localparts: Vec<String> = members
                 .iter()
-                .any(|member| member.user_id().localpart().starts_with(&sender_prefix));
-            if !has_service_member {
+                .map(|member| member.user_id().localpart().to_string())
+                .collect();
+            if !room_name_matches_service(&display_name, &service)
+                && !has_service_member(&service, &member_localparts)
+            {
                 return None;
             }
-            let is_group = members.len() > 3;
+            let is_group = is_group_room(&service, &member_localparts);
             // Get last activity from most recent message, regardless of sender
             let mut options = matrix_sdk::room::MessagesOptions::backward();
             options.limit = matrix_sdk::ruma::UInt::new(1).unwrap();
@@ -202,7 +230,6 @@ pub async fn get_service_rooms_trait(
     service: &str,
 ) -> Result<Vec<BridgeRoom>> {
     let joined_rooms = client.get_joined_rooms().await?;
-    let sender_prefix = get_sender_prefix(service);
     let service_cap = capitalize(service);
     let skip_terms = [
         format!("{}bot", service),
@@ -228,16 +255,18 @@ pub async fn get_service_rooms_trait(
                 Ok(m) => m,
                 Err(_) => continue,
             };
-
-            let has_service_member = members
+            let member_localparts: Vec<String> = members
                 .iter()
-                .any(|member| member.localpart.starts_with(&sender_prefix));
+                .map(|member| member.localpart.clone())
+                .collect();
 
-            if !has_service_member {
+            if !room_name_matches_service(&room_info.display_name, service)
+                && !has_service_member(service, &member_localparts)
+            {
                 continue;
             }
 
-            let is_group = members.len() > 3;
+            let is_group = is_group_room(service, &member_localparts);
             let last_activity = room.get_last_activity().await;
             rooms.push(BridgeRoom {
                 room_id: room_info.room_id,
@@ -1337,7 +1366,13 @@ pub async fn handle_bridge_message(
 
     // Check if this is a group chat (same heuristic as get_service_rooms)
     let is_group = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
-        Ok(members) => members.len() > 3,
+        Ok(members) => {
+            let member_localparts: Vec<String> = members
+                .iter()
+                .map(|member| member.user_id().localpart().to_string())
+                .collect();
+            is_group_room(&service, &member_localparts)
+        }
         Err(_) => false,
     };
 

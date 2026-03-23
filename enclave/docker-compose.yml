@@ -90,6 +90,7 @@ services:
       TELEGRAM_PROXY_PORT: ${TELEGRAM_PROXY_PORT:-}
       TELEGRAM_PROXY_USERNAME: ${TELEGRAM_PROXY_USERNAME:-}
       TELEGRAM_PROXY_PASSWORD: ${TELEGRAM_PROXY_PASSWORD:-}
+      TELEGRAM_PUBLIC_EXTERNAL_URL: ${TELEGRAM_PUBLIC_EXTERNAL_URL:-}
       # VSOCK proxy (Nitro Enclave)
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
@@ -105,6 +106,7 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
       - "127.0.0.1:8008:8008"
+      - "127.0.0.1:29317:29317"
 
 volumes:
   pg_data:

@@ -127,7 +127,7 @@ static MESSAGE_DEF: ObjectTypeDef = ObjectTypeDef {
 
 static EVENT_PROPS: &[PropertyDef] = &[PropertyDef {
     name: "status",
-    description: "Filter by event status. Omit to show only active events.",
+    description: "Filter by obligation status. Omit to show only active obligations.",
     prop_type: "String",
     filter: Some(FilterSource::Static(&[
         "active",
@@ -139,7 +139,7 @@ static EVENT_PROPS: &[PropertyDef] = &[PropertyDef {
 
 static EVENT_DEF: ObjectTypeDef = ObjectTypeDef {
     name: "Event",
-    description: "Query tracked events. Shows active events with IDs, descriptions, and deadlines.",
+    description: "Query tracked obligations. Use for specific commitments with a due time and reminder time, not umbrella situations.",
     properties: EVENT_PROPS,
     linkable_to: &[],
 };

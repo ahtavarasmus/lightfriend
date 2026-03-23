@@ -2004,8 +2004,13 @@ pub async fn web_chat_stream(
 
                     yield Ok(axum::response::sse::Event::default().data(event_data.to_string()));
                 } else {
+                    let error_message = if response.message.trim().is_empty() {
+                        "Failed to process message".to_string()
+                    } else {
+                        response.message.clone()
+                    };
                     yield Ok(axum::response::sse::Event::default().data(
-                        serde_json::json!({"step": "error", "message": "Failed to process message"}).to_string(),
+                        serde_json::json!({"step": "error", "message": error_message}).to_string(),
                     ));
                 }
             }

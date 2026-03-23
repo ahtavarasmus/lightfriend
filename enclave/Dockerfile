@@ -130,6 +130,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     libpq5 \
     libssl3 \
+    libmagic1 \
     curl \
     socat \
     sqlite3 \
@@ -160,9 +161,12 @@ COPY --from=whatsapp-src /usr/bin/mautrix-whatsapp /usr/local/bin/mautrix-whatsa
 # ── Copy mautrix-signal binary ────────────────────────────────────────────
 COPY --from=signal-src /usr/bin/mautrix-signal /usr/local/bin/mautrix-signal
 
-# ── Copy mautrix-telegram (Python package) ────────────────────────────────
-# The official image uses a Python venv at /opt/mautrix-telegram
+# ── Install mautrix-telegram into a local venv ────────────────────────────
+ARG MAUTRIX_TELEGRAM_VERSION=0.15.3
 COPY --from=telegram-src /opt/mautrix-telegram /opt/mautrix-telegram
+RUN python3 -m venv /opt/mautrix-telegram-venv && \
+    /opt/mautrix-telegram-venv/bin/pip install --upgrade pip && \
+    /opt/mautrix-telegram-venv/bin/pip install "mautrix-telegram[all]==${MAUTRIX_TELEGRAM_VERSION}"
 
 # ── Copy Lightfriend backend ──────────────────────────────────────────────
 WORKDIR /app

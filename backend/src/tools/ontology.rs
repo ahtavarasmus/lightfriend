@@ -322,7 +322,7 @@ fn query_event(
     };
 
     if events.is_empty() {
-        return Ok("No tracked events found.".to_string());
+        return Ok("No tracked obligations found.".to_string());
     }
 
     let now = std::time::SystemTime::now()
@@ -333,7 +333,7 @@ fn query_event(
     let mut output = format!("Found {} event(s):\n\n", events.len());
 
     for (i, e) in events.iter().enumerate() {
-        let deadline_str = match e.expires_at {
+        let deadline_str = match e.due_at {
             Some(ts) => {
                 let remaining = ts - now;
                 let days = remaining / 86400;

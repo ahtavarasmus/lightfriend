@@ -1,8 +1,11 @@
-use axum::http::HeaderValue;
+use axum::body::{to_bytes, Body};
+use axum::extract::OriginalUri;
+use axum::http::{HeaderValue, Request, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::{
     extract::DefaultBodyLimit,
     middleware,
-    routing::{delete, get, patch, post, put},
+    routing::{any, delete, get, patch, post, put},
     Router,
 };
 use dashmap::DashMap;
@@ -35,6 +38,92 @@ use handlers::{
 
 async fn health_check() -> &'static str {
     "OK"
+}
+
+const TELEGRAM_PUBLIC_BASE_URL: &str = "http://127.0.0.1:29317";
+const TELEGRAM_PUBLIC_PROXY_BODY_LIMIT: usize = 10 * 1024 * 1024;
+
+async fn proxy_telegram_public(original_uri: OriginalUri, request: Request<Body>) -> Response {
+    let path_and_query = match original_uri.0.path_and_query() {
+        Some(value) => value.as_str(),
+        None => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    let target_url = format!("{TELEGRAM_PUBLIC_BASE_URL}{path_and_query}");
+    let method = request.method().clone();
+    let request_headers = request.headers().clone();
+    let body = match to_bytes(request.into_body(), TELEGRAM_PUBLIC_PROXY_BODY_LIMIT).await {
+        Ok(body) => body,
+        Err(error) => {
+            tracing::warn!("Failed to read proxied Telegram public request body: {error}");
+            return (
+                StatusCode::BAD_REQUEST,
+                "Failed to read Telegram public request body",
+            )
+                .into_response();
+        }
+    };
+
+    let client = reqwest::Client::new();
+    let mut upstream_request = client.request(method, &target_url);
+    for (name, value) in request_headers.iter() {
+        let key = name.as_str();
+        if matches!(
+            key,
+            "host" | "connection" | "content-length" | "transfer-encoding" | "keep-alive"
+        ) {
+            continue;
+        }
+        upstream_request = upstream_request.header(name, value);
+    }
+    let upstream_response = match upstream_request.body(body).send().await {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::error!("Failed to proxy Telegram public request to {target_url}: {error}");
+            return (
+                StatusCode::BAD_GATEWAY,
+                "Telegram login page is currently unavailable",
+            )
+                .into_response();
+        }
+    };
+
+    let status = upstream_response.status();
+    let upstream_headers = upstream_response.headers().clone();
+    let response_body = match upstream_response.bytes().await {
+        Ok(body) => body,
+        Err(error) => {
+            tracing::error!("Failed to read proxied Telegram public response body: {error}");
+            return (
+                StatusCode::BAD_GATEWAY,
+                "Telegram login page returned an invalid response",
+            )
+                .into_response();
+        }
+    };
+
+    let mut response = Response::builder().status(status);
+    for (name, value) in upstream_headers.iter() {
+        let key = name.as_str();
+        if matches!(
+            key,
+            "connection" | "content-length" | "transfer-encoding" | "keep-alive"
+        ) {
+            continue;
+        }
+        response = response.header(name, value);
+    }
+
+    match response.body(Body::from(response_body)) {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::error!("Failed to build proxied Telegram public response: {error}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build Telegram login response",
+            )
+                .into_response()
+        }
+    }
 }
 
 pub fn validate_env() {
@@ -1129,6 +1218,8 @@ async fn main() {
         .merge(elevenlabs_routes)
         .merge(elevenlabs_free_routes)
         .merge(elevenlabs_webhook_routes)
+        .route("/public/{*path}", any(proxy_telegram_public))
+        .route("/public", any(proxy_telegram_public))
         .nest_service("/uploads", ServeDir::new("uploads"))
         .fallback_service(
             ServeDir::new("public").not_found_service(ServeFile::new("public/index.html")),

@@ -27,6 +27,7 @@ pub struct BridgeConfig {
 // SHARED CONSTANTS - same for all bridges
 const POLL_INTERVAL_MS: i32 = 5000; // 5 seconds
 const POLL_DURATION_MS: i32 = 300000; // 5 minutes
+const CONNECT_REQUEST_TIMEOUT_MS: u32 = 45000; // 45 seconds for initial connect request
 
 /// Map backend error strings to user-friendly messages
 fn humanize_error(raw: &str) -> String {
@@ -322,10 +323,29 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
             let remaining_seconds = remaining_seconds.clone();
             let bridge_id = bridge_id.clone();
             let bridge_name = bridge_name.clone();
+            let request_active = std::rc::Rc::new(std::cell::Cell::new(true));
             is_connecting.set(true);
             was_connecting.set(true);
             poll_start_time.set(js_sys::Date::now());
             remaining_seconds.set(POLL_DURATION_MS / 1000);
+            {
+                let request_active = request_active.clone();
+                let is_connecting = is_connecting.clone();
+                let is_cleaning_up = is_cleaning_up.clone();
+                let error = error.clone();
+                let bridge_name = bridge_name.clone();
+                gloo_timers::callback::Timeout::new(CONNECT_REQUEST_TIMEOUT_MS, move || {
+                    if request_active.replace(false) {
+                        is_connecting.set(false);
+                        is_cleaning_up.set(false);
+                        error.set(Some(format!(
+                            "{} connection timed out while waiting for the bridge. Please try again.",
+                            bridge_name
+                        )));
+                    }
+                })
+                .forget();
+            }
             spawn_local(async move {
                 // Retry loop for cleanup_in_progress
                 let max_cleanup_retries = 30; // 30 retries * 2 seconds = ~60 seconds max wait
@@ -333,6 +353,9 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                     let url = format!("/api/auth/{}/connect", bridge_id);
                     match Api::get(&url).send().await {
                         Ok(response) => {
+                            if !request_active.get() {
+                                return;
+                            }
                             let status = response.status();
                             // Check for cleanup_in_progress (409 Conflict)
                             if status == 409 {
@@ -350,6 +373,7 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                             if status == 200 {
                                 match response.json::<ConnectionResponse>().await {
                                     Ok(connection_response) => {
+                                        request_active.set(false);
                                         auth_data.set(Some(connection_response.auth_data));
                                         error.set(None);
                                         // Start polling for status
@@ -412,6 +436,7 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                         return; // Success - exit retry loop
                                     }
                                     Err(_) => {
+                                        request_active.set(false);
                                         is_connecting.set(false);
                                         error.set(Some(
                                             "Failed to parse connection response".to_string(),
@@ -421,6 +446,7 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                 }
                             } else {
                                 // Other error
+                                request_active.set(false);
                                 is_connecting.set(false);
                                 if let Ok(err_response) = response.json::<ErrorResponse>().await {
                                     error.set(Some(humanize_error(&err_response.error)));
@@ -434,6 +460,9 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                             }
                         }
                         Err(_) => {
+                            if !request_active.replace(false) {
+                                return;
+                            }
                             is_connecting.set(false);
                             is_cleaning_up.set(false);
                             error.set(Some(format!("Failed to start {} connection", bridge_name)));
@@ -442,6 +471,9 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                     }
                 }
                 // Exhausted retries waiting for cleanup
+                if !request_active.replace(false) {
+                    return;
+                }
                 is_connecting.set(false);
                 is_cleaning_up.set(false);
                 error.set(Some(

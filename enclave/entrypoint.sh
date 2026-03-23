@@ -70,6 +70,12 @@ else
     echo "No VSOCK device - running in direct network mode"
 fi
 
+# In local Docker mode there is no host-env bootstrap step, so preserve the
+# dev-only fallback key in memory before the runtime derivation step.
+if [ -n "${BACKUP_ENCRYPTION_KEY:-}" ] && [ "${ALLOW_INSECURE_BACKUP_KEY_FALLBACK:-false}" = "true" ] && [ -z "${INSECURE_BACKUP_ENCRYPTION_KEY_FALLBACK:-}" ]; then
+    export INSECURE_BACKUP_ENCRYPTION_KEY_FALLBACK="${BACKUP_ENCRYPTION_KEY}"
+fi
+
 # ── 0d. Derive backup encryption key (runtime only, never persisted) ────────
 echo "Deriving runtime backup encryption key..."
 if ! BACKUP_ENCRYPTION_KEY="$(/usr/local/bin/derive-backup-key.sh)"; then
@@ -113,6 +119,25 @@ elif [ "${RESTORE_MODE}" != "none" ]; then
     exit 1
 else
     echo "No restore requested - starting with current state"
+fi
+
+# ── 0f. Fetch one-time SQL seed from host via VSOCK (first bootstrap only) ──
+if [ -e /dev/vsock ] && [ "${RESTORE_MODE}" = "none" ]; then
+    mkdir -p /data/seed
+    SEED_DUMP="/data/seed/lightfriend_db.sql"
+    if [ ! -f "$SEED_DUMP" ]; then
+        echo "Checking host for one-time SQL seed..."
+        RECEIVED_SEED="/data/seed/lightfriend_db.seed.tmp"
+        socat -T30 -u VSOCK-CONNECT:3:9003 CREATE:"$RECEIVED_SEED" 2>/dev/null || true
+        if [ -s "$RECEIVED_SEED" ] && ! grep -q "NO_SEED" "$RECEIVED_SEED" 2>/dev/null; then
+            mv "$RECEIVED_SEED" "$SEED_DUMP"
+            SEED_SIZE=$(stat -c%s "$SEED_DUMP" 2>/dev/null || stat -f%z "$SEED_DUMP" 2>/dev/null || echo "unknown")
+            echo "SQL seed received from host (${SEED_SIZE} bytes)"
+        else
+            rm -f "$RECEIVED_SEED"
+            echo "No SQL seed available from host"
+        fi
+    fi
 fi
 
 # ── 1. Initialize PostgreSQL if needed ──────────────────────────────────────
@@ -536,6 +561,7 @@ substitute_vars() {
         "TELEGRAM_PROXY_PORT"
         "TELEGRAM_PROXY_USERNAME"
         "TELEGRAM_PROXY_PASSWORD"
+        "TELEGRAM_PUBLIC_EXTERNAL_URL"
         "WHATSAPP_AS_TOKEN"
         "WHATSAPP_HS_TOKEN"
         "WHATSAPP_SENDER_LOCALPART"
@@ -548,7 +574,7 @@ substitute_vars() {
     )
 
     for var in "${vars[@]}"; do
-        local value="${!var}"
+        local value="${!var-}"
         value=$(printf '%s\n' "$value" | sed 's/[&/\]/\\&/g')
         content=$(echo "$content" | sed "s/\${${var}}/${value}/g")
         # Also handle ${VAR:-default} patterns - strip the default syntax
@@ -556,6 +582,59 @@ substitute_vars() {
     done
 
     echo "$content" > "$output_file"
+}
+
+ensure_telegram_config_compat() {
+    local config_file="/data/bridges/telegram/config.yaml"
+    [ -f "$config_file" ] || return 0
+
+    python3 - <<'PY'
+from pathlib import Path
+import os
+import re
+
+path = Path("/data/bridges/telegram/config.yaml")
+text = path.read_text()
+external = os.environ.get("TELEGRAM_PUBLIC_EXTERNAL_URL") or "http://localhost:3000/public"
+
+public_block = (
+    "    public:\n"
+    "        enabled: true\n"
+    "        prefix: /public\n"
+    f"        external: {external}\n"
+)
+
+public_pattern = r"(?ms)^    public:\n(?:        .*?\n)+?(?=    [A-Za-z_][A-Za-z0-9_]*:|\Z)"
+if re.search(public_pattern, text):
+    text = re.sub(public_pattern, public_block, text, count=1)
+else:
+    db_opts_pattern = r"(?ms)^(    database_opts:\n(?:        .*?\n)+)"
+    text, count = re.subn(db_opts_pattern, r"\1" + public_block, text, count=1)
+    if count == 0:
+        appservice_pattern = r"(?ms)^(appservice:\n(?:    .*?\n)+?)^(    id:)"
+        text = re.sub(appservice_pattern, r"\1" + public_block + r"\2", text, count=1)
+
+text = re.sub(
+    r"(?m)^    sync_with_custom_puppets:\s+.*$",
+    "    sync_with_custom_puppets: false",
+    text,
+    count=1,
+)
+
+shared_secret = os.environ.get("MATRIX_HOMESERVER_SHARED_SECRET", "")
+if shared_secret:
+    login_secret_block = (
+        "    login_shared_secret_map:\n"
+        f"        localhost: {shared_secret}\n"
+    )
+    login_secret_pattern = r"(?ms)^    login_shared_secret_map:\n(?:        .*?\n)+?(?=    [A-Za-z_][A-Za-z0-9_]*:|\Z)"
+    if re.search(login_secret_pattern, text):
+        text = re.sub(login_secret_pattern, login_secret_block, text, count=1)
+
+path.write_text(text)
+PY
+
+    echo "  Ensured Telegram public login config in ${config_file}"
 }
 
 # Generate Tuwunel config
@@ -573,6 +652,8 @@ for bridge in whatsapp signal telegram; do
         echo "  ${config_file} exists, skipping template generation"
     fi
 done
+
+ensure_telegram_config_compat
 
 # Generate doublepuppet registration
 substitute_vars /etc/enclave-configs/doublepuppet.yaml.template /data/bridges/doublepuppet.yaml
@@ -604,7 +685,7 @@ TELEGRAM_REG="/data/bridges/telegram/telegram-registration.yaml"
 TELEGRAM_CFG="/data/bridges/telegram/config.yaml"
 if [ ! -f "$TELEGRAM_REG" ]; then
     echo "  Generating telegram registration..."
-    /opt/mautrix-telegram/bin/python -m mautrix_telegram -g -c "$TELEGRAM_CFG" -r "$TELEGRAM_REG" 2>/dev/null || true
+    /opt/mautrix-telegram-venv/bin/python -m mautrix_telegram -g -c "$TELEGRAM_CFG" -r "$TELEGRAM_REG" 2>/dev/null || true
 else
     echo "  telegram registration exists."
 fi

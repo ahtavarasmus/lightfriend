@@ -660,7 +660,7 @@ fn describe_action(action_type: &str, action_config: &str) -> String {
             .and_then(|v| v.as_str())
             .unwrap_or("tool");
         match tool {
-            "create_event" => "Create event".to_string(),
+            "create_event" => "Create obligation".to_string(),
             "send_email" => "Send email".to_string(),
             "send_chat_message" => "Send message".to_string(),
             "control_tesla" => "Tesla command".to_string(),

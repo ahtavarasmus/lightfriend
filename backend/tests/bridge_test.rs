@@ -592,6 +592,62 @@ mod workflow_tests {
     }
 
     #[tokio::test]
+    async fn test_get_service_rooms_accepts_tuwunel_dm_by_room_name() {
+        let dm_room = MockRoom::new("!dm:server", "Kaisa (WA)")
+            .with_members(vec![member("me"), member("whatsappbot")])
+            .with_last_activity(2000);
+
+        let unrelated_room = MockRoom::new("!other:server", "General")
+            .with_members(vec![member("me"), member("helper_bot")])
+            .with_last_activity(1000);
+
+        let client = MockMatrixClient::new().with_rooms(vec![dm_room, unrelated_room]);
+
+        let rooms = get_service_rooms_trait(&client, "whatsapp").await.unwrap();
+
+        assert_eq!(rooms.len(), 1);
+        assert_eq!(rooms[0].display_name, "Kaisa (WA)");
+        assert!(!rooms[0].is_group);
+    }
+
+    #[tokio::test]
+    async fn test_get_service_rooms_group_detection_uses_multiple_service_members() {
+        let dm_room = MockRoom::new("!dm:server", "Kai (WA)")
+            .with_members(vec![
+                member("whatsapp_kai"),
+                member("me"),
+                member("whatsappbot"),
+                member("helper_bot"),
+            ])
+            .with_last_activity(1000);
+
+        let group_room = MockRoom::new("!group:server", "Family (WA)")
+            .with_members(vec![
+                member("whatsapp_alice"),
+                member("whatsapp_bob"),
+                member("me"),
+                member("whatsappbot"),
+            ])
+            .with_last_activity(2000);
+
+        let client = MockMatrixClient::new().with_rooms(vec![dm_room, group_room]);
+
+        let rooms = get_service_rooms_trait(&client, "whatsapp").await.unwrap();
+
+        assert_eq!(rooms.len(), 2);
+        let dm = rooms
+            .iter()
+            .find(|room| room.room_id == "!dm:server")
+            .unwrap();
+        let group = rooms
+            .iter()
+            .find(|room| room.room_id == "!group:server")
+            .unwrap();
+        assert!(!dm.is_group);
+        assert!(group.is_group);
+    }
+
+    #[tokio::test]
     async fn test_get_service_rooms_empty_when_no_rooms() {
         let client = MockMatrixClient::new();
         let rooms = get_service_rooms_trait(&client, "whatsapp").await.unwrap();

@@ -100,9 +100,9 @@ impl ToolHandler for SetReminderHandler {
             .as_secs() as i32;
 
         if !is_recurring {
-            // One-time reminder: create an Event with notify_at == expires_at
-            let notify_at = crate::proactive::utils::parse_iso_to_timestamp(&when)
-                .ok_or_else(|| {
+            // One-time reminder: create an Event with remind_at == due_at
+            let remind_at =
+                crate::proactive::utils::parse_iso_to_timestamp(&when).ok_or_else(|| {
                     format!(
                         "Invalid one-time reminder timestamp '{}'. Use an ISO datetime.",
                         when
@@ -112,8 +112,8 @@ impl ToolHandler for SetReminderHandler {
             let new_event = NewOntEvent {
                 user_id: ctx.user_id,
                 description: message.clone(),
-                notify_at: Some(notify_at as i32),
-                expires_at: Some(notify_at as i32),
+                remind_at: Some(remind_at as i32),
+                due_at: Some(remind_at as i32),
                 status: "active".to_string(),
                 created_at: now,
                 updated_at: now,
@@ -489,7 +489,7 @@ For tool_call: {"tool":"tool_name","params":{...}}"#
 }
 
 // ---------------------------------------------------------------------------
-// CreateEventHandler - creates a tracked event linked to the triggering message
+// CreateEventHandler - creates a tracked obligation linked to the triggering message
 // ---------------------------------------------------------------------------
 
 pub struct CreateEventHandler;
@@ -521,26 +521,28 @@ impl ToolHandler for CreateEventHandler {
             Box::new(types::JSONSchemaDefine {
                 schema_type: Some(types::JSONSchemaType::String),
                 description: Some(
-                    "Short description of what to track (e.g. 'Amazon package delivery', 'Invoice payment due')."
+                    "Short description of one concrete obligation to track, not a whole situation (e.g. 'Pay hotel deposit', 'Confirm train tickets', 'Invoice payment due')."
                         .to_string(),
                 ),
                 ..Default::default()
             }),
         );
         properties.insert(
-            "notify_at_days".to_string(),
+            "remind_at_days".to_string(),
             Box::new(types::JSONSchemaDefine {
                 schema_type: Some(types::JSONSchemaType::Number),
-                description: Some("Days from now until notification. Default 7.".to_string()),
+                description: Some(
+                    "Days from now for the best reminder time. Default 7.".to_string(),
+                ),
                 ..Default::default()
             }),
         );
         properties.insert(
-            "expires_at_days".to_string(),
+            "due_at_days".to_string(),
             Box::new(types::JSONSchemaDefine {
                 schema_type: Some(types::JSONSchemaType::Number),
                 description: Some(
-                    "Days from now until expiration. Defaults to notify_at_days.".to_string(),
+                    "Days from now until the real deadline or last useful action time. Defaults to remind_at_days.".to_string(),
                 ),
                 ..Default::default()
             }),
@@ -551,7 +553,7 @@ impl ToolHandler for CreateEventHandler {
             function: types::Function {
                 name: "create_event".to_string(),
                 description: Some(
-                    "Create a tracked event on the user's dashboard. Links to the triggering message."
+                    "Create a tracked obligation on the user's dashboard for one concrete commitment. Links to the triggering message."
                         .to_string(),
                 ),
                 parameters: types::FunctionParameters {
@@ -578,10 +580,10 @@ impl ToolHandler for CreateEventHandler {
             .ok_or_else(|| "description is required".to_string())?
             .to_string();
 
-        let notify_at_days = args["notify_at_days"].as_i64().unwrap_or(7).clamp(1, 90) as i32;
-        let expires_at_days = args["expires_at_days"]
+        let remind_at_days = args["remind_at_days"].as_i64().unwrap_or(7).clamp(1, 90) as i32;
+        let due_at_days = args["due_at_days"]
             .as_i64()
-            .unwrap_or(notify_at_days as i64)
+            .unwrap_or(remind_at_days as i64)
             .clamp(1, 90) as i32;
 
         let now = std::time::SystemTime::now()
@@ -592,8 +594,8 @@ impl ToolHandler for CreateEventHandler {
         let new_event = NewOntEvent {
             user_id: ctx.user_id,
             description: description.clone(),
-            notify_at: Some(now + notify_at_days * 86400),
-            expires_at: Some(now + expires_at_days * 86400),
+            remind_at: Some(now + remind_at_days * 86400),
+            due_at: Some(now + due_at_days * 86400),
             status: "active".to_string(),
             created_at: now,
             updated_at: now,
@@ -617,14 +619,14 @@ impl ToolHandler for CreateEventHandler {
         );
 
         Ok(ToolResult::Answer(format!(
-            "Event '{}' created (id={}). Notify in {} days, expires in {} days.",
-            description, event.id, notify_at_days, expires_at_days
+            "Event '{}' created (id={}). Remind in {} days, due in {} days.",
+            description, event.id, remind_at_days, due_at_days
         )))
     }
 }
 
 // ---------------------------------------------------------------------------
-// UpdateEventHandler - updates a tracked event's status/description
+// UpdateEventHandler - updates a tracked obligation
 // ---------------------------------------------------------------------------
 
 pub struct UpdateEventHandler;
@@ -660,10 +662,13 @@ impl ToolHandler for UpdateEventHandler {
             }),
         );
         properties.insert(
-            "description".to_string(),
+            "append_description".to_string(),
             Box::new(types::JSONSchemaDefine {
                 schema_type: Some(types::JSONSchemaType::String),
-                description: Some("Updated description for the event".to_string()),
+                description: Some(
+                    "Append this update text to the event description. Keep the original context and add only the new concrete change."
+                        .to_string(),
+                ),
                 ..Default::default()
             }),
         );
@@ -681,10 +686,24 @@ impl ToolHandler for UpdateEventHandler {
             }),
         );
         properties.insert(
-            "extend_days".to_string(),
+            "remind_at".to_string(),
             Box::new(types::JSONSchemaDefine {
-                schema_type: Some(types::JSONSchemaType::Number),
-                description: Some("Extend deadline by this many days from now".to_string()),
+                schema_type: Some(types::JSONSchemaType::String),
+                description: Some(
+                    "Replace remind_at with this ISO datetime when the best reminder time changes."
+                        .to_string(),
+                ),
+                ..Default::default()
+            }),
+        );
+        properties.insert(
+            "due_at".to_string(),
+            Box::new(types::JSONSchemaDefine {
+                schema_type: Some(types::JSONSchemaType::String),
+                description: Some(
+                    "Replace due_at with this ISO datetime when the actual deadline or last useful action time changes."
+                        .to_string(),
+                ),
                 ..Default::default()
             }),
         );
@@ -694,7 +713,8 @@ impl ToolHandler for UpdateEventHandler {
             function: types::Function {
                 name: "update_event".to_string(),
                 description: Some(
-                    "Update a tracked event's status, description, or deadline.".to_string(),
+                    "Append new context to a tracked obligation and optionally update its status, reminder time, or due time."
+                        .to_string(),
                 ),
                 parameters: types::FunctionParameters {
                     schema_type: types::JSONSchemaType::Object,
@@ -712,14 +732,36 @@ impl ToolHandler for UpdateEventHandler {
         let event_id = args["event_id"]
             .as_i64()
             .ok_or_else(|| "event_id is required".to_string())? as i32;
-        let description = args["description"].as_str();
+        let append_description = args["append_description"].as_str();
         let status = args["status"].as_str();
-        let extend_days = args["extend_days"].as_i64().map(|d| d as i32);
+        let remind_at = args["remind_at"]
+            .as_str()
+            .map(|s| {
+                crate::proactive::utils::parse_iso_to_timestamp(s)
+                    .ok_or_else(|| "Invalid remind_at timestamp".to_string())
+            })
+            .transpose()?
+            .map(|t| t as i32);
+        let due_at = args["due_at"]
+            .as_str()
+            .map(|s| {
+                crate::proactive::utils::parse_iso_to_timestamp(s)
+                    .ok_or_else(|| "Invalid due_at timestamp".to_string())
+            })
+            .transpose()?
+            .map(|t| t as i32);
 
         let event = ctx
             .state
             .ontology_repository
-            .update_event(ctx.user_id, event_id, description, status, extend_days)
+            .update_event(
+                ctx.user_id,
+                event_id,
+                append_description,
+                status,
+                remind_at,
+                due_at,
+            )
             .map_err(|e| format!("Failed to update event: {}", e))?;
 
         // Always link the current message to the event

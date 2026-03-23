@@ -206,14 +206,50 @@ RestartSec=3
 WantedBy=multi-user.target
 SEEDEOF
 
+# VSOCK seed server (port 9003) - serves a one-time plain SQL bootstrap dump
+cat > /opt/lightfriend/seed-server.sh <<'SCRIPT'
+#!/bin/bash
+SEED_DIR="/opt/lightfriend/seed"
+CURRENT="${SEED_DIR}/lightfriend_db.sql"
+SERVED_DIR="${SEED_DIR}/served"
+mkdir -p "$SEED_DIR" "$SERVED_DIR"
+
+while true; do
+    if [ -f "$CURRENT" ]; then
+        TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
+        socat -u VSOCK-LISTEN:9003,reuseaddr FILE:"$CURRENT" 2>/dev/null
+        if [ -f "$CURRENT" ]; then
+            mv "$CURRENT" "${SERVED_DIR}/lightfriend_db-${TIMESTAMP}.sql"
+            echo "Served bootstrap SQL seed: lightfriend_db-${TIMESTAMP}.sql"
+        fi
+    else
+        socat VSOCK-LISTEN:9003,reuseaddr SYSTEM:"echo NO_SEED" 2>/dev/null
+    fi
+done
+SCRIPT
+chmod +x /opt/lightfriend/seed-server.sh
+
+cat > /etc/systemd/system/vsock-seed-server.service <<'SEEDSVCEOF'
+[Unit]
+Description=VSOCK SQL seed server for Nitro Enclave (port 9003)
+
+[Service]
+ExecStart=/opt/lightfriend/seed-server.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+SEEDSVCEOF
+
 # Enable and start all VSOCK services
 systemctl daemon-reload
-for svc in vsock-proxy-bridge vsock-config-server vsock-backup-receiver vsock-restore-server vsock-marlin-kms-bridge; do
+for svc in vsock-proxy-bridge vsock-config-server vsock-backup-receiver vsock-restore-server vsock-seed-server vsock-marlin-kms-bridge; do
     systemctl enable "$svc"
     systemctl start "$svc" || echo "WARNING: $svc failed to start"
 done
 
-echo "VSOCK services configured: proxy:8001, config:9000, backup:9001, restore:9002, marlin-kms:9010"
+echo "VSOCK services configured: proxy:8001, config:9000, backup:9001, restore:9002, seed:9003, marlin-kms:9010"
 
 # ── Enclave launch script ───────────────────────────────────────────────────
 

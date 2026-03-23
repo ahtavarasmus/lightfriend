@@ -135,7 +135,8 @@ pub fn resolve_prompt_template(prompt: &str, trigger_type: &str) -> String {
         } else {
             "Only notify if delaying this message over 2 hours could cause harm, financial loss, or miss a time-sensitive opportunity. Examples: emergencies, someone asking to meet now, immediate decisions needed. Routine updates, casual messages, and vague requests are NOT critical. If not critical, respond with just 'skip'."
         }.to_string(),
-        "track_items" => "Does this message relate to an already-tracked event? If it updates a tracked event (delivery status, payment confirmed, deadline passed), act on it. Otherwise skip.".to_string(),
+        "track_items_update" => "Does this message update an already-tracked obligation with a concrete next step or deadline? Create or update events for specific commitments like paying, booking, confirming, or sending something. Do not use one umbrella event for an entire trip or situation. Routine updates should be tracked silently in the background. If this message changes a tracked obligation's status, due date, or best reminder time, act on it. Otherwise skip.".to_string(),
+        "track_items_create" => "Should this message create a new tracked obligation? Only create one for a concrete commitment the user could forget and would benefit from being reminded about at the right time, such as paying, booking, confirming, sending, or following up by a certain date. Do not create umbrella events for whole situations like trip planning when the message is really about a smaller obligation inside it. If nothing specific should be tracked, respond with just 'skip'.".to_string(),
         _ if id.starts_with("check_condition:") => {
             let condition = id.strip_prefix("check_condition:").unwrap_or("");
             if is_schedule {
@@ -183,7 +184,7 @@ pub struct ActionConfig {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct LogicResult {
-    should_act: bool,
+    condition_met: bool,
     message: Option<String>,
     #[serde(flatten)]
     extra: HashMap<String, serde_json::Value>,
@@ -380,7 +381,7 @@ async fn evaluate_flow(
                 extra_params.as_ref(),
             )
             .await?;
-            let (next, msg, extras) = if result.should_act {
+            let (next, msg, extras) = if result.condition_met {
                 let extras = if result.extra.is_empty() {
                     None
                 } else {
@@ -623,12 +624,12 @@ pub(crate) async fn prefetch_sources(
                         .iter()
                         .map(|e| {
                             let deadline_tag = e
-                                .expires_at
-                                .map(|ea| {
-                                    if now > ea {
+                                .due_at
+                                .map(|due_at| {
+                                    if now > due_at {
                                         " [OVERDUE]".to_string()
                                     } else {
-                                        let days_left = (ea - now) / 86400;
+                                        let days_left = (due_at - now) / 86400;
                                         if days_left <= 2 {
                                             format!(" [due in {} days]", days_left)
                                         } else {
@@ -637,14 +638,43 @@ pub(crate) async fn prefetch_sources(
                                     }
                                 })
                                 .unwrap_or_default();
+                            let linked_messages = state
+                                .ontology_repository
+                                .get_messages_for_event(rule.user_id, e.id)
+                                .unwrap_or_default();
+                            let oldest_message = linked_messages.first();
+                            let newest_message = linked_messages.last();
+                            let summarize_message =
+                                |label: &str,
+                                 message: &crate::models::ontology_models::OntMessage|
+                                 -> String {
+                                    let preview: String =
+                                        message.content.chars().take(140).collect();
+                                    format!(
+                                        "\n  {}: [{}:{}] {}",
+                                        label, message.platform, message.sender_name, preview
+                                    )
+                                };
+                            let origin_context = oldest_message
+                                .map(|m| summarize_message("origin", m))
+                                .unwrap_or_default();
+                            let latest_context = newest_message
+                                .filter(|m| Some(m.id) != oldest_message.map(|om| om.id))
+                                .map(|m| summarize_message("latest", m))
+                                .unwrap_or_default();
                             format!(
-                                "[event_id={}] [status={}]{} {}",
-                                e.id, e.status, deadline_tag, e.description
+                                "[event_id={}] [status={}]{} {}{}{}",
+                                e.id,
+                                e.status,
+                                deadline_tag,
+                                e.description,
+                                origin_context,
+                                latest_context
                             )
                         })
                         .collect();
                     prefetched.push_str(&format!(
-                        "\n\n--- Tracked events ---\n{}",
+                        "\n\n--- Tracked obligations ---\n{}",
                         formatted.join("\n")
                     ));
                 }
@@ -678,17 +708,16 @@ pub(crate) async fn call_llm_condition(
         .unwrap_or_default();
 
     let extra_instructions = if extra_tool_params.is_some() {
-        " When should_act=true, also fill in the additional tool parameter fields."
+        " When condition_met=true, also fill in the additional tool parameter fields."
     } else {
         ""
     };
     let system_prompt = format!(
-        "You are evaluating whether to notify a user based on a rule they set up.\n\
+        "You are evaluating whether an IF condition matches in a user-defined rule.\n\
         Rule: \"{}\"\n\
         Instructions: {}\n\
         {}\n\n\
-        Call the `rule_result` tool with your decision. Set should_act=true if the user should be notified, \
-        and provide the notification `message` (used as SMS text to the user). Set should_act=false if conditions aren't met.{}\n\
+        Call the `rule_result` tool with your decision. Set condition_met=true when this IF condition matches and the true branch should run. Set condition_met=false when it does not match and the false branch should run. Fill the `message` field only if the downstream action will actually use it.{}\n\
         Keep messages concise (max 480 chars), direct, second person.",
         rule.name, prompt, tz_info, extra_instructions
     );
@@ -722,10 +751,12 @@ pub(crate) async fn call_llm_condition(
 
     let mut result_properties = HashMap::new();
     result_properties.insert(
-        "should_act".to_string(),
+        "condition_met".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::Boolean),
-            description: Some("true if the user should be notified".to_string()),
+            description: Some(
+                "true if this IF condition matches and the true branch should run".to_string(),
+            ),
             ..Default::default()
         }),
     );
@@ -734,13 +765,13 @@ pub(crate) async fn call_llm_condition(
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "Notification message for the user (max 480 chars, second person). This is sent as SMS to the user.".to_string(),
+                "Optional user-facing text for the downstream action when relevant (max 480 chars, second person). Leave minimal if the action is silent.".to_string(),
             ),
             ..Default::default()
         }),
     );
 
-    // Merge extra tool params (optional fields the LLM should fill when should_act=true)
+    // Merge extra tool params (optional fields the LLM should fill when condition_met=true)
     if let Some(extra) = extra_tool_params {
         for (key, schema) in extra {
             result_properties.insert(key.clone(), schema.clone());
@@ -755,7 +786,7 @@ pub(crate) async fn call_llm_condition(
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(result_properties),
-                required: Some(vec!["should_act".to_string(), "message".to_string()]),
+                required: Some(vec!["condition_met".to_string(), "message".to_string()]),
             },
         },
     };
@@ -787,7 +818,7 @@ pub(crate) async fn call_llm_condition(
 
     // Default: don't act
     Ok(LogicResult {
-        should_act: false,
+        condition_met: false,
         message: None,
         extra: HashMap::new(),
     })
@@ -842,7 +873,7 @@ async fn execute_flow_action(
                         return;
                     }
                 };
-                let params = {
+                let params_value = {
                     let mut p = config
                         .get("params")
                         .cloned()
@@ -873,8 +904,9 @@ async fn execute_flow_action(
                             }
                         }
                     }
-                    p.to_string()
+                    p
                 };
+                let params = params_value.to_string();
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
@@ -901,17 +933,6 @@ async fn execute_flow_action(
                             "Rule {} ({}): tool '{}' executed successfully",
                             rule.id, rule.name, tool_name
                         );
-                        // For update_event, send the LLM's message as SMS notification
-                        if tool_name == "update_event" && !message.is_empty() {
-                            send_notification(
-                                state,
-                                rule.user_id,
-                                message,
-                                "rule_sms".to_string(),
-                                None,
-                            )
-                            .await;
-                        }
                     }
                     Err(e) => {
                         error!(
@@ -1290,7 +1311,7 @@ pub async fn evaluate_flow_test(
                         FetchSource::Internet { query } => format!("internet: {}", query),
                         FetchSource::Tesla => "tesla".into(),
                         FetchSource::Mcp { server, tool, .. } => format!("mcp {}:{}", server, tool),
-                        FetchSource::Events => "tracked events".into(),
+                        FetchSource::Events => "tracked obligations".into(),
                     })
                     .collect();
                 let _ = tx
@@ -1325,7 +1346,7 @@ pub async fn evaluate_flow_test(
             .await
             {
                 Ok(result) => {
-                    let decided = result.should_act;
+                    let decided = result.condition_met;
                     let msg = result.message.clone();
                     let _ = tx
                         .send(RuleTestStep::LlmResult {

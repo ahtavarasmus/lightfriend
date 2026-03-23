@@ -1223,7 +1223,7 @@ enum PromptTemplate {
     Summarize,
     FilterImportant,
     CheckCondition,
-    TrackItems,
+    TrackItemsUpdate,
     Custom,
 }
 
@@ -1633,8 +1633,8 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                     logic_prompt.set(String::new());
                                     condition_input.set(String::new());
                                 }
-                                "template:track_items" => {
-                                    selected_template.set(PromptTemplate::TrackItems);
+                                "template:track_items_update" => {
+                                    selected_template.set(PromptTemplate::TrackItemsUpdate);
                                     logic_prompt.set(String::new());
                                     condition_input.set(String::new());
                                 }
@@ -1883,14 +1883,14 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                 event_fire_once.set(false);
                                 event_filter_key.set("none".to_string());
                                 logic_mode.set(LogicMode::Llm);
-                                selected_template.set(PromptTemplate::TrackItems);
+                                selected_template.set(PromptTemplate::TrackItemsUpdate);
                                 logic_prompt.set(String::new());
                                 active_sources_tmpl.set(vec![SourceConfig::Events]);
                                 action_mode.set(ActionMode::ToolCall);
                                 tool_name.set("update_event".to_string());
-                                // ELSE branch: nested condition to pin new items
+                                // ELSE branch: nested condition to create new tracked obligations
                                 else_flow.set(Some(FlowNode::LlmCondition {
-                                    prompt: "Is this about a delivery, invoice, payment, deadline, or something worth tracking?".to_string(),
+                                    prompt: "template:track_items_create".to_string(),
                                     fetch: vec![],
                                     true_branch: Box::new(Some(FlowNode::Action {
                                         action_type: "tool_call".to_string(),
@@ -1979,7 +1979,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
         LogicMode::Llm => match *selected_template {
             PromptTemplate::Summarize => "AI summarizes updates".to_string(),
             PromptTemplate::FilterImportant => "AI filters important".to_string(),
-            PromptTemplate::TrackItems => "AI tracks item updates".to_string(),
+            PromptTemplate::TrackItemsUpdate => "AI tracks item updates".to_string(),
             PromptTemplate::CheckCondition => {
                 let c = (*condition_input).clone();
                 if c.is_empty() {
@@ -2246,7 +2246,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                     PromptTemplate::FilterImportant => {
                         Some("template:filter_important".to_string())
                     }
-                    PromptTemplate::TrackItems => Some("template:track_items".to_string()),
+                    PromptTemplate::TrackItemsUpdate => Some("template:track_items_update".to_string()),
                 },
                 _ => None,
             };
@@ -2942,7 +2942,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                             {for [
                                                 (PromptTemplate::Summarize, "Summarize"),
                                                 (PromptTemplate::FilterImportant, "Only if important"),
-                                                (PromptTemplate::TrackItems, "AI tracks"),
+                                                (PromptTemplate::TrackItemsUpdate, "AI tracks"),
                                                 (PromptTemplate::CheckCondition, "Check condition"),
                                                 (PromptTemplate::Custom, "Custom"),
                                             ].iter().map(|(tmpl, label)| {
@@ -2973,7 +2973,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                                         as_tmpl.set(vec![]);
                                                                     }
                                                                 },
-                                                                PromptTemplate::TrackItems => {
+                                                                PromptTemplate::TrackItemsUpdate => {
                                                                     as_tmpl.set(vec![SourceConfig::Events]);
                                                                 },
                                                                 PromptTemplate::CheckCondition | PromptTemplate::Custom => {}
@@ -2984,7 +2984,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                             })}
                                         </div>
 
-                                        if *selected_template == PromptTemplate::Summarize || *selected_template == PromptTemplate::FilterImportant || *selected_template == PromptTemplate::TrackItems {
+                                        if *selected_template == PromptTemplate::Summarize || *selected_template == PromptTemplate::FilterImportant || *selected_template == PromptTemplate::TrackItemsUpdate {
                                             <div class="rb-template-desc">
                                                 {get_template_description(&*selected_template, &*when_mode)}
                                             </div>
@@ -3849,13 +3849,13 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
 
                                         if *tool_name == "create_event" {
                                             <div class="rb-field-hint" style="margin-bottom: 0.5rem;">
-                                                {"Creates a tracked event on your dashboard linked to the triggering message. Use with Event triggers."}
+                                                {"Creates one tracked obligation with a real due time and reminder time. Use for a concrete commitment, not a whole situation."}
                                             </div>
                                         }
 
                                         if *tool_name == "update_event" {
                                             <div class="rb-field-hint" style="margin-bottom: 0.5rem;">
-                                                {"Updates a tracked event's status. The AI picks the event and status from context."}
+                                                {"Updates a tracked obligation by appending new context and adjusting status, reminder time, or due time."}
                                             </div>
                                         }
 
@@ -4135,7 +4135,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                         }
                                                         PromptTemplate::Summarize => Some("template:summarize".to_string()),
                                                         PromptTemplate::FilterImportant => Some("template:filter_important".to_string()),
-                                                        PromptTemplate::TrackItems => Some("template:track_items".to_string()),
+                                                        PromptTemplate::TrackItemsUpdate => Some("template:track_items_update".to_string()),
                                                     }
                                                 }
                                                 _ => None,
@@ -5511,13 +5511,13 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
 
                     if cur_tool == "create_event" {
                         <div class="rb-field-hint" style="margin-bottom: 0.5rem;">
-                            {"Creates a tracked event on your dashboard linked to the triggering message. Use with Event triggers."}
+                            {"Creates one tracked obligation with a real due time and reminder time. Use for a concrete commitment, not a whole situation."}
                         </div>
                     }
 
                     if cur_tool == "update_event" {
                         <div class="rb-field-hint" style="margin-bottom: 0.5rem;">
-                            {"Updates a tracked event's status. The AI picks the event and status from context."}
+                            {"Updates a tracked obligation by appending new context and adjusting status, reminder time, or due time."}
                         </div>
                     }
                 }
@@ -5686,8 +5686,8 @@ fn build_rule_summary(
         LogicMode::Llm => match selected_template {
             PromptTemplate::Summarize => Some("AI summarizes your updates".to_string()),
             PromptTemplate::FilterImportant => Some("AI checks if it's important".to_string()),
-            PromptTemplate::TrackItems => {
-                Some("AI checks if it updates a tracked event".to_string())
+            PromptTemplate::TrackItemsUpdate => {
+                Some("AI checks if it updates a tracked obligation".to_string())
             }
             PromptTemplate::CheckCondition => {
                 if condition_input.is_empty() {
@@ -5726,8 +5726,8 @@ fn build_rule_summary(
             "send_email" => "sends an email".to_string(),
             "respond_to_email" => "replies to the email".to_string(),
             "control_tesla" => humanize_tesla_cmd(tc_tesla_cmd).to_string(),
-            "create_event" => "creates a tracked event".to_string(),
-            "update_event" => "updates the tracked event".to_string(),
+            "create_event" => "creates a tracked obligation".to_string(),
+            "update_event" => "updates the tracked obligation".to_string(),
             t if t.starts_with("mcp:") => {
                 let parts: Vec<&str> = t.splitn(3, ':').collect();
                 let tool_short = parts.get(2).unwrap_or(&"tool");
@@ -6052,7 +6052,7 @@ fn capitalize_first(s: &str) -> String {
 fn render_llm_params_hint(tool: &str) -> Html {
     let hint = match tool {
         "update_event" => {
-            Some("AI will pick which tracked event to update and set its new status")
+            Some("AI will pick which tracked obligation to update and append the new concrete change")
         }
         _ => None,
     };
@@ -6064,10 +6064,14 @@ fn render_llm_params_hint(tool: &str) -> Html {
     }
 }
 
+fn get_track_update_prompt() -> String {
+    "Does this message update an already-tracked obligation with a concrete next step or deadline? Compare it against existing tracked obligations and their linked message context. Create or update events for specific commitments like paying, booking, confirming, or sending something. Do not use one umbrella event for an entire trip or situation. Routine updates should be tracked silently in the background. If this message changes a tracked obligation's status, due date, or best reminder time, act on it. Otherwise skip.".to_string()
+}
+
 fn get_template_prompt(template: &PromptTemplate, when_mode: &WhenMode, condition: &str) -> String {
     match template {
         PromptTemplate::Summarize => match when_mode {
-            WhenMode::Schedule => "Summarize recent messages and emails into a brief digest. Focus on key points, action items, and anything that needs attention. Also mention any tracked events with approaching deadlines. Format as a numbered list, one item per line.".to_string(),
+            WhenMode::Schedule => "Summarize recent messages and emails into a brief digest. Focus on key points, action items, and anything that needs attention. Also mention any tracked obligations with approaching due times. Format as a numbered list, one item per line.".to_string(),
             WhenMode::Event => "Summarize this message along with recent conversation context. Highlight key points and any action needed.".to_string(),
         },
         PromptTemplate::FilterImportant => match when_mode {
@@ -6078,7 +6082,7 @@ fn get_template_prompt(template: &PromptTemplate, when_mode: &WhenMode, conditio
             WhenMode::Schedule => format!("Check if the following condition is met based on recent messages: {}. If the condition is not met, respond with just 'skip'.", condition),
             WhenMode::Event => format!("Check if this message matches the following condition: {}. If it doesn't match, respond with just 'skip'.", condition),
         },
-        PromptTemplate::TrackItems => "Does this message relate to an already-tracked event? If it updates a tracked event (delivery status, payment confirmed, deadline passed), act on it. Otherwise skip.".to_string(),
+        PromptTemplate::TrackItemsUpdate => get_track_update_prompt(),
         PromptTemplate::Custom => String::new(),
     }
 }
@@ -6093,7 +6097,7 @@ fn get_template_description(template: &PromptTemplate, when_mode: &WhenMode) -> 
             WhenMode::Schedule => "AI will review your recent messages and only notify you if something urgent or important needs your attention.",
             WhenMode::Event => "AI will evaluate this message and only notify you if it seems important or urgent.",
         },
-        PromptTemplate::TrackItems => "AI will check if this message updates an item you're already tracking (delivery status, payment, deadline) and update it automatically.",
+        PromptTemplate::TrackItemsUpdate => "AI will check if this message updates an item you're already tracking (delivery status, payment, deadline) and update it automatically.",
         _ => "",
     }
 }
@@ -6206,8 +6210,8 @@ fn render_review(
         LogicMode::Llm => match selected_template {
             PromptTemplate::Summarize => Some("AI summarizes your updates".to_string()),
             PromptTemplate::FilterImportant => Some("AI checks if it's important".to_string()),
-            PromptTemplate::TrackItems => {
-                Some("AI checks if it updates a tracked event".to_string())
+            PromptTemplate::TrackItemsUpdate => {
+                Some("AI checks if it updates a tracked obligation".to_string())
             }
             PromptTemplate::CheckCondition => {
                 if condition_input.is_empty() {
@@ -6245,8 +6249,8 @@ fn render_review(
             "send_email" => "Sends an email".to_string(),
             "respond_to_email" => "Replies to the email".to_string(),
             "control_tesla" => capitalize_first(humanize_tesla_cmd(tc_tesla_cmd)),
-            "create_event" => "Creates a tracked event".to_string(),
-            "update_event" => "Updates the tracked event".to_string(),
+            "create_event" => "Creates a tracked obligation".to_string(),
+            "update_event" => "Updates the tracked obligation".to_string(),
             t if t.starts_with("mcp:") => {
                 let parts: Vec<&str> = t.splitn(3, ':').collect();
                 format!("Runs {}", parts.get(2).unwrap_or(&"tool"))
@@ -6373,7 +6377,7 @@ fn review_action_text(action_type: &str, config: &serde_json::Value) -> String {
         },
         "tool_call" => match config.get("tool").and_then(|v| v.as_str()) {
             Some("create_event") => "Pins it to your dashboard".to_string(),
-            Some("update_event") => "Updates the tracked event".to_string(),
+            Some("update_event") => "Updates the tracked obligation".to_string(),
             Some("send_email") => "Sends an email".to_string(),
             Some("send_chat_message") => {
                 let plat = config

@@ -37,8 +37,8 @@ pub struct DashboardSummaryResponse {
 pub struct EventItem {
     pub id: i32,
     pub description: String,
-    pub notify_at: Option<i32>,
-    pub expires_at: Option<i32>,
+    pub remind_at: Option<i32>,
+    pub due_at: Option<i32>,
     pub status: String,
     pub created_at: i32,
 }
@@ -207,8 +207,8 @@ pub async fn get_dashboard_summary(
         .map(|e| EventItem {
             id: e.id,
             description: e.description,
-            notify_at: e.notify_at,
-            expires_at: e.expires_at,
+            remind_at: e.remind_at,
+            due_at: e.due_at,
             status: e.status,
             created_at: e.created_at,
         })
@@ -858,7 +858,7 @@ pub async fn get_rule_sources(
         meta: serde_json::json!({}),
     });
 
-    // Events: available if user has tracked events
+    // Events: available if user has tracked obligations
     let events_count = state
         .ontology_repository
         .get_active_events(user_id)
@@ -866,7 +866,7 @@ pub async fn get_rule_sources(
         .unwrap_or(0);
     sources.push(RuleSourceOption {
         source_type: "events".to_string(),
-        label: "Tracked events".to_string(),
+        label: "Tracked obligations".to_string(),
         available: true,
         meta: serde_json::json!({ "count": events_count }),
     });

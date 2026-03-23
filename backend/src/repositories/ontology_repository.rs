@@ -894,6 +894,44 @@ impl OntologyRepository {
             .load::<OntMessage>(&mut conn)
     }
 
+    /// Get all messages linked to an event, ordered by message timestamp ASC.
+    pub fn get_messages_for_event(
+        &self,
+        user_id: i32,
+        event_id: i32,
+    ) -> Result<Vec<OntMessage>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let links = self.get_links_for_entity(user_id, "Event", event_id)?;
+        let mut message_ids: Vec<i64> = links
+            .into_iter()
+            .filter_map(|link| {
+                if link.source_type == "Message" && link.target_type == "Event" {
+                    Some(link.source_id as i64)
+                } else if link.source_type == "Event" && link.target_type == "Message" {
+                    Some(link.target_id as i64)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        message_ids.sort_unstable();
+        message_ids.dedup();
+
+        if message_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut messages = ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::id.eq_any(&message_ids))
+            .load::<OntMessage>(&mut conn)?;
+
+        messages.sort_by_key(|m| (m.created_at, m.id));
+        Ok(messages)
+    }
+
     /// Get recent messages for a platform since a timestamp.
     pub fn get_recent_messages(
         &self,
@@ -1078,21 +1116,31 @@ impl OntologyRepository {
         &self,
         user_id: i32,
         event_id: i32,
-        description: Option<&str>,
+        append_description: Option<&str>,
         status: Option<&str>,
-        extend_days: Option<i32>,
+        remind_at: Option<i32>,
+        due_at: Option<i32>,
     ) -> Result<OntEvent, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let now = Self::now();
 
-        if let Some(desc) = description {
+        if let Some(append) = append_description {
+            let current: OntEvent = ont_events::table
+                .filter(ont_events::id.eq(event_id))
+                .filter(ont_events::user_id.eq(user_id))
+                .first(&mut conn)?;
+            let merged = if current.description.is_empty() {
+                append.to_string()
+            } else {
+                format!("{}\nUpdate: {}", current.description, append)
+            };
             diesel::update(
                 ont_events::table
                     .filter(ont_events::id.eq(event_id))
                     .filter(ont_events::user_id.eq(user_id)),
             )
             .set((
-                ont_events::description.eq(desc),
+                ont_events::description.eq(merged),
                 ont_events::updated_at.eq(now),
             ))
             .execute(&mut conn)?;
@@ -1108,16 +1156,19 @@ impl OntologyRepository {
             .execute(&mut conn)?;
         }
 
-        if let Some(days) = extend_days {
-            let extension = days * 86400;
+        if remind_at.is_some() || due_at.is_some() {
+            let current: OntEvent = ont_events::table
+                .filter(ont_events::id.eq(event_id))
+                .filter(ont_events::user_id.eq(user_id))
+                .first(&mut conn)?;
             diesel::update(
                 ont_events::table
                     .filter(ont_events::id.eq(event_id))
                     .filter(ont_events::user_id.eq(user_id)),
             )
             .set((
-                ont_events::notify_at.eq(Some(now + extension)),
-                ont_events::expires_at.eq(Some(now + extension)),
+                ont_events::remind_at.eq(remind_at.or(current.remind_at)),
+                ont_events::due_at.eq(due_at.or(current.due_at)),
                 ont_events::status.eq("active"),
                 ont_events::updated_at.eq(now),
             ))
@@ -1130,23 +1181,23 @@ impl OntologyRepository {
             .first(&mut conn)
     }
 
-    /// Get active events with notify_at <= now (due for notification).
+    /// Get active events with remind_at <= now (due for reminder).
     pub fn get_events_due_for_notification(&self, now: i32) -> Result<Vec<OntEvent>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         ont_events::table
             .filter(ont_events::status.eq("active"))
-            .filter(ont_events::notify_at.is_not_null())
-            .filter(ont_events::notify_at.le(now))
+            .filter(ont_events::remind_at.is_not_null())
+            .filter(ont_events::remind_at.le(now))
             .load(&mut conn)
     }
 
-    /// Get active or already-notified events with expires_at <= now.
+    /// Get active or already-notified events with due_at <= now.
     pub fn get_expired_events(&self, now: i32) -> Result<Vec<OntEvent>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         ont_events::table
             .filter(ont_events::status.eq_any(&["active", "notified"]))
-            .filter(ont_events::expires_at.is_not_null())
-            .filter(ont_events::expires_at.le(now))
+            .filter(ont_events::due_at.is_not_null())
+            .filter(ont_events::due_at.le(now))
             .load(&mut conn)
     }
 

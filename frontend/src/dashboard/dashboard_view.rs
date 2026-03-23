@@ -342,9 +342,9 @@ struct EventResponse {
     id: i32,
     description: String,
     #[serde(default)]
-    notify_at: Option<i32>,
+    remind_at: Option<i32>,
     #[serde(default)]
-    expires_at: Option<i32>,
+    due_at: Option<i32>,
     status: String,
     created_at: i32,
 }
@@ -730,17 +730,17 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                             <div class="events-header">
                                 <i class="fa-solid fa-calendar-check" style="color: #7EB2FF; margin-right: 0.4rem; font-size: 0.75rem;"></i>
                                 <span style="font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.03em;">
-                                    {"Events"}
+                                    {"Obligations"}
                                 </span>
                             </div>
                             { for events.iter().map(|evt| {
                                 let evt_id = evt.id;
                                 let now_ts = (js_sys::Date::now() / 1000.0) as i32;
-                                let deadline_html = evt.expires_at.map(|ea| {
-                                    if now_ts > ea {
+                                let deadline_html = evt.due_at.map(|due_at| {
+                                    if now_ts > due_at {
                                         html! { <span style="color: #ff6b6b; font-size: 0.65rem; font-weight: 600;">{"overdue"}</span> }
                                     } else {
-                                        let days_left = (ea - now_ts) / 86400;
+                                        let days_left = (due_at - now_ts) / 86400;
                                         if days_left <= 2 {
                                             html! { <span style="color: #fbbf24; font-size: 0.65rem;">{format!("due in {}d", days_left)}</span> }
                                         } else {
