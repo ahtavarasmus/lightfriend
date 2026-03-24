@@ -336,9 +336,14 @@ body {
 
     .nav-right {
         gap: 0.5rem;
+        margin-left: auto;
     }
 
     .nav-trust-badges {
+        display: none;
+    }
+
+    .nav-landing .nav-right .nav-link {
         display: none;
     }
 
@@ -939,15 +944,17 @@ button[type="submit"].loading::after {
     background: rgba(0, 0, 0, 0.2);
     border-radius: 12px;
     width: 100%;
-    max-width: 600px;
+    max-width: 720px;
     padding: 2rem;
     margin: 1.5rem auto;
+    text-align: left;
 }
 
 .legal-content h2 {
     color: #7EB2FF;
     font-size: 1.5rem;
     margin-bottom: 1.5rem;
+    text-align: center;
 }
 
 .legal-content h3 {
@@ -957,7 +964,7 @@ button[type="submit"].loading::after {
 }
 
 .legal-content p, .legal-content li {
-    color: #999;
+    color: #b8b8b8;
     line-height: 1.6;
     margin-bottom: 1rem;
 }
@@ -972,11 +979,76 @@ button[type="submit"].loading::after {
     margin-bottom: 0.5rem;
 }
 
-.legal-content li:before {
+.legal-content ul > li:before {
     content: "•";
     color: #1E90FF;
     position: absolute;
     left: -1.5rem;
+}
+
+.legal-content ol {
+    padding-left: 1.5rem;
+    list-style-type: decimal;
+}
+
+.legal-content ol > li {
+    padding-left: 0.25rem;
+}
+
+.legal-content ol > li::marker {
+    color: #1E90FF;
+}
+
+.legal-content ol ul {
+    margin-top: 0.5rem;
+}
+
+.legal-content section a {
+    color: #1E90FF;
+    text-decoration: none;
+    border-bottom: 1px solid rgba(30, 144, 255, 0.3);
+    transition: border-color 0.3s ease;
+}
+
+.legal-content section a:hover {
+    border-color: #1E90FF;
+}
+
+.legal-content pre {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(30, 144, 255, 0.15);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    overflow-x: auto;
+    margin: 1rem 0;
+}
+
+.legal-content pre code {
+    color: #7EB2FF;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+.legal-content code {
+    background: rgba(30, 144, 255, 0.1);
+    color: #7EB2FF;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.85em;
+}
+
+.legal-content pre code {
+    background: none;
+    padding: 0;
+    border-radius: 0;
+}
+
+.trustless-subtitle {
+    color: #999;
+    font-size: 1.1rem;
+    margin-bottom: 2rem;
 }
 
 .legal-links {

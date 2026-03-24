@@ -44,6 +44,22 @@ pub struct EventItem {
 }
 
 #[derive(Serialize)]
+pub struct EventMessageItem {
+    pub id: i64,
+    pub platform: String,
+    pub sender_name: String,
+    pub content: String,
+    pub created_at: i32,
+    pub room_id: String,
+}
+
+#[derive(Serialize)]
+pub struct EventDetailResponse {
+    pub event: EventItem,
+    pub linked_messages: Vec<EventMessageItem>,
+}
+
+#[derive(Serialize)]
 pub struct ActionItem {
     pub message_id: i64,
     pub person_name: String,
@@ -1046,4 +1062,55 @@ pub async fn dismiss_event(
             )
         })?;
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// GET /api/events/{id}
+pub async fn get_event_detail(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(event_id): Path<i32>,
+) -> Result<Json<EventDetailResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let event = state
+        .ontology_repository
+        .get_event(auth_user.user_id, event_id)
+        .map_err(|e| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": format!("Failed to get event: {}", e) })),
+            )
+        })?;
+
+    let linked_messages = state
+        .ontology_repository
+        .get_messages_for_event(auth_user.user_id, event_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": format!("Failed to get linked messages: {}", e)
+                })),
+            )
+        })?
+        .into_iter()
+        .map(|message| EventMessageItem {
+            id: message.id,
+            platform: message.platform,
+            sender_name: message.sender_name,
+            content: message.content,
+            created_at: message.created_at,
+            room_id: message.room_id,
+        })
+        .collect();
+
+    Ok(Json(EventDetailResponse {
+        event: EventItem {
+            id: event.id,
+            description: event.description,
+            remind_at: event.remind_at,
+            due_at: event.due_at,
+            status: event.status,
+            created_at: event.created_at,
+        },
+        linked_messages,
+    }))
 }

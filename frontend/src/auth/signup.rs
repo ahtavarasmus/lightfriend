@@ -808,7 +808,7 @@ pub mod password_reset {
                     <div class="contact-info">
                         <p>{"To reset your password, please contact:"}</p>
                         <p style="margin-top: 1rem;">
-                            <a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>
+                            <a href="mailto:rasmus@lightfriend.ai">{"rasmus@lightfriend.ai"}</a>
                         </p>
                         <p style="margin-top: 1rem; font-size: 0.9rem; color: rgba(255, 255, 255, 0.6);">
                             {"We'll verify your identity and send you a secure reset link."}
@@ -984,7 +984,7 @@ pub mod password_reset {
                                         {(*error).as_ref().unwrap_or(&"Invalid or expired reset link.".to_string())}
                                     </div>
                                     <div class="contact-info">
-                                        <p>{"Please contact "}<a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>{" for a new reset link."}</p>
+                                        <p>{"Please contact "}<a href="mailto:rasmus@lightfriend.ai">{"rasmus@lightfriend.ai"}</a>{" for a new reset link."}</p>
                                     </div>
                                 </>
                             }

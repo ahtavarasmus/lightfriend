@@ -367,7 +367,7 @@ pub fn faq() -> Html {
                     <h3>{"Notification-Only Countries"}</h3>
                     <p>{"If you live in Germany, France, Spain, Italy, Portugal, Belgium, Austria, Switzerland, Poland, Czech Republic, Sweden, Denmark, Norway, Ireland, or New Zealand, you can use lightfriend in notification-only mode. This means you'll receive messages from a US number and can reply to it, but you won't get your own local phone number. Message costs are based on Twilio's international rates for your country."}</p>
                     <h3>{"Other Countries"}</h3>
-                    <p>{"Elsewhere you will have to bring your own Twilio number or if you have an extra android phone with extra phone plan laying around, you can use it to send and receive sms messages through it without extra costs. See your country's Twilio pricing and regulations from "}<a href="/bring-own-number">{"here"}</a> {" or ask about the service availability in your country by emailing "}<a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com."}</a></p>
+                    <p>{"Elsewhere you will have to bring your own Twilio number or if you have an extra android phone with extra phone plan laying around, you can use it to send and receive sms messages through it without extra costs. See your country's Twilio pricing and regulations from "}<a href="/bring-own-number">{"here"}</a> {" or ask about the service availability in your country by emailing "}<a href="mailto:rasmus@lightfriend.ai">{"rasmus@lightfriend.ai."}</a></p>
 
                 </FaqItem>
 

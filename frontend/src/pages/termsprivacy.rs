@@ -7,7 +7,7 @@ use yew_router::prelude::*;
 pub fn privacy_policy() -> Html {
     use_seo(SeoMeta {
         title: "Privacy Policy \u{2013} Lightfriend",
-        description: "How Lightfriend protects your data. AES-256 encryption, no data selling, GDPR compliant. Learn about our privacy practices for the AI dumbphone assistant.",
+        description: "How Lightfriend handles your data. Verifiable privacy through sealed computing, open source code, and cryptographic proofs. Not promises - architecture.",
         canonical: "https://lightfriend.ai/privacy",
         og_type: "website",
     });
@@ -16,164 +16,127 @@ pub fn privacy_policy() -> Html {
             <h1>{"Privacy Policy"}</h1>
 
             <section>
-                <h2>{"1. Data Collection and Processing"}</h2>
-                <p>{"We collect and process the following personal data:"}</p>
+                <h2>{"1. Overview"}</h2>
+                <p>{"Lightfriend is a verifiable system. Its privacy properties are enforced by architecture, not policy, and can be independently verified by anyone. This document describes how the system is designed to work. It is not a warranty. See Section 14."}</p>
+                <p>{"For a plain-language explanation, see "}<Link<Route> to={Route::Trustless}>{"Verifiably Private"}</Link<Route>>{"."}</p>
+            </section>
+
+            <section>
+                <h2>{"2. What Data Enters the System"}</h2>
+                <p>{"When you use Lightfriend, the following data enters the enclave environment:"}</p>
                 <ul>
-                    <li>{"Phone number (for service access and user identification)"}</li>
-                    <li>{"Email address (for account recovery and identification)"}</li>
-                    <li>{"User-provided profile information (for AI assistant personalization)"}</li>
-                    <li>{"Access tokens used to access the integrations you setup"}</li>
-                    <li>{"Location coordinates (latitude/longitude) for calculating sunrise/sunset times"}</li>
-                    <li>{"AI-generated attention items (attention summaries, suggested actions, priority levels)"}</li>
-                    <li>{"MCP server configuration data (server URLs, authentication tokens)"}</li>
+                    <li>{"Phone number and email address (for account access and identification)"}</li>
+                    <li>{"Profile information you provide (for AI personalization)"}</li>
+                    <li>{"Messages from services you connect (WhatsApp, Signal, Telegram, email, etc.)"}</li>
+                    <li>{"Authentication tokens for your connected integrations"}</li>
+                    <li>{"Location coordinates if you provide them (for sunrise/sunset times)"}</li>
+                    <li>{"AI-generated attention items (summaries, suggested actions)"}</li>
+                    <li>{"MCP server configuration data if you set it up"}</li>
+                </ul>
+                <p>{"All of this data is processed and stored inside a sealed enclave. It is designed to never leave the enclave in plaintext. Data stored outside the enclave is encrypted with keys that exist only inside the enclave. You can verify this."}</p>
+            </section>
+
+            <section>
+                <h2>{"3. How the System is Designed"}</h2>
+                <p>{"Lightfriend runs inside an AWS Nitro Enclave - an isolated environment designed to prevent anyone, including us, from accessing data inside it. The system is designed so that:"}</p>
+                <ul>
+                    <li>{"The enclave is designed so that no one can log in, inspect memory, or extract data."}</li>
+                    <li>{"Encryption keys are designed to exist only inside the enclave."}</li>
+                    <li>{"Key management is handled by an independent service (Marlin) that is designed to release keys only to enclaves running approved, publicly auditable code."}</li>
+                    <li>{"All source code is open source on GitHub with reproducible builds."}</li>
                 </ul>
             </section>
 
             <section>
-                <h2>{"2. Legal Basis for Processing"}</h2>
-                <p>{"We process your data based on:"}</p>
+                <h2>{"4. Verification"}</h2>
+                <p>{"Anyone can verify what code is running by comparing the live enclave's cryptographic attestation against our public builds. Verification tools, API endpoints, and instructions are on our "}<Link<Route> to={Route::Trustless}>{"Verifiably Private"}</Link<Route>>{" page."}</p>
+            </section>
+
+            <section>
+                <h2>{"5. Third-Party Services"}</h2>
+                <p>{"The system depends on third-party infrastructure. We do not control these services and are not responsible for their behavior."}</p>
                 <ul>
-                    <li>{"Contract fulfillment (service provision)"}</li>
-                    <li>{"Your explicit consent for AI personalization"}</li>
-                    <li>{"Legitimate business interests (billing and security)"}</li>
+                    <li><strong>{"AWS Nitro Enclaves: "}</strong>{"Provides the sealed environment. Isolation depends on Amazon's hardware and software."}</li>
+                    <li><strong>{"Marlin: "}</strong>{"Key custody. Runs inside its own enclave. Open source."}</li>
+                    <li><strong>{"Tinfoil: "}</strong>{"AI inference inside sealed environments with cryptographic attestation."}</li>
+                    <li><strong>{"Twilio: "}</strong>{"SMS delivery. Message content is designed to be deleted from Twilio after delivery."}</li>
+                    <li><strong>{"ElevenLabs: "}</strong>{"Voice call audio. Does not provide cryptographic privacy guarantees. This is the one area relying on trust. We intend to replace this when a verifiable alternative is available."}</li>
                 </ul>
             </section>
 
             <section>
-                <h2>{"3. Data Security Measures"}</h2>
-                <ul>
-                    <li>{"Secure server access limited to authorized personnel"}</li>
-                    <li>{"Password hashing for secure storage"}</li>
-                    <li>{"HTTPS encryption for all data transmission"}</li>
-                    <li>{"Protected API endpoints with secret keys"}</li>
-                    <li>{"Access tokens and other sensitive data are encrypted at rest"}</li>
-                    <li>{"Segregated user data access"}</li>
-                </ul>
+                <h2>{"6. AI Processing"}</h2>
+                <p>{"AI processing happens inside sealed environments (enclave and Tinfoil). AI outputs are automatic and may be inaccurate, incomplete, or inappropriate. You are solely responsible for deciding whether and how to act on them. Lightfriend does not review or endorse AI-generated content."}</p>
             </section>
 
             <section>
-                <h2>{"4. Your Data Rights"}</h2>
-                <p>{"You have the right to:"}</p>
-                <ul>
-                    <li>{"Access your personal data"}</li>
-                    <li>{"Modify your phone number, email, nickname, profile information and service connections"}</li>
-                    <li>{"Request account deletion (subject to outstanding payments)"}</li>
-                </ul>
+                <h2>{"7. Messaging Integrations"}</h2>
+                <p>{"Messages from your connected platforms enter the enclave for processing. Connection data and messages are stored encrypted inside the enclave. You are solely responsible for message content. Lightfriend acts as a technical intermediary."}</p>
             </section>
 
             <section>
-                <h2>{"5. AI Processing"}</h2>
-                <p>{"Our AI assistant processes your provided information to:"}</p>
+                <h2>{"8. YouTube Integration"}</h2>
+                <p>{"Uses YouTube API Services. By using this feature you agree to the "}<a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer">{"YouTube Terms of Service"}</a>{" and "}<a href="http://www.google.com/policies/privacy" target="_blank" rel="noopener noreferrer">{"Google Privacy Policy"}</a>{"."}</p>
                 <ul>
-                    <li>{"Personalize responses based on your profile information"}</li>
-                    <li>{"Provide context-aware assistance during calls"}</li>
-                    <li>{"Improve service quality"}</li>
-                    <li>{"Automatically generate attention items that flag messages and events needing your attention"}</li>
-                    <li>{"Attention items include AI-generated summaries, suggested actions, reasoning, and contextual data"}</li>
-                    <li>{"Attention items are stored until dismissed, actioned, or expired"}</li>
-                </ul>
-            </section>
-
-            <section>
-                <h2>{"6. Messaging Platform Integrations (WhatsApp, Signal, Telegram)"}</h2>
-                <p>{"Lightfriend integrates with various messaging platforms to allow you to send and receive messages via SMS or voice calls. This section applies to all messaging integrations including WhatsApp, Signal, and Telegram."}</p>
-                <ul>
-                    <li>{"Connection Data: We store encrypted authentication data to maintain connections to your messaging accounts."}</li>
-                    <li>{"Message Processing: Messages are processed and temporarily stored on our servers to enable format conversion between platforms. This is a technical necessity for service operation."}</li>
-                    <li>{"Data Retention: Connection data is retained until you disconnect the service or delete your account. Messages are retained only as long as necessary for delivery."}</li>
-                    <li>{"Third-Party Access: We do not share your messaging data with third parties except as required by law."}</li>
-                    <li>{"Room Identifiers: We store messaging platform room identifiers linked to your contact profiles to route messages to the correct contacts."}</li>
-                </ul>
-                <p>{"Important Disclaimers:"}</p>
-                <ul>
-                    <li>{"Users are solely responsible for the content of messages sent through our service. Lightfriend acts only as a technical intermediary."}</li>
-                    <li>{"We cannot guarantee privacy beyond our implemented security measures. Users should consider this when deciding what information to share."}</li>
-                    <li>{"We are not responsible for any actions taken by the underlying messaging platforms."}</li>
-                </ul>
-            </section>
-
-            <section>
-                <h2>{"8. YouTube Integration and OAuth"}</h2>
-                <p>{"Lightfriend provides an intentional YouTube viewing experience through our web dashboard, designed for users who want to access YouTube content without algorithmic recommendations, infinite scroll, or autoplay. This feature uses YouTube API Services."}</p>
-                <ul>
-                    <li><strong>{"YouTube API Services: "}</strong>{"This application uses YouTube API Services. By using the YouTube features, you are also agreeing to be bound by the "}<a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer">{"YouTube Terms of Service"}</a>{"."}</li>
-                    <li><strong>{"Google Privacy Policy: "}</strong>{"Google's Privacy Policy applies to your use of YouTube through our service. Please review the "}<a href="http://www.google.com/policies/privacy" target="_blank" rel="noopener noreferrer">{"Google Privacy Policy"}</a>{"."}</li>
-                    <li><strong>{"Data We Access (Read-Only): "}</strong>{"With your authorization via the youtube.readonly scope, we access: your YouTube subscriptions list to display recent videos from channels you follow, video metadata (titles, thumbnails, descriptions, view counts), and the ability to search YouTube on your behalf."}</li>
-                    <li><strong>{"Data We Access (Extended Permissions): "}</strong>{"If you choose to enable extended permissions via the youtube.force-ssl scope, we can additionally: subscribe/unsubscribe from channels on your behalf, read and post comments, and like/dislike videos. These actions are only performed when you explicitly request them through our interface."}</li>
-                    <li><strong>{"Tokens We Store: "}</strong>{"Upon your authorization, we store an encrypted access token and refresh token in our secure database. These tokens enable Lightfriend to access YouTube on your behalf when you use our dashboard."}</li>
-                    <li><strong>{"What We Don't Store: "}</strong>{"We do not store your YouTube videos, watch history, search history, or any content beyond the encrypted authentication tokens necessary for the integration."}</li>
-                    <li><strong>{"Usage: "}</strong>{"The stored tokens are used exclusively to authenticate with YouTube API when you actively use the YouTube features in our dashboard. We do not access your YouTube data in the background or use it to train AI models."}</li>
-                    <li><strong>{"Sharing: "}</strong>{"We do not share your YouTube data or tokens with third parties, except as required by law."}</li>
-                    <li><strong>{"AI-Assisted Access: "}</strong>{"Our AI assistant can search YouTube and access your subscription feed on your behalf when processing your requests, using your stored OAuth tokens."}</li>
-                    <li><strong>{"Revoking Access: "}</strong>{"You can disconnect YouTube from Lightfriend at any time through your account settings. You can also revoke Lightfriend's access to your Google account at any time by visiting your "}<a href="https://security.google.com/settings/security/permissions" target="_blank" rel="noopener noreferrer">{"Google Security Settings"}</a>{". Upon revocation through Lightfriend, your tokens are deleted and revoked immediately. Upon revocation through Google Security Settings, we will delete your tokens within 30 days."}</li>
-                    <li><strong>{"Contact: "}</strong>{"For questions about our YouTube integration privacy practices, contact rasmus@ahtava.com."}</li>
+                    <li>{"We store encrypted OAuth tokens to access YouTube on your behalf."}</li>
+                    <li>{"With read-only scope: subscription list, video metadata, search."}</li>
+                    <li>{"With extended scope: subscribe/unsubscribe, comments, likes - only when you explicitly request it."}</li>
+                    <li>{"We do not store watch history, search history, or video content."}</li>
+                    <li>{"Revoke access anytime via account settings or "}<a href="https://security.google.com/settings/security/permissions" target="_blank" rel="noopener noreferrer">{"Google Security Settings"}</a>{"."}</li>
                 </ul>
             </section>
 
             <section>
                 <h2>{"9. Vehicle Integration (Tesla)"}</h2>
-                <p>{"Lightfriend offers integration with Tesla vehicles to allow remote vehicle control via SMS or voice commands. BY USING THIS FEATURE, YOU ACKNOWLEDGE AND ACCEPT THE FOLLOWING:"}</p>
+                <p>{"THIS IS AN EXPERIMENTAL SERVICE. Commands may control real vehicle functions. YOU ACCEPT FULL RESPONSIBILITY for all commands and their consequences. Lightfriend accepts NO LIABILITY for any accidents, damage, injury, theft, or loss resulting from vehicle commands."}</p>
+            </section>
+
+            <section>
+                <h2>{"10. Email, MCP, and Other Integrations"}</h2>
+                <p>{"All integration credentials are stored encrypted inside the enclave. You connect services at your own risk and are responsible for your accounts with third-party services. MCP server data may leave the enclave when sent to your configured external servers. We are not liable for third-party service behavior."}</p>
+            </section>
+
+            <section>
+                <h2>{"11. Your Rights"}</h2>
                 <ul>
-                    <li>{"We store encrypted OAuth tokens to access your Tesla account on your behalf."}</li>
-                    <li>{"Commands you send may control real vehicle functions including but not limited to: unlocking doors, starting climate control, opening trunks, and other vehicle operations."}</li>
-                    <li>{"THIS IS AN EXPERIMENTAL SERVICE. You use it entirely at your own risk."}</li>
-                    <li>{"You are solely responsible for ensuring it is safe and appropriate to send any vehicle command."}</li>
-                    <li>{"Lightfriend does not verify the safety, appropriateness, or consequences of any command."}</li>
-                    <li>{"Lightfriend accepts NO LIABILITY whatsoever for any accidents, damage, injury, theft, loss, or any other consequences resulting from vehicle commands."}</li>
-                    <li>{"By using this integration, you explicitly waive any and all claims against Lightfriend related to vehicle control."}</li>
+                    <li>{"Access and modify your personal data"}</li>
+                    <li>{"Request account deletion"}</li>
+                    <li>{"Disconnect any integration at any time"}</li>
+                    <li>{"Verify the system's privacy properties yourself"}</li>
                 </ul>
             </section>
 
             <section>
-                <h2>{"10. Email Integration (IMAP)"}</h2>
-                <p>{"Lightfriend can connect to your email account to monitor and notify you of important messages."}</p>
+                <h2>{"12. Data Retention"}</h2>
+                <p>{"Data is retained until you delete your account or legal requirements are met. Stored data is encrypted with keys that exist only inside the enclave."}</p>
+            </section>
+
+            <section>
+                <h2>{"13. Legal Basis"}</h2>
+                <p>{"Data is processed on the basis of contract fulfillment, your consent for AI personalization, and legitimate business interests (billing, security)."}</p>
+            </section>
+
+            <section>
+                <h2>{"14. Disclaimers"}</h2>
+                <p>{"This policy describes system design and intent, not warranties."}</p>
                 <ul>
-                    <li>{"We store encrypted credentials (server, port, password) to access your email."}</li>
-                    <li>{"Email content is accessed by our AI to judge importance and send notifications."}</li>
-                    <li>{"You are responsible for the security of your email account credentials."}</li>
-                    <li>{"We do not share your email data with third parties except as required by law."}</li>
+                    <li>{"No system is perfectly secure. There may be vulnerabilities unknown to us."}</li>
+                    <li>{"Security depends on third-party infrastructure functioning correctly. We do not control these systems."}</li>
+                    <li>{"AI outputs may be wrong or harmful. You use them at your own risk."}</li>
+                    <li>{"We built this in good faith. We do not warrant it will prevent all unauthorized access."}</li>
+                    <li>{"You can verify the system yourself. Use without verification is at your own discretion."}</li>
+                    <li>{"To the fullest extent permitted by law, Lightfriend disclaims all warranties regarding the security, privacy, or integrity of your data."}</li>
                 </ul>
             </section>
 
             <section>
-                <h2>{"11. Other Third-Party Services"}</h2>
-                <p>{"Lightfriend may integrate with additional third-party services not explicitly listed above. For all such integrations:"}</p>
-                <ul>
-                    <li>{"We store only the credentials necessary for access, encrypted at rest."}</li>
-                    <li>{"You connect these services at your own risk."}</li>
-                    <li>{"You are responsible for your accounts with these third-party services."}</li>
-                    <li>{"We are not liable for any issues arising from third-party service failures or actions."}</li>
-                    <li>{"We may modify or discontinue integrations at any time."}</li>
-                </ul>
+                <h2>{"15. Changes"}</h2>
+                <p>{"We may update this policy. Changes are visible here and in our open source repository. Continued use constitutes acceptance."}</p>
             </section>
 
             <section>
-                <h2>{"12. MCP Server Integration"}</h2>
-                <p>{"Lightfriend allows you to configure custom third-party MCP (Model Context Protocol) servers to extend your AI assistant's capabilities."}</p>
-                <ul>
-                    <li>{"We store encrypted MCP server URLs and authentication tokens that you provide."}</li>
-                    <li>{"When the AI assistant uses MCP tools, your queries and related data may be sent to these external servers."}</li>
-                    <li>{"You are responsible for the third-party MCP servers you choose to connect."}</li>
-                    <li>{"Lightfriend is not liable for data handling, security practices, or any actions taken by user-configured MCP servers."}</li>
-                    <li>{"You can remove MCP server configurations at any time through your account settings."}</li>
-                </ul>
-            </section>
-
-            <section>
-                <h2>{"13. Data Retention"}</h2>
-                <p>{"We retain your data until:"}</p>
-                <ul>
-                    <li>{"You request account deletion"}</li>
-                    <li>{"All outstanding payments are settled"}</li>
-                    <li>{"Legal retention requirements are met"}</li>
-                </ul>
-            </section>
-
-            <section>
-                <h2>{"14. Contact Information"}</h2>
-                <p>{"For privacy-related inquiries or to exercise your data rights, contact:"}</p>
-                <p>{"Email: rasmus@ahtava.com"}</p>
-                <p>{"Location: Tampere, Finland"}</p>
+                <h2>{"16. Contact"}</h2>
+                <p>{"rasmus@lightfriend.ai - Tampere, Finland"}</p>
             </section>
             <div class="legal-links">
                 <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
@@ -228,15 +191,17 @@ pub fn terms_and_conditions() -> Html {
                 <h3>{"AI Assistant Services"}</h3>
                 <ul>
                     <li>{"The Service provides AI-powered assistance based on the information you provide during registration and subsequent interactions."}</li>
-                    <li>{"While we strive to provide accurate and helpful assistance, the Service makes no guarantees about the accuracy or reliability of AI-generated responses."}</li>
+                    <li>{"AI outputs are generated automatically by third-party models and may be inaccurate, incomplete, misleading, or inappropriate. They are provided for informational purposes only."}</li>
+                    <li>{"You are solely responsible for evaluating, interpreting, and deciding whether to act on any AI-generated content. Lightfriend does not review, verify, or endorse AI outputs."}</li>
+                    <li>{"Lightfriend is not liable for any consequences resulting from actions you take based on AI-generated content."}</li>
                     <li>{"We reserve the right to modify, improve, or discontinue any aspect of the AI assistant features."}</li>
                 </ul>
 
                 <h3>{"Data Collection and Privacy"}</h3>
                 <ul>
-                    <li>{"To provide personalized assistance, we collect and process personal information including your phone number and profile information."}</li>
+                    <li>{"To provide personalized assistance, personal information including your phone number and profile information enters the enclave for processing."}</li>
                     <li>{"You grant us permission to use this information to improve and personalize the AI assistant's responses."}</li>
-                    <li>{"We implement appropriate security measures to protect your personal information."}</li>
+                    <li>{"The Service is designed to process data inside sealed computing environments (AWS Nitro Enclaves). See our Privacy Policy for details on the architecture and its limitations."}</li>
                 </ul>
 
                 <h3>{"Service Modifications"}</h3>
@@ -268,10 +233,13 @@ pub fn terms_and_conditions() -> Html {
                 <h2>{"7. Limitation of Liability"}</h2>
                 <p>{"THE SERVICE IS PROVIDED \"AS IS\" AND \"AS AVAILABLE\" WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED. TO THE FULLEST EXTENT PERMITTED BY LAW:"}</p>
                 <ul>
-                    <li>{"Lightfriend makes no warranties regarding accuracy, reliability, or availability of the Service."}</li>
+                    <li>{"Lightfriend makes no warranties regarding accuracy, reliability, availability, or security of the Service."}</li>
                     <li>{"Lightfriend shall not be liable for any direct, indirect, incidental, special, consequential, or punitive damages arising from your use of or inability to use the Service."}</li>
-                    <li>{"Lightfriend is not responsible for any actions taken by third-party services or integrations."}</li>
-                    <li>{"You assume all risk associated with your use of the Service and any connected third-party services."}</li>
+                    <li>{"Lightfriend is not responsible for any actions taken by third-party services, integrations, or AI models."}</li>
+                    <li>{"The Service's privacy architecture depends on third-party infrastructure (AWS Nitro Enclaves, Marlin, Tinfoil, and others). Lightfriend does not warrant the correct functioning of these systems and is not liable for failures in third-party infrastructure."}</li>
+                    <li>{"Descriptions of security architecture on the Service's website and documentation describe intended system design, not warranties. No computing system is perfectly secure."}</li>
+                    <li>{"You assume all risk associated with your use of the Service, any connected third-party services, and any actions taken based on AI-generated content."}</li>
+                    <li>{"The Service provides verification tools so you can independently assess its properties. Use of the Service without performing verification is at your own discretion and risk."}</li>
                     <li>{"In no event shall Lightfriend's total liability exceed the amount you paid for the Service in the preceding 12 months."}</li>
                 </ul>
             </section>
@@ -359,14 +327,14 @@ pub fn terms_and_conditions() -> Html {
 
             <section>
                 <h2>{"16. Data Protection and Privacy"}</h2>
-                <p>{"Your privacy and personal data are protected under our Privacy Policy, which forms an integral part of these Terms. By using the Service, you acknowledge that you have read and understood our Privacy Policy and consent to the collection and processing of your personal data as described therein."}</p>
+                <p>{"Our Privacy Policy describes how the system is designed to handle your data. It forms an integral part of these Terms. By using the Service, you acknowledge that you have read and understood our Privacy Policy."}</p>
             </section>
 
             <section>
                 <h2>{"17. Contact Us"}</h2>
                 <p>
                     {"For questions or concerns regarding these Terms, please contact us at "}
-                    <a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>
+                    <a href="mailto:rasmus@lightfriend.ai">{"rasmus@lightfriend.ai"}</a>
                 </p>
             </section>
             <div class="legal-links">

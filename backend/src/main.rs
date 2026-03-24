@@ -1108,6 +1108,10 @@ async fn main() {
             "/api/events/{id}/dismiss",
             post(dashboard_handlers::dismiss_event),
         )
+        .route(
+            "/api/events/{id}",
+            get(dashboard_handlers::get_event_detail),
+        )
         // Person + Channel (ontology) routes
         .route(
             "/api/persons",

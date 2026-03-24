@@ -150,7 +150,7 @@ pub fn supported_countries() -> Html {
             inbound_sms: FeatureStatus::Unsure,
             outbound_sms: FeatureStatus::Unsure,
             mms_messages: FeatureStatus::Unsure,
-            notes: Some("Contact rasmus@ahtava.com for the availability in countries that were not mentioned here:)".to_string()),
+            notes: Some("Contact rasmus@lightfriend.ai for the availability in countries that were not mentioned here:)".to_string()),
         });
         map
     });

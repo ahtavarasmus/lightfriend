@@ -1894,9 +1894,9 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                     <a style="color: rgba(255, 255, 255, 0.8);" href="/supported-countries">{"Supported Countries"}</a>
                                     {" or by emailing "}
                                     <a style="color: rgba(255, 255, 255, 0.8);"
-                                       href={format!("mailto:rasmus@ahtava.com?subject=Country%20Availability%20Inquiry%20for%20{}&body=Hey,%0A%0AIs%20the%20service%20available%20in%20{}%3F%0A%0AThanks,%0A",
+                                       href={format!("mailto:rasmus@lightfriend.ai?subject=Country%20Availability%20Inquiry%20for%20{}&body=Hey,%0A%0AIs%20the%20service%20available%20in%20{}%3F%0A%0AThanks,%0A",
                                        props.country_name.clone(), props.country_name.clone())}>
-                                        {"rasmus@ahtava.com"}
+                                        {"rasmus@lightfriend.ai"}
                                     </a>
                                 </span>
                                 {". Contact to ask for availability"}

@@ -50,7 +50,7 @@ pub struct TimezoneInfo {
 
 impl TimezoneInfo {
     fn compute(tz_str: &str) -> Self {
-        let (hours, minutes) = match crate::api::elevenlabs::get_offset_with_jiff(tz_str) {
+        let (hours, minutes) = match crate::api::elevenlabs::get_timezone_offset(tz_str) {
             Ok((h, m)) => (h, m),
             Err(_) => {
                 tracing::error!(

@@ -106,7 +106,7 @@ pub async fn unsubscribe(
                     tracing::error!("Failed to update notify for user {}: {}", user.id, e);
                     Err((
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        "Failed to unsubscribe. Sorry about this, send email to rasmus@ahtava.com"
+                        "Failed to unsubscribe. Sorry about this, send email to rasmus@lightfriend.ai"
                             .to_string(),
                     ))
                 }

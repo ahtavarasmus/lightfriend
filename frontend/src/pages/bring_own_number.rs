@@ -158,7 +158,7 @@ fn intro_and_country_component(props: &IntroAndCountryProps) -> Html {
                                     <a href={format!("https://www.twilio.com/en-us/phone-numbers/{}", *selected_country)} target="_blank" class="twilio-link">{"Available Numbers"}</a>
                                 </p>
                                 <p class="info-note">
-                                    {"Questions? Email rasmus@ahtava.com"}
+                                    {"Questions? Email rasmus@lightfriend.ai"}
                                 </p>
                             </div>
                         }

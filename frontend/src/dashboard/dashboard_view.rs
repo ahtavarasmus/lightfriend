@@ -94,11 +94,22 @@ const DASHBOARD_STYLES: &str = r#"
     flex-direction: column;
     gap: 0.35rem;
     padding: 0.25rem 0 0.5rem;
+    max-height: min(46vh, 420px);
+    min-height: 0;
+}
+.events-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    overflow-y: auto;
+    min-height: 0;
+    padding-right: 0.2rem;
 }
 .events-header {
     display: flex;
     align-items: center;
     padding-bottom: 0.15rem;
+    flex-shrink: 0;
 }
 .event-card {
     display: flex;
@@ -108,6 +119,7 @@ const DASHBOARD_STYLES: &str = r#"
     border: 1px solid rgba(126, 178, 255, 0.12);
     border-radius: 8px;
     padding: 0.5rem 0.6rem;
+    cursor: pointer;
 }
 .event-card-body {
     flex: 1;
@@ -122,6 +134,52 @@ const DASHBOARD_STYLES: &str = r#"
     font-size: 0.75rem;
     color: #888;
     line-height: 1.3;
+    margin-top: 0.3rem;
+}
+.event-card-time {
+    display: block;
+}
+.event-card-detail {
+    margin-top: 0.55rem;
+    padding-top: 0.55rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.event-card-detail-title {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #7EB2FF;
+    margin-bottom: 0.35rem;
+}
+.event-card-message-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+.event-card-message {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 6px;
+    padding: 0.45rem 0.5rem;
+}
+.event-card-message-meta {
+    font-size: 0.68rem;
+    color: #7f8a9a;
+    margin-bottom: 0.2rem;
+}
+.event-card-message-content {
+    font-size: 0.75rem;
+    color: #b9c0ca;
+    line-height: 1.35;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.event-card-empty {
+    font-size: 0.72rem;
+    color: #777;
+}
+.event-card-expanded {
+    border-color: rgba(126, 178, 255, 0.24);
+    background: rgba(126, 178, 255, 0.09);
 }
 .event-card-dismiss {
     flex-shrink: 0;
@@ -350,6 +408,22 @@ struct EventResponse {
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
+struct EventMessageResponse {
+    id: i64,
+    platform: String,
+    sender_name: String,
+    content: String,
+    created_at: i32,
+    room_id: String,
+}
+
+#[derive(Clone, PartialEq, Deserialize)]
+struct EventDetailResponse {
+    event: EventResponse,
+    linked_messages: Vec<EventMessageResponse>,
+}
+
+#[derive(Clone, PartialEq, Deserialize)]
 struct ActionItemResponse {
     message_id: i64,
     person_name: String,
@@ -418,6 +492,9 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let youtube_connected = use_state(|| false);
     let tesla_connected = use_state(|| false);
     let settings_open = use_state(|| false);
+    let expanded_event_id = use_state(|| None::<i32>);
+    let event_details = use_state(std::collections::HashMap::<i32, EventDetailResponse>::new);
+    let event_detail_loading = use_state(std::collections::HashSet::<i32>::new);
     let settings_initial_tab = use_state(|| SettingsTab::Capabilities);
     let dismissed_ids = use_state(get_dismissed_ids);
     let chat_prefill = use_state(|| None::<String>);
@@ -701,6 +778,13 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let rules_active = (*summary).as_ref().map(|s| s.rules_active).unwrap_or(0);
     let filtered_count = (*summary).as_ref().map(|s| s.filtered_count).unwrap_or(0);
 
+    let format_event_time = |timestamp: i32| {
+        let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(timestamp as f64 * 1000.0));
+        date.to_locale_string("en-GB", &js_sys::Object::new())
+            .as_string()
+            .unwrap_or_else(|| timestamp.to_string())
+    };
+
     html! {
         <>
             <style>{DASHBOARD_STYLES}</style>
@@ -730,52 +814,122 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                             <div class="events-header">
                                 <i class="fa-solid fa-calendar-check" style="color: #7EB2FF; margin-right: 0.4rem; font-size: 0.75rem;"></i>
                                 <span style="font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.03em;">
-                                    {"Obligations"}
+                                    {"Events"}
                                 </span>
                             </div>
-                            { for events.iter().map(|evt| {
-                                let evt_id = evt.id;
-                                let now_ts = (js_sys::Date::now() / 1000.0) as i32;
-                                let deadline_html = evt.due_at.map(|due_at| {
-                                    if now_ts > due_at {
-                                        html! { <span style="color: #ff6b6b; font-size: 0.65rem; font-weight: 600;">{"overdue"}</span> }
-                                    } else {
-                                        let days_left = (due_at - now_ts) / 86400;
-                                        if days_left <= 2 {
-                                            html! { <span style="color: #fbbf24; font-size: 0.65rem;">{format!("due in {}d", days_left)}</span> }
+                            <div class="events-list">
+                                { for events.iter().map(|evt| {
+                                    let evt_id = evt.id;
+                                    let is_expanded = *expanded_event_id == Some(evt_id);
+                                    let detail = (*event_details).get(&evt_id).cloned();
+                                    let is_detail_loading = (*event_detail_loading).contains(&evt_id);
+                                    let remind_display = evt.remind_at.map(&format_event_time);
+                                    let due_display = evt.due_at.map(&format_event_time);
+                                    let detail_html = if is_expanded {
+                                        if is_detail_loading {
+                                            html! { <div class="event-card-empty">{"Loading linked messages..."}</div> }
+                                        } else if let Some(detail) = detail.clone() {
+                                            if detail.linked_messages.is_empty() {
+                                                html! { <div class="event-card-empty">{"No linked messages yet."}</div> }
+                                            } else {
+                                                html! {
+                                                    <div class="event-card-message-list">
+                                                        {for detail.linked_messages.iter().map(|message| {
+                                                            html! {
+                                                                <div class="event-card-message">
+                                                                    <div class="event-card-message-meta">
+                                                                        {format!("{} · {} · {}", message.sender_name, message.platform, format_event_time(message.created_at))}
+                                                                    </div>
+                                                                    <div class="event-card-message-content">
+                                                                        {&message.content}
+                                                                    </div>
+                                                                </div>
+                                                            }
+                                                        })}
+                                                    </div>
+                                                }
+                                            }
                                         } else {
-                                            html! { <span style="color: #666; font-size: 0.65rem;">{format!("due in {}d", days_left)}</span> }
+                                            html! { <div class="event-card-empty">{"No detail loaded."}</div> }
                                         }
-                                    }
-                                });
-                                let on_dismiss = {
-                                    let fetch_summary = fetch_summary.clone();
-                                    Callback::from(move |e: MouseEvent| {
-                                        e.stop_propagation();
+                                    } else {
+                                        Html::default()
+                                    };
+                                    let on_expand = {
+                                        let expanded_event_id = expanded_event_id.clone();
+                                        let event_details = event_details.clone();
+                                        let event_detail_loading = event_detail_loading.clone();
+                                        Callback::from(move |_| {
+                                            if *expanded_event_id == Some(evt_id) {
+                                                expanded_event_id.set(None);
+                                                return;
+                                            }
+                                            expanded_event_id.set(Some(evt_id));
+                                            if (*event_details).contains_key(&evt_id) || (*event_detail_loading).contains(&evt_id) {
+                                                return;
+                                            }
+                                            let mut loading = (*event_detail_loading).clone();
+                                            loading.insert(evt_id);
+                                            event_detail_loading.set(loading);
+                                            let event_details = event_details.clone();
+                                            let event_detail_loading = event_detail_loading.clone();
+                                            spawn_local(async move {
+                                                let url = format!("/api/events/{}", evt_id);
+                                                if let Ok(response) = Api::get(&url).send().await {
+                                                    if let Ok(detail) = response.json::<EventDetailResponse>().await {
+                                                        let mut next = (*event_details).clone();
+                                                        next.insert(evt_id, detail);
+                                                        event_details.set(next);
+                                                    }
+                                                }
+                                                let mut loading = (*event_detail_loading).clone();
+                                                loading.remove(&evt_id);
+                                                event_detail_loading.set(loading);
+                                            });
+                                        })
+                                    };
+                                    let on_dismiss = {
                                         let fetch_summary = fetch_summary.clone();
-                                        spawn_local(async move {
-                                            let url = format!("/api/events/{}/dismiss", evt_id);
-                                            let _ = Api::post(&url).send().await;
-                                            fetch_summary.emit(());
-                                        });
-                                    })
-                                };
-                                html! {
-                                    <div class="event-card">
-                                        <div class="event-card-body">
-                                            <div class="event-card-description">
-                                                {&evt.description}
-                                                if let Some(ref dl) = deadline_html {
-                                                    <span style="margin-left: 0.4rem;">{dl.clone()}</span>
+                                        Callback::from(move |e: MouseEvent| {
+                                            e.stop_propagation();
+                                            let fetch_summary = fetch_summary.clone();
+                                            spawn_local(async move {
+                                                let url = format!("/api/events/{}/dismiss", evt_id);
+                                                let _ = Api::post(&url).send().await;
+                                                fetch_summary.emit(());
+                                            });
+                                        })
+                                    };
+                                    html! {
+                                        <div class={classes!("event-card", is_expanded.then_some("event-card-expanded"))} onclick={on_expand}>
+                                            <div class="event-card-body">
+                                                <div class="event-card-description">
+                                                    {&evt.description}
+                                                </div>
+                                                <div class="event-card-meta">
+                                                    <span class="event-card-time">
+                                                        <strong>{"Remind at: "}</strong>
+                                                        {remind_display.unwrap_or_else(|| "Not set".to_string())}
+                                                    </span>
+                                                    <span class="event-card-time">
+                                                        <strong>{"Due at: "}</strong>
+                                                        {due_display.unwrap_or_else(|| "Not set".to_string())}
+                                                    </span>
+                                                </div>
+                                                if is_expanded {
+                                                    <div class="event-card-detail">
+                                                        <div class="event-card-detail-title">{"Linked messages"}</div>
+                                                        {detail_html}
+                                                    </div>
                                                 }
                                             </div>
+                                            <button class="event-card-dismiss" onclick={on_dismiss} title="Dismiss">
+                                                <i class="fa-solid fa-xmark"></i>
+                                            </button>
                                         </div>
-                                        <button class="event-card-dismiss" onclick={on_dismiss} title="Dismiss">
-                                            <i class="fa-solid fa-xmark"></i>
-                                        </button>
-                                    </div>
-                                }
-                            })}
+                                    }
+                                })}
+                            </div>
                         </div>
                     }
 
@@ -903,11 +1057,15 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                         {" | "}
                         <a href="/blog">{"Blog"}</a>
                         {" | "}
+                        <a href="mailto:support@lightfriend.ai">{"Support"}</a>
+                        {" | "}
                         <a href="/pricing">{"Pricing"}</a>
                         {" | "}
                         <a href="/terms">{"Terms"}</a>
                         {" | "}
                         <a href="/privacy">{"Privacy"}</a>
+                        {" | "}
+                        <a href="/trustless">{"Verifiably Private"}</a>
                         {" | "}
                         <a href="/updates">{"Updates"}</a>
                     </div>

@@ -137,7 +137,7 @@ A: No. Any phone that can send texts and make calls works with Lightfriend.
 ## Contact
 
 - Support: support@lightfriend.ai
-- Email: rasmus@ahtava.com
+- Email: rasmus@lightfriend.ai
 - Twitter/X: @ahtavarasm_us
 - GitHub: https://github.com/ahtavarasmus/lightfriend
 

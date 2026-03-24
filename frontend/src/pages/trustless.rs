@@ -20,7 +20,7 @@ pub fn trustless_verification() -> Html {
             <section>
                 <h2>{"The Problem With Most Apps"}</h2>
                 <p>{"When you use most apps, the people who built and run them can see your data. Your messages, your files, your personal info - it all sits on their servers, and you just have to trust that they won't look at it. That's a promise, not a guarantee."}</p>
-                <p>{"Lightfriend is different. We built it so that even we - the developers who made it and run the servers - cannot access your data. And we don't ask you to take our word for it. Anyone can verify this is true, at any time."}</p>
+                <p>{"Lightfriend is different. We designed it so that even we can't access your data, even if we wanted to. And you don't have to take our word for it - anyone can verify this, at any time."}</p>
             </section>
 
             <section>
@@ -56,12 +56,13 @@ pub fn trustless_verification() -> Html {
                 <h3>{"How it works:"}</h3>
                 <ol>
                     <li><strong>{"A public approval list (Smart Contract): "}</strong>{"We publish a list on a public record book (blockchain) that says \"these specific code fingerprints are approved versions of Lightfriend.\" Anyone can see this list - it's completely public and can't be secretly changed."}</li>
-                    <li><strong>{"A key guardian (Marlin Key Service): "}</strong>{"There's an independent service that holds the master key. It will only give the key to a sealed room that can prove two things:"}</li>
+                    <li><strong>{"A key guardian (Marlin Key Service): "}</strong>{"There's an independent service that holds the master key. It will only give the key to a sealed room that can prove two things:"}
+                        <ul>
+                            <li>{"\"I am a real sealed room\" - proven by Amazon's signed certificate (Nitro Attestation)"}</li>
+                            <li>{"\"I am running approved code\" - proven by checking the fingerprint against the public approval list (Smart Contract)"}</li>
+                        </ul>
+                    </li>
                 </ol>
-                <ul>
-                    <li>{"\"I am a real sealed room\" - proven by Amazon's signed certificate (Nitro Attestation)"}</li>
-                    <li>{"\"I am running approved code\" - proven by checking the fingerprint against the public approval list (Smart Contract)"}</li>
-                </ul>
 
                 <h3>{"So when we release an update:"}</h3>
                 <ol>
@@ -79,7 +80,7 @@ pub fn trustless_verification() -> Html {
                 <p>{"Lightfriend doesn't do everything alone - it talks to a few outside services. Here's how each one is handled:"}</p>
                 <ul>
                     <li><strong>{"AI (Tinfoil): "}</strong>{"When Lightfriend needs to think (run AI models), it sends requests to "}<a href="https://tinfoil.sh" target="_blank" rel="noopener noreferrer">{"Tinfoil"}</a>{", which runs AI workloads inside the same kind of sealed rooms (TEEs) with the same cryptographic guarantees as Nitro Enclaves. Verifiable, not trust-based."}</li>
-                    <li><strong>{"SMS (Twilio): "}</strong>{"Twilio carries text messages back and forth, but Lightfriend's code automatically deletes message bodies from Twilio's logs as soon as each message is delivered. Even in the worst case where a deletion didn't go through, Twilio only ever sees individual message content - it has no access to any user data on our servers."}</li>
+                    <li><strong>{"SMS (Twilio): "}</strong>{"Twilio carries text messages back and forth, but Lightfriend's code is designed to automatically delete message bodies from Twilio's logs as soon as each message is delivered."}</li>
                     <li><strong>{"Voice calls (ElevenLabs): "}</strong>{"This is the one area where we currently rely on trust. ElevenLabs handles voice call audio and does not provide cryptographic privacy guarantees. We are moving voice calls in-house as soon as Tinfoil provides a verifiable text-to-speech model, which will bring voice calls under the same sealed room protections as everything else."}</li>
                 </ul>
             </section>
@@ -120,6 +121,10 @@ pub fn trustless_verification() -> Html {
                     <li><code>{"/.well-known/lightfriend/attestation/raw"}</code>{" - raw signed proof from the sealed room (Nitro Attestation document)."}</li>
                     <li><code>{"/.well-known/lightfriend/attestation/hex"}</code>{" - same proof in hex format."}</li>
                 </ul>
+            </section>
+
+            <section>
+                <p style="font-size: 0.85rem; color: #777;">{"This page describes how the system is designed and intended to work. It is not a warranty or guarantee. No system is perfectly secure, and the properties described here depend on third-party infrastructure (AWS, Marlin, and others) functioning correctly. See our "}<Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>{" for full disclaimers."}</p>
             </section>
 
             <div class="legal-links">

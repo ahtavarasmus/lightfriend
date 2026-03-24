@@ -1224,6 +1224,7 @@ enum PromptTemplate {
     FilterImportant,
     CheckCondition,
     TrackItemsUpdate,
+    TrackItemsCreate,
     Custom,
 }
 
@@ -1638,6 +1639,11 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                     logic_prompt.set(String::new());
                                     condition_input.set(String::new());
                                 }
+                                "template:track_items_create" => {
+                                    selected_template.set(PromptTemplate::TrackItemsCreate);
+                                    logic_prompt.set(String::new());
+                                    condition_input.set(String::new());
+                                }
                                 s if s.starts_with("template:check_condition:") => {
                                     selected_template.set(PromptTemplate::CheckCondition);
                                     let cond =
@@ -1980,6 +1986,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
             PromptTemplate::Summarize => "AI summarizes updates".to_string(),
             PromptTemplate::FilterImportant => "AI filters important".to_string(),
             PromptTemplate::TrackItemsUpdate => "AI tracks item updates".to_string(),
+            PromptTemplate::TrackItemsCreate => "AI creates tracked items".to_string(),
             PromptTemplate::CheckCondition => {
                 let c = (*condition_input).clone();
                 if c.is_empty() {
@@ -2247,6 +2254,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                         Some("template:filter_important".to_string())
                     }
                     PromptTemplate::TrackItemsUpdate => Some("template:track_items_update".to_string()),
+                    PromptTemplate::TrackItemsCreate => Some("template:track_items_create".to_string()),
                 },
                 _ => None,
             };
@@ -2973,7 +2981,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                                         as_tmpl.set(vec![]);
                                                                     }
                                                                 },
-                                                                PromptTemplate::TrackItemsUpdate => {
+                                                                PromptTemplate::TrackItemsUpdate | PromptTemplate::TrackItemsCreate => {
                                                                     as_tmpl.set(vec![SourceConfig::Events]);
                                                                 },
                                                                 PromptTemplate::CheckCondition | PromptTemplate::Custom => {}
@@ -2984,7 +2992,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                             })}
                                         </div>
 
-                                        if *selected_template == PromptTemplate::Summarize || *selected_template == PromptTemplate::FilterImportant || *selected_template == PromptTemplate::TrackItemsUpdate {
+                                        if *selected_template == PromptTemplate::Summarize || *selected_template == PromptTemplate::FilterImportant || *selected_template == PromptTemplate::TrackItemsUpdate || *selected_template == PromptTemplate::TrackItemsCreate {
                                             <div class="rb-template-desc">
                                                 {get_template_description(&*selected_template, &*when_mode)}
                                             </div>
@@ -4136,6 +4144,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                         PromptTemplate::Summarize => Some("template:summarize".to_string()),
                                                         PromptTemplate::FilterImportant => Some("template:filter_important".to_string()),
                                                         PromptTemplate::TrackItemsUpdate => Some("template:track_items_update".to_string()),
+                                                        PromptTemplate::TrackItemsCreate => Some("template:track_items_create".to_string()),
                                                     }
                                                 }
                                                 _ => None,
@@ -4511,12 +4520,22 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
         .unwrap_or("lock")
         .to_string();
     // Derive template/condition from prompt
-    let selected_template = if prompt.is_empty() {
-        PromptTemplate::Summarize
+    let (selected_template, condition_input_val) = if prompt.is_empty() {
+        (PromptTemplate::Summarize, String::new())
+    } else if prompt == "template:summarize" {
+        (PromptTemplate::Summarize, String::new())
+    } else if prompt == "template:filter_important" {
+        (PromptTemplate::FilterImportant, String::new())
+    } else if prompt == "template:track_items_update" {
+        (PromptTemplate::TrackItemsUpdate, String::new())
+    } else if prompt == "template:track_items_create" {
+        (PromptTemplate::TrackItemsCreate, String::new())
+    } else if prompt.starts_with("template:check_condition:") {
+        let cond = prompt.strip_prefix("template:check_condition:").unwrap_or("").to_string();
+        (PromptTemplate::CheckCondition, cond)
     } else {
-        PromptTemplate::Custom
+        (PromptTemplate::Custom, String::new())
     };
-    let condition_input_val = String::new();
 
     // --- UI-only state hooks ---
     let expanded_card = use_state(|| None::<Card>);
@@ -4658,6 +4677,7 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
             let templates = [
                 (PromptTemplate::Summarize, "Summarize"),
                 (PromptTemplate::FilterImportant, "Only if important"),
+                (PromptTemplate::TrackItemsCreate, "Track new items"),
                 (PromptTemplate::CheckCondition, "Check condition"),
                 (PromptTemplate::Custom, "Custom"),
             ];
@@ -4675,7 +4695,11 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
                         onclick={Callback::from(move |_: MouseEvent| {
                             let new_prompt = match &tmpl_clone {
                                 PromptTemplate::Custom => String::new(),
-                                other => get_template_prompt(other, &wm, ""),
+                                PromptTemplate::Summarize => "template:summarize".to_string(),
+                                PromptTemplate::FilterImportant => "template:filter_important".to_string(),
+                                PromptTemplate::TrackItemsUpdate => "template:track_items_update".to_string(),
+                                PromptTemplate::TrackItemsCreate => "template:track_items_create".to_string(),
+                                PromptTemplate::CheckCondition => "template:check_condition:".to_string(),
                             };
                             let new_fetch = match &tmpl_clone {
                                 PromptTemplate::Summarize => match wm {
@@ -4686,6 +4710,7 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
                                     WhenMode::Schedule => vec![SourceConfig::Email, SourceConfig::Chat { platform: "all".to_string(), limit: 50 }],
                                     WhenMode::Event => vec![],
                                 },
+                                PromptTemplate::TrackItemsCreate | PromptTemplate::TrackItemsUpdate => vec![SourceConfig::Events],
                                 _ => f.clone(),
                             };
                             ou.emit(Some(FlowNode::LlmCondition {
@@ -4724,11 +4749,9 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
             let f = fetch.clone();
             let tb = true_branch.clone();
             let fb = false_branch.clone();
-            let wm = props.when_mode.clone();
             Callback::from(move |e: InputEvent| {
                 if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
-                    let new_prompt =
-                        get_template_prompt(&PromptTemplate::CheckCondition, &wm, &input.value());
+                    let new_prompt = format!("template:check_condition:{}", input.value());
                     ou.emit(Some(FlowNode::LlmCondition {
                         prompt: new_prompt,
                         fetch: f.clone(),
@@ -4820,6 +4843,7 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
         // Detect which template is active based on prompt content
         let is_summarize = selected_template == PromptTemplate::Summarize;
         let is_filter = selected_template == PromptTemplate::FilterImportant;
+        let is_track_create = selected_template == PromptTemplate::TrackItemsCreate;
         let is_check = selected_template == PromptTemplate::CheckCondition;
         let is_custom = selected_template == PromptTemplate::Custom;
 
@@ -4859,7 +4883,7 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
                         {for template_buttons}
                     </div>
 
-                    if is_summarize || is_filter {
+                    if is_summarize || is_filter || is_track_create {
                         <div class="rb-template-desc">
                             {get_template_description(&selected_template, &props.when_mode)}
                         </div>
@@ -5689,6 +5713,9 @@ fn build_rule_summary(
             PromptTemplate::TrackItemsUpdate => {
                 Some("AI checks if it updates a tracked obligation".to_string())
             }
+            PromptTemplate::TrackItemsCreate => {
+                Some("AI checks if it should create a new tracked item".to_string())
+            }
             PromptTemplate::CheckCondition => {
                 if condition_input.is_empty() {
                     Some("AI checks a condition".to_string())
@@ -6083,6 +6110,7 @@ fn get_template_prompt(template: &PromptTemplate, when_mode: &WhenMode, conditio
             WhenMode::Event => format!("Check if this message matches the following condition: {}. If it doesn't match, respond with just 'skip'.", condition),
         },
         PromptTemplate::TrackItemsUpdate => get_track_update_prompt(),
+        PromptTemplate::TrackItemsCreate => "Should this message create a new tracked obligation? Only create one for a concrete commitment the user could forget and would benefit from being reminded about at the right time, such as paying, booking, confirming, sending, or following up by a certain date. Do not create umbrella events for whole situations like trip planning when the message is really about a smaller obligation inside it. If nothing specific should be tracked, respond with just 'skip'.".to_string(),
         PromptTemplate::Custom => String::new(),
     }
 }
@@ -6098,6 +6126,7 @@ fn get_template_description(template: &PromptTemplate, when_mode: &WhenMode) -> 
             WhenMode::Event => "AI will evaluate this message and only notify you if it seems important or urgent.",
         },
         PromptTemplate::TrackItemsUpdate => "AI will check if this message updates an item you're already tracking (delivery status, payment, deadline) and update it automatically.",
+        PromptTemplate::TrackItemsCreate => "AI will check if this message contains a concrete commitment worth tracking (payment, booking, follow-up by a date) and create a new tracked item for it.",
         _ => "",
     }
 }
@@ -6212,6 +6241,9 @@ fn render_review(
             PromptTemplate::FilterImportant => Some("AI checks if it's important".to_string()),
             PromptTemplate::TrackItemsUpdate => {
                 Some("AI checks if it updates a tracked obligation".to_string())
+            }
+            PromptTemplate::TrackItemsCreate => {
+                Some("AI checks if it should create a new tracked item".to_string())
             }
             PromptTemplate::CheckCondition => {
                 if condition_input.is_empty() {

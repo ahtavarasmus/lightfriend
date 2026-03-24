@@ -44,3 +44,4 @@ backend/matrix_store/
 # Generated contract build artifacts
 cache/
 contracts/out/
+.gstack/

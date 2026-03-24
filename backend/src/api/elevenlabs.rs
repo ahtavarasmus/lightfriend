@@ -200,16 +200,17 @@ pub async fn validate_elevenlabs_secret(
     }
 }
 
-use jiff::Timestamp;
+use chrono::{Offset, Utc};
+use chrono_tz::Tz;
 
-pub fn get_offset_with_jiff(timezone_str: &str) -> Result<(i32, i32), jiff::Error> {
-    let time = Timestamp::now();
-    let zoned = time.in_tz(timezone_str)?;
-
-    // Get offset information
-    let offset_seconds = zoned.offset().seconds();
-    let hours = offset_seconds / 3600;
-    let minutes = (offset_seconds.abs() % 3600) / 60;
+pub fn get_timezone_offset(timezone_str: &str) -> Result<(i32, i32), String> {
+    let tz: Tz = timezone_str
+        .parse()
+        .map_err(|e| format!("Invalid timezone '{}': {}", timezone_str, e))?;
+    let now = Utc::now().with_timezone(&tz);
+    let total_seconds = now.offset().fix().local_minus_utc();
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds.abs() % 3600) / 60;
 
     Ok((hours, minutes))
 }
@@ -328,8 +329,8 @@ pub async fn fetch_assistant(
                 Some(ref tz) => tz.as_str(),
                 None => "UTC",
             };
-            // Get timezone offset using jiff
-            let (hours, minutes) = match get_offset_with_jiff(timezone_str) {
+            // Get timezone offset
+            let (hours, minutes) = match get_timezone_offset(timezone_str) {
                 Ok((h, m)) => (h, m),
                 Err(_) => {
                     tracing::error!(
@@ -2087,8 +2088,8 @@ pub async fn make_notification_call(
         Some(ref tz) => tz.as_str(),
         None => "UTC",
     };
-    // Get timezone offset using jiff
-    let (hours, minutes) = match get_offset_with_jiff(timezone_str) {
+    // Get timezone offset
+    let (hours, minutes) = match get_timezone_offset(timezone_str) {
         Ok((h, m)) => (h, m),
         Err(_) => {
             tracing::error!(
@@ -2297,7 +2298,7 @@ pub async fn get_web_signed_url(
         .unwrap_or_else(|| "UTC".to_string());
 
     // Get timezone offset
-    let (hours, minutes) = match get_offset_with_jiff(&timezone_str) {
+    let (hours, minutes) = match get_timezone_offset(&timezone_str) {
         Ok((h, m)) => (h, m),
         Err(_) => (0, 0),
     };
