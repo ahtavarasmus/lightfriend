@@ -8,7 +8,9 @@ backend/database.db
 backend/backend/
 backend/uploads/
 backend/target/
+tools/attestation-verifier/target/
 .env
+docs/OPERATOR_RUNBOOK.md
 backend/src/api/payloads.md
 second_terminal
 *.pem
@@ -38,3 +40,8 @@ backend/matrix_store/
 
 # Claude safety guard override flags (one-time use)
 .claude/.allow-*
+
+# Generated contract build artifacts
+cache/
+contracts/out/
+.gstack/

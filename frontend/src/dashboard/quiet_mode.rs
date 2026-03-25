@@ -1,12 +1,12 @@
-use yew::prelude::*;
-use wasm_bindgen_futures::spawn_local;
-use wasm_bindgen::prelude::*;
-use wasm_bindgen::closure::Closure;
-use serde::{Deserialize, Serialize};
 use crate::utils::api::Api;
-use web_sys::MouseEvent;
-use std::rc::Rc;
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
+use std::rc::Rc;
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::spawn_local;
+use web_sys::MouseEvent;
+use yew::prelude::*;
 
 const QUIET_MODE_STYLES: &str = r#"
 .quiet-mode-indicator {
@@ -127,10 +127,13 @@ pub fn quiet_mode_indicator(props: &QuietModeIndicatorProps) -> Html {
     {
         let status = status.clone();
         let initial = props.initial_status.clone();
-        use_effect_with_deps(move |_| {
-            status.set(initial);
-            || ()
-        }, props.initial_status.clone());
+        use_effect_with_deps(
+            move |_| {
+                status.set(initial);
+                || ()
+            },
+            props.initial_status.clone(),
+        );
     }
 
     // Click outside handler using web_sys
@@ -147,7 +150,8 @@ pub fn quiet_mode_indicator(props: &QuietModeIndicatorProps) -> Html {
                 let dropdown_open = dropdown_open_for_effect.clone();
                 let container_ref = container_ref.clone();
 
-                let closure: Rc<RefCell<Option<Closure<dyn Fn(MouseEvent)>>>> = Rc::new(RefCell::new(None));
+                let closure: Rc<RefCell<Option<Closure<dyn Fn(MouseEvent)>>>> =
+                    Rc::new(RefCell::new(None));
                 let closure_clone = closure.clone();
 
                 let cb = Closure::wrap(Box::new(move |e: MouseEvent| {
@@ -165,7 +169,10 @@ pub fn quiet_mode_indicator(props: &QuietModeIndicatorProps) -> Html {
 
                 if let Some(window) = web_sys::window() {
                     if let Some(document) = window.document() {
-                        let _ = document.add_event_listener_with_callback("mousedown", cb.as_ref().unchecked_ref());
+                        let _ = document.add_event_listener_with_callback(
+                            "mousedown",
+                            cb.as_ref().unchecked_ref(),
+                        );
                     }
                 }
 
@@ -175,7 +182,10 @@ pub fn quiet_mode_indicator(props: &QuietModeIndicatorProps) -> Html {
                     if let Some(cb) = closure.borrow_mut().take() {
                         if let Some(window) = web_sys::window() {
                             if let Some(document) = window.document() {
-                                let _ = document.remove_event_listener_with_callback("mousedown", cb.as_ref().unchecked_ref());
+                                let _ = document.remove_event_listener_with_callback(
+                                    "mousedown",
+                                    cb.as_ref().unchecked_ref(),
+                                );
                             }
                         }
                     }
@@ -281,15 +291,25 @@ pub fn quiet_mode_indicator(props: &QuietModeIndicatorProps) -> Html {
     };
 
     let (btn_class, icon, label) = if status.is_quiet {
-        let mut display = status.until_display.clone()
+        let mut display = status
+            .until_display
+            .clone()
             .unwrap_or_else(|| compute_display_text(status.until));
         if status.rule_count > 0 {
-            display = format!("{} (+ {} rule{})", display, status.rule_count,
-                if status.rule_count == 1 { "" } else { "s" });
+            display = format!(
+                "{} (+ {} rule{})",
+                display,
+                status.rule_count,
+                if status.rule_count == 1 { "" } else { "s" }
+            );
         }
         ("quiet-mode-btn quiet", "fa-solid fa-bell-slash", display)
     } else {
-        ("quiet-mode-btn active", "fa-solid fa-bell", "Active".to_string())
+        (
+            "quiet-mode-btn active",
+            "fa-solid fa-bell",
+            "Active".to_string(),
+        )
     };
 
     html! {

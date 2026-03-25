@@ -39,6 +39,61 @@
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
+/* ============================================
+   Design Tokens
+   ============================================ */
+:root {
+    /* Core palette */
+    --color-bg: #1a1a1a;
+    --color-surface: rgba(30, 30, 30, 0.7);
+    --color-surface-hover: rgba(30, 30, 30, 0.9);
+
+    /* Accent */
+    --color-accent: #1E90FF;
+    --color-accent-dark: #4169E1;
+    --color-accent-light: #7EB2FF;
+    --color-accent-bg: rgba(30, 144, 255, 0.1);
+    --color-accent-border: rgba(30, 144, 255, 0.2);
+
+    /* Semantic */
+    --color-success: #4CAF50;
+    --color-success-bright: #69f0ae;
+    --color-success-bg: rgba(0, 255, 0, 0.1);
+    --color-success-border: rgba(0, 255, 0, 0.2);
+    --color-error: #ff6b6b;
+    --color-error-bg: rgba(255, 0, 0, 0.1);
+    --color-error-border: rgba(255, 0, 0, 0.2);
+    --color-warning: #FFC107;
+    --color-warning-bg: rgba(255, 193, 7, 0.1);
+    --color-warning-border: rgba(255, 193, 7, 0.2);
+
+    /* Text */
+    --color-text: #ffffff;
+    --color-text-secondary: #999999;
+    --color-text-tertiary: #666666;
+    --color-text-muted: #888888;
+
+    /* Borders */
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --border-accent: rgba(30, 144, 255, 0.1);
+
+    /* Radii */
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+
+    /* Z-index scale */
+    --z-sticky: 10;
+    --z-nav: 1002;
+    --z-overlay: 1000;
+    --z-panel: 1100;
+
+    /* Transitions */
+    --transition-fast: 0.2s ease;
+    --transition-base: 0.3s ease;
+}
+
 /* Global styles */
 * {
     margin: 0;
@@ -281,9 +336,14 @@ body {
 
     .nav-right {
         gap: 0.5rem;
+        margin-left: auto;
     }
 
     .nav-trust-badges {
+        display: none;
+    }
+
+    .nav-landing .nav-right .nav-link {
         display: none;
     }
 
@@ -491,21 +551,21 @@ button[type="submit"]:hover {
 }
 
 .error-message {
-    background: rgba(255, 0, 0, 0.1);
-    border: 1px solid rgba(255, 0, 0, 0.2);
-    color: #ff6b6b !important; /* Brighter red for dark theme */
+    background: var(--color-error-bg);
+    border: 1px solid var(--color-error-border);
+    color: var(--color-error) !important;
     padding: 1rem;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     margin-bottom: 1.5rem;
     text-align: center;
 }
 
 .success-message {
-    background: rgba(0, 255, 0, 0.1);
-    border: 1px solid rgba(0, 255, 0, 0.2);
-    color: #69f0ae !important; /* Brighter green for dark theme */
+    background: var(--color-success-bg);
+    border: 1px solid var(--color-success-border);
+    color: var(--color-success-bright) !important;
     padding: 1rem;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     margin-bottom: 1.5rem;
     text-align: center;
 }
@@ -845,14 +905,6 @@ button[type="submit"].loading::after {
     border-color: #007bff;
 }
 
-.error-message {
-    color: #ff4444;
-    font-size: 1rem;
-    display: block;
-    text-align: center;
-    padding: 1rem;
-}
-
 .info-section.error {
     border: 1px solid rgba(255, 68, 68, 0.2);
     background: rgba(255, 68, 68, 0.1);
@@ -892,15 +944,17 @@ button[type="submit"].loading::after {
     background: rgba(0, 0, 0, 0.2);
     border-radius: 12px;
     width: 100%;
-    max-width: 600px;
+    max-width: 720px;
     padding: 2rem;
     margin: 1.5rem auto;
+    text-align: left;
 }
 
 .legal-content h2 {
     color: #7EB2FF;
     font-size: 1.5rem;
     margin-bottom: 1.5rem;
+    text-align: center;
 }
 
 .legal-content h3 {
@@ -910,7 +964,7 @@ button[type="submit"].loading::after {
 }
 
 .legal-content p, .legal-content li {
-    color: #999;
+    color: #b8b8b8;
     line-height: 1.6;
     margin-bottom: 1rem;
 }
@@ -925,11 +979,76 @@ button[type="submit"].loading::after {
     margin-bottom: 0.5rem;
 }
 
-.legal-content li:before {
+.legal-content ul > li:before {
     content: "•";
     color: #1E90FF;
     position: absolute;
     left: -1.5rem;
+}
+
+.legal-content ol {
+    padding-left: 1.5rem;
+    list-style-type: decimal;
+}
+
+.legal-content ol > li {
+    padding-left: 0.25rem;
+}
+
+.legal-content ol > li::marker {
+    color: #1E90FF;
+}
+
+.legal-content ol ul {
+    margin-top: 0.5rem;
+}
+
+.legal-content section a {
+    color: #1E90FF;
+    text-decoration: none;
+    border-bottom: 1px solid rgba(30, 144, 255, 0.3);
+    transition: border-color 0.3s ease;
+}
+
+.legal-content section a:hover {
+    border-color: #1E90FF;
+}
+
+.legal-content pre {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(30, 144, 255, 0.15);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    overflow-x: auto;
+    margin: 1rem 0;
+}
+
+.legal-content pre code {
+    color: #7EB2FF;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+.legal-content code {
+    background: rgba(30, 144, 255, 0.1);
+    color: #7EB2FF;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.85em;
+}
+
+.legal-content pre code {
+    background: none;
+    padding: 0;
+    border-radius: 0;
+}
+
+.trustless-subtitle {
+    color: #999;
+    font-size: 1.1rem;
+    margin-bottom: 2rem;
 }
 
 .legal-links {
@@ -1274,22 +1393,10 @@ button[type="submit"].loading::after {
 /* Message styling */
 .message {
     padding: 1rem;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     margin-bottom: 1.5rem;
     width: 100%;
     text-align: center;
-}
-
-.error-message {
-    background: rgba(255, 0, 0, 0.1);
-    border: 1px solid rgba(255, 0, 0, 0.2);
-    color: #ff6b6b !important;
-}
-
-.success-message {
-    background: rgba(0, 255, 0, 0.1);
-    border: 1px solid rgba(0, 255, 0, 0.2);
-    color: #69f0ae !important;
 }
 
 /* Loading state */
@@ -2615,4 +2722,53 @@ button[type="submit"].loading::after {
 .chat-btn.send .chat-price {
     background: rgba(255, 255, 255, 0.2);
     color: rgba(255, 255, 255, 0.8);
+}
+
+/* ============================================
+   1.2 Button :active feedback
+   ============================================ */
+button:active:not(:disabled),
+a.subscribe-link:active,
+a.nav-login-button:active {
+    transform: scale(0.97);
+}
+
+/* ============================================
+   1.3 Respect prefers-reduced-motion
+   ============================================ */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* ============================================
+   1.4 Focus-visible styles for buttons and links
+   ============================================ */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+}
+
+/* ============================================
+   Loading spinner utility (reusable)
+   ============================================ */
+.loading-spinner-inline {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--color-accent-border);
+    border-top-color: var(--color-accent);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    vertical-align: middle;
 }

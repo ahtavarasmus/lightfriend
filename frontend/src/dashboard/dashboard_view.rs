@@ -1,148 +1,268 @@
-use yew::prelude::*;
+use crate::profile::billing_models::UserProfile;
+use crate::utils::api::Api;
+use serde::Deserialize;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
-use serde::Deserialize;
-use crate::utils::api::Api;
-use crate::profile::billing_models::UserProfile;
+use yew::prelude::*;
 
+use super::activity_feed::ActivityFeed;
 use super::chat_box::ChatBox;
-use super::triage_indicator::AttentionItem;
-use super::timeline_view::{UpcomingItem, UpcomingDigest};
+use super::rule_builder::{RuleBuilder, RuleTemplate, RuleTemplatePicker};
+use super::rules_section::RulesSection;
 use super::settings_panel::{SettingsPanel, SettingsTab};
-use super::contact_avatar_row::ContactAvatarRow;
-use super::quiet_mode::QuietModeStatus;
-use super::items_status::{ItemsStatusSection, digest_sources};
-
-fn format_date_from_ts(ts: i32) -> String {
-    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(ts as f64 * 1000.0));
-    let months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-    let month = months.get(date.get_month() as usize).unwrap_or(&"");
-    format!("{} {}", month, date.get_date())
-}
 
 const DASHBOARD_STYLES: &str = r#"
-.peace-dashboard {
+.palantir-dashboard {
+    display: grid;
+    grid-template-columns: 2fr 3fr;
+    grid-template-rows: 1fr auto;
+    grid-template-areas:
+        "left right"
+        "footer right";
+    gap: 0;
+    height: 100%;
+    max-width: 100%;
+    margin: 0;
+    overflow: hidden;
+}
+.panel-left {
+    grid-area: left;
     display: flex;
     flex-direction: column;
-    gap: 2rem;
-    max-width: 600px;
-    margin: 0 auto;
-    padding: 0;
-    position: relative;
+    gap: 0.75rem;
+    padding: 1rem;
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+    overflow-y: auto;
 }
-.item-focus-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.3);
-    z-index: 100;
-    cursor: pointer;
-}
-.item-edit-container {
-    position: relative;
-    z-index: 101;
-}
-.peace-main {
+.panel-right {
+    grid-area: right;
+    grid-row: 1 / -1;
     display: flex;
     flex-direction: column;
-    gap: 1.5rem;
-    transition: all 0.2s ease;
+    overflow: hidden;
 }
-.peace-main.item-focused {
-    filter: blur(4px);
-    opacity: 0.6;
-}
-.peace-separator {
-    height: 1px;
-    background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.1), transparent);
-    margin: 1rem 0;
-}
-.item-detail-bar {
-    background: rgba(30, 30, 46, 0.95);
-    border: 1px solid rgba(126, 178, 255, 0.3);
-    border-radius: 12px;
+.panel-right-rules {
+    flex-shrink: 0;
+    max-height: 40%;
+    overflow-y: auto;
     padding: 0.75rem 1rem;
-    margin-top: 0.75rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     display: flex;
-    align-items: center;
-    justify-content: space-between;
     gap: 1rem;
 }
-.item-detail-info {
+.panel-right-rules > .rules-scroll-section {
     flex: 1;
     min-width: 0;
 }
-.item-detail-time {
+.panel-right-activity {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+/* ---- Status Hero (compact) ---- */
+.status-compact {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0;
+}
+.status-compact-icon {
+    font-size: 1.4rem;
+}
+.status-compact-icon.all-good { color: #4ade80; }
+.status-compact-icon.needs-attention { color: #fbbf24; }
+.status-compact-text {
     font-size: 1rem;
-    font-weight: 600;
-    color: #7EB2FF;
+    font-weight: 500;
 }
-.item-detail-desc {
-    font-size: 0.85rem;
-    color: #999;
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    line-height: 1.4;
-}
-.item-detail-source {
+.status-compact-text.all-good { color: #4ade80; }
+.status-compact-text.needs-attention { color: #fbbf24; }
+.trust-stats-compact {
+    color: #555;
     font-size: 0.75rem;
-    color: #7eb2ff;
-    margin-top: 0.15rem;
-    opacity: 0.8;
+    padding: 0 0 0.25rem;
 }
-.item-detail-meta {
+.trust-stat-sep {
+    margin: 0 0.4rem;
+    color: #444;
+}
+
+/* ---- Tracked Events ---- */
+.events-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.25rem 0 0.5rem;
+    max-height: min(46vh, 420px);
+    min-height: 0;
+}
+.events-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    overflow-y: auto;
+    min-height: 0;
+    padding-right: 0.2rem;
+}
+.events-header {
+    display: flex;
+    align-items: center;
+    padding-bottom: 0.15rem;
+    flex-shrink: 0;
+}
+.event-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    background: rgba(126, 178, 255, 0.06);
+    border: 1px solid rgba(126, 178, 255, 0.12);
+    border-radius: 8px;
+    padding: 0.5rem 0.6rem;
+    cursor: pointer;
+}
+.event-card-body {
+    flex: 1;
+    min-width: 0;
+}
+.event-card-description {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #ccc;
+}
+.event-card-meta {
+    font-size: 0.75rem;
+    color: #888;
+    line-height: 1.3;
+    margin-top: 0.3rem;
+}
+.event-card-time {
+    display: block;
+}
+.event-card-detail {
+    margin-top: 0.55rem;
+    padding-top: 0.55rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.event-card-detail-title {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #7EB2FF;
+    margin-bottom: 0.35rem;
+}
+.event-card-message-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+.event-card-message {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 6px;
+    padding: 0.45rem 0.5rem;
+}
+.event-card-message-meta {
+    font-size: 0.68rem;
+    color: #7f8a9a;
+    margin-bottom: 0.2rem;
+}
+.event-card-message-content {
+    font-size: 0.75rem;
+    color: #b9c0ca;
+    line-height: 1.35;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.event-card-empty {
+    font-size: 0.72rem;
+    color: #777;
+}
+.event-card-expanded {
+    border-color: rgba(126, 178, 255, 0.24);
+    background: rgba(126, 178, 255, 0.09);
+}
+.event-card-dismiss {
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    color: #555;
+    cursor: pointer;
+    padding: 0.2rem;
+    font-size: 0.75rem;
+    line-height: 1;
+}
+.event-card-dismiss:hover {
+    color: #ff6b6b;
+}
+
+/* ---- Action Cards ---- */
+.action-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.action-card {
+    background: rgba(30, 30, 30, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 0.75rem;
+}
+.action-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.35rem;
+}
+.action-card-person {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #e0e0e0;
+}
+.action-card-platform {
+    font-size: 0.65rem;
+    color: #888;
+    background: rgba(255, 255, 255, 0.06);
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    text-transform: capitalize;
+}
+.action-card-preview {
+    font-size: 0.8rem;
+    color: #aaa;
+    line-height: 1.3;
+    margin-bottom: 0.5rem;
+    word-break: break-word;
+}
+.action-card-actions {
     display: flex;
     gap: 0.4rem;
-    margin-top: 0.15rem;
-    flex-wrap: wrap;
 }
-.item-detail-meta span {
-    font-size: 0.7rem;
-    padding: 0.1rem 0.4rem;
-    border-radius: 0.25rem;
-    background: rgba(255,255,255,0.08);
-    color: #aaa;
-}
-.item-detail-tracking {
-    color: #7eb2ff !important;
-}
-.item-detail-notify {
-    color: #e8a838 !important;
-}
-.item-detail-note {
-    font-size: 0.7rem;
-    color: #666;
-    margin-top: 0.25rem;
-    font-style: italic;
-}
-.item-btn-delete {
-    background: rgba(255, 68, 68, 0.15);
-    border: 1px solid rgba(255, 68, 68, 0.4);
-    color: #ff6b6b;
-    padding: 0.5rem 0.75rem;
-    border-radius: 8px;
+.action-btn {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.7rem;
+    border-radius: 5px;
     cursor: pointer;
-    font-size: 0.85rem;
-    transition: all 0.2s;
+    border: none;
 }
-.item-btn-delete:hover {
-    background: rgba(255, 68, 68, 0.25);
+.action-btn-reply {
+    background: rgba(126, 178, 255, 0.15);
+    color: #7EB2FF;
 }
-.item-btn-close {
+.action-btn-reply:hover { background: rgba(126, 178, 255, 0.25); }
+.action-btn-dismiss {
     background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: #888;
-    padding: 0.5rem 0.75rem;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 0.85rem;
+    color: #666;
+    border: 1px solid rgba(255, 255, 255, 0.08);
 }
-.item-btn-close:hover {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.1);
+.action-btn-dismiss:hover { color: #999; }
+
+/* ---- Rules scroll sections ---- */
+.rules-scroll-section {
+    max-height: 220px;
+    overflow-y: auto;
 }
+
+/* ---- Section labels ---- */
 .section-label {
     display: flex;
     align-items: center;
@@ -161,128 +281,156 @@ const DASHBOARD_STYLES: &str = r#"
     font-size: 0.75rem;
     cursor: pointer;
     padding: 0.1rem 0.25rem;
-    transition: color 0.2s;
 }
-.info-icon-btn:hover {
-    color: #7EB2FF;
-}
-.info-modal-overlay {
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0,0,0,0.8);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 9999;
-}
-.info-modal-box {
-    background: #1e1e2f;
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 12px;
-    padding: 1.5rem;
-    max-width: 440px;
-    width: 90%;
-    max-height: 80vh;
-    overflow-y: auto;
-    color: #ddd;
-}
-.info-modal-box h3 {
-    margin: 0 0 0.75rem 0;
-    font-size: 1.1rem;
-    color: #fff;
-}
-.info-modal-box h4 {
-    margin: 1rem 0 0.35rem 0;
-    font-size: 0.9rem;
-    color: #7EB2FF;
-}
-.info-modal-box ul {
-    margin: 0;
-    padding-left: 1.25rem;
-}
-.info-modal-box li {
-    font-size: 0.8rem;
-    color: #aaa;
-    margin-bottom: 0.25rem;
-    line-height: 1.4;
-}
-.info-modal-hint {
-    font-size: 0.8rem;
-    color: #888;
-    margin-bottom: 0.75rem;
-}
-.info-modal-limits {
-    margin-top: 1rem;
-    padding-top: 0.75rem;
-    border-top: 1px solid rgba(255,255,255,0.08);
-}
-.info-modal-limits p {
-    font-size: 0.75rem;
-    color: #666;
-    margin: 0.2rem 0;
-}
-.info-modal-section {
-    margin-bottom: 0.75rem;
-}
-.info-modal-section p {
-    font-size: 0.8rem;
-    color: #aaa;
-    margin: 0.25rem 0;
-    line-height: 1.4;
-}
-.info-modal-section strong {
-    color: #ccc;
-}
-.info-modal-divider {
+.info-icon-btn:hover { color: #7EB2FF; }
+
+.peace-separator {
     height: 1px;
-    background: rgba(255,255,255,0.08);
-    margin: 1rem 0;
+    background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.08), transparent);
+    margin: 0.25rem 0;
 }
-.info-modal-close {
-    display: block;
-    margin: 1.25rem auto 0;
-    background: transparent;
-    border: 1px solid rgba(255,255,255,0.15);
-    color: #999;
-    padding: 0.4rem 1.25rem;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 0.85rem;
-}
-.info-modal-close:hover {
-    color: #ccc;
-}
-.lf-number-label {
-    font-size: 0.75rem;
-    color: #666;
+
+.sidebar-footer {
+    grid-area: footer;
+    padding: 0.5rem 1rem;
     text-align: center;
-    margin-bottom: 0.35rem;
-    letter-spacing: 0.02em;
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.35);
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+.sidebar-footer a {
+    color: rgba(255, 255, 255, 0.45);
+    text-decoration: none;
+}
+.sidebar-footer a:hover {
+    color: #1E90FF;
+    text-decoration: underline;
+}
+.sidebar-footer .sidebar-footer-links {
+    margin-top: 0.25rem;
+}
+@media (prefers-color-scheme: light) {
+    .sidebar-footer { color: rgba(0, 0, 0, 0.35); }
+    .sidebar-footer a { color: rgba(0, 0, 0, 0.45); }
+    .sidebar-footer a:hover { color: #1E90FF; }
+}
+
+.lf-number-label {
+    font-size: 0.7rem;
+    color: #555;
+    text-align: center;
+    margin-bottom: 0.25rem;
+}
+
+/* ---- Responsive: single column on mobile ---- */
+@media (max-width: 768px) {
+    .palantir-dashboard {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto;
+        grid-template-areas:
+            "left"
+            "right"
+            "footer";
+        height: auto;
+        overflow: auto;
+    }
+    .panel-left {
+        border-right: none;
+        height: auto;
+        overflow-y: visible;
+    }
+    .panel-right {
+        grid-row: auto;
+        height: auto;
+        overflow: visible;
+    }
+    .panel-right-rules {
+        flex-direction: column;
+        gap: 0.5rem;
+        max-height: none;
+    }
+    .panel-right-activity {
+        max-height: 60vh;
+    }
+    .sidebar-footer {
+        border-right: none;
+        padding: 1rem;
+    }
+}
+
+/* ---- Light mode ---- */
+@media (prefers-color-scheme: light) {
+    .panel-left { border-right-color: rgba(0,0,0,0.06); }
+    .status-compact-text.all-good { color: #16a34a; }
+    .status-compact-icon.all-good { color: #16a34a; }
+    .status-compact-text.needs-attention { color: #d97706; }
+    .status-compact-icon.needs-attention { color: #d97706; }
+    .trust-stats-compact { color: #888; }
+    .trust-stat-sep { color: #ccc; }
+    .action-card { background: rgba(255,255,255,0.8); border-color: rgba(0,0,0,0.08); }
+    .action-card-person { color: #333; }
+    .action-card-platform { color: #666; background: rgba(0,0,0,0.04); }
+    .action-card-preview { color: #555; }
+    .action-btn-dismiss { color: #999; border-color: rgba(0,0,0,0.1); }
+    .person-name { color: #333; }
+    .person-channel-badge { color: #888; background: rgba(0,0,0,0.05); }
+    .person-row:hover { background: rgba(0,0,0,0.03); }
 }
 "#;
 
-/// API response types matching backend
+/// API response types
 #[derive(Clone, PartialEq, Deserialize)]
 struct DashboardSummaryResponse {
-    attention_count: i32,
-    attention_items: Vec<AttentionItemResponse>,
-    next_scheduled: Option<ScheduledItemResponse>,
-    upcoming_items: Vec<UpcomingItemResponse>,
+    status: String,
+    messages_handled_today: i64,
+    notifications_sent_today: i64,
+    rules_active: i64,
+    action_items: Vec<ActionItemResponse>,
+    filtered_count: i64,
     #[serde(default)]
-    upcoming_digests: Vec<UpcomingDigestResponse>,
+    events: Vec<EventResponse>,
     watched_contacts: Vec<WatchedContactResponse>,
     quiet_mode: QuietModeResponse,
     sunrise_hour: Option<f32>,
     sunset_hour: Option<f32>,
-    /// Items beyond the current timeline range (for extend button preview)
+}
+
+#[derive(Clone, PartialEq, Deserialize)]
+struct EventResponse {
+    id: i32,
+    description: String,
     #[serde(default)]
-    items_beyond: Vec<UpcomingItemResponse>,
-    /// Total count of items beyond the timeline range
+    remind_at: Option<i32>,
     #[serde(default)]
-    items_beyond_count: i32,
-    /// Total number of tracked items
-    #[serde(default)]
-    total_tracked_count: i32,
+    due_at: Option<i32>,
+    status: String,
+    created_at: i32,
+}
+
+#[derive(Clone, PartialEq, Deserialize)]
+struct EventMessageResponse {
+    id: i64,
+    platform: String,
+    sender_name: String,
+    content: String,
+    created_at: i32,
+    room_id: String,
+}
+
+#[derive(Clone, PartialEq, Deserialize)]
+struct EventDetailResponse {
+    event: EventResponse,
+    linked_messages: Vec<EventMessageResponse>,
+}
+
+#[derive(Clone, PartialEq, Deserialize)]
+struct ActionItemResponse {
+    message_id: i64,
+    person_name: String,
+    platform: String,
+    preview: String,
+    timestamp: i32,
+    person_id: Option<i32>,
 }
 
 #[derive(Clone, PartialEq, Deserialize, Default)]
@@ -295,69 +443,9 @@ struct QuietModeResponse {
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
-struct AttentionItemResponse {
-    id: i32,
-    item_type: String,
-    summary: String,
-    #[serde(default)]
-    description: String,
-    #[serde(default)]
-    priority: i32,
-    #[serde(default)]
-    due_at: Option<i32>,
-    source: Option<String>,
-    #[serde(default)]
-    source_id: Option<String>,
-    #[serde(default)]
-    notify: Option<String>,
-    #[serde(default)]
-    sender: Option<String>,
-    #[serde(default)]
-    platform: Option<String>,
-    #[serde(default)]
-    time_display: Option<String>,
-    #[serde(default)]
-    relative_display: Option<String>,
-}
-
-#[derive(Clone, PartialEq, Deserialize)]
-struct ScheduledItemResponse {
-    time_display: String,
-    description: String,
-    item_id: Option<i32>,
-}
-
-#[derive(Clone, PartialEq, Deserialize)]
-struct UpcomingItemResponse {
-    item_id: Option<i32>,
-    timestamp: i32,
-    time_display: String,
-    description: String,
-    #[serde(default)]
-    date_display: String,
-    #[serde(default)]
-    relative_display: String,
-    #[serde(default)]
-    item_type: Option<String>,
-    #[serde(default)]
-    notify: Option<String>,
-    #[serde(default)]
-    sources_display: Option<String>,
-}
-
-#[derive(Clone, PartialEq, Deserialize)]
 struct WatchedContactResponse {
     nickname: String,
     notification_mode: String,
-}
-
-#[derive(Clone, PartialEq, Deserialize)]
-struct UpcomingDigestResponse {
-    #[serde(default)]
-    item_id: Option<i32>,
-    timestamp: i32,
-    time_display: String,
-    sources: Option<String>,
 }
 
 #[derive(Properties, PartialEq, Clone)]
@@ -366,23 +454,53 @@ pub struct DashboardViewProps {
     pub on_profile_update: Callback<UserProfile>,
 }
 
+fn get_dismissed_ids() -> std::collections::HashSet<i64> {
+    let mut set = std::collections::HashSet::new();
+    if let Some(window) = web_sys::window() {
+        if let Ok(Some(storage)) = window.local_storage() {
+            if let Ok(Some(val)) = storage.get_item("lf_dismissed_messages") {
+                for part in val.split(',') {
+                    if let Ok(id) = part.trim().parse::<i64>() {
+                        set.insert(id);
+                    }
+                }
+            }
+        }
+    }
+    set
+}
+
+fn dismiss_message(id: i64) {
+    if let Some(window) = web_sys::window() {
+        if let Ok(Some(storage)) = window.local_storage() {
+            let mut ids = get_dismissed_ids();
+            ids.insert(id);
+            let val: String = ids
+                .iter()
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            let _ = storage.set_item("lf_dismissed_messages", &val);
+        }
+    }
+}
+
 #[function_component(DashboardView)]
 pub fn dashboard_view(props: &DashboardViewProps) -> Html {
-    // Dashboard summary state
     let summary = use_state(|| None::<DashboardSummaryResponse>);
     let summary_loading = use_state(|| true);
-
-    // YouTube connection state for media panel comments
     let youtube_connected = use_state(|| false);
-
-    // Tesla connection state for shortcut icons
     let tesla_connected = use_state(|| false);
-
-    // Panel visibility state
     let settings_open = use_state(|| false);
+    let expanded_event_id = use_state(|| None::<i32>);
+    let event_details = use_state(std::collections::HashMap::<i32, EventDetailResponse>::new);
+    let event_detail_loading = use_state(std::collections::HashSet::<i32>::new);
     let settings_initial_tab = use_state(|| SettingsTab::Capabilities);
+    let dismissed_ids = use_state(get_dismissed_ids);
+    let chat_prefill = use_state(|| None::<String>);
+    let activity_refresh_seq = use_state(|| 0u32);
 
-    // Handle URL parameters for opening settings panel with specific tab
+    // Handle URL parameters for settings panel
     {
         let settings_open = settings_open.clone();
         let settings_initial_tab = settings_initial_tab.clone();
@@ -391,10 +509,11 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 if let Some(window) = web_sys::window() {
                     if let Ok(search) = window.location().search() {
                         if let Ok(params) = web_sys::UrlSearchParams::new_with_str(&search) {
-                            // Check for ?settings=capabilities (or other tab names)
                             if let Some(tab) = params.get("settings") {
                                 let tab_enum = match tab.to_lowercase().as_str() {
-                                    "capabilities" | "connections" => Some(SettingsTab::Capabilities),
+                                    "capabilities" | "connections" => {
+                                        Some(SettingsTab::Capabilities)
+                                    }
                                     "account" => Some(SettingsTab::Account),
                                     "billing" => Some(SettingsTab::Billing),
                                     _ => None,
@@ -402,7 +521,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                 if let Some(tab) = tab_enum {
                                     settings_initial_tab.set(tab);
                                     settings_open.set(true);
-                                    // Clean URL
                                     if let Ok(history) = window.history() {
                                         let _ = history.replace_state_with_url(
                                             &wasm_bindgen::JsValue::NULL,
@@ -421,7 +539,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         );
     }
 
-    // Listen for custom event from nav Settings button
+    // Listen for nav Settings button
     {
         let settings_open = settings_open.clone();
         let settings_initial_tab = settings_initial_tab.clone();
@@ -432,7 +550,8 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 let callback = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
                     settings_initial_tab.set(SettingsTab::Account);
                     settings_open.set(true);
-                }) as Box<dyn FnMut()>);
+                })
+                    as Box<dyn FnMut()>);
 
                 if let Some(window) = web_sys::window() {
                     let _ = window.add_event_listener_with_callback(
@@ -441,13 +560,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     );
                 }
 
-                // Return cleanup function
-                let cleanup_callback = callback;
+                let cleanup = callback;
                 move || {
                     if let Some(window) = web_sys::window() {
                         let _ = window.remove_event_listener_with_callback(
                             "open-settings",
-                            cleanup_callback.as_ref().unchecked_ref(),
+                            cleanup.as_ref().unchecked_ref(),
                         );
                     }
                 }
@@ -456,64 +574,62 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         );
     }
 
-    // Item detail modal state
-    let selected_item = use_state(|| None::<UpcomingItem>);
+    // Rule builder state
+    let rule_builder_open = use_state(|| false);
+    let editing_rule = use_state(|| None::<super::rules_section::RuleData>);
+    let rules_refresh_seq = use_state(|| 0u32);
+    let template_picker_open = use_state(|| false);
+    let selected_template = use_state(|| None::<RuleTemplate>);
 
-    // Item preview state (shown below chatbox after creation, before entering edit mode)
-    let preview_item = use_state(|| None::<UpcomingItem>);
-
-    // Fetch YouTube connection status
+    // Fetch YouTube/Tesla status
     {
         let youtube_connected = youtube_connected.clone();
-        use_effect_with_deps(move |_| {
-            spawn_local(async move {
-                match Api::get("/api/auth/youtube/status").send().await {
-                    Ok(response) => {
-                        if let Ok(data) = response.json::<serde_json::Value>().await {
-                            if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
-                                youtube_connected.set(connected);
+        use_effect_with_deps(
+            move |_| {
+                spawn_local(async move {
+                    if let Ok(r) = Api::get("/api/auth/youtube/status").send().await {
+                        if let Ok(data) = r.json::<serde_json::Value>().await {
+                            if let Some(c) = data.get("connected").and_then(|v| v.as_bool()) {
+                                youtube_connected.set(c);
                             }
                         }
                     }
-                    Err(_) => {}
-                }
-            });
-            || ()
-        }, ());
+                });
+                || ()
+            },
+            (),
+        );
     }
-
-    // Fetch Tesla connection status
     {
         let tesla_connected = tesla_connected.clone();
-        use_effect_with_deps(move |_| {
-            spawn_local(async move {
-                match Api::get("/api/auth/tesla/status").send().await {
-                    Ok(response) => {
-                        if let Ok(data) = response.json::<serde_json::Value>().await {
-                            if let Some(connected) = data.get("has_tesla").and_then(|v| v.as_bool()) {
-                                tesla_connected.set(connected);
+        use_effect_with_deps(
+            move |_| {
+                spawn_local(async move {
+                    if let Ok(r) = Api::get("/api/auth/tesla/status").send().await {
+                        if let Ok(data) = r.json::<serde_json::Value>().await {
+                            if let Some(c) = data.get("has_tesla").and_then(|v| v.as_bool()) {
+                                tesla_connected.set(c);
                             }
                         }
                     }
-                    Err(_) => {}
-                }
-            });
-            || ()
-        }, ());
+                });
+                || ()
+            },
+            (),
+        );
     }
 
     // Fetch dashboard summary
     let fetch_summary = {
         let summary = summary.clone();
         let summary_loading = summary_loading.clone();
+        let activity_refresh_seq = activity_refresh_seq.clone();
         Callback::from(move |_: ()| {
             let summary = summary.clone();
             let summary_loading = summary_loading.clone();
-            let until = (js_sys::Date::now() / 1000.0) as i32 + 90 * 24 * 60 * 60;
-
+            let activity_refresh_seq = activity_refresh_seq.clone();
             spawn_local(async move {
-                let url = format!("/api/dashboard/summary?until={}", until);
-                match Api::get(&url).send().await {
+                match Api::get("/api/dashboard/summary").send().await {
                     Ok(response) => {
                         if response.ok() {
                             if let Ok(data) = response.json::<DashboardSummaryResponse>().await {
@@ -524,11 +640,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     Err(_) => {}
                 }
                 summary_loading.set(false);
+                activity_refresh_seq.set(js_sys::Date::now() as u32);
             });
         })
     };
 
-    // Fetch on mount and after chat
+    // Fetch on mount
     {
         let fetch_summary = fetch_summary.clone();
         use_effect_with_deps(
@@ -540,32 +657,28 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         );
     }
 
-    // Listen for chat events to refresh summary
+    // Refresh on chat events
     {
         let fetch_summary = fetch_summary.clone();
         use_effect_with_deps(
             move |_| {
                 use wasm_bindgen::closure::Closure;
                 use wasm_bindgen::JsCast;
-
                 let callback = Closure::wrap(Box::new(move || {
                     fetch_summary.emit(());
                 }) as Box<dyn Fn()>);
-
                 if let Some(window) = web_sys::window() {
                     let _ = window.add_event_listener_with_callback(
                         "lightfriend-chat-sent",
                         callback.as_ref().unchecked_ref(),
                     );
                 }
-
-                // Return cleanup
-                let cleanup_callback = callback;
+                let cleanup = callback;
                 move || {
                     if let Some(window) = web_sys::window() {
                         let _ = window.remove_event_listener_with_callback(
                             "lightfriend-chat-sent",
-                            cleanup_callback.as_ref().unchecked_ref(),
+                            cleanup.as_ref().unchecked_ref(),
                         );
                     }
                 }
@@ -573,435 +686,393 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
             (),
         );
     }
-
-    // Convert API response to component props
-    let (_attention_count, attention_items, total_tracked_count) = match (*summary).as_ref() {
-        Some(s) => (
-            s.attention_count,
-            s.attention_items
-                .iter()
-                .map(|item| AttentionItem {
-                    id: item.id,
-                    item_type: item.item_type.clone(),
-                    summary: item.summary.clone(),
-                    description: item.description.clone(),
-                    priority: item.priority,
-                    due_at: item.due_at,
-                    source: item.source.clone(),
-                    source_id: item.source_id.clone(),
-                    notify: item.notify.clone(),
-                    sender: item.sender.clone(),
-                    platform: item.platform.clone(),
-                    time_display: item.time_display.clone(),
-                    relative_display: item.relative_display.clone(),
-                })
-                .collect(),
-            s.total_tracked_count,
-        ),
-        None => (0, vec![], 0),
-    };
-
-    let upcoming_items: Vec<UpcomingItem> = (*summary)
-        .as_ref()
-        .map(|s| {
-            s.upcoming_items
-                .iter()
-                .map(|t| UpcomingItem {
-                    item_id: t.item_id,
-                    timestamp: t.timestamp,
-                    time_display: t.time_display.clone(),
-                    description: t.description.clone(),
-                    date_display: t.date_display.clone(),
-                    relative_display: t.relative_display.clone(),
-                    item_type: t.item_type.clone(),
-                    notify: t.notify.clone(),
-                    sources_display: t.sources_display.clone(),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let upcoming_digests: Vec<UpcomingDigest> = (*summary)
-        .as_ref()
-        .map(|s| {
-            s.upcoming_digests
-                .iter()
-                .map(|d| UpcomingDigest {
-                    item_id: d.item_id,
-                    timestamp: d.timestamp,
-                    time_display: d.time_display.clone(),
-                    sources: d.sources.clone(),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-
-    // Update selected_item with fresh data when summary changes (check both items and digests)
-    {
-        let selected_item = selected_item.clone();
-        let upcoming_items_for_effect = upcoming_items.clone();
-        let upcoming_digests_for_effect = upcoming_digests.clone();
-        use_effect_with_deps(
-            move |(items, digests): &(Vec<UpcomingItem>, Vec<UpcomingDigest>)| {
-                if let Some(current) = (*selected_item).as_ref() {
-                    if let Some(id) = current.item_id {
-                        if let Some(updated) = items.iter().find(|t| t.item_id == Some(id)) {
-                            selected_item.set(Some(updated.clone()));
-                        } else if let Some(updated_digest) = digests.iter().find(|d| d.item_id == Some(id)) {
-                            let item = UpcomingItem {
-                                item_id: updated_digest.item_id,
-                                timestamp: updated_digest.timestamp,
-                                time_display: updated_digest.time_display.clone(),
-                                description: format!("Digest: {}", updated_digest.sources.as_deref().unwrap_or("all sources")),
-                                date_display: String::new(),
-                                relative_display: String::new(),
-                                item_type: Some("recurring".to_string()),
-                                notify: None,
-                                sources_display: None,
-                            };
-                            selected_item.set(Some(item));
-                        }
-                    }
-                }
-                || ()
-            },
-            (upcoming_items_for_effect, upcoming_digests_for_effect),
-        );
-    }
-
-    let quiet_mode = (*summary)
-        .as_ref()
-        .map(|s| QuietModeStatus {
-            is_quiet: s.quiet_mode.is_quiet,
-            until: s.quiet_mode.until,
-            until_display: s.quiet_mode.until_display.clone(),
-            rule_count: s.quiet_mode.rule_count,
-        })
-        .unwrap_or_default();
-
-    // Extract sunrise/sunset hours for timeline
-    let sunrise_hour = (*summary).as_ref().and_then(|s| s.sunrise_hour);
-    let sunset_hour = (*summary).as_ref().and_then(|s| s.sunset_hour);
-
-    // Callbacks for footer buttons
-    let on_quiet_mode_change = {
-        let fetch_summary = fetch_summary.clone();
-        Callback::from(move |_: ()| {
-            fetch_summary.emit(());
-        })
-    };
 
     let on_settings_close = {
         let settings_open = settings_open.clone();
-        Callback::from(move |_| {
-            settings_open.set(false);
-        })
+        Callback::from(move |_| settings_open.set(false))
     };
 
-    // Item delete callback
-    let on_activity_item_delete = {
-        let fetch_summary = fetch_summary.clone();
-        Callback::from(move |id: i32| {
-            let fetch_summary = fetch_summary.clone();
-            spawn_local(async move {
-                if let Ok(resp) = Api::delete(&format!("/api/items/{}", id)).send().await {
-                    if resp.ok() {
-                        fetch_summary.emit(());
-                    }
-                }
-            });
-        })
-    };
-
-    // Close item modal callback
-    let on_item_modal_close = {
-        let selected_item = selected_item.clone();
-        Callback::from(move |_: MouseEvent| {
-            selected_item.set(None);
-        })
-    };
-
-    // Delete item callback
-    let on_delete_item = {
-        let selected_item = selected_item.clone();
-        let fetch_summary = fetch_summary.clone();
-        Callback::from(move |_: MouseEvent| {
-            if let Some(item) = (*selected_item).as_ref() {
-                if let Some(id) = item.item_id {
-                    let selected_item = selected_item.clone();
-                    let fetch_summary = fetch_summary.clone();
-                    spawn_local(async move {
-                        if let Ok(resp) = Api::delete(&format!("/api/items/{}", id)).send().await {
-                            if resp.ok() {
-                                selected_item.set(None);
-                                fetch_summary.emit(());
-                            }
-                        }
-                    });
-                }
-            }
-        })
-    };
-
-    // Callback for when item is cleared after editing
-    let on_item_cleared = {
-        let selected_item = selected_item.clone();
-        let fetch_summary = fetch_summary.clone();
-        Callback::from(move |_: ()| {
-            selected_item.set(None);
-            fetch_summary.emit(());
-        })
-    };
-
-    // Dismiss item callback
-    let on_dismiss_item = {
-        let fetch_summary = fetch_summary.clone();
-        Callback::from(move |item: AttentionItem| {
-            let fetch_summary = fetch_summary.clone();
-            spawn_local(async move {
-                let url = format!("/api/items/{}", item.id);
-                if let Ok(resp) = Api::delete(&url).send().await {
-                    if resp.ok() {
-                        fetch_summary.emit(());
-                    }
-                }
-            });
-        })
-    };
-
-    // Chat prefill state (for digest suggestion hint)
-    let prefill_chat: UseStateHandle<Option<String>> = use_state(|| None);
-    let people_info_seq = use_state(|| 0u32);
-
-    // Digest prefill callback - pre-fills chatbox with prompt from digest creator
-    let on_digest_prefill = {
-        let prefill_chat = prefill_chat.clone();
-        Callback::from(move |prompt: String| {
-            prefill_chat.set(Some(prompt));
-        })
-    };
-
-    // Callback to clear prefill after it's consumed
-    let on_prefill_consumed = {
-        let prefill_chat = prefill_chat.clone();
-        Callback::from(move |_: ()| {
-            prefill_chat.set(None);
-        })
-    };
-
-    // Listen for onboarding prefill events
-    {
-        let prefill_chat = prefill_chat.clone();
-        use_effect_with_deps(
-            move |_| {
-                use wasm_bindgen::closure::Closure;
-                use wasm_bindgen::JsCast;
-
-                let callback = Closure::wrap(Box::new(move |e: web_sys::CustomEvent| {
-                    if let Some(detail) = e.detail().as_string() {
-                        prefill_chat.set(Some(detail));
-                    }
-                }) as Box<dyn Fn(web_sys::CustomEvent)>);
-
-                if let Some(window) = web_sys::window() {
-                    let _ = window.add_event_listener_with_callback(
-                        "lightfriend-prefill-chat",
-                        callback.as_ref().unchecked_ref(),
-                    );
-                }
-
-                let cleanup_callback = callback;
-                move || {
-                    if let Some(window) = web_sys::window() {
-                        let _ = window.remove_event_listener_with_callback(
-                            "lightfriend-prefill-chat",
-                            cleanup_callback.as_ref().unchecked_ref(),
-                        );
-                    }
-                }
-            },
-            (),
-        );
-    }
-
-    // Callback for usage changes (refresh summary after chat)
     let on_usage_change = fetch_summary.clone();
 
-    // Callback for clicking items in ItemsStatusSection - open edit modal
-    let on_item_status_click = {
-        let selected_item = selected_item.clone();
-        Callback::from(move |item: AttentionItem| {
-            let sources = digest_sources(&item.summary, &item.description);
-            selected_item.set(Some(UpcomingItem {
-                item_id: Some(item.id),
-                timestamp: item.due_at.unwrap_or(0),
-                time_display: item.time_display.clone().unwrap_or_default(),
-                description: item.description.clone(),
-                date_display: item.due_at.map(format_date_from_ts).unwrap_or_default(),
-                relative_display: item.relative_display.clone().unwrap_or_default(),
-                item_type: Some(item.item_type.clone()),
-                notify: item.notify.clone(),
-                sources_display: sources,
-            }));
-        })
-    };
-
-    // Callback for when an item is created via chat - show preview below chatbox
-    let on_item_created = {
-        let preview_item = preview_item.clone();
-        let fetch_summary = fetch_summary.clone();
-        Callback::from(move |item_id: i32| {
-            // Refresh the dashboard to get the new item
-            fetch_summary.emit(());
-
-            // Schedule a check after a short delay to find and show preview
-            let preview_item = preview_item.clone();
-            gloo_timers::callback::Timeout::new(500, move || {
-                let preview_item = preview_item.clone();
-                spawn_local(async move {
-                    if let Ok(response) = Api::get(&format!("/api/items/{}", item_id)).send().await {
-                        if response.ok() {
-                            if let Ok(data) = response.json::<serde_json::Value>().await {
-                                let item = UpcomingItem {
-                                    item_id: data["id"].as_i64().map(|i| i as i32),
-                                    timestamp: data["trigger_timestamp"].as_i64().unwrap_or(0) as i32,
-                                    time_display: data["time_display"].as_str().unwrap_or("").to_string(),
-                                    description: data["description"].as_str().unwrap_or("").to_string(),
-                                    date_display: data["date_display"].as_str().unwrap_or("").to_string(),
-                                    relative_display: data["relative_display"].as_str().unwrap_or("").to_string(),
-                                    item_type: data["item_type"].as_str().map(|s| s.to_string()),
-                                    notify: data["notify"].as_str().map(|s| s.to_string()),
-                                    sources_display: data["sources_display"].as_str().map(|s| s.to_string()),
-                                };
-                                preview_item.set(Some(item));
-                            }
-                        }
-                    }
-                });
-            }).forget();
-        })
-    };
-
-    // Callback for when user clicks on item preview to edit it
-    let on_preview_click = {
-        let selected_item = selected_item.clone();
-        let preview_item = preview_item.clone();
-        Callback::from(move |item: UpcomingItem| {
-            selected_item.set(Some(item));
-            preview_item.set(None);
-        })
-    };
-
-    // Callback to close item preview
-    let on_preview_close = {
-        let preview_item = preview_item.clone();
+    let on_rule_create_click = {
+        let template_picker_open = template_picker_open.clone();
+        let editing_rule = editing_rule.clone();
         Callback::from(move |_: ()| {
-            preview_item.set(None);
+            editing_rule.set(None);
+            template_picker_open.set(true);
         })
+    };
+    let on_template_picker_close = {
+        let template_picker_open = template_picker_open.clone();
+        Callback::from(move |_: ()| template_picker_open.set(false))
+    };
+    let on_template_selected = {
+        let template_picker_open = template_picker_open.clone();
+        let rule_builder_open = rule_builder_open.clone();
+        let selected_template = selected_template.clone();
+        let editing_rule = editing_rule.clone();
+        Callback::from(move |tmpl: RuleTemplate| {
+            editing_rule.set(None);
+            selected_template.set(Some(tmpl));
+            template_picker_open.set(false);
+            rule_builder_open.set(true);
+        })
+    };
+    let on_rule_edit_click = {
+        let rule_builder_open = rule_builder_open.clone();
+        let editing_rule = editing_rule.clone();
+        Callback::from(move |rule: super::rules_section::RuleData| {
+            editing_rule.set(Some(rule));
+            rule_builder_open.set(true);
+        })
+    };
+    let on_rule_builder_close = {
+        let rule_builder_open = rule_builder_open.clone();
+        let selected_template = selected_template.clone();
+        Callback::from(move |_: ()| {
+            rule_builder_open.set(false);
+            selected_template.set(None);
+        })
+    };
+    let on_rule_saved = {
+        let rule_builder_open = rule_builder_open.clone();
+        let rules_refresh_seq = rules_refresh_seq.clone();
+        let selected_template = selected_template.clone();
+        Callback::from(move |_: ()| {
+            rule_builder_open.set(false);
+            selected_template.set(None);
+            rules_refresh_seq.set(*rules_refresh_seq + 1);
+        })
+    };
+
+    let on_prefill_consumed = {
+        let chat_prefill = chat_prefill.clone();
+        Callback::from(move |_: ()| chat_prefill.set(None))
+    };
+
+    // Build visible action items
+    let visible_action_items: Vec<&ActionItemResponse> = (*summary)
+        .as_ref()
+        .map(|s| {
+            s.action_items
+                .iter()
+                .filter(|i| !dismissed_ids.contains(&i.message_id))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let has_action_items = !visible_action_items.is_empty();
+    let events: Vec<&EventResponse> = (*summary)
+        .as_ref()
+        .map(|s| s.events.iter().collect())
+        .unwrap_or_default();
+    let has_events = !events.is_empty();
+    let messages_handled = (*summary)
+        .as_ref()
+        .map(|s| s.messages_handled_today)
+        .unwrap_or(0);
+    let notifications_sent = (*summary)
+        .as_ref()
+        .map(|s| s.notifications_sent_today)
+        .unwrap_or(0);
+    let rules_active = (*summary).as_ref().map(|s| s.rules_active).unwrap_or(0);
+    let filtered_count = (*summary).as_ref().map(|s| s.filtered_count).unwrap_or(0);
+
+    let format_event_time = |timestamp: i32| {
+        let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(timestamp as f64 * 1000.0));
+        date.to_locale_string("en-GB", &js_sys::Object::new())
+            .as_string()
+            .unwrap_or_else(|| timestamp.to_string())
     };
 
     html! {
         <>
             <style>{DASHBOARD_STYLES}</style>
-            <div class="peace-dashboard">
-                // Overlay for clicking outside to close item edit mode
-                if selected_item.is_some() {
-                    <div class="item-focus-overlay" onclick={on_item_modal_close.clone()}></div>
-                }
+            <div class="palantir-dashboard">
 
-                // Chat box and item bar in a container above the overlay
-                <div class={if selected_item.is_some() { "item-edit-container" } else { "" }}>
-                    // Show the user's Lightfriend SMS number above chat
-                    if let Some(ref num) = props.user_profile.preferred_number {
-                        <div class="lf-number-label">
-                            {"SMS: "}{num}
+                // ======== LEFT PANEL ========
+                <div class="panel-left">
+
+                    // ---- Status (compact) - only show when action items need attention ----
+                    if has_action_items {
+                        <div class="status-compact">
+                            <span class="status-compact-icon needs-attention">
+                                <i class="fa-solid fa-bell"></i>
+                            </span>
+                            <span class="status-compact-text needs-attention">
+                                {format!("{} {} your attention",
+                                    visible_action_items.len(),
+                                    if visible_action_items.len() == 1 { "message needs" } else { "messages need" }
+                                )}
+                            </span>
                         </div>
                     }
-                    // Chat box - always at the top, pass focused_item for edit mode
-                    <ChatBox
-                        on_usage_change={on_usage_change}
-                        youtube_connected={*youtube_connected}
-                        tesla_connected={*tesla_connected}
-                        focused_item={(*selected_item).clone()}
-                        on_item_cleared={on_item_cleared}
-                        on_item_created={on_item_created}
-                        preview_item={(*preview_item).clone()}
-                        on_preview_click={on_preview_click}
-                        on_preview_close={on_preview_close}
-                        prefill_text={(*prefill_chat).clone()}
-                        on_prefill_consumed={Some(on_prefill_consumed)}
-                    />
 
-                    // Item detail bar (shown when item selected) - below ChatBox
-                    if let Some(item) = (*selected_item).as_ref() {
-                        <div class="item-detail-bar">
-                            <div class="item-detail-info">
-                                <div class="item-detail-time">{
-                                    if item.date_display.is_empty() {
-                                        item.time_display.clone()
-                                    } else {
-                                        format!("{} - {}", item.time_display, item.date_display)
-                                    }
-                                }</div>
-                                if let Some(ref src) = item.sources_display {
-                                    <div class="item-detail-source">{format!("Check: {}", src)}</div>
-                                    if src.to_lowercase().contains("weather") {
-                                        <div class="item-detail-note">{"Location from Settings > Account"}</div>
-                                    }
-                                }
-                                <div class="item-detail-meta">
-                                    {if let Some(ref t) = item.item_type {
-                                        html! { <span class={if t == "tracking" { "item-detail-tracking" } else { "item-detail-type" }}>{t}</span> }
-                                    } else {
-                                        html! {}
-                                    }}
-                                    {if let Some(ref n) = item.notify {
-                                        html! { <span class="item-detail-notify">{n}</span> }
-                                    } else {
-                                        html! {}
-                                    }}
-                                </div>
-                                <div class="item-detail-desc">
-                                    {super::emoji_utils::emojify_description(&item.description)}
-                                </div>
+                    // ---- Tracked events ----
+                    if has_events {
+                        <div class="events-section">
+                            <div class="events-header">
+                                <i class="fa-solid fa-calendar-check" style="color: #7EB2FF; margin-right: 0.4rem; font-size: 0.75rem;"></i>
+                                <span style="font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.03em;">
+                                    {"Events"}
+                                </span>
                             </div>
-                            <button class="item-btn-delete" onclick={on_delete_item}>{"Delete"}</button>
-                            <button class="item-btn-close" onclick={on_item_modal_close.clone()}>{"x"}</button>
+                            <div class="events-list">
+                                { for events.iter().map(|evt| {
+                                    let evt_id = evt.id;
+                                    let is_expanded = *expanded_event_id == Some(evt_id);
+                                    let detail = (*event_details).get(&evt_id).cloned();
+                                    let is_detail_loading = (*event_detail_loading).contains(&evt_id);
+                                    let remind_display = evt.remind_at.map(&format_event_time);
+                                    let due_display = evt.due_at.map(&format_event_time);
+                                    let detail_html = if is_expanded {
+                                        if is_detail_loading {
+                                            html! { <div class="event-card-empty">{"Loading linked messages..."}</div> }
+                                        } else if let Some(detail) = detail.clone() {
+                                            if detail.linked_messages.is_empty() {
+                                                html! { <div class="event-card-empty">{"No linked messages yet."}</div> }
+                                            } else {
+                                                html! {
+                                                    <div class="event-card-message-list">
+                                                        {for detail.linked_messages.iter().map(|message| {
+                                                            html! {
+                                                                <div class="event-card-message">
+                                                                    <div class="event-card-message-meta">
+                                                                        {format!("{} · {} · {}", message.sender_name, message.platform, format_event_time(message.created_at))}
+                                                                    </div>
+                                                                    <div class="event-card-message-content">
+                                                                        {&message.content}
+                                                                    </div>
+                                                                </div>
+                                                            }
+                                                        })}
+                                                    </div>
+                                                }
+                                            }
+                                        } else {
+                                            html! { <div class="event-card-empty">{"No detail loaded."}</div> }
+                                        }
+                                    } else {
+                                        Html::default()
+                                    };
+                                    let on_expand = {
+                                        let expanded_event_id = expanded_event_id.clone();
+                                        let event_details = event_details.clone();
+                                        let event_detail_loading = event_detail_loading.clone();
+                                        Callback::from(move |_| {
+                                            if *expanded_event_id == Some(evt_id) {
+                                                expanded_event_id.set(None);
+                                                return;
+                                            }
+                                            expanded_event_id.set(Some(evt_id));
+                                            if (*event_details).contains_key(&evt_id) || (*event_detail_loading).contains(&evt_id) {
+                                                return;
+                                            }
+                                            let mut loading = (*event_detail_loading).clone();
+                                            loading.insert(evt_id);
+                                            event_detail_loading.set(loading);
+                                            let event_details = event_details.clone();
+                                            let event_detail_loading = event_detail_loading.clone();
+                                            spawn_local(async move {
+                                                let url = format!("/api/events/{}", evt_id);
+                                                if let Ok(response) = Api::get(&url).send().await {
+                                                    if let Ok(detail) = response.json::<EventDetailResponse>().await {
+                                                        let mut next = (*event_details).clone();
+                                                        next.insert(evt_id, detail);
+                                                        event_details.set(next);
+                                                    }
+                                                }
+                                                let mut loading = (*event_detail_loading).clone();
+                                                loading.remove(&evt_id);
+                                                event_detail_loading.set(loading);
+                                            });
+                                        })
+                                    };
+                                    let on_dismiss = {
+                                        let fetch_summary = fetch_summary.clone();
+                                        Callback::from(move |e: MouseEvent| {
+                                            e.stop_propagation();
+                                            let fetch_summary = fetch_summary.clone();
+                                            spawn_local(async move {
+                                                let url = format!("/api/events/{}/dismiss", evt_id);
+                                                let _ = Api::post(&url).send().await;
+                                                fetch_summary.emit(());
+                                            });
+                                        })
+                                    };
+                                    html! {
+                                        <div class={classes!("event-card", is_expanded.then_some("event-card-expanded"))} onclick={on_expand}>
+                                            <div class="event-card-body">
+                                                <div class="event-card-description">
+                                                    {&evt.description}
+                                                </div>
+                                                <div class="event-card-meta">
+                                                    <span class="event-card-time">
+                                                        <strong>{"Remind at: "}</strong>
+                                                        {remind_display.unwrap_or_else(|| "Not set".to_string())}
+                                                    </span>
+                                                    <span class="event-card-time">
+                                                        <strong>{"Due at: "}</strong>
+                                                        {due_display.unwrap_or_else(|| "Not set".to_string())}
+                                                    </span>
+                                                </div>
+                                                if is_expanded {
+                                                    <div class="event-card-detail">
+                                                        <div class="event-card-detail-title">{"Linked messages"}</div>
+                                                        {detail_html}
+                                                    </div>
+                                                }
+                                            </div>
+                                            <button class="event-card-dismiss" onclick={on_dismiss} title="Dismiss">
+                                                <i class="fa-solid fa-xmark"></i>
+                                            </button>
+                                        </div>
+                                    }
+                                })}
+                            </div>
                         </div>
                     }
+
+                    // ---- Trust stats ----
+                    if messages_handled > 0 || notifications_sent > 0 || rules_active > 0 {
+                        <div class="trust-stats-compact">
+                            if messages_handled > 0 {
+                                <span>{format!("{} messages handled", messages_handled)}</span>
+                            }
+                            if messages_handled > 0 && notifications_sent > 0 {
+                                <span class="trust-stat-sep">{"-"}</span>
+                            }
+                            if notifications_sent > 0 {
+                                <span>{format!("{} notifications sent", notifications_sent)}</span>
+                            }
+                            if (messages_handled > 0 || notifications_sent > 0) && rules_active > 0 {
+                                <span class="trust-stat-sep">{"-"}</span>
+                            }
+                            if rules_active > 0 {
+                                <span>{format!("{} {} active", rules_active, if rules_active == 1 { "rule" } else { "rules" })}</span>
+                            }
+                        </div>
+                    }
+
+                    // ---- Action Cards ----
+                    if has_action_items {
+                        <div class="action-cards">
+                            { for visible_action_items.iter().map(|item| {
+                                let msg_id = item.message_id;
+                                let person_name = item.person_name.clone();
+                                let platform = item.platform.clone();
+                                let preview_text = item.preview.clone();
+
+                                let on_dismiss = {
+                                    let dismissed_ids = dismissed_ids.clone();
+                                    Callback::from(move |_: MouseEvent| {
+                                        dismiss_message(msg_id);
+                                        let mut new_set = (*dismissed_ids).clone();
+                                        new_set.insert(msg_id);
+                                        dismissed_ids.set(new_set);
+                                    })
+                                };
+
+                                let reply_person = person_name.clone();
+                                let reply_platform = platform.clone();
+                                let on_reply = {
+                                    let chat_prefill = chat_prefill.clone();
+                                    Callback::from(move |_: MouseEvent| {
+                                        chat_prefill.set(Some(format!("Reply to {} on {}: ", reply_person, reply_platform)));
+                                    })
+                                };
+
+                                html! {
+                                    <div class="action-card" key={msg_id.to_string()}>
+                                        <div class="action-card-header">
+                                            <span class="action-card-person">{&person_name}</span>
+                                            <span class="action-card-platform">{&platform}</span>
+                                        </div>
+                                        <div class="action-card-preview">{format!("\"{}\"", preview_text)}</div>
+                                        <div class="action-card-actions">
+                                            <button class="action-btn action-btn-reply" onclick={on_reply}>{"Reply"}</button>
+                                            <button class="action-btn action-btn-dismiss" onclick={on_dismiss}>{"Dismiss"}</button>
+                                        </div>
+                                    </div>
+                                }
+                            })}
+                        </div>
+                    }
+
+                    // ---- ChatBox ----
+                    <div>
+                        if let Some(ref num) = props.user_profile.preferred_number {
+                            <div class="lf-number-label">{"SMS: "}{num}</div>
+                        }
+                        <ChatBox
+                            on_usage_change={on_usage_change}
+                            youtube_connected={*youtube_connected}
+                            tesla_connected={*tesla_connected}
+                            prefill_text={(*chat_prefill).clone()}
+                            on_prefill_consumed={on_prefill_consumed}
+                        />
+                    </div>
+
+                    <div class="peace-separator"></div>
                 </div>
 
-            // Main dashboard content - blurred when item focused
-            <div class={if selected_item.is_some() { "peace-main item-focused" } else { "peace-main" }}>
-                // Items status: urgent cards, tracking group, and status line
-                <ItemsStatusSection
-                    items={attention_items.clone()}
-                    total_tracked_count={total_tracked_count}
-                    on_dismiss={on_dismiss_item.clone()}
-                    on_digest_prefill={Some(on_digest_prefill)}
-                    on_item_click={Some(on_item_status_click)}
-                />
+                // ======== RIGHT PANEL ========
+                <div class="panel-right">
+                    // ---- Rules (top) ----
+                    <div class="panel-right-rules">
+                        <div class="rules-scroll-section">
+                            <RulesSection
+                                filter_trigger_type={Some("schedule".to_string())}
+                                label_override={Some("Schedule".to_string())}
+                                on_create_click={on_rule_create_click.clone()}
+                                on_edit_click={on_rule_edit_click.clone()}
+                                refresh_seq={*rules_refresh_seq}
+                            />
+                        </div>
+                        <div class="rules-scroll-section">
+                            <RulesSection
+                                filter_trigger_type={Some("ontology_change".to_string())}
+                                label_override={Some("Monitoring".to_string())}
+                                on_create_click={on_rule_create_click.clone()}
+                                on_edit_click={on_rule_edit_click.clone()}
+                                refresh_seq={*rules_refresh_seq}
+                                show_create_button={false}
+                            />
+                        </div>
+                    </div>
 
-                // People section with contact avatars
-                <div class="section-label">
-                    <span>{"People"}</span>
-                    <button class="info-icon-btn" onclick={{
-                        let people_info_seq = people_info_seq.clone();
-                        Callback::from(move |e: MouseEvent| {
-                            e.stop_propagation();
-                            people_info_seq.set(*people_info_seq + 1);
-                        })
-                    }}>
-                        <i class="fa-solid fa-circle-info"></i>
-                    </button>
+                    // ---- Activity feed (bottom) ----
+                    <div class="panel-right-activity">
+                        <ActivityFeed refresh_seq={*activity_refresh_seq} />
+                    </div>
                 </div>
-                <ContactAvatarRow open_info_seq={*people_info_seq} />
 
-                <div class="peace-separator"></div>
+                // ---- Footer links ----
+                <div class="sidebar-footer">
+                    <div>{"Source code on "}
+                        <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer">{"GitHub"}</a>
+                    </div>
+                    <div class="sidebar-footer-links">
+                        <a href="/faq">{"FAQ"}</a>
+                        {" | "}
+                        <a href="/blog">{"Blog"}</a>
+                        {" | "}
+                        <a href="mailto:support@lightfriend.ai">{"Support"}</a>
+                        {" | "}
+                        <a href="/pricing">{"Pricing"}</a>
+                        {" | "}
+                        <a href="/terms">{"Terms"}</a>
+                        {" | "}
+                        <a href="/privacy">{"Privacy"}</a>
+                        {" | "}
+                        <a href="/trustless">{"Verifiably Private"}</a>
+                        {" | "}
+                        <a href="/updates">{"Updates"}</a>
+                    </div>
+                </div>
             </div>
 
-            // Settings panel (slide-in)
+            // Overlays
             <SettingsPanel
                 is_open={*settings_open}
                 user_profile={Some(props.user_profile.clone())}
@@ -1009,8 +1080,19 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 on_profile_update={props.on_profile_update.clone()}
                 initial_tab={*settings_initial_tab}
             />
-
-            </div>
+            <RuleTemplatePicker
+                is_open={*template_picker_open}
+                on_close={on_template_picker_close}
+                on_select={on_template_selected}
+            />
+            <RuleBuilder
+                is_open={*rule_builder_open}
+                on_close={on_rule_builder_close}
+                on_saved={on_rule_saved}
+                editing_rule={(*editing_rule).clone()}
+                initial_template={(*selected_template).clone()}
+                plan_type={props.user_profile.plan_type.clone()}
+            />
         </>
     }
 }

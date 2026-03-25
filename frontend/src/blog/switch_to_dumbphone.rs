@@ -1,7 +1,7 @@
+use crate::utils::seo::{use_seo, SeoMeta};
+use crate::Route;
 use yew::prelude::*;
 use yew_router::components::Link;
-use crate::Route;
-use crate::utils::seo::{use_seo, SeoMeta};
 
 #[function_component(SwitchToDumbphoneGuide)]
 pub fn switch_to_dumbphone_guide() -> Html {

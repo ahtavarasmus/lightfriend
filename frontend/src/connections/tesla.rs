@@ -1,10 +1,10 @@
-use yew::prelude::*;
-use wasm_bindgen::JsCast;
-use wasm_bindgen::closure::Closure;
-use wasm_bindgen_futures::spawn_local;
-use web_sys::window;
 use crate::utils::api::Api;
 use serde::Deserialize;
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::spawn_local;
+use web_sys::window;
+use yew::prelude::*;
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct VehicleInfo {
@@ -50,9 +50,9 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
 
     // Scope picker modal state
     let show_scope_picker = use_state(|| false);
-    let scope_vehicle_data = use_state(|| true);    // Default: checked
-    let scope_vehicle_cmds = use_state(|| true);    // Default: checked
-    let scope_charging_cmds = use_state(|| true);   // Default: checked
+    let scope_vehicle_data = use_state(|| true); // Default: checked
+    let scope_vehicle_cmds = use_state(|| true); // Default: checked
+    let scope_charging_cmds = use_state(|| true); // Default: checked
 
     // Check for OAuth callback error/success in URL on mount
     {
@@ -70,14 +70,22 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
                                     if let Some(message) = params.get("message") {
                                         error.set(Some(message));
                                     } else {
-                                        error.set(Some("Failed to connect Tesla. Please try again.".to_string()));
+                                        error.set(Some(
+                                            "Failed to connect Tesla. Please try again."
+                                                .to_string(),
+                                        ));
                                     }
                                 } else if tesla_status == "success" {
-                                    command_result.set(Some("Tesla connected successfully!".to_string()));
+                                    command_result
+                                        .set(Some("Tesla connected successfully!".to_string()));
                                 }
                                 // Clear URL params after reading
                                 let _ = window.history().and_then(|h| {
-                                    h.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some("/connections"))
+                                    h.replace_state_with_url(
+                                        &wasm_bindgen::JsValue::NULL,
+                                        "",
+                                        Some("/connections"),
+                                    )
                                 });
                             }
                         }
@@ -121,10 +129,7 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
         use_effect_with_deps(
             move |_| {
                 spawn_local(async move {
-                    match Api::get("/api/auth/tesla/status")
-                        .send()
-                        .await
-                    {
+                    match Api::get("/api/auth/tesla/status").send().await {
                         Ok(response) => {
                             if response.ok() {
                                 if let Ok(status) = response.json::<serde_json::Value>().await {
@@ -157,10 +162,7 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
             move |connected| {
                 if **connected {
                     spawn_local(async move {
-                        match Api::get("/api/auth/tesla/virtual-key")
-                            .send()
-                            .await
-                        {
+                        match Api::get("/api/auth/tesla/virtual-key").send().await {
                             Ok(response) => {
                                 if response.ok() {
                                     if let Ok(data) = response.json::<serde_json::Value>().await {
@@ -198,21 +200,21 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
             move |connected| {
                 if **connected {
                     spawn_local(async move {
-                        match Api::get("/api/tesla/vehicles")
-                            .send()
-                            .await
-                        {
+                        match Api::get("/api/tesla/vehicles").send().await {
                             Ok(response) => {
                                 if response.ok() {
                                     if let Ok(data) = response.json::<serde_json::Value>().await {
                                         if let Some(vehicles_array) = data["vehicles"].as_array() {
                                             let vehicles: Vec<VehicleInfo> = vehicles_array
                                                 .iter()
-                                                .filter_map(|v| serde_json::from_value(v.clone()).ok())
+                                                .filter_map(|v| {
+                                                    serde_json::from_value(v.clone()).ok()
+                                                })
                                                 .collect();
 
                                             // Find selected vehicle name
-                                            let selected_name = vehicles.iter()
+                                            let selected_name = vehicles
+                                                .iter()
                                                 .find(|v| v.selected)
                                                 .map(|v| v.name.clone());
 
@@ -233,7 +235,6 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
             tesla_connected.clone(),
         );
     }
-
 
     // Clear all state when disconnected (handles edge cases like external disconnects)
     {
@@ -293,9 +294,15 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
 
             // Build scopes string from selected checkboxes
             let mut scopes = Vec::new();
-            if *scope_vehicle_data { scopes.push("vehicle_device_data"); }
-            if *scope_vehicle_cmds { scopes.push("vehicle_cmds"); }
-            if *scope_charging_cmds { scopes.push("vehicle_charging_cmds"); }
+            if *scope_vehicle_data {
+                scopes.push("vehicle_device_data");
+            }
+            if *scope_vehicle_cmds {
+                scopes.push("vehicle_cmds");
+            }
+            if *scope_charging_cmds {
+                scopes.push("vehicle_charging_cmds");
+            }
 
             // Require at least one scope
             if scopes.is_empty() {
@@ -308,11 +315,11 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
             connecting.set(true);
 
             spawn_local(async move {
-                let url = format!("/api/auth/tesla/login?scopes={}", urlencoding::encode(&scopes_param));
-                match Api::get(&url)
-                    .send()
-                    .await
-                {
+                let url = format!(
+                    "/api/auth/tesla/login?scopes={}",
+                    urlencoding::encode(&scopes_param)
+                );
+                match Api::get(&url).send().await {
                     Ok(response) => {
                         if response.ok() {
                             if let Ok(data) = response.json::<serde_json::Value>().await {
@@ -393,9 +400,7 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
             is_disconnecting.set(true);
 
             spawn_local(async move {
-                let request = Api::delete("/api/auth/tesla/connection")
-                    .send()
-                    .await;
+                let request = Api::delete("/api/auth/tesla/connection").send().await;
                 match request {
                     Ok(response) => {
                         if response.ok() {
@@ -415,10 +420,15 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
                             is_disconnecting.set(false);
                         } else {
                             if let Ok(error_data) = response.json::<serde_json::Value>().await {
-                                if let Some(error_msg) = error_data.get("error").and_then(|e| e.as_str()) {
+                                if let Some(error_msg) =
+                                    error_data.get("error").and_then(|e| e.as_str())
+                                {
                                     error.set(Some(error_msg.to_string()));
                                 } else {
-                                    error.set(Some(format!("Failed to delete connection: {}", response.status())));
+                                    error.set(Some(format!(
+                                        "Failed to delete connection: {}",
+                                        response.status()
+                                    )));
                                 }
                             }
                             is_disconnecting.set(false);
@@ -458,9 +468,7 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
                     "vehicle_id": vehicle_clone.vehicle_id,
                 });
 
-                let request = match Api::post("/api/tesla/select-vehicle")
-                    .json(&body)
-                {
+                let request = match Api::post("/api/tesla/select-vehicle").json(&body) {
                     Ok(req) => req.send().await,
                     Err(e) => {
                         command_result.set(Some(format!("Failed to select vehicle: {}", e)));
@@ -518,25 +526,28 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
             let vin_clone = vin.clone();
 
             spawn_local(async move {
-                match Api::get(&format!("/api/auth/tesla/virtual-key?vin={}", urlencoding::encode(&vin_clone)))
-                    .send()
-                    .await
+                match Api::get(&format!(
+                    "/api/auth/tesla/virtual-key?vin={}",
+                    urlencoding::encode(&vin_clone)
+                ))
+                .send()
+                .await
                 {
-                                Ok(response) => {
-                                    if response.ok() {
-                                        if let Ok(data) = response.json::<serde_json::Value>().await {
-                                            if let Some(link) = data["pairing_link"].as_str() {
-                                                vehicle_pairing_link.set(Some(link.to_string()));
-                                            }
-                                            if let Some(qr_url) = data["qr_code_url"].as_str() {
-                                                vehicle_qr_code_url.set(Some(qr_url.to_string()));
-                                            }
-                                            vehicle_pairing_vin.set(Some(vin_clone));
-                                        }
-                                    } else {
-                                        command_result.set(Some("Failed to fetch pairing info".to_string()));
-                                    }
+                    Ok(response) => {
+                        if response.ok() {
+                            if let Ok(data) = response.json::<serde_json::Value>().await {
+                                if let Some(link) = data["pairing_link"].as_str() {
+                                    vehicle_pairing_link.set(Some(link.to_string()));
                                 }
+                                if let Some(qr_url) = data["qr_code_url"].as_str() {
+                                    vehicle_qr_code_url.set(Some(qr_url.to_string()));
+                                }
+                                vehicle_pairing_vin.set(Some(vin_clone));
+                            }
+                        } else {
+                            command_result.set(Some("Failed to fetch pairing info".to_string()));
+                        }
+                    }
                     Err(e) => {
                         command_result.set(Some(format!("Failed to fetch pairing info: {}", e)));
                     }
@@ -618,7 +629,7 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
             }
 
             // Check subscription tier
-            if props.sub_tier == Some("tier 2".to_string()) {
+            if props.sub_tier.is_some() {
                 if !*tesla_connected {
                     <div class="tesla-connect-hint" style="
                         background: rgba(30, 144, 255, 0.08);

@@ -1,17 +1,22 @@
-use axum::http::HeaderValue;
+use axum::body::{to_bytes, Body};
+use axum::extract::OriginalUri;
+use axum::http::{HeaderValue, Request, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::{
+    extract::DefaultBodyLimit,
     middleware,
-    routing::{delete, get, patch, post, put},
+    routing::{any, delete, get, patch, post, put},
     Router,
 };
 use dashmap::DashMap;
 use diesel::r2d2::{self, ConnectionManager};
 use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_http::cors::{AllowOrigin, CorsLayer};
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
 use tower_sessions::{MemoryStore, SessionManagerLayer};
@@ -20,12 +25,12 @@ use tracing::Level;
 // Import modules and types from library crate
 use api::{elevenlabs, elevenlabs_webhook, twilio_sms};
 use backend::{
-    api, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState, ItemRepository,
-    TotpRepository, UserCore, UserCoreOps, UserRepository, WebauthnRepository,
+    api, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState, TotpRepository, UserCore,
+    UserCoreOps, UserRepository, WebauthnRepository,
 };
 use handlers::{
-    admin_handlers, auth_handlers, billing_handlers, bridge_auth_common, contact_profile_handlers,
-    dashboard_handlers, filter_handlers, imap_auth, imap_handlers, profile_handlers,
+    admin_handlers, attestation_handlers, auth_handlers, billing_handlers, bridge_auth_common,
+    dashboard_handlers, imap_auth, imap_handlers, person_handlers, profile_handlers, rule_handlers,
     self_host_handlers, signal_auth, signal_handlers, stripe_handlers, telegram_auth,
     telegram_handlers, tesla_auth, twilio_handlers, whatsapp_auth, whatsapp_handlers, youtube,
     youtube_auth,
@@ -33,6 +38,92 @@ use handlers::{
 
 async fn health_check() -> &'static str {
     "OK"
+}
+
+const TELEGRAM_PUBLIC_BASE_URL: &str = "http://127.0.0.1:29317";
+const TELEGRAM_PUBLIC_PROXY_BODY_LIMIT: usize = 10 * 1024 * 1024;
+
+async fn proxy_telegram_public(original_uri: OriginalUri, request: Request<Body>) -> Response {
+    let path_and_query = match original_uri.0.path_and_query() {
+        Some(value) => value.as_str(),
+        None => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    let target_url = format!("{TELEGRAM_PUBLIC_BASE_URL}{path_and_query}");
+    let method = request.method().clone();
+    let request_headers = request.headers().clone();
+    let body = match to_bytes(request.into_body(), TELEGRAM_PUBLIC_PROXY_BODY_LIMIT).await {
+        Ok(body) => body,
+        Err(error) => {
+            tracing::warn!("Failed to read proxied Telegram public request body: {error}");
+            return (
+                StatusCode::BAD_REQUEST,
+                "Failed to read Telegram public request body",
+            )
+                .into_response();
+        }
+    };
+
+    let client = reqwest::Client::new();
+    let mut upstream_request = client.request(method, &target_url);
+    for (name, value) in request_headers.iter() {
+        let key = name.as_str();
+        if matches!(
+            key,
+            "host" | "connection" | "content-length" | "transfer-encoding" | "keep-alive"
+        ) {
+            continue;
+        }
+        upstream_request = upstream_request.header(name, value);
+    }
+    let upstream_response = match upstream_request.body(body).send().await {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::error!("Failed to proxy Telegram public request to {target_url}: {error}");
+            return (
+                StatusCode::BAD_GATEWAY,
+                "Telegram login page is currently unavailable",
+            )
+                .into_response();
+        }
+    };
+
+    let status = upstream_response.status();
+    let upstream_headers = upstream_response.headers().clone();
+    let response_body = match upstream_response.bytes().await {
+        Ok(body) => body,
+        Err(error) => {
+            tracing::error!("Failed to read proxied Telegram public response body: {error}");
+            return (
+                StatusCode::BAD_GATEWAY,
+                "Telegram login page returned an invalid response",
+            )
+                .into_response();
+        }
+    };
+
+    let mut response = Response::builder().status(status);
+    for (name, value) in upstream_headers.iter() {
+        let key = name.as_str();
+        if matches!(
+            key,
+            "connection" | "content-length" | "transfer-encoding" | "keep-alive"
+        ) {
+            continue;
+        }
+        response = response.header(name, value);
+    }
+
+    match response.body(Body::from(response_body)) {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::error!("Failed to build proxied Telegram public response: {error}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build Telegram login response",
+            )
+                .into_response()
+        }
+    }
 }
 
 pub fn validate_env() {
@@ -59,7 +150,6 @@ pub fn validate_env() {
             "STRIPE_PUBLISHABLE_KEY",
             "STRIPE_WEBHOOK_SECRET",
             "STRIPE_CREDITS_PRODUCT_ID",
-            "STRIPE_SUBSCRIPTION_WORLD_PRICE_ID",
             // SMS/Voice (Twilio)
             "TWILIO_ACCOUNT_SID",
             "TWILIO_AUTH_TOKEN",
@@ -69,14 +159,12 @@ pub fn validate_env() {
             "FIN_PHONE",
             "USA_PHONE",
             "AUS_PHONE",
-            // Music recognition (Shazam)
-            "SHAZAM_PHONE_NUMBER",
-            "SHAZAM_API_KEY",
+            "GB_PHONE",
+            "NL_PHONE",
+            "CAN_PHONE",
             // Production server config
             "SERVER_URL",
             "ASSISTANT_ID",
-            // External integrations
-            "COMPOSIO_API_KEY",
         ];
 
         for var in production_vars.iter() {
@@ -87,7 +175,6 @@ pub fn validate_env() {
 
     // Note: The following are truly optional even in production:
     // - PERPLEXITY_API_KEY, OPENROUTER_API_KEY (AI features gracefully degrade)
-    // - SENTRY_DSN (error tracking, optional)
     // - Bridge bot IDs (may have defaults)
 }
 
@@ -123,9 +210,8 @@ async fn bootstrap_admin_if_needed(
         .filter(|e| !e.is_empty())
         .expect("ADMIN_EMAILS must contain at least one email");
 
-    // Password defaults to 12345678 if not set
-    let password =
-        std::env::var("BOOTSTRAP_ADMIN_PASSWORD").unwrap_or_else(|_| "12345678".to_string());
+    let password = std::env::var("BOOTSTRAP_ADMIN_PASSWORD")
+        .expect("BOOTSTRAP_ADMIN_PASSWORD environment variable is required for admin bootstrap");
 
     let phone = std::env::var("BOOTSTRAP_ADMIN_PHONE").unwrap_or_else(|_| "+12345678".to_string());
 
@@ -168,10 +254,15 @@ async fn main() {
         }
     }
 
-    let _guard = sentry::init(("https://07fbdaf63c1270c8509844b775045dd3@o4507415184539648.ingest.de.sentry.io/4508802101411920", sentry::ClientOptions {
-        release: sentry::release_name!(),
-        ..Default::default()
-    }));
+    let _guard = std::env::var("SENTRY_DSN").ok().map(|dsn| {
+        sentry::init((
+            dsn,
+            sentry::ClientOptions {
+                release: sentry::release_name!(),
+                ..Default::default()
+            },
+        ))
+    });
     use tracing_subscriber::{fmt, EnvFilter};
 
     // Create filter that sets Matrix SDK logs to WARN and keeps our app at DEBUG
@@ -232,11 +323,11 @@ async fn main() {
     }
 
     let user_repository = Arc::new(UserRepository::new(pg_pool.clone()));
-    let item_repository = Arc::new(ItemRepository::new(pg_pool.clone()));
     let totp_repository = Arc::new(TotpRepository::new(pg_pool.clone()));
     let webauthn_repository = Arc::new(WebauthnRepository::new(pg_pool.clone()));
     let admin_alert_repository = Arc::new(AdminAlertRepository::new(pg_pool.clone()));
     let metrics_repository = Arc::new(backend::MetricsRepository::new(pg_pool.clone()));
+    let ontology_repository = Arc::new(backend::OntologyRepository::new(pg_pool.clone()));
     let server_url_oauth =
         std::env::var("SERVER_URL_OAUTH").unwrap_or_else(|_| "http://localhost:3000".to_string());
     let server_url =
@@ -302,7 +393,6 @@ async fn main() {
         pg_pool,
         user_core: user_core.clone(),
         user_repository: user_repository.clone(),
-        item_repository,
         twilio_client,
         twilio_message_service,
         ai_config: AiConfig::from_env(),
@@ -312,6 +402,7 @@ async fn main() {
         login_limiter: DashMap::new(),
         password_reset_limiter: DashMap::new(),
         password_reset_verify_limiter: DashMap::new(),
+        api_rate_limiter: DashMap::new(),
         password_reset_otps: DashMap::new(),
         phone_verify_otps: DashMap::new(),
         matrix_sync_tasks,
@@ -331,7 +422,11 @@ async fn main() {
         session_to_token: DashMap::new(),
         totp_verify_limiter: DashMap::new(),
         webauthn_verify_limiter: DashMap::new(),
+        ontology_repository,
+        ontology_registry: backend::ontology::registry::OntologyRegistry::build(),
         tool_registry: backend::build_tool_registry(),
+        pending_rule_tests: Arc::new(DashMap::new()),
+        maintenance_mode: Arc::new(AtomicBool::new(false)),
     });
     // SMS server route - validates signature using user lookup
     let twilio_sms_routes = Router::new()
@@ -382,11 +477,6 @@ async fn main() {
         )
         .route("/api/call/email/send", post(elevenlabs::handle_email_send))
         .route(
-            "/api/call/items/create",
-            post(elevenlabs::handle_create_item_voice),
-        )
-        .route("/api/call/items", get(elevenlabs::handle_fetch_items_voice))
-        .route(
             "/api/call/cancel-message",
             get(elevenlabs::handle_cancel_pending_message_tool_call),
         )
@@ -434,6 +524,18 @@ async fn main() {
     // Public routes that don't need authentication. there's ratelimiting though
     let public_routes = Router::new()
         .route("/api/health", get(health_check))
+        .route(
+            "/.well-known/lightfriend/attestation",
+            get(attestation_handlers::attestation_metadata),
+        )
+        .route(
+            "/.well-known/lightfriend/attestation/raw",
+            get(attestation_handlers::attestation_raw),
+        )
+        .route(
+            "/.well-known/lightfriend/attestation/hex",
+            get(attestation_handlers::attestation_hex),
+        )
         .route("/api/unsubscribe", get(admin_handlers::unsubscribe))
         .route("/api/login", post(auth_handlers::login))
         .route("/api/register", post(auth_handlers::register))
@@ -731,10 +833,6 @@ async fn main() {
             post(profile_handlers::web_chat_with_image),
         )
         .route(
-            "/api/chat/digest",
-            get(profile_handlers::get_instant_digest),
-        )
-        .route(
             "/api/billing/increase-credits/{user_id}",
             post(billing_handlers::increase_credits),
         )
@@ -989,57 +1087,73 @@ async fn main() {
             delete(bridge_auth_common::reset_matrix_connection),
         )
         // Item edit with AI
-        .route(
-            "/api/items/{id}/edit-ai",
-            post(filter_handlers::edit_item_with_ai),
-        )
-        .route(
-            "/api/items/{id}/edit-ai-stream",
-            get(filter_handlers::edit_item_with_ai_stream),
-        )
         // Dashboard routes
         .route(
             "/api/dashboard/summary",
             get(dashboard_handlers::get_dashboard_summary),
         )
-        // Item routes
-        .route("/api/items", get(dashboard_handlers::get_items))
         .route(
-            "/api/items/{id}/snooze",
-            post(dashboard_handlers::snooze_item),
+            "/api/dashboard/activity-feed",
+            get(dashboard_handlers::get_activity_feed),
         )
         .route(
-            "/api/items/{id}",
-            get(dashboard_handlers::get_item_detail).delete(dashboard_handlers::dismiss_item),
-        )
-        // Contact Profiles routes
-        .route(
-            "/api/contact-profiles",
-            get(contact_profile_handlers::get_contact_profiles),
+            "/api/dashboard/senders",
+            get(dashboard_handlers::get_senders),
         )
         .route(
-            "/api/contact-profiles",
-            post(contact_profile_handlers::create_contact_profile),
+            "/api/dashboard/rule-sources",
+            get(dashboard_handlers::get_rule_sources),
         )
         .route(
-            "/api/contact-profiles/default-mode",
-            put(contact_profile_handlers::update_default_mode),
+            "/api/events/{id}/dismiss",
+            post(dashboard_handlers::dismiss_event),
         )
         .route(
-            "/api/contact-profiles/phone-contact-mode",
-            put(contact_profile_handlers::update_phone_contact_mode),
+            "/api/events/{id}",
+            get(dashboard_handlers::get_event_detail),
+        )
+        // Person + Channel (ontology) routes
+        .route(
+            "/api/persons",
+            get(person_handlers::get_persons).post(person_handlers::create_person),
         )
         .route(
-            "/api/contact-profiles/search/{service}",
-            get(contact_profile_handlers::search_chats),
+            "/api/persons/{id}",
+            put(person_handlers::update_person).delete(person_handlers::delete_person),
         )
         .route(
-            "/api/contact-profiles/{id}",
-            put(contact_profile_handlers::update_contact_profile),
+            "/api/persons/{id}/channels",
+            post(person_handlers::add_person_channel),
         )
         .route(
-            "/api/contact-profiles/{id}",
-            delete(contact_profile_handlers::delete_contact_profile),
+            "/api/persons/{person_id}/channels/{channel_id}",
+            put(person_handlers::update_person_channel)
+                .delete(person_handlers::delete_person_channel),
+        )
+        .route("/api/persons/merge", post(person_handlers::merge_persons))
+        .route(
+            "/api/persons/search/{service}",
+            get(person_handlers::search_chats),
+        )
+        // Rule (automation) routes
+        .route(
+            "/api/rules",
+            get(rule_handlers::list_rules).post(rule_handlers::create_rule),
+        )
+        .route("/api/rules/test", post(rule_handlers::start_rule_test))
+        .route(
+            "/api/rules/test-stream",
+            get(rule_handlers::test_rule_stream),
+        )
+        .route(
+            "/api/rules/{id}",
+            get(rule_handlers::get_rule)
+                .put(rule_handlers::update_rule)
+                .delete(rule_handlers::delete_rule),
+        )
+        .route(
+            "/api/rules/{id}/status",
+            patch(rule_handlers::update_rule_status),
         )
         // Web-based voice call routes (browser to ElevenLabs)
         .route(
@@ -1078,7 +1192,23 @@ async fn main() {
             post(handlers::mcp_handlers::test_url_connection),
         )
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
+    // Internal maintenance endpoints (localhost-only, no auth)
+    let maintenance_routes = Router::new()
+        .route(
+            "/api/internal/maintenance/enable",
+            post(handlers::maintenance_handlers::enable_maintenance),
+        )
+        .route(
+            "/api/internal/maintenance/disable",
+            post(handlers::maintenance_handlers::disable_maintenance),
+        )
+        .route(
+            "/api/internal/maintenance/status",
+            get(handlers::maintenance_handlers::maintenance_status),
+        );
+
     let app = Router::new()
+        .merge(maintenance_routes)
         .merge(public_routes)
         .merge(admin_routes)
         .merge(protected_routes)
@@ -1092,16 +1222,30 @@ async fn main() {
         .merge(elevenlabs_routes)
         .merge(elevenlabs_free_routes)
         .merge(elevenlabs_webhook_routes)
+        .route("/public/{*path}", any(proxy_telegram_public))
+        .route("/public", any(proxy_telegram_public))
         .nest_service("/uploads", ServeDir::new("uploads"))
-        // Serve static files (robots.txt, sitemap.xml) at the root
+        .fallback_service(
+            ServeDir::new("public").not_found_service(ServeFile::new("public/index.html")),
+        )
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            handlers::auth_middleware::apply_api_rate_limit,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            handlers::maintenance_handlers::maintenance_guard,
+        ))
         .layer(session_layer)
+        .layer(DefaultBodyLimit::max(10 * 1024 * 1024))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
-        .layer(
-            CorsLayer::new()
+        .layer({
+            let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_default();
+            let cors = CorsLayer::new()
                 .allow_methods([
                     axum::http::Method::GET,
                     axum::http::Method::POST,
@@ -1110,12 +1254,6 @@ async fn main() {
                     axum::http::Method::PATCH,
                     axum::http::Method::PUT,
                 ])
-                .allow_origin(AllowOrigin::exact(
-                    std::env::var("FRONTEND_URL")
-                        .unwrap_or_else(|_| "http://localhost:8080".to_string())
-                        .parse()
-                        .expect("Invalid FRONTEND_URL"),
-                )) // Restrict in production
                 .allow_headers([
                     axum::http::header::CONTENT_TYPE,
                     axum::http::header::AUTHORIZATION,
@@ -1125,9 +1263,21 @@ async fn main() {
                 .expose_headers([
                     axum::http::header::CONTENT_TYPE,
                     axum::http::header::CONTENT_LENGTH,
-                ])
-                .allow_credentials(true),
-        )
+                ]);
+            if frontend_url.is_empty() {
+                let server_origin = std::env::var("SERVER_URL")
+                    .expect("SERVER_URL must be set when FRONTEND_URL is not configured");
+                cors.allow_origin(AllowOrigin::exact(
+                    server_origin.parse().expect("Invalid SERVER_URL"),
+                ))
+            } else {
+                // Cross-origin mode (local dev): exact origin with credentials
+                cors.allow_origin(AllowOrigin::exact(
+                    frontend_url.parse().expect("Invalid FRONTEND_URL"),
+                ))
+                .allow_credentials(true)
+            }
+        })
         // Security headers to prevent clickjacking, XSS, and other attacks
         .layer(SetResponseHeaderLayer::overriding(
             axum::http::header::X_FRAME_OPTIONS,

@@ -1,9 +1,9 @@
-use yew::prelude::*;
-use web_sys::MouseEvent;
-use yew::{Children, Properties};
+use crate::utils::seo::{use_seo, SeoMeta};
 use gloo_timers::callback::Timeout;
 use wasm_bindgen::prelude::*;
-use crate::utils::seo::{use_seo, SeoMeta};
+use web_sys::MouseEvent;
+use yew::prelude::*;
+use yew::{Children, Properties};
 
 #[derive(Clone, PartialEq)]
 struct ChatMessage {
@@ -21,46 +21,57 @@ struct FaqItemProps {
 #[function_component(FaqItem)]
 fn faq_item(props: &FaqItemProps) -> Html {
     let is_open = use_state(|| false);
-    
+
     // Check URL hash on mount and when hash changes
     {
         let is_open = is_open.clone();
         let id = props.id.clone();
-        
-        use_effect_with_deps(move |_| {
-            let check_hash = move || {
-                if let Some(window) = web_sys::window() {
-                    if let Ok(location) = window.location().hash() {
-                        if location == format!("#{}", id) {
-                            is_open.set(true);
-                            // Add a small delay to ensure the content is expanded before scrolling
-                            let window_clone = window.clone();
-                            let id_clone = id.clone();
-                            let timeout = Timeout::new(100, move || {
-                                if let Some(element) = window_clone.document().and_then(|doc| doc.get_element_by_id(&id_clone)) {
-                                    element.scroll_into_view_with_bool(true);
-                                }
-                            });
-                            timeout.forget();
+
+        use_effect_with_deps(
+            move |_| {
+                let check_hash = move || {
+                    if let Some(window) = web_sys::window() {
+                        if let Ok(location) = window.location().hash() {
+                            if location == format!("#{}", id) {
+                                is_open.set(true);
+                                // Add a small delay to ensure the content is expanded before scrolling
+                                let window_clone = window.clone();
+                                let id_clone = id.clone();
+                                let timeout = Timeout::new(100, move || {
+                                    if let Some(element) = window_clone
+                                        .document()
+                                        .and_then(|doc| doc.get_element_by_id(&id_clone))
+                                    {
+                                        element.scroll_into_view_with_bool(true);
+                                    }
+                                });
+                                timeout.forget();
+                            }
                         }
                     }
-                }
-            };
+                };
 
-            // Check hash immediately
-            check_hash();
-
-            // Set up hash change listener
-            let window = web_sys::window().unwrap();
-            let callback = Closure::wrap(Box::new(move || {
+                // Check hash immediately
                 check_hash();
-            }) as Box<dyn FnMut()>);
-            
-            window.add_event_listener_with_callback("hashchange", callback.as_ref().unchecked_ref()).unwrap();
-            callback.forget();
 
-            || ()
-        }, ());
+                // Set up hash change listener
+                let window = web_sys::window().unwrap();
+                let callback = Closure::wrap(Box::new(move || {
+                    check_hash();
+                }) as Box<dyn FnMut()>);
+
+                window
+                    .add_event_listener_with_callback(
+                        "hashchange",
+                        callback.as_ref().unchecked_ref(),
+                    )
+                    .unwrap();
+                callback.forget();
+
+                || ()
+            },
+            (),
+        );
     }
 
     let toggle = {
@@ -89,7 +100,6 @@ fn faq_item(props: &FaqItemProps) -> Html {
         </div>
     }
 }
-
 
 #[function_component(Faq)]
 pub fn faq() -> Html {
@@ -226,18 +236,18 @@ pub fn faq() -> Html {
         let chat_messages = chat_messages.clone();
         let is_typing = is_typing.clone();
         let current_demo_index = current_demo_index.clone();
-        
+
         Callback::from(move |question_index: usize| {
             if question_index >= demo_conversations.len() {
                 return;
             }
-            
+
             let chat_messages = chat_messages.clone();
             let is_typing = is_typing.clone();
             let current_demo_index = current_demo_index.clone();
             let question = demo_conversations[question_index].0.to_string();
             let answer = demo_conversations[question_index].1.to_string();
-            
+
             // Clear previous messages and add user message
             let user_message = ChatMessage {
                 text: question.clone(),
@@ -245,10 +255,10 @@ pub fn faq() -> Html {
             };
             chat_messages.set(vec![user_message]);
             current_demo_index.set(question_index);
-            
+
             // Show typing indicator
             is_typing.set(true);
-            
+
             // Simulate AI response delay
             let timeout = Timeout::new(1500, move || {
                 is_typing.set(false);
@@ -279,7 +289,7 @@ pub fn faq() -> Html {
 
                 <h2>{"Getting Started"}</h2>
 
-                <FaqItem 
+                <FaqItem
                     question="What problem does lightfriend solve?"
                     id="lightfriend-solution"
                 >
@@ -357,7 +367,7 @@ pub fn faq() -> Html {
                     <h3>{"Notification-Only Countries"}</h3>
                     <p>{"If you live in Germany, France, Spain, Italy, Portugal, Belgium, Austria, Switzerland, Poland, Czech Republic, Sweden, Denmark, Norway, Ireland, or New Zealand, you can use lightfriend in notification-only mode. This means you'll receive messages from a US number and can reply to it, but you won't get your own local phone number. Message costs are based on Twilio's international rates for your country."}</p>
                     <h3>{"Other Countries"}</h3>
-                    <p>{"Elsewhere you will have to bring your own Twilio number or if you have an extra android phone with extra phone plan laying around, you can use it to send and receive sms messages through it without extra costs. See your country's Twilio pricing and regulations from "}<a href="/bring-own-number">{"here"}</a> {" or ask about the service availability in your country by emailing "}<a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com."}</a></p>
+                    <p>{"Elsewhere you will have to bring your own Twilio number or if you have an extra android phone with extra phone plan laying around, you can use it to send and receive sms messages through it without extra costs. See your country's Twilio pricing and regulations from "}<a href="/bring-own-number">{"here"}</a> {" or ask about the service availability in your country by emailing "}<a href="mailto:rasmus@lightfriend.ai">{"rasmus@lightfriend.ai."}</a></p>
 
                 </FaqItem>
 
@@ -380,7 +390,7 @@ pub fn faq() -> Html {
                     id="try-service"
                 >
                     <p>{"Yes! Try our demo chat below to see how LightFriend responds to common requests:"}</p>
-                    
+
                     <div class="demo-chat-container">
                         <div class="phone-demo">
                             <div class="phone-screen">
@@ -454,7 +464,7 @@ pub fn faq() -> Html {
                 <h2>{"Why Go Light?"}</h2>
 
 
-                <FaqItem 
+                <FaqItem
                     question="Why choose a dumbphone?"
                     id="why-dumbphone"
                 >
@@ -467,7 +477,7 @@ pub fn faq() -> Html {
                     </p>
                 </FaqItem>
 
-                <FaqItem 
+                <FaqItem
                     question="What about the impact on relationships?"
                     id="relationships-impact"
                 >
@@ -480,7 +490,7 @@ pub fn faq() -> Html {
                     </p>
                 </FaqItem>
 
-                <FaqItem 
+                <FaqItem
                     question="What's the value of boredom?"
                     id="value-of-boredom"
                 >
@@ -495,7 +505,7 @@ pub fn faq() -> Html {
 
                 <h2>{"Practical Solutions"}</h2>
 
-                <FaqItem 
+                <FaqItem
                     question="Where can I buy a dumbphone?"
                     id="buy-dumbphone"
                 >
@@ -503,12 +513,12 @@ pub fn faq() -> Html {
                     <p>
                         {"Lightfriend service is phone-agnostic - it works with any basic phone capable of calling and texting. We strongly recommend starting with whatever simple phone you already have, even if it's an old flip phone in your drawer."}
                     </p>
-                    
+
                     <h3>{"Ready to commit?"}</h3>
                     <p>
                         {"If you've tried the minimalist phone life and want to continue, "}<a href="https://dumbphones.org">{"dumbphones.org"}</a>{" is an excellent resource for comparing different models based on your needs."}
                     </p>
-                    
+
                     <h3>{"The Light Phone Option"}</h3>
                     <p>
                         {"While not necessary for using LightFriend, the "}<a href="https://www.thelightphone.com">{"Light Phone 2 and 3"}</a>{" are popular choices among our users. They offer features like:"}
@@ -520,41 +530,41 @@ pub fn faq() -> Html {
                     </ul>
                 </FaqItem>
 
-                <FaqItem 
+                <FaqItem
                     question="How do I handle 2FA authentication?"
                     id="handle-2fa"
                 >
                     <h3>{"'Step Two' mac app"}</h3>
                     <p>{"It is very fast and simple. It's free for certain number of accounts and then small one time payment for unlimited."}</p>
                     <img src="/assets/StepTwo.png" loading="lazy" alt="Step Two app" class="faq-image" />
-                    
+
                     <h3>{"Yubikey"}</h3>
                     <p>{"Can be used inplace of authenticator apps."}</p>
                     <img src="/assets/Yubikey.png" alt="Yubikey" loading="lazy" class="faq-image" />
-                    
+
                     <h3>{"Physical Code Calculator Device"}</h3>
                     <p>{"Most banks have it and it's used for bank login."}</p>
                     <img src="/assets/nordea_code_calc.png" loading="lazy" alt="Nordea code calculator" class="faq-image" />
                 </FaqItem>
 
-                <FaqItem 
+                <FaqItem
                     question="How do I handle commuting and navigation?"
                     id="commuting-navigation"
                 >
                     <h3>{"Airport"}</h3>
                     <p>{"Get printed boarding passes and use computer to check flight times. With some airlines you can also get gate changes texted to you."}</p>
-                    
+
                     <h3>{"Bus"}</h3>
                     <p>{"If you use bus in your home town, ask for physical keycard which can be loaded with credits."}</p>
-                    
+
                     <h3>{"Taxi & Ridesharing"}</h3>
                     <p>{"In US, Canada and UK there is "}<a href="https://www.tremp.me/">{"Tremp."}</a></p>
-                    
+
                     <h3>{"Maps"}</h3>
                     <p>{"Options include physical paper map, maps on your computer, or get a phone that has maps like "}<a href="https://www.thelightphone.com/">{"the Light Phone."}</a>{" While you might still get lost occasionally, that's part of the adventure:)."}</p>
                 </FaqItem>
 
-                <FaqItem 
+                <FaqItem
                     question="What tools can help me stay focused?"
                     id="focus-tools"
                 >

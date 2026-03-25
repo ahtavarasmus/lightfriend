@@ -1,23 +1,22 @@
-use yew::prelude::*;
-use web_sys::MouseEvent;
-use wasm_bindgen_futures::spawn_local;
-use wasm_bindgen::JsValue;
-use web_sys::UrlSearchParams;
-use crate::utils::api::Api;
-use crate::connections::whatsapp::WhatsappConnect;
 use crate::connections::email::EmailConnect;
-use crate::connections::telegram::TelegramConnect;
-use crate::connections::signal::SignalConnect;
-use crate::connections::tesla::TeslaConnect;
-use crate::connections::youtube::YouTubeConnect;
 use crate::connections::mcp::McpConnect;
+use crate::connections::signal::SignalConnect;
+use crate::connections::telegram::TelegramConnect;
+use crate::connections::tesla::TeslaConnect;
+use crate::connections::whatsapp::WhatsappConnect;
+use crate::connections::youtube::YouTubeConnect;
+use crate::utils::api::Api;
 use serde_json::Value;
+use wasm_bindgen::JsValue;
+use wasm_bindgen_futures::spawn_local;
+use web_sys::MouseEvent;
+use web_sys::UrlSearchParams;
+use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
 pub struct ConnectProps {
     pub user_id: i32,
     pub sub_tier: Option<String>,
-    pub discount: bool,
     pub phone_number: String,
     pub estimated_monitoring_cost: f32,
 }
@@ -43,8 +42,8 @@ pub fn connect(props: &ConnectProps) -> Html {
     {
         let email_connected = email_connected.clone();
         let whatsapp_connected = whatsapp_connected.clone();
-        let telegram_connected= telegram_connected.clone();
-        let signal_connected= signal_connected.clone();
+        let telegram_connected = telegram_connected.clone();
+        let signal_connected = signal_connected.clone();
         let tesla_connected = tesla_connected.clone();
         let youtube_connected = youtube_connected.clone();
         let mcp_server_count = mcp_server_count.clone();
@@ -55,12 +54,11 @@ pub fn connect(props: &ConnectProps) -> Html {
                 spawn_local({
                     let email_connected = email_connected.clone();
                     async move {
-                        if let Ok(response) = Api::get("/api/auth/imap/status")
-                            .send()
-                            .await
-                        {
+                        if let Ok(response) = Api::get("/api/auth/imap/status").send().await {
                             if let Ok(data) = response.json::<Value>().await {
-                                if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                if let Some(connected) =
+                                    data.get("connected").and_then(|v| v.as_bool())
+                                {
                                     email_connected.set(connected);
                                 }
                             }
@@ -71,12 +69,11 @@ pub fn connect(props: &ConnectProps) -> Html {
                 spawn_local({
                     let whatsapp_connected = whatsapp_connected.clone();
                     async move {
-                        if let Ok(response) = Api::get("/api/auth/whatsapp/status")
-                            .send()
-                            .await
-                        {
+                        if let Ok(response) = Api::get("/api/auth/whatsapp/status").send().await {
                             if let Ok(data) = response.json::<Value>().await {
-                                if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                if let Some(connected) =
+                                    data.get("connected").and_then(|v| v.as_bool())
+                                {
                                     whatsapp_connected.set(connected);
                                 }
                             }
@@ -87,12 +84,11 @@ pub fn connect(props: &ConnectProps) -> Html {
                 spawn_local({
                     let telegram_connected = telegram_connected.clone();
                     async move {
-                        if let Ok(response) = Api::get("/api/auth/telegram/status")
-                            .send()
-                            .await
-                        {
+                        if let Ok(response) = Api::get("/api/auth/telegram/status").send().await {
                             if let Ok(data) = response.json::<Value>().await {
-                                if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                if let Some(connected) =
+                                    data.get("connected").and_then(|v| v.as_bool())
+                                {
                                     telegram_connected.set(connected);
                                 }
                             }
@@ -103,12 +99,11 @@ pub fn connect(props: &ConnectProps) -> Html {
                 spawn_local({
                     let signal_connected = signal_connected.clone();
                     async move {
-                        if let Ok(response) = Api::get("/api/auth/signal/status")
-                            .send()
-                            .await
-                        {
+                        if let Ok(response) = Api::get("/api/auth/signal/status").send().await {
                             if let Ok(data) = response.json::<Value>().await {
-                                if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                if let Some(connected) =
+                                    data.get("connected").and_then(|v| v.as_bool())
+                                {
                                     signal_connected.set(connected);
                                 }
                             }
@@ -119,12 +114,11 @@ pub fn connect(props: &ConnectProps) -> Html {
                 spawn_local({
                     let tesla_connected = tesla_connected.clone();
                     async move {
-                        if let Ok(response) = Api::get("/api/auth/tesla/status")
-                            .send()
-                            .await
-                        {
+                        if let Ok(response) = Api::get("/api/auth/tesla/status").send().await {
                             if let Ok(data) = response.json::<Value>().await {
-                                if let Some(has_tesla) = data.get("has_tesla").and_then(|v| v.as_bool()) {
+                                if let Some(has_tesla) =
+                                    data.get("has_tesla").and_then(|v| v.as_bool())
+                                {
                                     tesla_connected.set(has_tesla);
                                 }
                             }
@@ -135,12 +129,11 @@ pub fn connect(props: &ConnectProps) -> Html {
                 spawn_local({
                     let youtube_connected = youtube_connected.clone();
                     async move {
-                        if let Ok(response) = Api::get("/api/auth/youtube/status")
-                            .send()
-                            .await
-                        {
+                        if let Ok(response) = Api::get("/api/auth/youtube/status").send().await {
                             if let Ok(data) = response.json::<Value>().await {
-                                if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                if let Some(connected) =
+                                    data.get("connected").and_then(|v| v.as_bool())
+                                {
                                     youtube_connected.set(connected);
                                 }
                             }
@@ -151,10 +144,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                 spawn_local({
                     let mcp_server_count = mcp_server_count.clone();
                     async move {
-                        if let Ok(response) = Api::get("/api/mcp/servers")
-                            .send()
-                            .await
-                        {
+                        if let Ok(response) = Api::get("/api/mcp/servers").send().await {
                             if let Ok(data) = response.json::<Value>().await {
                                 if let Some(servers) = data.as_array() {
                                     mcp_server_count.set(servers.len());
@@ -170,8 +160,22 @@ pub fn connect(props: &ConnectProps) -> Html {
     }
     let _group_states = use_state(|| {
         let mut map = std::collections::HashMap::new();
-        map.insert("tools", ServiceGroupState { expanded: false, service_count: 4, connected_count: 0 });
-        map.insert("proactive", ServiceGroupState { expanded: false, service_count: 4, connected_count: 0 });
+        map.insert(
+            "tools",
+            ServiceGroupState {
+                expanded: false,
+                service_count: 4,
+                connected_count: 0,
+            },
+        );
+        map.insert(
+            "proactive",
+            ServiceGroupState {
+                expanded: false,
+                service_count: 4,
+                connected_count: 0,
+            },
+        );
         map
     });
     // Clean URL parameters if present (post-callback)
@@ -182,7 +186,9 @@ pub fn connect(props: &ConnectProps) -> Html {
                     if !search.is_empty() {
                         let params = UrlSearchParams::new_with_str(&search).unwrap();
                         if params.get("code").is_some() || params.get("state").is_some() {
-                            web_sys::console::log_1(&"Detected callback parameters, cleaning URL".into());
+                            web_sys::console::log_1(
+                                &"Detected callback parameters, cleaning URL".into(),
+                            );
                             if let Ok(history) = window.history() {
                                 let _ = history.push_state_with_url(
                                     &JsValue::NULL,
@@ -200,134 +206,154 @@ pub fn connect(props: &ConnectProps) -> Html {
     );
     let details = if let Some(app) = &*selected_app {
         match app.as_str() {
-            "email" => html! { <EmailConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
-            "whatsapp" => html! { <WhatsappConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
-            "telegram" => html! { <TelegramConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
-            "signal" => html! { <SignalConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
-            "tesla" => html! { <TeslaConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} /> },
-            "youtube" => html! { <YouTubeConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
+            "email" => {
+                html! { <EmailConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} /> }
+            }
+            "whatsapp" => {
+                html! { <WhatsappConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} /> }
+            }
+            "telegram" => {
+                html! { <TelegramConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} /> }
+            }
+            "signal" => {
+                html! { <SignalConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} /> }
+            }
+            "tesla" => {
+                html! { <TeslaConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} /> }
+            }
+            "youtube" => {
+                html! { <YouTubeConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} /> }
+            }
             "mcp" => html! { <McpConnect user_id={props.user_id} /> },
-            "perplexity" => html! { <div class="builtin-detail"><p>{"AI-powered web search for real-time information, research, and fact-checking."}</p></div> },
-            "weather" => html! { <div class="builtin-detail"><p>{"Weather updates and forecasts. Uses your location from Settings > Account."}</p></div> },
-            "photo" => html! { <div class="builtin-detail"><p>{"Send a photo to scan QR codes, translate text, or describe what you see."}</p></div> },
-            "sms_calls" => html! { <div class="builtin-detail"><p>{"Send follow-up info via SMS while on a voice call."}</p></div> },
+            "perplexity" => {
+                html! { <div class="builtin-detail"><p>{"AI-powered web search for real-time information, research, and fact-checking."}</p></div> }
+            }
+            "weather" => {
+                html! { <div class="builtin-detail"><p>{"Weather updates and forecasts. Uses your location from Settings > Account."}</p></div> }
+            }
+            "photo" => {
+                html! { <div class="builtin-detail"><p>{"Send a photo to scan QR codes, translate text, or describe what you see."}</p></div> }
+            }
+            "sms_calls" => {
+                html! { <div class="builtin-detail"><p>{"Send follow-up info via SMS while on a voice call."}</p></div> }
+            }
             _ => html! {},
         }
     } else {
         html! {}
     };
     html! {
-                <div class="connect-section">
-                    // Apps
-                    <div class="apps-icons-row">
-                        <button
-                            class={classes!("app-icon", if *email_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "email") { "selected" } else { "" })}
-                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                selected_app.set(if *selected_app == Some("email".to_string()) { None } else { Some("email".to_string()) });
-                            })}
-                        >
-                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath fill='%234285f4' d='M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4L236.8 313.6c11.4 8.5 27 8.5 38.4 0L492.8 150.4c12.1-9.1 19.2-23.3 19.2-38.4c0-26.5-21.5-48-48-48H48zM0 176V384c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V176L294.4 339.2c-22.8 17.1-54 17.1-76.8 0L0 176z'/%3E%3C/svg%3E" alt="IMAP" width="24" height="24"/>
-                        </button>
-                        <button
-                            class={classes!("app-icon", if *whatsapp_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "whatsapp") { "selected" } else { "" })}
-                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                selected_app.set(if *selected_app == Some("whatsapp".to_string()) { None } else { Some("whatsapp".to_string()) });
-                            })}
-                        >
-                            <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp" width="24" height="24"/>
-                        </button>
-                        <button
-                            class={classes!("app-icon", if *telegram_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "telegram") { "selected" } else { "" })}
-                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                selected_app.set(if *selected_app == Some("telegram".to_string()) { None } else { Some("telegram".to_string()) });
-                            })}
-                        >
-                            <img src="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg" alt="Telegram" width="24" height="24"/>
-                        </button>
-                        <button
-                            class={classes!("app-icon", if *signal_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "signal") { "selected" } else { "" })}
-                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                selected_app.set(if *selected_app == Some("signal".to_string()) { None } else { Some("signal".to_string()) });
-                            })}
-                        >
-                            <img src="https://upload.wikimedia.org/wikipedia/commons/6/60/Signal-Logo-Ultramarine_%282024%29.svg" alt="Signal Logo" width="24" height="24"/>
-                        </button>
-                        <button
-                            class={classes!("app-icon", if *tesla_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "tesla") { "selected" } else { "" })}
-                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                selected_app.set(if *selected_app == Some("tesla".to_string()) { None } else { Some("tesla".to_string()) });
-                            })}
-                        >
-                            <img src="https://upload.wikimedia.org/wikipedia/commons/b/bb/Tesla_T_symbol.svg" alt="Tesla" width="24" height="24"/>
-                        </button>
-                        <button
-                            class={classes!("app-icon", if *youtube_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "youtube") { "selected" } else { "" })}
-                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                selected_app.set(if *selected_app == Some("youtube".to_string()) { None } else { Some("youtube".to_string()) });
-                            })}
-                        >
-                            <img src="https://upload.wikimedia.org/wikipedia/commons/0/09/YouTube_full-color_icon_%282017%29.svg" alt="YouTube" width="24" height="24"/>
-                        </button>
-                        <button
-                            class={classes!("app-icon", "mcp-icon", if *mcp_server_count > 0 { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "mcp") { "selected" } else { "" })}
-                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                selected_app.set(if *selected_app == Some("mcp".to_string()) { None } else { Some("mcp".to_string()) });
-                            })}
-                            title="MCP Servers - Add custom tools (beta)"
-                        >
-                            <i class="fa-solid fa-plug"></i>
-                        </button>
-                    </div>
-                    <div class="app-details">
-                        { details }
-                    </div>
-                    // Built-in tools row - same style as capabilities above
-                    <div class="builtin-tools-label">{"Built-in"}</div>
-                    <div class="apps-icons-row builtin-row">
-                        <button
-                            class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "perplexity") { "selected" } else { "" })}
-                            title="Perplexity AI - AI-powered search and answers"
-                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                selected_app.set(if *selected_app == Some("perplexity".to_string()) { None } else { Some("perplexity".to_string()) });
-                            })}
-                        >
-                            <img src="https://upload.wikimedia.org/wikipedia/commons/1/1d/Perplexity_AI_logo.svg" alt="Perplexity" width="24" height="24"/>
-                        </button>
-                        <button
-                            class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "weather") { "selected" } else { "" })}
-                            title="Weather - Weather updates and forecasts"
-                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                selected_app.set(if *selected_app == Some("weather".to_string()) { None } else { Some("weather".to_string()) });
-                            })}
-                        >
-                            <i class="fa-solid fa-sun"></i>
-                        </button>
-                        <button
-                            class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "photo") { "selected" } else { "" })}
-                            title="Photo - QR codes and text translation"
-                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                selected_app.set(if *selected_app == Some("photo".to_string()) { None } else { Some("photo".to_string()) });
-                            })}
-                        >
-                            <i class="fa-solid fa-camera"></i>
-                        </button>
-                        <button
-                            class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "sms_calls") { "selected" } else { "" })}
-                            title="SMS During Calls - Send info via SMS while on voice calls"
-                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                selected_app.set(if *selected_app == Some("sms_calls".to_string()) { None } else { Some("sms_calls".to_string()) });
-                            })}
-                        >
-                            <i class="fa-solid fa-sms"></i>
-                        </button>
-                    </div>
-                    if let Some(err) = (*error).as_ref() {
-                        <div class="error-message">
-                            {err}
+                    <div class="connect-section">
+                        // Apps
+                        <div class="apps-icons-row">
+                            <button
+                                class={classes!("app-icon", if *email_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "email") { "selected" } else { "" })}
+                                onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                    selected_app.set(if *selected_app == Some("email".to_string()) { None } else { Some("email".to_string()) });
+                                })}
+                            >
+                                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath fill='%234285f4' d='M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4L236.8 313.6c11.4 8.5 27 8.5 38.4 0L492.8 150.4c12.1-9.1 19.2-23.3 19.2-38.4c0-26.5-21.5-48-48-48H48zM0 176V384c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V176L294.4 339.2c-22.8 17.1-54 17.1-76.8 0L0 176z'/%3E%3C/svg%3E" alt="IMAP" width="24" height="24"/>
+                            </button>
+                            <button
+                                class={classes!("app-icon", if *whatsapp_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "whatsapp") { "selected" } else { "" })}
+                                onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                    selected_app.set(if *selected_app == Some("whatsapp".to_string()) { None } else { Some("whatsapp".to_string()) });
+                                })}
+                            >
+                                <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp" width="24" height="24"/>
+                            </button>
+                            <button
+                                class={classes!("app-icon", if *telegram_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "telegram") { "selected" } else { "" })}
+                                onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                    selected_app.set(if *selected_app == Some("telegram".to_string()) { None } else { Some("telegram".to_string()) });
+                                })}
+                            >
+                                <img src="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg" alt="Telegram" width="24" height="24"/>
+                            </button>
+                            <button
+                                class={classes!("app-icon", if *signal_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "signal") { "selected" } else { "" })}
+                                onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                    selected_app.set(if *selected_app == Some("signal".to_string()) { None } else { Some("signal".to_string()) });
+                                })}
+                            >
+                                <img src="https://upload.wikimedia.org/wikipedia/commons/6/60/Signal-Logo-Ultramarine_%282024%29.svg" alt="Signal Logo" width="24" height="24"/>
+                            </button>
+                            <button
+                                class={classes!("app-icon", if *tesla_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "tesla") { "selected" } else { "" })}
+                                onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                    selected_app.set(if *selected_app == Some("tesla".to_string()) { None } else { Some("tesla".to_string()) });
+                                })}
+                            >
+                                <img src="https://upload.wikimedia.org/wikipedia/commons/b/bb/Tesla_T_symbol.svg" alt="Tesla" width="24" height="24"/>
+                            </button>
+                            <button
+                                class={classes!("app-icon", if *youtube_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "youtube") { "selected" } else { "" })}
+                                onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                    selected_app.set(if *selected_app == Some("youtube".to_string()) { None } else { Some("youtube".to_string()) });
+                                })}
+                            >
+                                <img src="https://upload.wikimedia.org/wikipedia/commons/0/09/YouTube_full-color_icon_%282017%29.svg" alt="YouTube" width="24" height="24"/>
+                            </button>
+                            <button
+                                class={classes!("app-icon", "mcp-icon", if *mcp_server_count > 0 { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "mcp") { "selected" } else { "" })}
+                                onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                    selected_app.set(if *selected_app == Some("mcp".to_string()) { None } else { Some("mcp".to_string()) });
+                                })}
+                                title="MCP Servers - Add custom tools (beta)"
+                            >
+                                <i class="fa-solid fa-plug"></i>
+                            </button>
                         </div>
-                    }
-<style>
-        {r#"
+                        <div class="app-details">
+                            { details }
+                        </div>
+                        // Built-in tools row - same style as capabilities above
+                        <div class="builtin-tools-label">{"Built-in"}</div>
+                        <div class="apps-icons-row builtin-row">
+                            <button
+                                class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "perplexity") { "selected" } else { "" })}
+                                title="Perplexity AI - AI-powered search and answers"
+                                onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                    selected_app.set(if *selected_app == Some("perplexity".to_string()) { None } else { Some("perplexity".to_string()) });
+                                })}
+                            >
+                                <img src="https://upload.wikimedia.org/wikipedia/commons/1/1d/Perplexity_AI_logo.svg" alt="Perplexity" width="24" height="24"/>
+                            </button>
+                            <button
+                                class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "weather") { "selected" } else { "" })}
+                                title="Weather - Weather updates and forecasts"
+                                onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                    selected_app.set(if *selected_app == Some("weather".to_string()) { None } else { Some("weather".to_string()) });
+                                })}
+                            >
+                                <i class="fa-solid fa-sun"></i>
+                            </button>
+                            <button
+                                class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "photo") { "selected" } else { "" })}
+                                title="Photo - QR codes and text translation"
+                                onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                    selected_app.set(if *selected_app == Some("photo".to_string()) { None } else { Some("photo".to_string()) });
+                                })}
+                            >
+                                <i class="fa-solid fa-camera"></i>
+                            </button>
+                            <button
+                                class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "sms_calls") { "selected" } else { "" })}
+                                title="SMS During Calls - Send info via SMS while on voice calls"
+                                onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                    selected_app.set(if *selected_app == Some("sms_calls".to_string()) { None } else { Some("sms_calls".to_string()) });
+                                })}
+                            >
+                                <i class="fa-solid fa-sms"></i>
+                            </button>
+                        </div>
+                        if let Some(err) = (*error).as_ref() {
+                            <div class="error-message">
+                                {err}
+                            </div>
+                        }
+    <style>
+            {r#"
 /* Built-in tools - same row style as capabilities */
 .builtin-tools-label {
     color: #666;
@@ -1375,7 +1401,7 @@ input:checked + .slider:before {
     border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 "#}
-                    </style>
-                </div>
-            }
+                        </style>
+                    </div>
+                }
 }

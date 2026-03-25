@@ -1,9 +1,9 @@
-use yew::prelude::*;
-use serde::{Deserialize, Serialize};
-use web_sys::HtmlInputElement;
-use wasm_bindgen_futures::spawn_local;
-use serde_json::json;
 use crate::utils::api::Api;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use wasm_bindgen_futures::spawn_local;
+use web_sys::HtmlInputElement;
+use yew::prelude::*;
 
 /// Media platforms supported for link detection
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -58,31 +58,39 @@ pub fn detect_platform(input: &str) -> MediaPlatform {
 pub fn extract_youtube_video_id(url: &str) -> Option<String> {
     // Handle youtu.be/VIDEO_ID
     if url.contains("youtu.be/") {
-        return url
-            .split("youtu.be/")
-            .nth(1)
-            .map(|s| s.split(&['?', '&', '#'][..]).next().unwrap_or(s).to_string());
+        return url.split("youtu.be/").nth(1).map(|s| {
+            s.split(&['?', '&', '#'][..])
+                .next()
+                .unwrap_or(s)
+                .to_string()
+        });
     }
     // Handle youtube.com/watch?v=VIDEO_ID
     if url.contains("v=") {
-        return url
-            .split("v=")
-            .nth(1)
-            .map(|s| s.split(&['?', '&', '#'][..]).next().unwrap_or(s).to_string());
+        return url.split("v=").nth(1).map(|s| {
+            s.split(&['?', '&', '#'][..])
+                .next()
+                .unwrap_or(s)
+                .to_string()
+        });
     }
     // Handle youtube.com/embed/VIDEO_ID
     if url.contains("/embed/") {
-        return url
-            .split("/embed/")
-            .nth(1)
-            .map(|s| s.split(&['?', '&', '#'][..]).next().unwrap_or(s).to_string());
+        return url.split("/embed/").nth(1).map(|s| {
+            s.split(&['?', '&', '#'][..])
+                .next()
+                .unwrap_or(s)
+                .to_string()
+        });
     }
     // Handle youtube.com/shorts/VIDEO_ID
     if url.contains("/shorts/") {
-        return url
-            .split("/shorts/")
-            .nth(1)
-            .map(|s| s.split(&['?', '&', '#'][..]).next().unwrap_or(s).to_string());
+        return url.split("/shorts/").nth(1).map(|s| {
+            s.split(&['?', '&', '#'][..])
+                .next()
+                .unwrap_or(s)
+                .to_string()
+        });
     }
     None
 }
@@ -604,49 +612,77 @@ pub fn media_panel(props: &MediaPanelProps) -> Html {
         let loading_comments = loading_comments.clone();
         let liked = liked.clone();
         let youtube_connected = props.youtube_connected;
-        use_effect_with_deps(move |video_id| {
-            if let Some(vid) = video_id.clone() {
-                web_sys::console::log_1(&format!("MediaPanel: video_id={}, youtube_connected={}", vid, youtube_connected).into());
-                if youtube_connected {
-                    let comments = comments.clone();
-                    let loading_comments = loading_comments.clone();
-                    let liked = liked.clone();
-                    loading_comments.set(true);
-                    liked.set(false);
-                    spawn_local(async move {
-                        web_sys::console::log_1(&format!("MediaPanel: Fetching comments for {}", vid).into());
-                        match Api::get(&format!("/api/youtube/video/{}/comments", vid)).send().await {
-                            Ok(response) => {
-                                let status = response.status();
-                                web_sys::console::log_1(&format!("MediaPanel: Comments response status={}", status).into());
-                                if response.ok() {
-                                    match response.json::<CommentsResponse>().await {
-                                        Ok(data) => {
-                                            web_sys::console::log_1(&format!("MediaPanel: Got {} comments", data.comments.len()).into());
-                                            comments.set(data.comments);
+        use_effect_with_deps(
+            move |video_id| {
+                if let Some(vid) = video_id.clone() {
+                    web_sys::console::log_1(
+                        &format!(
+                            "MediaPanel: video_id={}, youtube_connected={}",
+                            vid, youtube_connected
+                        )
+                        .into(),
+                    );
+                    if youtube_connected {
+                        let comments = comments.clone();
+                        let loading_comments = loading_comments.clone();
+                        let liked = liked.clone();
+                        loading_comments.set(true);
+                        liked.set(false);
+                        spawn_local(async move {
+                            web_sys::console::log_1(
+                                &format!("MediaPanel: Fetching comments for {}", vid).into(),
+                            );
+                            match Api::get(&format!("/api/youtube/video/{}/comments", vid))
+                                .send()
+                                .await
+                            {
+                                Ok(response) => {
+                                    let status = response.status();
+                                    web_sys::console::log_1(
+                                        &format!("MediaPanel: Comments response status={}", status)
+                                            .into(),
+                                    );
+                                    if response.ok() {
+                                        match response.json::<CommentsResponse>().await {
+                                            Ok(data) => {
+                                                web_sys::console::log_1(
+                                                    &format!(
+                                                        "MediaPanel: Got {} comments",
+                                                        data.comments.len()
+                                                    )
+                                                    .into(),
+                                                );
+                                                comments.set(data.comments);
+                                            }
+                                            Err(e) => {
+                                                web_sys::console::error_1(&format!("MediaPanel: Failed to parse comments: {:?}", e).into());
+                                            }
                                         }
-                                        Err(e) => {
-                                            web_sys::console::error_1(&format!("MediaPanel: Failed to parse comments: {:?}", e).into());
-                                        }
+                                    } else {
+                                        web_sys::console::error_1(&format!("MediaPanel: Comments request failed with status {}", status).into());
                                     }
-                                } else {
-                                    web_sys::console::error_1(&format!("MediaPanel: Comments request failed with status {}", status).into());
+                                }
+                                Err(e) => {
+                                    web_sys::console::error_1(
+                                        &format!("MediaPanel: Comments request error: {:?}", e)
+                                            .into(),
+                                    );
                                 }
                             }
-                            Err(e) => {
-                                web_sys::console::error_1(&format!("MediaPanel: Comments request error: {:?}", e).into());
-                            }
-                        }
-                        loading_comments.set(false);
-                    });
+                            loading_comments.set(false);
+                        });
+                    } else {
+                        web_sys::console::log_1(
+                            &"MediaPanel: youtube_connected is false, not fetching comments".into(),
+                        );
+                    }
                 } else {
-                    web_sys::console::log_1(&"MediaPanel: youtube_connected is false, not fetching comments".into());
+                    comments.set(Vec::new());
                 }
-            } else {
-                comments.set(Vec::new());
-            }
-            || ()
-        }, video_id);
+                || ()
+            },
+            video_id,
+        );
     }
 
     // Resolve non-YouTube video URLs when playing starts
@@ -658,31 +694,34 @@ pub fn media_panel(props: &MediaPanelProps) -> Html {
         let resolving_embed = resolving_embed.clone();
         let resolve_error = resolve_error.clone();
 
-        use_effect_with_deps(move |(playing, playing_index, items): &(bool, usize, Vec<MediaItem>)| {
-            if *playing && *playing_index < items.len() {
-                let item = &items[*playing_index];
-                let platform = item.platform.as_str();
+        use_effect_with_deps(
+            move |(playing, playing_index, items): &(bool, usize, Vec<MediaItem>)| {
+                if *playing && *playing_index < items.len() {
+                    let item = &items[*playing_index];
+                    let platform = item.platform.as_str();
 
-                // YouTube uses direct embed URLs, no resolution needed
-                // For any other platform, fall back to embed_url()
-                if platform == "youtube" {
+                    // YouTube uses direct embed URLs, no resolution needed
+                    // For any other platform, fall back to embed_url()
+                    if platform == "youtube" {
+                        resolved_embed.set(None);
+                        resolving_embed.set(false);
+                        resolve_error.set(None);
+                    } else {
+                        resolved_embed.set(Some(ResolvedEmbed {
+                            embed_url: item.embed_url(),
+                            is_vertical: false,
+                        }));
+                    }
+                } else {
+                    // Not playing, clear resolved embed
                     resolved_embed.set(None);
                     resolving_embed.set(false);
                     resolve_error.set(None);
-                } else {
-                    resolved_embed.set(Some(ResolvedEmbed {
-                        embed_url: item.embed_url(),
-                        is_vertical: false,
-                    }));
                 }
-            } else {
-                // Not playing, clear resolved embed
-                resolved_embed.set(None);
-                resolving_embed.set(false);
-                resolve_error.set(None);
-            }
-            || ()
-        }, (playing, playing_index, media_items));
+                || ()
+            },
+            (playing, playing_index, media_items),
+        );
     }
 
     let on_close = {
@@ -747,7 +786,10 @@ pub fn media_panel(props: &MediaPanelProps) -> Html {
                             }
                         } else {
                             if let Ok(data) = response.json::<serde_json::Value>().await {
-                                let err = data["error"].as_str().unwrap_or("Failed to post comment").to_string();
+                                let err = data["error"]
+                                    .as_str()
+                                    .unwrap_or("Failed to post comment")
+                                    .to_string();
                                 comment_error.set(Some(err));
                             }
                         }

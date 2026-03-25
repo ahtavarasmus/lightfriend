@@ -1,13 +1,13 @@
+use crate::utils::api::Api;
+use crate::Route;
+use serde::Deserialize;
+use serde_json::json;
+use serde_json::Value;
+use std::collections::HashMap;
+use wasm_bindgen_futures;
+use web_sys::window;
 use yew::prelude::*;
 use yew_router::prelude::Link;
-use crate::Route;
-use serde_json::json;
-use web_sys::window;
-use wasm_bindgen_futures;
-use serde_json::Value;
-use serde::Deserialize;
-use std::collections::HashMap;
-use crate::utils::api::Api;
 
 /// Check if a country is notification-only (receives SMS from US number, dynamic pricing)
 /// Any country that's not a local-number country is notification-only
@@ -24,7 +24,7 @@ fn is_local_number_country(country: &str) -> bool {
 /// Message equivalent display that fetches real pricing from backend
 #[derive(Properties, PartialEq)]
 pub struct MessageEquivalentProps {
-    pub plan_messages: i32,  // 50 or 150 (the "messages" in the plan)
+    pub plan_messages: i32, // 50 or 150 (the "messages" in the plan)
     pub country: String,
 }
 
@@ -39,23 +39,28 @@ pub fn message_equivalent_display(props: &MessageEquivalentProps) -> Html {
         let pricing = pricing.clone();
         let loading = loading.clone();
         let country = props.country.clone();
-        use_effect_with_deps(move |country| {
-            let country = country.clone();
-            // Set loading state immediately when country changes
-            loading.set(true);
-            wasm_bindgen_futures::spawn_local(async move {
-                let response = Api::get(&format!("/api/pricing/byot/{}", country)).send().await;
-                if let Ok(resp) = response {
-                    if resp.ok() {
-                        if let Ok(data) = resp.json::<ByotPricingResponse>().await {
-                            pricing.set(Some(data));
+        use_effect_with_deps(
+            move |country| {
+                let country = country.clone();
+                // Set loading state immediately when country changes
+                loading.set(true);
+                wasm_bindgen_futures::spawn_local(async move {
+                    let response = Api::get(&format!("/api/pricing/byot/{}", country))
+                        .send()
+                        .await;
+                    if let Ok(resp) = response {
+                        if resp.ok() {
+                            if let Ok(data) = resp.json::<ByotPricingResponse>().await {
+                                pricing.set(Some(data));
+                            }
                         }
                     }
-                }
-                loading.set(false);
-            });
-            || ()
-        }, country);
+                    loading.set(false);
+                });
+                || ()
+            },
+            country,
+        );
     }
 
     let is_local = is_local_number_country(&props.country);
@@ -77,12 +82,16 @@ pub fn message_equivalent_display(props: &MessageEquivalentProps) -> Html {
             let digests = (total_credits / (3.0 * sms_price)).floor() as i32;
 
             // Voice outbound (if available)
-            let voice_calls = p.costs.voice_outbound_per_min
+            let voice_calls = p
+                .costs
+                .voice_outbound_per_min
                 .map(|v| (total_credits / v).floor() as i32);
 
             // Inbound voice (if local number country)
             let inbound_mins = if is_local {
-                p.costs.voice_inbound_per_min.map(|v| (total_credits / v).floor() as i32)
+                p.costs
+                    .voice_inbound_per_min
+                    .map(|v| (total_credits / v).floor() as i32)
             } else {
                 None
             };
@@ -163,7 +172,10 @@ pub fn message_equivalent_display(props: &MessageEquivalentProps) -> Html {
     let display_value = if is_loading {
         format!("{} messages", props.plan_messages)
     } else {
-        views.get(*current_view).cloned().unwrap_or_else(|| format!("{} messages", props.plan_messages))
+        views
+            .get(*current_view)
+            .cloned()
+            .unwrap_or_else(|| format!("{} messages", props.plan_messages))
     };
 
     let hint_text = if is_loading {
@@ -215,26 +227,29 @@ pub fn byot_pricing_display() -> Html {
         let loading = loading.clone();
         let error = error.clone();
         let country = (*selected_country).clone();
-        use_effect_with_deps(move |country| {
-            let country = country.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                loading.set(true);
-                error.set(None);
-                let response = Api::get(&format!("/api/pricing/byot/{}", country)).send().await;
-                match response {
-                    Ok(resp) if resp.ok() => {
-                        match resp.json::<ByotPricingResponse>().await {
+        use_effect_with_deps(
+            move |country| {
+                let country = country.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    loading.set(true);
+                    error.set(None);
+                    let response = Api::get(&format!("/api/pricing/byot/{}", country))
+                        .send()
+                        .await;
+                    match response {
+                        Ok(resp) if resp.ok() => match resp.json::<ByotPricingResponse>().await {
                             Ok(data) => pricing.set(Some(data)),
                             Err(_) => error.set(Some("Failed to parse pricing".to_string())),
-                        }
+                        },
+                        Ok(_) => error.set(Some("Country not supported".to_string())),
+                        Err(e) => error.set(Some(format!("Failed to fetch: {}", e))),
                     }
-                    Ok(_) => error.set(Some("Country not supported".to_string())),
-                    Err(e) => error.set(Some(format!("Failed to fetch: {}", e))),
-                }
-                loading.set(false);
-            });
-            || ()
-        }, country);
+                    loading.set(false);
+                });
+                || ()
+            },
+            country,
+        );
     }
 
     let on_country_change = {
@@ -669,7 +684,8 @@ pub fn guest_checkout_button(props: &GuestCheckoutButtonProps) -> Html {
                                 }
                                 Err(_) => {
                                     loading.set(false);
-                                    error.set(Some("Failed to parse checkout response".to_string()));
+                                    error
+                                        .set(Some("Failed to parse checkout response".to_string()));
                                 }
                             }
                         } else {
@@ -833,7 +849,8 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
     } else if props.is_logged_in {
         if props.sub_tier.as_ref() == Some(&effective_tier)
             && (props.plan_type == props.user_plan_type
-                || (props.user_plan_type.is_none() && props.selected_country != "Other")) {
+                || (props.user_plan_type.is_none() && props.selected_country != "Other"))
+        {
             // Show "Current Plan" if tier matches AND either:
             // - plan_type matches exactly, OR
             // - user has no plan_type (legacy US/CA users) and not on BYOT
@@ -1229,29 +1246,34 @@ pub fn credit_pricing(props: &FeatureListProps) -> Html {
         let pricing = pricing.clone();
         let loading = loading.clone();
         let country = country.clone();
-        use_effect_with_deps(move |country| {
-            let country = country.clone();
-            // Skip fetch for US/CA/Other
-            if country != "US" && country != "CA" && country != "Other" {
-                let pricing = pricing.clone();
-                let loading = loading.clone();
-                wasm_bindgen_futures::spawn_local(async move {
-                    loading.set(true);
-                    let response = Api::get(&format!("/api/pricing/byot/{}", country)).send().await;
-                    if let Ok(resp) = response {
-                        if resp.ok() {
-                            if let Ok(data) = resp.json::<ByotPricingResponse>().await {
-                                pricing.set(Some(data));
+        use_effect_with_deps(
+            move |country| {
+                let country = country.clone();
+                // Skip fetch for US/CA/Other
+                if country != "US" && country != "CA" && country != "Other" {
+                    let pricing = pricing.clone();
+                    let loading = loading.clone();
+                    wasm_bindgen_futures::spawn_local(async move {
+                        loading.set(true);
+                        let response = Api::get(&format!("/api/pricing/byot/{}", country))
+                            .send()
+                            .await;
+                        if let Ok(resp) = response {
+                            if resp.ok() {
+                                if let Ok(data) = resp.json::<ByotPricingResponse>().await {
+                                    pricing.set(Some(data));
+                                }
                             }
                         }
-                    }
+                        loading.set(false);
+                    });
+                } else {
                     loading.set(false);
-                });
-            } else {
-                loading.set(false);
-            }
-            || ()
-        }, country);
+                }
+                || ()
+            },
+            country,
+        );
     }
 
     let credit_css = r#"
@@ -1339,8 +1361,14 @@ pub fn credit_pricing(props: &FeatureListProps) -> Html {
         let notification_price = p.costs.notification.map(|n| n * OVERAGE_MULTIPLIER);
         let response_price = p.costs.normal_response.map(|r| r * OVERAGE_MULTIPLIER);
         let digest_price = p.costs.digest.map(|d| d * OVERAGE_MULTIPLIER);
-        let voice_out_price = p.costs.voice_outbound_per_min.map(|v| v * OVERAGE_MULTIPLIER);
-        let voice_in_price = p.costs.voice_inbound_per_min.map(|v| v * OVERAGE_MULTIPLIER);
+        let voice_out_price = p
+            .costs
+            .voice_outbound_per_min
+            .map(|v| v * OVERAGE_MULTIPLIER);
+        let voice_in_price = p
+            .costs
+            .voice_inbound_per_min
+            .map(|v| v * OVERAGE_MULTIPLIER);
 
         let is_local = is_local_number_country(country);
         let is_notification_only = is_notification_only_country(country);
@@ -1434,7 +1462,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
         ("HK".to_string(), 29.00),
         ("TW".to_string(), 29.00),
         ("IL".to_string(), 29.00),
-        ("Other".to_string(), 19.00),  // BYOT plan stays at 19 EUR
+        ("Other".to_string(), 19.00), // BYOT plan stays at 19 EUR
     ]);
     let _hosted_total_price = hosted_prices.get(&props.selected_country).unwrap_or(&0.0);
     let pricing_css = r#"
@@ -1866,9 +1894,9 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                     <a style="color: rgba(255, 255, 255, 0.8);" href="/supported-countries">{"Supported Countries"}</a>
                                     {" or by emailing "}
                                     <a style="color: rgba(255, 255, 255, 0.8);"
-                                       href={format!("mailto:rasmus@ahtava.com?subject=Country%20Availability%20Inquiry%20for%20{}&body=Hey,%0A%0AIs%20the%20service%20available%20in%20{}%3F%0A%0AThanks,%0A",
+                                       href={format!("mailto:rasmus@lightfriend.ai?subject=Country%20Availability%20Inquiry%20for%20{}&body=Hey,%0A%0AIs%20the%20service%20available%20in%20{}%3F%0A%0AThanks,%0A",
                                        props.country_name.clone(), props.country_name.clone())}>
-                                        {"rasmus@ahtava.com"}
+                                        {"rasmus@lightfriend.ai"}
                                     </a>
                                 </span>
                                 {". Contact to ask for availability"}
@@ -2089,7 +2117,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                     user_id={props.user_id}
                                     user_email={props.user_email.clone()}
                                     is_logged_in={props.is_logged_in}
-    
+
                                     sub_tier={props.sub_tier.clone()}
                                     user_plan_type={props.user_plan_type.clone()}
                                     selected_country={props.selected_country.clone()}
@@ -2110,7 +2138,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                     user_id={props.user_id}
                                     user_email={props.user_email.clone()}
                                     is_logged_in={props.is_logged_in}
-    
+
                                     sub_tier={props.sub_tier.clone()}
                                     user_plan_type={props.user_plan_type.clone()}
                                     selected_country={props.selected_country.clone()}
@@ -2133,7 +2161,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                         user_id={props.user_id}
                                         user_email={props.user_email.clone()}
                                         is_logged_in={props.is_logged_in}
-        
+
                                         sub_tier={props.sub_tier.clone()}
                                         user_plan_type={props.user_plan_type.clone()}
                                         selected_country={props.selected_country.clone()}
@@ -2244,6 +2272,8 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                 <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
                 {" | "}
                 <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
+                {" | "}
+                <Link<Route> to={Route::Trustless}>{"Verifiably Private"}</Link<Route>>
                 {" | "}
                 <Link<Route> to={Route::Changelog}>{"Updates"}</Link<Route>>
             </div>

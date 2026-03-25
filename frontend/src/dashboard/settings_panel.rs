@@ -1,9 +1,11 @@
-use yew::prelude::*;
-use web_sys::MouseEvent;
+use super::people_list::PeopleList;
 use crate::auth::connect::Connect;
-use crate::profile::settings::SettingsPage;
 use crate::profile::billing_credits::BillingPage;
 use crate::profile::billing_models::UserProfile;
+use crate::profile::settings::SettingsPage;
+use wasm_bindgen::JsCast;
+use web_sys::MouseEvent;
+use yew::prelude::*;
 
 const SETTINGS_STYLES: &str = r#"
 .settings-panel-overlay {
@@ -95,6 +97,7 @@ const SETTINGS_STYLES: &str = r#"
 #[derive(Clone, PartialEq, Copy)]
 pub enum SettingsTab {
     Capabilities,
+    People,
     Account,
     Billing,
 }
@@ -126,6 +129,51 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
         );
     }
 
+    // Escape key to close panel
+    {
+        let on_close = props.on_close.clone();
+        let is_open = props.is_open;
+        use_effect_with_deps(
+            move |is_open: &bool| {
+                let closure_holder: std::rc::Rc<
+                    std::cell::RefCell<
+                        Option<wasm_bindgen::closure::Closure<dyn Fn(web_sys::KeyboardEvent)>>,
+                    >,
+                > = std::rc::Rc::new(std::cell::RefCell::new(None));
+                if *is_open {
+                    let on_close = on_close.clone();
+                    let closure =
+                        wasm_bindgen::closure::Closure::<dyn Fn(web_sys::KeyboardEvent)>::new(
+                            move |e: web_sys::KeyboardEvent| {
+                                if e.key() == "Escape" {
+                                    on_close.emit(());
+                                }
+                            },
+                        );
+                    if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+                        let _ = document.add_event_listener_with_callback(
+                            "keydown",
+                            closure.as_ref().unchecked_ref(),
+                        );
+                    }
+                    *closure_holder.borrow_mut() = Some(closure);
+                }
+                let holder = closure_holder;
+                move || {
+                    if let Some(closure) = holder.borrow_mut().take() {
+                        if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+                            let _ = document.remove_event_listener_with_callback(
+                                "keydown",
+                                closure.as_ref().unchecked_ref(),
+                            );
+                        }
+                    }
+                }
+            },
+            is_open,
+        );
+    }
+
     if !props.is_open {
         return html! {};
     }
@@ -139,14 +187,21 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                         <Connect
                             user_id={profile.id}
                             sub_tier={profile.sub_tier.clone()}
-                            discount={profile.discount}
                             phone_number={profile.phone_number.clone()}
                             estimated_monitoring_cost={profile.estimated_monitoring_cost.clone()}
                         />
                     </div>
                 }
             } else {
-                html! { <div class="settings-content">{"Loading..."}</div> }
+                html! { <div class="settings-content"><div class="loading-spinner-inline"></div></div> }
+            }
+        }
+        SettingsTab::People => {
+            html! {
+                <div class="settings-content">
+                    <h3>{"People"}</h3>
+                    <PeopleList />
+                </div>
             }
         }
         SettingsTab::Account => {
@@ -162,7 +217,7 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                     </div>
                 }
             } else {
-                html! { <div class="settings-content">{"Loading..."}</div> }
+                html! { <div class="settings-content"><div class="loading-spinner-inline"></div></div> }
             }
         }
         SettingsTab::Billing => {
@@ -174,7 +229,7 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                     </div>
                 }
             } else {
-                html! { <div class="settings-content">{"Loading..."}</div> }
+                html! { <div class="settings-content"><div class="loading-spinner-inline"></div></div> }
             }
         }
     };
@@ -193,7 +248,7 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
     html! {
         <>
             <style>{SETTINGS_STYLES}</style>
-            <div class="settings-panel-overlay" onclick={overlay_click}>
+            <div class="settings-panel-overlay" onclick={overlay_click} role="dialog" aria-modal="true" aria-label="Settings">
                 <div class="settings-panel" onclick={stop_propagation}>
                 <div class="settings-header">
                     <h2>{"Settings"}</h2>
@@ -216,6 +271,15 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                         }}
                     >
                         {"Capabilities"}
+                    </button>
+                    <button
+                        class={classes!("settings-tab", (*active_tab == SettingsTab::People).then(|| "active"))}
+                        onclick={{
+                            let active_tab = active_tab.clone();
+                            Callback::from(move |_| active_tab.set(SettingsTab::People))
+                        }}
+                    >
+                        {"People"}
                     </button>
                     <button
                         class={classes!("settings-tab", (*active_tab == SettingsTab::Account).then(|| "active"))}

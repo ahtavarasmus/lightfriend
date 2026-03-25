@@ -16,10 +16,12 @@ use matrix_sdk::{
 use serde::Serialize;
 use serde_json::json;
 use std::sync::Arc;
-use tokio::time::{sleep, Duration};
+use tokio::time::{sleep, timeout, Duration};
 
 use std::path::Path;
 use tokio::fs;
+
+const TELEGRAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(45);
 
 // Helper function to detect the one-time key conflict error
 fn is_one_time_key_conflict(error: &anyhow::Error) -> bool {
@@ -230,6 +232,8 @@ async fn connect_telegram(
                                 }
                             };
 
+                            tracing::info!("Telegram login response: {}", message_body);
+
                             // More efficient login url extraction
                             if let Some(url) = extract_login_url(&message_body) {
                                 login_url = Some(url);
@@ -261,11 +265,21 @@ fn extract_login_url(message: &str) -> Option<String> {
     // Remove backticks and other formatting that might interfere
     let clean_message = message.replace('`', "").replace("*", "");
 
-    // Regex to match the full URL within Markdown [text](url) format
-    let re = regex::Regex::new(r"\((https?://[^\)]+)\)").ok()?;
+    // Match any plain https URL first. The bot response format varies by bridge version.
+    let plain_url_re = regex::Regex::new(r#"https?://[^\s<>\")\]]+"#).ok()?;
+    if let Some(found) = plain_url_re.find(&clean_message) {
+        return Some(
+            found
+                .as_str()
+                .trim_end_matches(|c: char| matches!(c, '.' | ',' | ')' | ']'))
+                .to_string(),
+        );
+    }
 
-    if let Some(captures) = re.captures(&clean_message) {
-        return Some(captures[1].to_string()); // Capture the URL inside the parentheses
+    // Fallback for Markdown [text](url) format if the closing paren was excluded above.
+    let markdown_re = regex::Regex::new(r"\((https?://[^\)]+)\)").ok()?;
+    if let Some(captures) = markdown_re.captures(&clean_message) {
+        return Some(captures[1].to_string());
     }
 
     None
@@ -302,18 +316,34 @@ pub async fn start_telegram_connection(
     tracing::debug!("🔗 Connecting to Telegram bridge...");
     // Connect to Telegram bridge
     let mut client_clone = Arc::clone(&client);
-    let (room_id, login_url) =
-        connect_telegram_with_retry(&mut client_clone, &bridge_bot, auth_user.user_id, &state)
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to connect to Telegram bridge: {}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    AxumJson(
-                        json!({"error": format!("Failed to connect to Telegram bridge: {}", e)}),
-                    ),
-                )
-            })?;
+    let (room_id, login_url) = match timeout(
+        TELEGRAM_CONNECT_TIMEOUT,
+        connect_telegram_with_retry(&mut client_clone, &bridge_bot, auth_user.user_id, &state),
+    )
+    .await
+    {
+        Ok(Ok(result)) => result,
+        Ok(Err(e)) => {
+            tracing::error!("Failed to connect to Telegram bridge: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": format!("Failed to connect to Telegram bridge: {}", e)})),
+            ));
+        }
+        Err(_) => {
+            tracing::error!(
+                "Telegram connection timed out for user {} after {:?}",
+                auth_user.user_id,
+                TELEGRAM_CONNECT_TIMEOUT
+            );
+            return Err((
+                StatusCode::GATEWAY_TIMEOUT,
+                AxumJson(json!({
+                    "error": "Telegram connection timed out while waiting for the bridge. Please try again."
+                })),
+            ));
+        }
+    };
 
     // Debug: Log the login url
     tracing::info!("Generated login url");

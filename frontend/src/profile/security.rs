@@ -1,9 +1,9 @@
-use yew::prelude::*;
-use web_sys::HtmlInputElement;
 use crate::utils::api::Api;
 use crate::utils::webauthn;
-use wasm_bindgen_futures::spawn_local;
 use serde::{Deserialize, Serialize};
+use wasm_bindgen_futures::spawn_local;
+use web_sys::HtmlInputElement;
+use yew::prelude::*;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum TwoFactorState {
@@ -111,52 +111,60 @@ pub fn SecuritySettings() -> Html {
     // Load TOTP status on mount
     {
         let state = state.clone();
-        use_effect_with_deps(move |_| {
-            spawn_local(async move {
-                match Api::get("/api/totp/status").send().await {
-                    Ok(resp) if resp.ok() => {
-                        if let Ok(status) = resp.json::<TotpStatusResponse>().await {
-                            if status.enabled {
-                                state.set(TwoFactorState::Enabled {
-                                    remaining_backup_codes: status.remaining_backup_codes,
-                                });
-                            } else {
-                                state.set(TwoFactorState::Disabled);
+        use_effect_with_deps(
+            move |_| {
+                spawn_local(async move {
+                    match Api::get("/api/totp/status").send().await {
+                        Ok(resp) if resp.ok() => {
+                            if let Ok(status) = resp.json::<TotpStatusResponse>().await {
+                                if status.enabled {
+                                    state.set(TwoFactorState::Enabled {
+                                        remaining_backup_codes: status.remaining_backup_codes,
+                                    });
+                                } else {
+                                    state.set(TwoFactorState::Disabled);
+                                }
                             }
                         }
+                        _ => {
+                            state.set(TwoFactorState::Error(
+                                "Failed to load 2FA status".to_string(),
+                            ));
+                        }
                     }
-                    _ => {
-                        state.set(TwoFactorState::Error("Failed to load 2FA status".to_string()));
-                    }
-                }
-            });
-            || ()
-        }, ());
+                });
+                || ()
+            },
+            (),
+        );
     }
 
     // Load passkeys on mount
     {
         let passkey_state = passkey_state.clone();
         let passkeys = passkeys.clone();
-        use_effect_with_deps(move |_| {
-            spawn_local(async move {
-                match Api::get("/api/webauthn/passkeys").send().await {
-                    Ok(resp) if resp.ok() => {
-                        // Backend returns Vec<PasskeyInfo> directly (not wrapped)
-                        if let Ok(list) = resp.json::<Vec<Passkey>>().await {
-                            passkeys.set(list);
-                            passkey_state.set(PasskeyState::Ready);
-                        } else {
+        use_effect_with_deps(
+            move |_| {
+                spawn_local(async move {
+                    match Api::get("/api/webauthn/passkeys").send().await {
+                        Ok(resp) if resp.ok() => {
+                            // Backend returns Vec<PasskeyInfo> directly (not wrapped)
+                            if let Ok(list) = resp.json::<Vec<Passkey>>().await {
+                                passkeys.set(list);
+                                passkey_state.set(PasskeyState::Ready);
+                            } else {
+                                passkey_state.set(PasskeyState::Ready);
+                            }
+                        }
+                        _ => {
                             passkey_state.set(PasskeyState::Ready);
                         }
                     }
-                    _ => {
-                        passkey_state.set(PasskeyState::Ready);
-                    }
-                }
-            });
-            || ()
-        }, ());
+                });
+                || ()
+            },
+            (),
+        );
     }
 
     // Start 2FA setup
@@ -182,7 +190,10 @@ pub fn SecuritySettings() -> Html {
                         }
                     }
                     Ok(resp) => {
-                        error_message.set(Some(format!("Failed to start 2FA setup: {}", resp.status())));
+                        error_message.set(Some(format!(
+                            "Failed to start 2FA setup: {}",
+                            resp.status()
+                        )));
                     }
                     Err(e) => {
                         error_message.set(Some(format!("Network error: {:?}", e)));
@@ -399,9 +410,9 @@ pub fn SecuritySettings() -> Html {
                     let clipboard = navigator.clipboard();
                     let codes_copied = codes_copied.clone();
                     spawn_local(async move {
-                        let _ = wasm_bindgen_futures::JsFuture::from(
-                            clipboard.write_text(&codes_text)
-                        ).await;
+                        let _ =
+                            wasm_bindgen_futures::JsFuture::from(clipboard.write_text(&codes_text))
+                                .await;
                         codes_copied.set(true);
                     });
                 }
@@ -433,7 +444,9 @@ pub fn SecuritySettings() -> Html {
         let new_passkey_name = new_passkey_name.clone();
         Callback::from(move |_: MouseEvent| {
             new_passkey_name.set(String::new());
-            passkey_state.set(PasskeyState::Registering { device_name: String::new() });
+            passkey_state.set(PasskeyState::Registering {
+                device_name: String::new(),
+            });
         })
     };
 
@@ -492,7 +505,7 @@ pub fn SecuritySettings() -> Html {
                                     // Fallback: maybe the response is already the options directly
                                     Ok(json)
                                 }
-                            },
+                            }
                             Err(e) => Err(format!("Failed to parse options: {:?}", e)),
                         }
                     }
@@ -583,7 +596,12 @@ pub fn SecuritySettings() -> Html {
                     Ok(resp) if resp.ok() => {
                         // Remove from local list
                         let current = (*passkeys).clone();
-                        passkeys.set(current.into_iter().filter(|p| p.credential_id != cred_id_clone).collect());
+                        passkeys.set(
+                            current
+                                .into_iter()
+                                .filter(|p| p.credential_id != cred_id_clone)
+                                .collect(),
+                        );
                         delete_passkey_id.set(None);
                     }
                     Ok(resp) => {
@@ -680,9 +698,7 @@ pub fn SecuritySettings() -> Html {
             logout_loading.set(true);
             spawn_local(async move {
                 // Call backend logout endpoint to clear cookies
-                let _ = Api::post("/api/logout")
-                    .send()
-                    .await;
+                let _ = Api::post("/api/logout").send().await;
 
                 // Reload the page to reset state
                 if let Some(window) = web_sys::window() {
@@ -701,7 +717,11 @@ pub fn SecuritySettings() -> Html {
     };
 
     // Check if TOTP is enabled - required before passkeys can be added
-    let totp_is_enabled = if let TwoFactorState::Enabled { .. } = &*state { true } else { false };
+    let totp_is_enabled = if let TwoFactorState::Enabled { .. } = &*state {
+        true
+    } else {
+        false
+    };
 
     html! {
         <div class="security-container">

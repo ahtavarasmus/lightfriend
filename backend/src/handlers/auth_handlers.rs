@@ -7,6 +7,7 @@ use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation}
 use rand::Rng;
 use serde::Deserialize;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::env;
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -27,6 +28,12 @@ use serde::Serialize;
 #[derive(Serialize)]
 pub struct PasswordResetResponse {
     message: String,
+}
+
+fn hash_token(token: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    hex::encode(hasher.finalize())
 }
 
 pub async fn get_users(
@@ -186,7 +193,7 @@ pub async fn login(
         return Ok(response);
     }
 
-    generate_tokens_and_response(user.id)
+    generate_tokens_and_response(&state, user.id)
 }
 
 #[derive(serde::Deserialize)]
@@ -504,11 +511,11 @@ pub async fn register(
             .user_core
             .set_preferred_number_for_country(user.id, &country);
     }
-    generate_tokens_and_response(user.id)
+    generate_tokens_and_response(&state, user.id)
 }
 
 pub async fn refresh_token(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     headers: reqwest::header::HeaderMap,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     let refresh_token = match headers.get("cookie") {
@@ -558,11 +565,35 @@ pub async fn refresh_token(
         ));
     }
 
-    // Optional: Rotate refresh token by generating a new one
-    generate_tokens_and_response(user_id)
+    let user = state.user_core.find_by_id(user_id).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to load user"})),
+        )
+    })?;
+
+    let user = user.ok_or((
+        StatusCode::UNAUTHORIZED,
+        Json(json!({"error": "Invalid user in token"})),
+    ))?;
+
+    let presented_hash = hash_token(&refresh_token);
+    match user.refresh_token_hash.as_deref() {
+        Some(stored_hash) if stored_hash == presented_hash && !user.refresh_token_compromised => {
+            generate_tokens_and_response(&state, user_id)
+        }
+        _ => {
+            let _ = state.user_core.mark_refresh_token_compromised(user_id);
+            Err((
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "Refresh token is no longer valid"})),
+            ))
+        }
+    }
 }
 
 pub fn generate_tokens_and_response(
+    state: &Arc<AppState>,
     user_id: i32,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     // Generate access token (1 hour)
@@ -606,6 +637,17 @@ pub fn generate_tokens_and_response(
             Json(json!({"error": "Token generation failed"})),
         )
     })?;
+
+    let refresh_token_hash = hash_token(&refresh_token);
+    state
+        .user_core
+        .set_refresh_token_hash(user_id, &refresh_token_hash)
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to persist refresh token state"})),
+            )
+        })?;
 
     // Create response with HttpOnly cookies
     let mut response = Response::new(axum::body::Body::from(
@@ -708,10 +750,14 @@ pub async fn validate_magic_link(
     State(state): State<Arc<AppState>>,
     Path(token): Path<String>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
     // Find user by magic_token
     let user = state
         .user_core
-        .find_by_magic_token(&token)
+        .find_by_valid_magic_token(&token, now)
         .map_err(|e| {
             tracing::error!("Database error finding user by magic token: {}", e);
             (
@@ -741,8 +787,15 @@ pub async fn validate_magic_link(
             .body(axum::body::Body::from(response_body.to_string()))
             .unwrap())
     } else {
-        // User already has password - auto-login and return JWT
-        generate_tokens_and_response(user.id)
+        // User already has password - auto-login and invalidate the link
+        state.user_core.clear_magic_token(user.id).map_err(|e| {
+            tracing::error!("Failed to clear magic token for user {}: {}", user.id, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to consume magic link"})),
+            )
+        })?;
+        generate_tokens_and_response(&state, user.id)
     }
 }
 
@@ -760,10 +813,14 @@ pub async fn set_password_from_magic_link(
         ));
     }
 
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
     // Find user by magic_token
     let user = state
         .user_core
-        .find_by_magic_token(&req.token)
+        .find_by_valid_magic_token(&req.token, now)
         .map_err(|e| {
             tracing::error!("Database error finding user by magic token: {}", e);
             (
@@ -798,10 +855,18 @@ pub async fn set_password_from_magic_link(
             )
         })?;
 
+    state.user_core.clear_magic_token(user.id).map_err(|e| {
+        tracing::error!("Failed to clear magic token for user {}: {}", user.id, e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to consume token"})),
+        )
+    })?;
+
     tracing::info!("User {} set their password via magic link", user.id);
 
     // Generate JWT tokens and return
-    generate_tokens_and_response(user.id)
+    generate_tokens_and_response(&state, user.id)
 }
 
 /// Get magic token from Stripe session ID (for redirect flow)

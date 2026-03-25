@@ -170,6 +170,10 @@ impl ToolHandler for RespondEmailHandler {
         crate::tool_call_utils::email::get_respond_to_email_tool()
     }
 
+    fn auto_injected_params(&self) -> Vec<&'static str> {
+        vec!["email_id"]
+    }
+
     fn is_outgoing(&self) -> bool {
         true
     }

@@ -1,9 +1,9 @@
-use yew::prelude::*;
-use wasm_bindgen_futures::spawn_local;
-use serde::Deserialize;
-use crate::utils::api::Api;
 use crate::dashboard::media_panel::MediaItem;
+use crate::utils::api::Api;
+use serde::Deserialize;
+use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
+use yew::prelude::*;
 
 const YOUTUBE_PANEL_STYLES: &str = r#"
 .youtube-quick-panel {
@@ -443,11 +443,12 @@ pub fn youtube_quick_panel(props: &YouTubeQuickPanelProps) -> Html {
     let search_query = use_state(|| init.search_query.clone());
     let current_view = use_state(|| init.current_view.clone());
     let active_filter = use_state(|| init.active_filter.clone());
-    let browsing_channel: UseStateHandle<Option<(String, String)>> = use_state(|| init.browsing_channel.clone());
+    let browsing_channel: UseStateHandle<Option<(String, String)>> =
+        use_state(|| init.browsing_channel.clone());
     let cached_videos = use_state(|| init.cached_videos.clone());
-    let cached_channels: UseStateHandle<Vec<YouTubeChannel>> = use_state(|| init.cached_channels.clone());
+    let cached_channels: UseStateHandle<Vec<YouTubeChannel>> =
+        use_state(|| init.cached_channels.clone());
     let cached_view: UseStateHandle<Option<YtView>> = use_state(|| init.cached_view.clone());
-
 
     // Helper: emit state change to parent
     let emit_state = {
@@ -500,31 +501,51 @@ pub fn youtube_quick_panel(props: &YouTubeQuickPanelProps) -> Html {
                             Ok(response) => {
                                 if response.ok() {
                                     if let Ok(data) = response.json::<serde_json::Value>().await {
-                                        let has_youtube = data["connected"].as_bool().unwrap_or(false);
+                                        let has_youtube =
+                                            data["connected"].as_bool().unwrap_or(false);
                                         connected.set(Some(has_youtube));
 
                                         if has_youtube {
                                             // Fetch subscription feed
-                                            match Api::get("/api/youtube/subscriptions").send().await {
+                                            match Api::get("/api/youtube/subscriptions")
+                                                .send()
+                                                .await
+                                            {
                                                 Ok(resp) => {
                                                     if resp.ok() {
-                                                        if let Ok(data) = resp.json::<YouTubeVideosResponse>().await {
+                                                        if let Ok(data) = resp
+                                                            .json::<YouTubeVideosResponse>()
+                                                            .await
+                                                        {
                                                             videos.set(data.videos);
                                                             emit_state.emit(());
                                                         } else {
-                                                            error.set(Some("Failed to parse videos".to_string()));
+                                                            error.set(Some(
+                                                                "Failed to parse videos"
+                                                                    .to_string(),
+                                                            ));
                                                         }
                                                     } else {
-                                                        if let Ok(err_data) = resp.json::<serde_json::Value>().await {
-                                                            let msg = err_data["error"].as_str().unwrap_or("Failed to fetch videos");
+                                                        if let Ok(err_data) =
+                                                            resp.json::<serde_json::Value>().await
+                                                        {
+                                                            let msg = err_data["error"]
+                                                                .as_str()
+                                                                .unwrap_or(
+                                                                    "Failed to fetch videos",
+                                                                );
                                                             error.set(Some(msg.to_string()));
                                                         } else {
-                                                            error.set(Some("Failed to fetch videos".to_string()));
+                                                            error.set(Some(
+                                                                "Failed to fetch videos"
+                                                                    .to_string(),
+                                                            ));
                                                         }
                                                     }
                                                 }
                                                 Err(e) => {
-                                                    error.set(Some(format!("Network error: {}", e)));
+                                                    error
+                                                        .set(Some(format!("Network error: {}", e)));
                                                 }
                                             }
                                         }
@@ -709,7 +730,10 @@ pub fn youtube_quick_panel(props: &YouTubeQuickPanelProps) -> Html {
             error.set(None);
 
             spawn_local(async move {
-                let endpoint = format!("/api/youtube/channel/{}/videos", urlencoding::encode(&channel_id));
+                let endpoint = format!(
+                    "/api/youtube/channel/{}/videos",
+                    urlencoding::encode(&channel_id)
+                );
                 match Api::get(&endpoint).send().await {
                     Ok(resp) => {
                         if resp.ok() {
@@ -721,7 +745,9 @@ pub fn youtube_quick_panel(props: &YouTubeQuickPanelProps) -> Html {
                             }
                         } else {
                             if let Ok(err_data) = resp.json::<serde_json::Value>().await {
-                                let msg = err_data["error"].as_str().unwrap_or("Failed to load channel");
+                                let msg = err_data["error"]
+                                    .as_str()
+                                    .unwrap_or("Failed to load channel");
                                 error.set(Some(msg.to_string()));
                             }
                         }
@@ -833,7 +859,12 @@ pub fn youtube_quick_panel(props: &YouTubeQuickPanelProps) -> Html {
         let on_filter_click = on_filter_click.clone();
 
         move || -> Html {
-            let filters = [YtFilter::All, YtFilter::Videos, YtFilter::Shorts, YtFilter::Channels];
+            let filters = [
+                YtFilter::All,
+                YtFilter::Videos,
+                YtFilter::Shorts,
+                YtFilter::Channels,
+            ];
             html! {
                 <div class="youtube-filter-row">
                     { for filters.iter().map(|f| {

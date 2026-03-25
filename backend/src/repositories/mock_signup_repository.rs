@@ -45,6 +45,9 @@ impl MockUser {
             last_credits_notification: None,
             next_billing_date_timestamp: None,
             magic_token: self.magic_token.clone(),
+            refresh_token_hash: None,
+            refresh_token_compromised: false,
+            magic_token_expires_at: None,
             plan_type: None,
             matrix_e2ee_enabled: false,
         }

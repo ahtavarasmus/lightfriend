@@ -29,37 +29,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    contact_profiles (id) {
-        id -> Int4,
-        user_id -> Int4,
-        nickname -> Text,
-        whatsapp_chat -> Nullable<Text>,
-        telegram_chat -> Nullable<Text>,
-        signal_chat -> Nullable<Text>,
-        email_addresses -> Nullable<Text>,
-        notification_mode -> Text,
-        notification_type -> Text,
-        notify_on_call -> Int4,
-        created_at -> Int4,
-        whatsapp_room_id -> Nullable<Text>,
-        telegram_room_id -> Nullable<Text>,
-        signal_room_id -> Nullable<Text>,
-        notes -> Nullable<Text>,
-    }
-}
-
-diesel::table! {
-    contact_profile_exceptions (id) {
-        id -> Int4,
-        profile_id -> Int4,
-        platform -> Text,
-        notification_mode -> Text,
-        notification_type -> Text,
-        notify_on_call -> Int4,
-    }
-}
-
-diesel::table! {
     imap_connection (id) {
         id -> Int4,
         user_id -> Int4,
@@ -263,6 +232,9 @@ diesel::table! {
         last_credits_notification -> Nullable<Int4>,
         next_billing_date_timestamp -> Nullable<Int4>,
         magic_token -> Nullable<Text>,
+        refresh_token_hash -> Nullable<Text>,
+        refresh_token_compromised -> Bool,
+        magic_token_expires_at -> Nullable<Int4>,
         plan_type -> Nullable<Text>,
         matrix_e2ee_enabled -> Bool,
     }
@@ -375,14 +347,130 @@ diesel::table! {
     }
 }
 
+// Ontology v1: Person + Channel tables
+
+diesel::table! {
+    ont_persons (id) {
+        id -> Int4,
+        user_id -> Int4,
+        name -> Text,
+        created_at -> Int4,
+        updated_at -> Int4,
+    }
+}
+
+diesel::table! {
+    ont_person_edits (id) {
+        id -> Int4,
+        user_id -> Int4,
+        person_id -> Int4,
+        property_name -> Text,
+        value -> Text,
+        edited_at -> Int4,
+    }
+}
+
+diesel::table! {
+    ont_channels (id) {
+        id -> Int4,
+        user_id -> Int4,
+        person_id -> Int4,
+        platform -> Text,
+        handle -> Nullable<Text>,
+        room_id -> Nullable<Text>,
+        notification_mode -> Text,
+        notification_type -> Text,
+        notify_on_call -> Int4,
+        created_at -> Int4,
+    }
+}
+
+diesel::table! {
+    ont_changelog (id) {
+        id -> Int8,
+        user_id -> Int4,
+        entity_type -> Text,
+        entity_id -> Int4,
+        change_type -> Text,
+        changed_fields -> Nullable<Text>,
+        source -> Text,
+        created_at -> Int4,
+    }
+}
+
+// Ontology v2: Links between entities
+
+diesel::table! {
+    ont_links (id) {
+        id -> Int4,
+        user_id -> Int4,
+        source_type -> Text,
+        source_id -> Int4,
+        target_type -> Text,
+        target_id -> Int4,
+        link_type -> Text,
+        metadata -> Nullable<Text>,
+        created_at -> Int4,
+    }
+}
+
+diesel::table! {
+    ont_messages (id) {
+        id -> Int8,
+        user_id -> Int4,
+        room_id -> Text,
+        platform -> Text,
+        sender_name -> Text,
+        content -> Text,
+        person_id -> Nullable<Int4>,
+        created_at -> Int4,
+    }
+}
+
+diesel::table! {
+    ont_events (id) {
+        id -> Int4,
+        user_id -> Int4,
+        description -> Text,
+        remind_at -> Nullable<Int4>,
+        due_at -> Nullable<Int4>,
+        status -> Text,
+        created_at -> Int4,
+        updated_at -> Int4,
+    }
+}
+
+diesel::table! {
+    ont_rules (id) {
+        id -> Int4,
+        user_id -> Int4,
+        name -> Text,
+        trigger_type -> Text,
+        trigger_config -> Text,
+        logic_type -> Text,
+        logic_prompt -> Nullable<Text>,
+        logic_fetch -> Nullable<Text>,
+        action_type -> Text,
+        action_config -> Text,
+        status -> Text,
+        next_fire_at -> Nullable<Int4>,
+        expires_at -> Nullable<Int4>,
+        last_triggered_at -> Nullable<Int4>,
+        created_at -> Int4,
+        updated_at -> Int4,
+        flow_config -> Nullable<Text>,
+    }
+}
+
+diesel::joinable!(ont_person_edits -> ont_persons (person_id));
+diesel::joinable!(ont_channels -> ont_persons (person_id));
+
 diesel::joinable!(refund_info -> users (user_id));
 diesel::joinable!(user_settings -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     user_secrets,
     user_info,
-    contact_profiles,
-    contact_profile_exceptions,
     imap_connection,
     message_history,
     tesla,
@@ -406,4 +494,12 @@ diesel::allow_tables_to_appear_in_same_query!(
     disabled_alert_types,
     site_metrics,
     waitlist,
+    ont_persons,
+    ont_person_edits,
+    ont_channels,
+    ont_changelog,
+    ont_links,
+    ont_messages,
+    ont_events,
+    ont_rules,
 );

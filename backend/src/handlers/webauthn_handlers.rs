@@ -696,7 +696,7 @@ pub async fn verify_login(
     state.pending_totp_logins.remove(&req.login_token);
 
     // Generate tokens and return response
-    generate_tokens_and_response(user_id).map_err(|_| {
+    generate_tokens_and_response(&state, user_id).map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "Failed to generate tokens"})),

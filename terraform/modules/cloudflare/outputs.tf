@@ -14,12 +14,7 @@ output "tunnel_cname" {
   value       = "${cloudflare_zero_trust_tunnel_cloudflared.main.id}.cfargotunnel.com"
 }
 
-output "api_url" {
-  description = "API endpoint URL"
-  value       = "https://api-${var.environment}.${var.domain}"
-}
-
-output "app_url" {
-  description = "App frontend URL"
-  value       = "https://app-${var.environment}.${var.domain}"
+output "url" {
+  description = "Application URL"
+  value       = "https://${var.subdomain}.${var.domain}"
 }

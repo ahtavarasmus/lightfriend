@@ -1,9 +1,9 @@
-use yew::prelude::*;
-use serde::Deserialize;
 use crate::utils::api::Api;
+use gloo_timers::future::TimeoutFuture;
+use serde::Deserialize;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::js_sys;
-use gloo_timers::future::TimeoutFuture;
+use yew::prelude::*;
 
 // Auth type enum
 #[derive(Clone, PartialEq)]
@@ -25,8 +25,33 @@ pub struct BridgeConfig {
 }
 
 // SHARED CONSTANTS - same for all bridges
-const POLL_INTERVAL_MS: i32 = 5000;        // 5 seconds
-const POLL_DURATION_MS: i32 = 300000;      // 5 minutes
+const POLL_INTERVAL_MS: i32 = 5000; // 5 seconds
+const POLL_DURATION_MS: i32 = 300000; // 5 minutes
+const CONNECT_REQUEST_TIMEOUT_MS: u32 = 45000; // 45 seconds for initial connect request
+
+/// Map backend error strings to user-friendly messages
+fn humanize_error(raw: &str) -> String {
+    match raw {
+        "cleanup_in_progress" => {
+            "Previous connection is still being cleaned up. Please wait a moment and try again."
+                .to_string()
+        }
+        "bridge_not_found" => {
+            "The messaging bridge could not be found. Please try again.".to_string()
+        }
+        "already_connected" => "This account is already connected.".to_string(),
+        "rate_limited" => {
+            "Too many attempts. Please wait a minute before trying again.".to_string()
+        }
+        "invalid_qr" | "qr_expired" => {
+            "The QR code has expired. Please try connecting again.".to_string()
+        }
+        "matrix_error" => {
+            "There was an issue with the messaging server. Please try again later.".to_string()
+        }
+        other => other.to_string(),
+    }
+}
 
 // Bridge configs
 pub const WHATSAPP_CONFIG: BridgeConfig = BridgeConfig {
@@ -119,7 +144,6 @@ struct ErrorResponse {
 pub struct BridgeConnectProps {
     pub user_id: i32,
     pub sub_tier: Option<String>,
-    pub discount: bool,
     pub config: BridgeConfig,
 }
 
@@ -143,8 +167,45 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
     let is_resetting = use_state(|| false);
     let reset_success = use_state(|| false);
     let is_cleaning_up = use_state(|| false);
+    let remaining_seconds = use_state(|| 0_i32);
+    let poll_start_time = use_state(|| 0.0_f64);
+
+    // Countdown timer effect - ticks every second while connecting
+    {
+        let remaining_seconds = remaining_seconds.clone();
+        let poll_start_time = poll_start_time.clone();
+        let is_connecting_dep = *is_connecting;
+        use_effect_with_deps(
+            move |is_conn: &bool| {
+                let interval_holder: std::rc::Rc<
+                    std::cell::RefCell<Option<gloo_timers::callback::Interval>>,
+                > = std::rc::Rc::new(std::cell::RefCell::new(None));
+                if *is_conn {
+                    let remaining_seconds = remaining_seconds.clone();
+                    let poll_start_time_val = *poll_start_time;
+                    let interval = gloo_timers::callback::Interval::new(1_000, move || {
+                        if poll_start_time_val > 0.0 {
+                            let elapsed = (js_sys::Date::now() - poll_start_time_val) / 1000.0;
+                            let remaining =
+                                ((POLL_DURATION_MS as f64 / 1000.0) - elapsed).max(0.0) as i32;
+                            remaining_seconds.set(remaining);
+                        }
+                    });
+                    *interval_holder.borrow_mut() = Some(interval);
+                } else {
+                    remaining_seconds.set(0);
+                }
+                let holder = interval_holder;
+                move || {
+                    holder.borrow_mut().take();
+                }
+            },
+            is_connecting_dep,
+        );
+    }
+
     // Phone pairing state (WhatsApp only)
-    let phone_login_mode = use_state(|| false);  // true = phone mode, false = QR mode
+    let phone_login_mode = use_state(|| false); // true = phone mode, false = QR mode
     let phone_input = use_state(String::new);
     let pairing_code = use_state(|| None::<String>);
 
@@ -187,9 +248,12 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                     pairing_code.set(None);
                                     phone_login_mode.set(false);
                                     error.set(None); // Clear any previous timeout errors
-                                    // Show success message only if we were actively connecting
+                                                     // Show success message only if we were actively connecting
                                     if was_in_connecting_state {
-                                        success_message.set(Some(format!("{} connected successfully!", bridge_name)));
+                                        success_message.set(Some(format!(
+                                            "{} connected successfully!",
+                                            bridge_name
+                                        )));
                                         // Auto-hide success message after 3 seconds
                                         let success_message_clone = success_message.clone();
                                         spawn_local(async move {
@@ -227,10 +291,13 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
     // Effect to fetch initial status
     {
         let fetch_status = fetch_status.clone();
-        use_effect_with_deps(move |_| {
-            fetch_status.emit(());
-            || ()
-        }, ());
+        use_effect_with_deps(
+            move |_| {
+                fetch_status.emit(());
+                || ()
+            },
+            (),
+        );
     }
 
     // Function to start connection with cleanup retry support
@@ -241,6 +308,8 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
         let error = error.clone();
         let fetch_status = fetch_status.clone();
         let is_cleaning_up = is_cleaning_up.clone();
+        let poll_start_time = poll_start_time.clone();
+        let remaining_seconds = remaining_seconds.clone();
         let bridge_id = bridge_id.to_string();
         let bridge_name = bridge_name.to_string();
         Callback::from(move |_| {
@@ -250,10 +319,33 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
             let error = error.clone();
             let fetch_status = fetch_status.clone();
             let is_cleaning_up = is_cleaning_up.clone();
+            let poll_start_time = poll_start_time.clone();
+            let remaining_seconds = remaining_seconds.clone();
             let bridge_id = bridge_id.clone();
             let bridge_name = bridge_name.clone();
+            let request_active = std::rc::Rc::new(std::cell::Cell::new(true));
             is_connecting.set(true);
             was_connecting.set(true);
+            poll_start_time.set(js_sys::Date::now());
+            remaining_seconds.set(POLL_DURATION_MS / 1000);
+            {
+                let request_active = request_active.clone();
+                let is_connecting = is_connecting.clone();
+                let is_cleaning_up = is_cleaning_up.clone();
+                let error = error.clone();
+                let bridge_name = bridge_name.clone();
+                gloo_timers::callback::Timeout::new(CONNECT_REQUEST_TIMEOUT_MS, move || {
+                    if request_active.replace(false) {
+                        is_connecting.set(false);
+                        is_cleaning_up.set(false);
+                        error.set(Some(format!(
+                            "{} connection timed out while waiting for the bridge. Please try again.",
+                            bridge_name
+                        )));
+                    }
+                })
+                .forget();
+            }
             spawn_local(async move {
                 // Retry loop for cleanup_in_progress
                 let max_cleanup_retries = 30; // 30 retries * 2 seconds = ~60 seconds max wait
@@ -261,6 +353,9 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                     let url = format!("/api/auth/{}/connect", bridge_id);
                     match Api::get(&url).send().await {
                         Ok(response) => {
+                            if !request_active.get() {
+                                return;
+                            }
                             let status = response.status();
                             // Check for cleanup_in_progress (409 Conflict)
                             if status == 409 {
@@ -278,6 +373,7 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                             if status == 200 {
                                 match response.json::<ConnectionResponse>().await {
                                     Ok(connection_response) => {
+                                        request_active.set(false);
                                         auth_data.set(Some(connection_response.auth_data));
                                         error.set(None);
                                         // Start polling for status
@@ -293,10 +389,14 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                             fetch_status: Callback<()>,
                                         ) -> Box<dyn Fn()> {
                                             Box::new(move || {
-                                                if js_sys::Date::now() - start_time > poll_duration as f64 {
+                                                if js_sys::Date::now() - start_time
+                                                    > poll_duration as f64
+                                                {
                                                     is_connecting.set(false);
                                                     auth_data.set(None);
-                                                    error.set(Some("Connection attempt timed out".to_string()));
+                                                    error.set(Some(
+                                                        "Connection attempt timed out".to_string(),
+                                                    ));
                                                     return;
                                                 }
                                                 fetch_status.emit(());
@@ -336,23 +436,33 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                         return; // Success - exit retry loop
                                     }
                                     Err(_) => {
+                                        request_active.set(false);
                                         is_connecting.set(false);
-                                        error.set(Some("Failed to parse connection response".to_string()));
+                                        error.set(Some(
+                                            "Failed to parse connection response".to_string(),
+                                        ));
                                         return;
                                     }
                                 }
                             } else {
                                 // Other error
+                                request_active.set(false);
                                 is_connecting.set(false);
                                 if let Ok(err_response) = response.json::<ErrorResponse>().await {
-                                    error.set(Some(err_response.error));
+                                    error.set(Some(humanize_error(&err_response.error)));
                                 } else {
-                                    error.set(Some(format!("Failed to start {} connection", bridge_name)));
+                                    error.set(Some(format!(
+                                        "Failed to start {} connection",
+                                        bridge_name
+                                    )));
                                 }
                                 return;
                             }
                         }
                         Err(_) => {
+                            if !request_active.replace(false) {
+                                return;
+                            }
                             is_connecting.set(false);
                             is_cleaning_up.set(false);
                             error.set(Some(format!("Failed to start {} connection", bridge_name)));
@@ -361,9 +471,14 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                     }
                 }
                 // Exhausted retries waiting for cleanup
+                if !request_active.replace(false) {
+                    return;
+                }
                 is_connecting.set(false);
                 is_cleaning_up.set(false);
-                error.set(Some("Cleanup is taking too long. Please try again later.".to_string()));
+                error.set(Some(
+                    "Cleanup is taking too long. Please try again later.".to_string(),
+                ));
             });
         })
     };
@@ -433,10 +548,14 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                             fetch_status: Callback<()>,
                                         ) -> Box<dyn Fn()> {
                                             Box::new(move || {
-                                                if js_sys::Date::now() - start_time > poll_duration as f64 {
+                                                if js_sys::Date::now() - start_time
+                                                    > poll_duration as f64
+                                                {
                                                     is_connecting.set(false);
                                                     pairing_code.set(None);
-                                                    error.set(Some("Connection attempt timed out".to_string()));
+                                                    error.set(Some(
+                                                        "Connection attempt timed out".to_string(),
+                                                    ));
                                                     return;
                                                 }
                                                 fetch_status.emit(());
@@ -474,7 +593,9 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                     }
                                     Err(_) => {
                                         is_connecting.set(false);
-                                        error.set(Some("Failed to parse pairing response".to_string()));
+                                        error.set(Some(
+                                            "Failed to parse pairing response".to_string(),
+                                        ));
                                         return;
                                     }
                                 }
@@ -483,7 +604,10 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                 if let Ok(err_response) = response.json::<ErrorResponse>().await {
                                     error.set(Some(err_response.error));
                                 } else {
-                                    error.set(Some(format!("Failed to start {} phone connection", bridge_name)));
+                                    error.set(Some(format!(
+                                        "Failed to start {} phone connection",
+                                        bridge_name
+                                    )));
                                 }
                                 return;
                             }
@@ -491,14 +615,19 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                         Err(_) => {
                             is_connecting.set(false);
                             is_cleaning_up.set(false);
-                            error.set(Some(format!("Failed to start {} phone connection", bridge_name)));
+                            error.set(Some(format!(
+                                "Failed to start {} phone connection",
+                                bridge_name
+                            )));
                             return;
                         }
                     }
                 }
                 is_connecting.set(false);
                 is_cleaning_up.set(false);
-                error.set(Some("Cleanup is taking too long. Please try again later.".to_string()));
+                error.set(Some(
+                    "Cleanup is taking too long. Please try again later.".to_string(),
+                ));
             });
         })
     };
@@ -529,7 +658,9 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                 let url = format!("/api/auth/{}/disconnect", bridge_id);
                 if let Err(_) = Api::delete(&url).send().await {
                     // Log error but don't show to user - UI already updated
-                    web_sys::console::error_1(&format!("Background {} disconnect failed", bridge_name).into());
+                    web_sys::console::error_1(
+                        &format!("Background {} disconnect failed", bridge_name).into(),
+                    );
                 }
             });
             error.set(None);
@@ -564,7 +695,10 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                 Ok(health_response) => {
                                     is_checking_health.set(false);
                                     if health_response.healthy {
-                                        health_message.set(Some(format!("Connection healthy: {}", health_response.message)));
+                                        health_message.set(Some(format!(
+                                            "Connection healthy: {}",
+                                            health_response.message
+                                        )));
                                         // Auto-hide success message after 5 seconds
                                         let health_message_clone = health_message.clone();
                                         spawn_local(async move {
@@ -579,12 +713,17 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                             created_at: (js_sys::Date::now() / 1000.0) as i32,
                                             connected_account: None,
                                         }));
-                                        error.set(Some(format!("{} disconnected: {}", bridge_name, health_response.message)));
+                                        error.set(Some(format!(
+                                            "{} disconnected: {}",
+                                            bridge_name, health_response.message
+                                        )));
                                     }
                                 }
                                 Err(_) => {
                                     is_checking_health.set(false);
-                                    error.set(Some("Failed to parse health check response".to_string()));
+                                    error.set(Some(
+                                        "Failed to parse health check response".to_string(),
+                                    ));
                                 }
                             }
                         } else {
@@ -592,10 +731,16 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                             is_checking_health.set(false);
                             match response.json::<ErrorResponse>().await {
                                 Ok(err_response) => {
-                                    error.set(Some(format!("{} health check failed: {}", bridge_name, err_response.error)));
+                                    error.set(Some(format!(
+                                        "{} health check failed: {}",
+                                        bridge_name, err_response.error
+                                    )));
                                 }
                                 Err(_) => {
-                                    error.set(Some(format!("{} health check failed (status {})", bridge_name, status)));
+                                    error.set(Some(format!(
+                                        "{} health check failed (status {})",
+                                        bridge_name, status
+                                    )));
                                 }
                             }
                         }
@@ -826,6 +971,11 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                     { for config.instructions.iter().enumerate().map(|(i, instruction)| {
                                         html! { <p class="instruction">{format!("{}. {}", i + 1, instruction)}</p> }
                                     })}
+                                    if *remaining_seconds > 0 {
+                                        <div class="poll-countdown">
+                                            {format!("{}:{:02} remaining", *remaining_seconds / 60, *remaining_seconds % 60)}
+                                        </div>
+                                    }
                                 </div>
                             } else {
                                 <div class="loading-container">
@@ -847,7 +997,7 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                 </div>
                             }
                         } else {
-                            if props.sub_tier.as_deref() == Some("tier 2") || props.discount {
+                            if props.sub_tier.is_some() {
                                 <p class="service-description">
                                     {format!("Send and receive {} messages through SMS or voice calls.", bridge_name)}
                                 </p>
@@ -1344,6 +1494,15 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                         color: #999;
                         margin-top: 0.5rem;
                         font-size: 0.9rem;
+                    }
+                    .poll-countdown {
+                        color: #888;
+                        font-size: 0.85rem;
+                        margin-top: 1rem;
+                        padding: 0.5rem 1rem;
+                        background: rgba(255, 255, 255, 0.05);
+                        border-radius: 6px;
+                        display: inline-block;
                     }
                     .loading-container {
                         text-align: center;

@@ -200,16 +200,17 @@ pub async fn validate_elevenlabs_secret(
     }
 }
 
-use jiff::Timestamp;
+use chrono::{Offset, Utc};
+use chrono_tz::Tz;
 
-pub fn get_offset_with_jiff(timezone_str: &str) -> Result<(i32, i32), jiff::Error> {
-    let time = Timestamp::now();
-    let zoned = time.in_tz(timezone_str)?;
-
-    // Get offset information
-    let offset_seconds = zoned.offset().seconds();
-    let hours = offset_seconds / 3600;
-    let minutes = (offset_seconds.abs() % 3600) / 60;
+pub fn get_timezone_offset(timezone_str: &str) -> Result<(i32, i32), String> {
+    let tz: Tz = timezone_str
+        .parse()
+        .map_err(|e| format!("Invalid timezone '{}': {}", timezone_str, e))?;
+    let now = Utc::now().with_timezone(&tz);
+    let total_seconds = now.offset().fix().local_minus_utc();
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds.abs() % 3600) / 60;
 
     Ok((hours, minutes))
 }
@@ -328,8 +329,8 @@ pub async fn fetch_assistant(
                 Some(ref tz) => tz.as_str(),
                 None => "UTC",
             };
-            // Get timezone offset using jiff
-            let (hours, minutes) = match get_offset_with_jiff(timezone_str) {
+            // Get timezone offset
+            let (hours, minutes) = match get_timezone_offset(timezone_str) {
                 Ok((h, m)) => (h, m),
                 Err(_) => {
                     tracing::error!(
@@ -400,17 +401,16 @@ pub async fn fetch_assistant(
                 tracing::error!("Failed to log call usage: {}", e);
                 // Continue execution even if logging fails
             }
-            // Get contact profile nicknames for voice pronunciation
-            // This is faster than fetching from Matrix and contains user's important contacts
-            let contact_nicknames: String = state
-                .user_repository
-                .get_contact_profiles(user.id)
+            // Get Person names from ontology for voice pronunciation
+            let contact_names: Vec<String> = state
+                .ontology_repository
+                .get_persons(user.id)
                 .unwrap_or_default()
                 .iter()
-                .map(|p| p.nickname.clone())
-                .collect::<Vec<_>>()
-                .join(", ");
+                .map(|p| p.name.clone())
+                .collect();
 
+            let contact_nicknames = contact_names.join(", ");
             dynamic_variables.insert("recent_contacts".to_string(), json!(contact_nicknames));
         }
         Ok(None) => {
@@ -436,173 +436,6 @@ pub async fn fetch_assistant(
         dynamic_variables,
     };
     Ok(Json(payload))
-}
-
-/// POST /api/call/items/create?user_id=X
-/// Creates an item from the ElevenLabs voice agent.
-/// Accepts the full CreateItemArgs schema for all item types.
-#[derive(Deserialize)]
-pub struct CreateItemVoicePayload {
-    pub item_type: String,
-    pub notify: String,
-    pub description: String,
-    #[serde(default)]
-    pub due_at: Option<String>,
-    #[serde(default)]
-    pub repeat: Option<String>,
-    #[serde(default)]
-    pub fetch: Option<String>,
-    #[serde(default)]
-    pub platform: Option<String>,
-    #[serde(default)]
-    pub sender: Option<String>,
-    #[serde(default)]
-    pub topic: Option<String>,
-}
-
-pub async fn handle_create_item_voice(
-    State(state): State<Arc<AppState>>,
-    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
-    Json(payload): Json<CreateItemVoicePayload>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Invalid or missing user_id parameter"})),
-            ));
-        }
-    };
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i32;
-
-    // Normalize "none" values to None
-    let item_type = if payload.item_type == "none" {
-        "task".to_string()
-    } else {
-        payload.item_type
-    };
-    let notify = if payload.notify == "none" {
-        "silent".to_string()
-    } else {
-        payload.notify
-    };
-    let repeat = payload.repeat.filter(|r| r != "none");
-    let fetch = payload.fetch.filter(|f| f != "none");
-    let platform = payload.platform.filter(|p| p != "none");
-    let sender = payload.sender.filter(|s| s != "none");
-    let topic = payload.topic.filter(|t| t != "none");
-
-    // Build summary with tags: [type:X] [notify:Y] [repeat:Z] [fetch:A] [platform:B] [sender:C] [topic:D]\nDescription
-    let mut tags = Vec::new();
-    tags.push(format!("[type:{}]", item_type));
-    tags.push(format!("[notify:{}]", notify));
-
-    if let Some(ref r) = repeat {
-        tags.push(format!("[repeat:{}]", r));
-    }
-    if let Some(ref f) = fetch {
-        tags.push(format!("[fetch:{}]", f));
-    }
-    if let Some(ref p) = platform {
-        tags.push(format!("[platform:{}]", p));
-    }
-    if let Some(ref s) = sender {
-        tags.push(format!("[sender:{}]", s));
-    }
-    if let Some(ref t) = topic {
-        if t.to_lowercase() == "any" {
-            tags.push("[scope:any]".to_string());
-        } else {
-            tags.push(format!("[topic:{}]", t));
-        }
-    }
-
-    let summary = format!("{}\n{}", tags.join(" "), payload.description);
-
-    // Parse due_at (RFC3339/ISO) into unix timestamp
-    let due_at = payload
-        .due_at
-        .as_deref()
-        .and_then(crate::proactive::utils::parse_iso_to_timestamp);
-
-    let new_item = crate::pg_models::NewPgItem {
-        user_id,
-        summary,
-        due_at,
-        priority: 0,
-        source_id: None,
-        created_at: now,
-    };
-
-    match state.item_repository.create_item(&new_item) {
-        Ok(item_id) => {
-            let confirmation = if due_at.is_some() {
-                "Got it! I'll remind you at the scheduled time."
-            } else {
-                "Got it! I've noted that down."
-            };
-            Ok(Json(json!({
-                "response": confirmation,
-                "status": "success",
-                "user_id": user_id,
-                "item_id": item_id,
-            })))
-        }
-        Err(e) => {
-            error!("Failed to create item: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to create item", "details": e.to_string()})),
-            ))
-        }
-    }
-}
-
-/// GET /api/call/items?user_id=X
-/// Returns all items for a user (for the ElevenLabs voice agent).
-pub async fn handle_fetch_items_voice(
-    State(state): State<Arc<AppState>>,
-    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Invalid or missing user_id parameter"})),
-            ));
-        }
-    };
-
-    let items = state.item_repository.get_items(user_id).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to get items: {}", e)})),
-        )
-    })?;
-
-    let items_json: Vec<serde_json::Value> = items
-        .into_iter()
-        .map(|item| {
-            json!({
-                "id": item.id,
-                "summary": item.summary,
-                "item_type": crate::proactive::utils::parse_summary_tags(&item.summary).item_type,
-                "due_at": item.due_at,
-                "priority": item.priority,
-            })
-        })
-        .collect();
-
-    Ok(Json(json!({
-        "items": items_json,
-        "count": items_json.len(),
-    })))
 }
 
 pub async fn handle_email_fetch_tool_call(
@@ -2255,8 +2088,8 @@ pub async fn make_notification_call(
         Some(ref tz) => tz.as_str(),
         None => "UTC",
     };
-    // Get timezone offset using jiff
-    let (hours, minutes) = match get_offset_with_jiff(timezone_str) {
+    // Get timezone offset
+    let (hours, minutes) = match get_timezone_offset(timezone_str) {
         Ok((h, m)) => (h, m),
         Err(_) => {
             tracing::error!(
@@ -2465,7 +2298,7 @@ pub async fn get_web_signed_url(
         .unwrap_or_else(|| "UTC".to_string());
 
     // Get timezone offset
-    let (hours, minutes) = match get_offset_with_jiff(&timezone_str) {
+    let (hours, minutes) = match get_timezone_offset(&timezone_str) {
         Ok((h, m)) => (h, m),
         Err(_) => (0, 0),
     };
@@ -2508,13 +2341,13 @@ pub async fn get_web_signed_url(
         }
     });
 
-    // Get contact profile nicknames for voice pronunciation
+    // Get Person names from ontology for voice pronunciation
     let contact_nicknames: String = state
-        .user_repository
-        .get_contact_profiles(user_id)
+        .ontology_repository
+        .get_persons(user_id)
         .unwrap_or_default()
         .iter()
-        .map(|p| p.nickname.clone())
+        .map(|p| p.name.clone())
         .collect::<Vec<_>>()
         .join(", ");
 

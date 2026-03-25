@@ -1,0 +1,127 @@
+# Telegram bridge configuration for enclave (single container)
+
+homeserver:
+    address: http://localhost:8008
+    domain: localhost
+    software: standard
+    http_retry_count: 4
+
+appservice:
+    address: http://localhost:29317
+    hostname: 0.0.0.0
+    port: 29317
+    max_body_size: 1
+    database: postgres://telegram_user:telegram_password@localhost:5432/telegram_db?sslmode=disable
+    database_opts:
+        min_size: 5
+        max_size: 25
+    public:
+        enabled: true
+        prefix: /public
+        external: ${TELEGRAM_PUBLIC_EXTERNAL_URL:-http://localhost:3000/public}
+    id: telegram
+    bot_username: telegrambot
+    bot_displayname: Telegram Bridge
+    ephemeral_events: true
+
+telegram:
+    # Get your own API keys at https://my.telegram.org/apps
+    api_id: ${TELEGRAM_API_ID}
+    api_hash: ${TELEGRAM_API_HASH}
+    bot_token: disabled
+
+    catch_up: true
+    sequential_updates: true
+    exit_on_update_error: false
+    force_refresh_interval_seconds: 0
+
+    connection:
+        timeout: 120
+        retries: 5
+        retry_delay: 1
+        flood_sleep_threshold: 60
+        request_retries: 5
+        use_ipv6: false
+
+    device_info:
+        device_model: lightfriend
+        system_version: auto
+        app_version: auto
+        lang_code: en
+        system_lang_code: en
+
+    server:
+        enabled: false
+
+    proxy:
+        type: ${TELEGRAM_PROXY_TYPE:-socks5}
+        address: ${TELEGRAM_PROXY_ADDRESS:-gw.dataimpulse.com}
+        port: ${TELEGRAM_PROXY_PORT:-10000}
+        rdns: true
+        username: ${TELEGRAM_PROXY_USERNAME:-}
+        password: ${TELEGRAM_PROXY_PASSWORD:-}
+
+bridge:
+    username_template: telegram_{userid}
+    alias_template: telegram_{groupname}
+    displayname_template: "{displayname} (Telegram)"
+    displayname_preference:
+    - full name
+    - username
+    - phone number
+    displayname_max_length: 100
+    startup_sync: true
+    sync_direct_chats: true
+    sync_direct_chat_list: true
+    allow_matrix_login: true
+    sync_matrix_state: true
+
+    sync_with_custom_puppets: false
+    double_puppet_server_map:
+        localhost: http://localhost:8008
+    double_puppet_allow_discovery: false
+    login_shared_secret_map:
+        localhost: ${MATRIX_HOMESERVER_SHARED_SECRET}
+    appservice_double_puppet:
+        localhost: as_token:${DOUBLE_PUPPET_SECRET}
+
+    caption_in_message: true
+    federate_rooms: false
+
+    encryption:
+        allow: false
+        default: false
+        appservice: false
+        require: false
+
+    bridge_matrix_leave: false
+    kick_on_logout: true
+    create_group_on_invite: true
+
+    backfill:
+        enable: false
+
+    permissions:
+        '*': puppeting
+        '@admin:localhost': admin
+
+logging:
+    version: 1
+    formatters:
+        colored:
+            (): mautrix_telegram.util.ColorFormatter
+            format: "[%(asctime)s] [%(levelname)s@%(name)s] %(message)s"
+    handlers:
+        console:
+            class: logging.StreamHandler
+            formatter: colored
+    loggers:
+        mau:
+            level: INFO
+        telethon:
+            level: INFO
+        aiohttp:
+            level: WARNING
+    root:
+        level: INFO
+        handlers: [console]

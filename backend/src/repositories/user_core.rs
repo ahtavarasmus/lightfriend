@@ -1,6 +1,6 @@
 use crate::{
     models::user_models::{NewUserSettings, User, UserSettings},
-    pg_models::{NewPgItem, NewPgUserInfo, PgItem, PgUserInfo},
+    pg_models::{NewPgUserInfo, PgUserInfo},
     pg_schema::{user_info, user_settings, users},
     PgDbPool,
 };
@@ -50,6 +50,11 @@ pub trait UserCoreOps: Send + Sync {
     fn find_by_email(&self, email: &str) -> Result<Option<User>, DieselError>;
     fn find_by_phone_number(&self, phone: &str) -> Result<Option<User>, DieselError>;
     fn find_by_magic_token(&self, token: &str) -> Result<Option<User>, DieselError>;
+    fn find_by_valid_magic_token(
+        &self,
+        token: &str,
+        now_ts: i32,
+    ) -> Result<Option<User>, DieselError>;
     fn get_all_users(&self) -> Result<Vec<User>, DieselError>;
     fn get_users_by_tier(&self, tier: &str) -> Result<Vec<User>, DieselError>;
 
@@ -60,9 +65,12 @@ pub trait UserCoreOps: Send + Sync {
 
     // Core field updates
     fn update_password(&self, user_id: i32, password_hash: &str) -> Result<(), DieselError>;
+    fn clear_magic_token(&self, user_id: i32) -> Result<(), DieselError>;
     fn update_phone_number(&self, user_id: i32, phone: &str) -> Result<(), DieselError>;
     fn update_nickname(&self, user_id: i32, nickname: &str) -> Result<(), DieselError>;
     fn update_preferred_number(&self, user_id: i32, number: &str) -> Result<(), DieselError>;
+    fn set_refresh_token_hash(&self, user_id: i32, token_hash: &str) -> Result<(), DieselError>;
+    fn mark_refresh_token_compromised(&self, user_id: i32) -> Result<(), DieselError>;
 
     // User info
     fn ensure_user_info_exists(&self, user_id: i32) -> Result<(), DieselError>;
@@ -141,7 +149,7 @@ pub trait UserCoreOps: Send + Sync {
         topic: Option<&str>,
         description: &str,
     ) -> Result<i32, DieselError>;
-    fn get_quiet_rules(&self, user_id: i32) -> Result<Vec<PgItem>, DieselError>;
+    fn get_quiet_rules(&self, user_id: i32) -> Result<Vec<String>, DieselError>;
     fn check_quiet_with_context(
         &self,
         user_id: i32,
@@ -221,50 +229,6 @@ impl UserCore {
 }
 
 /// Check if a quiet rule's tag conditions match a notification context.
-/// All specified conditions are AND'd. Platform is exact (case-insensitive),
-/// sender and topic are substring matches (case-insensitive).
-pub fn rule_matches(
-    rule: &crate::proactive::utils::ParsedTags,
-    platform: Option<&str>,
-    sender: Option<&str>,
-    content: Option<&str>,
-) -> bool {
-    // Platform: exact match (case-insensitive)
-    if let Some(rule_platform) = &rule.platform {
-        match platform {
-            Some(p) if p.to_lowercase() == rule_platform.to_lowercase() => {}
-            _ => return false,
-        }
-    }
-
-    // Sender: substring match (case-insensitive)
-    if let Some(rule_sender) = &rule.sender {
-        let rule_lower = rule_sender.to_lowercase();
-        let sender_match = sender
-            .map(|s| s.to_lowercase().contains(&rule_lower))
-            .unwrap_or(false);
-        let content_match = content
-            .map(|c| c.to_lowercase().contains(&rule_lower))
-            .unwrap_or(false);
-        if !sender_match && !content_match {
-            return false;
-        }
-    }
-
-    // Topic: substring match (case-insensitive)
-    if let Some(rule_topic) = &rule.topic {
-        let rule_lower = rule_topic.to_lowercase();
-        let content_match = content
-            .map(|c| c.to_lowercase().contains(&rule_lower))
-            .unwrap_or(false);
-        if !content_match {
-            return false;
-        }
-    }
-
-    true
-}
-
 impl UserCoreOps for UserCore {
     fn create_user(
         &self,
@@ -317,10 +281,33 @@ impl UserCoreOps for UserCore {
         Ok(user)
     }
 
+    fn find_by_valid_magic_token(
+        &self,
+        token: &str,
+        now_ts: i32,
+    ) -> Result<Option<User>, DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        let user = users::table
+            .filter(users::magic_token.eq(token))
+            .filter(users::magic_token_expires_at.is_not_null())
+            .filter(users::magic_token_expires_at.gt(now_ts))
+            .first::<User>(&mut pg_conn)
+            .optional()?;
+        Ok(user)
+    }
+
     fn set_magic_token(&self, user_id: i32, token: &str) -> Result<(), DieselError> {
         let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        let expiry = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32
+            + (24 * 60 * 60);
         diesel::update(users::table.find(user_id))
-            .set(users::magic_token.eq(Some(token)))
+            .set((
+                users::magic_token.eq(Some(token)),
+                users::magic_token_expires_at.eq(Some(expiry)),
+            ))
             .execute(&mut pg_conn)?;
         Ok(())
     }
@@ -390,6 +377,42 @@ impl UserCoreOps for UserCore {
         diesel::update(users::table)
             .filter(users::id.eq(user_id))
             .set(users::password_hash.eq(password_hash))
+            .execute(&mut pg_conn)?;
+        Ok(())
+    }
+
+    fn clear_magic_token(&self, user_id: i32) -> Result<(), DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        diesel::update(users::table)
+            .filter(users::id.eq(user_id))
+            .set((
+                users::magic_token.eq::<Option<String>>(None),
+                users::magic_token_expires_at.eq::<Option<i32>>(None),
+            ))
+            .execute(&mut pg_conn)?;
+        Ok(())
+    }
+
+    fn set_refresh_token_hash(&self, user_id: i32, token_hash: &str) -> Result<(), DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        diesel::update(users::table)
+            .filter(users::id.eq(user_id))
+            .set((
+                users::refresh_token_hash.eq(Some(token_hash)),
+                users::refresh_token_compromised.eq(false),
+            ))
+            .execute(&mut pg_conn)?;
+        Ok(())
+    }
+
+    fn mark_refresh_token_compromised(&self, user_id: i32) -> Result<(), DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        diesel::update(users::table)
+            .filter(users::id.eq(user_id))
+            .set((
+                users::refresh_token_hash.eq::<Option<String>>(None),
+                users::refresh_token_compromised.eq(true),
+            ))
             .execute(&mut pg_conn)?;
         Ok(())
     }
@@ -1035,75 +1058,14 @@ impl UserCoreOps for UserCore {
         Ok(())
     }
 
-    fn set_quiet_mode(&self, user_id: i32, until: Option<i32>) -> Result<(), DieselError> {
-        use crate::pg_schema::items;
-        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
-
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32;
-
-        // Remove any existing quiet_mode items for this user
-        diesel::delete(
-            items::table
-                .filter(items::user_id.eq(user_id))
-                .filter(items::source_id.eq("quiet_mode")),
-        )
-        .execute(&mut pg_conn)?;
-
-        // If enabling quiet mode, insert a new item
-        if let Some(end_ts) = until {
-            let end_time = if end_ts == 0 { None } else { Some(end_ts) };
-            let new_item = NewPgItem {
-                user_id,
-                summary: "Quiet mode.".to_string(),
-                due_at: end_time,
-                priority: 0,
-                source_id: Some("quiet_mode".to_string()),
-                created_at: now,
-            };
-            diesel::insert_into(items::table)
-                .values(&new_item)
-                .execute(&mut pg_conn)?;
-        }
-
+    fn set_quiet_mode(&self, _user_id: i32, _until: Option<i32>) -> Result<(), DieselError> {
+        // TODO: Quiet mode needs to be reimplemented using ont_rules
         Ok(())
     }
 
     fn get_quiet_mode(&self, user_id: i32) -> Result<Option<i32>, DieselError> {
-        use crate::pg_schema::items;
-        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
-
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32;
-
-        // Find quiet_mode items for this user
-        let quiet_items = items::table
-            .filter(items::user_id.eq(user_id))
-            .filter(items::source_id.eq("quiet_mode"))
-            .load::<PgItem>(&mut pg_conn)?;
-
-        for item in &quiet_items {
-            match item.due_at {
-                None => {
-                    // Indefinite quiet mode
-                    return Ok(Some(0));
-                }
-                Some(end_ts) if end_ts > now => {
-                    // Still active timed quiet mode
-                    return Ok(Some(end_ts));
-                }
-                Some(_) => {
-                    // Expired - delete this item
-                    diesel::delete(items::table.filter(items::id.eq(item.id)))
-                        .execute(&mut pg_conn)?;
-                }
-            }
-        }
-
+        // TODO: Quiet mode needs to be reimplemented using ont_rules
+        let _ = user_id;
         Ok(None)
     }
 
@@ -1117,75 +1079,23 @@ impl UserCoreOps for UserCore {
         topic: Option<&str>,
         description: &str,
     ) -> Result<i32, DieselError> {
-        use crate::pg_schema::items;
-        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
-
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32;
-
-        // Build tagged summary line
-        let mut tags = format!("[quiet:{}]", rule_type);
-        if let Some(p) = platform {
-            tags.push_str(&format!(" [platform:{}]", p));
-        }
-        if let Some(s) = sender {
-            tags.push_str(&format!(" [sender:{}]", s));
-        }
-        if let Some(t) = topic {
-            tags.push_str(&format!(" [topic:{}]", t));
-        }
-        let summary = format!("{}\n{}", tags, description);
-
-        let new_item = NewPgItem {
+        // TODO: Quiet rules need to be reimplemented using ont_rules
+        let _ = (
             user_id,
-            summary,
-            due_at: Some(until),
-            priority: 0,
-            source_id: Some("quiet_mode".to_string()),
-            created_at: now,
-        };
-        let item: PgItem = diesel::insert_into(items::table)
-            .values(&new_item)
-            .get_result(&mut pg_conn)?;
-
-        Ok(item.id)
+            until,
+            rule_type,
+            platform,
+            sender,
+            topic,
+            description,
+        );
+        Ok(0)
     }
 
-    fn get_quiet_rules(&self, user_id: i32) -> Result<Vec<PgItem>, DieselError> {
-        use crate::pg_schema::items;
-        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
-
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32;
-
-        let all_items = items::table
-            .filter(items::user_id.eq(user_id))
-            .filter(items::source_id.eq("quiet_mode"))
-            .load::<PgItem>(&mut pg_conn)?;
-
-        let mut active = Vec::new();
-        for item in all_items {
-            match item.due_at {
-                None => {
-                    // Indefinite - always active
-                    active.push(item);
-                }
-                Some(end_ts) if end_ts > now => {
-                    active.push(item);
-                }
-                Some(_) => {
-                    // Expired - clean up
-                    diesel::delete(items::table.filter(items::id.eq(item.id)))
-                        .execute(&mut pg_conn)?;
-                }
-            }
-        }
-
-        Ok(active)
+    fn get_quiet_rules(&self, user_id: i32) -> Result<Vec<String>, DieselError> {
+        // TODO: Quiet rules need to be reimplemented using ont_rules
+        let _ = user_id;
+        Ok(Vec::new())
     }
 
     fn check_quiet_with_context(
@@ -1195,57 +1105,8 @@ impl UserCoreOps for UserCore {
         sender: Option<&str>,
         content: Option<&str>,
     ) -> Result<bool, DieselError> {
-        let items = self.get_quiet_rules(user_id)?;
-
-        if items.is_empty() {
-            return Ok(false);
-        }
-
-        // Parse tags from each item
-        let mut has_global_suppress = false;
-        let mut suppress_rules: Vec<crate::proactive::utils::ParsedTags> = Vec::new();
-        let mut allow_rules: Vec<crate::proactive::utils::ParsedTags> = Vec::new();
-
-        for item in &items {
-            let tags = crate::proactive::utils::parse_summary_tags(&item.summary);
-            match tags.quiet.as_deref() {
-                None => {
-                    // No [quiet:...] tag - backward compat global suppress
-                    has_global_suppress = true;
-                }
-                Some("suppress") => {
-                    suppress_rules.push(tags);
-                }
-                Some("allow") => {
-                    allow_rules.push(tags);
-                }
-                _ => {}
-            }
-        }
-
-        // 1. Global suppress (backward compat - tagless items)
-        if has_global_suppress {
-            return Ok(true);
-        }
-
-        // 2. Check suppress rules - if any match, suppress
-        for rule in &suppress_rules {
-            if rule_matches(rule, platform, sender, content) {
-                return Ok(true);
-            }
-        }
-
-        // 3. If allow rules exist but none match, suppress
-        if !allow_rules.is_empty() {
-            let any_match = allow_rules
-                .iter()
-                .any(|rule| rule_matches(rule, platform, sender, content));
-            if !any_match {
-                return Ok(true);
-            }
-        }
-
-        // 4. Otherwise allow
+        // TODO: Quiet mode needs to be reimplemented using ont_rules
+        let _ = (user_id, platform, sender, content);
         Ok(false)
     }
 
