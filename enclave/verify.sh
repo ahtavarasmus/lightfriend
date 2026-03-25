@@ -109,7 +109,7 @@ fi
 echo "Check 6: data integrity..."
 MANIFEST="/tmp/backup-manifest.json"
 if [ -f "${MANIFEST}" ]; then
-    EXPECTED_COUNT=$(cat "${MANIFEST}" | grep -o '"user_count": [0-9]*' | grep -o '[0-9]*')
+    EXPECTED_COUNT=$(grep -o '"user_count": [0-9]*' "${MANIFEST}" | grep -o '[0-9]*')
     if [ -n "${EXPECTED_COUNT}" ] && [ "${DB_USER_COUNT}" != "ERROR" ]; then
         if [ "${DB_USER_COUNT}" -eq "${EXPECTED_COUNT}" ]; then
             echo "  OK: user count matches manifest (${DB_USER_COUNT})"
@@ -229,7 +229,7 @@ CHECKS_JSON=$(printf '%s' "${ALL_CHECKS[*]}" | sed 's/" "/", "/g')
 
 # Determine restore type
 if [ -f /tmp/backup-manifest.json ]; then
-    MANIFEST_FORMAT=$(cat /tmp/backup-manifest.json | grep -o '"format": "[^"]*"' | grep -o '"[^"]*"$' | tr -d '"')
+    MANIFEST_FORMAT=$(grep -o '"format": "[^"]*"' /tmp/backup-manifest.json | grep -o '"[^"]*"$' | tr -d '"')
     if [ "${MANIFEST_FORMAT}" = "lightfriend-pg-backup" ]; then
         RESTORE_TYPE="pg_only_restore"
     else
