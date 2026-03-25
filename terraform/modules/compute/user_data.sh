@@ -103,14 +103,14 @@ while true; do
     fi
 
     ENDPOINT=$(grep '^MARLIN_ROOT_SERVER_ENDPOINT=' /opt/lightfriend/.env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r')
-    if [ -z "${ENDPOINT}" ]; then
+    if [ -z "$${ENDPOINT}" ]; then
         sleep 30
         continue
     fi
 
-    HOST="${ENDPOINT%:*}"
-    PORT="${ENDPOINT##*:}"
-    /usr/bin/socat VSOCK-LISTEN:9010,reuseaddr,fork TCP:"${HOST}":"${PORT}" 2>/dev/null || true
+    HOST="$${ENDPOINT%:*}"
+    PORT="$${ENDPOINT##*:}"
+    /usr/bin/socat VSOCK-LISTEN:9010,reuseaddr,fork TCP:"$${HOST}":"$${PORT}" 2>/dev/null || true
     sleep 2
 done
 SCRIPT
@@ -210,8 +210,8 @@ SEEDEOF
 cat > /opt/lightfriend/seed-server.sh <<'SCRIPT'
 #!/bin/bash
 SEED_DIR="/opt/lightfriend/seed"
-CURRENT="${SEED_DIR}/lightfriend_db.sql"
-SERVED_DIR="${SEED_DIR}/served"
+CURRENT="$${SEED_DIR}/lightfriend_db.sql"
+SERVED_DIR="$${SEED_DIR}/served"
 mkdir -p "$SEED_DIR" "$SERVED_DIR"
 
 while true; do
@@ -219,8 +219,8 @@ while true; do
         TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
         socat -u VSOCK-LISTEN:9003,reuseaddr FILE:"$CURRENT" 2>/dev/null
         if [ -f "$CURRENT" ]; then
-            mv "$CURRENT" "${SERVED_DIR}/lightfriend_db-${TIMESTAMP}.sql"
-            echo "Served bootstrap SQL seed: lightfriend_db-${TIMESTAMP}.sql"
+            mv "$CURRENT" "$${SERVED_DIR}/lightfriend_db-$${TIMESTAMP}.sql"
+            echo "Served bootstrap SQL seed: lightfriend_db-$${TIMESTAMP}.sql"
         fi
     else
         socat VSOCK-LISTEN:9003,reuseaddr SYSTEM:"echo NO_SEED" 2>/dev/null
@@ -279,7 +279,7 @@ BACKUP=$(ls -t /opt/lightfriend/backups/*.tar.gz.enc 2>/dev/null | head -1)
 [ -z "$BACKUP" ] && { echo "No backup found"; exit 1; }
 BUCKET=$(grep S3_BACKUP_BUCKET /opt/lightfriend/.env | cut -d= -f2)
 [ -z "$BUCKET" ] && { echo "S3_BACKUP_BUCKET not set in .env"; exit 1; }
-BACKUP_TIER="${BACKUP_TIER:-hourly}"
+BACKUP_TIER="$${BACKUP_TIER:-hourly}"
 
 LOCAL_SIZE=$(stat -c%s "$BACKUP" 2>/dev/null || stat -f%z "$BACKUP" 2>/dev/null)
 LOCAL_SHA=$(sha256sum "$BACKUP" | awk '{print $1}')
@@ -308,8 +308,8 @@ chmod +x /opt/lightfriend/upload-backup.sh
 cat > /opt/lightfriend/download-eif.sh <<'SCRIPT'
 #!/bin/bash
 set -euo pipefail
-EIF_KEY="${1:-}"
-EXPECTED_SHA="${2:-}"
+EIF_KEY="$${1:-}"
+EXPECTED_SHA="$${2:-}"
 BUCKET=$(grep S3_BACKUP_BUCKET /opt/lightfriend/.env | cut -d= -f2)
 [ -n "$BUCKET" ] || { echo "S3_BACKUP_BUCKET not set in .env"; exit 1; }
 [ -n "$EIF_KEY" ] || { echo "Usage: download-eif.sh <s3-key> <sha256>"; exit 1; }
@@ -335,7 +335,7 @@ chmod +x /opt/lightfriend/download-eif.sh
 cat > /opt/lightfriend/download-backup.sh <<'SCRIPT'
 #!/bin/bash
 set -euo pipefail
-BACKUP_KEY="${1:-}"
+BACKUP_KEY="$${1:-}"
 BUCKET=$(grep S3_BACKUP_BUCKET /opt/lightfriend/.env | cut -d= -f2)
 [ -z "$BUCKET" ] && { echo "S3_BACKUP_BUCKET not set in .env"; exit 1; }
 [ -z "$BACKUP_KEY" ] && { echo "Usage: download-backup.sh <s3-key>"; exit 1; }
@@ -370,9 +370,9 @@ chmod +x /opt/lightfriend/clear-restore-state.sh
 cat > /opt/lightfriend/restore-enclave.sh <<'SCRIPT'
 #!/bin/bash
 set -euo pipefail
-BACKUP_KEY="${1:-}"
-DEPLOY_ID="${2:-manual}"
-RESTORE_TYPE="${3:-full}"
+BACKUP_KEY="$${1:-}"
+DEPLOY_ID="$${2:-manual}"
+RESTORE_TYPE="$${3:-full}"
 VERIFY="/opt/lightfriend/verify-result.json"
 ARTIFACT=""
 SUCCESS=false
@@ -388,7 +388,7 @@ cleanup() {
         else
             FAILED_DIR="/opt/lightfriend/restore/failed"
             mkdir -p "$FAILED_DIR"
-            mv "$ARTIFACT" "$FAILED_DIR/${DEPLOY_ID}-$(basename "$ARTIFACT")"
+            mv "$ARTIFACT" "$FAILED_DIR/$${DEPLOY_ID}-$(basename "$ARTIFACT")"
         fi
     fi
 }
@@ -398,9 +398,9 @@ ARTIFACT=$(/opt/lightfriend/download-backup.sh "$BACKUP_KEY" | tail -1)
 [ -f "$ARTIFACT" ] || { echo "FATAL: Restore artifact not downloaded"; exit 1; }
 
 cat > /opt/lightfriend/restore.env <<EOF
-RESTORE_MODE=${RESTORE_TYPE}
-RESTORE_BACKUP_KEY=${BACKUP_KEY}
-RESTORE_DEPLOY_ID=${DEPLOY_ID}
+RESTORE_MODE=$${RESTORE_TYPE}
+RESTORE_BACKUP_KEY=$${BACKUP_KEY}
+RESTORE_DEPLOY_ID=$${DEPLOY_ID}
 EOF
 printf '%s\n' "$ARTIFACT" > /opt/lightfriend/restore/current-path
 
@@ -490,7 +490,7 @@ chmod +x /opt/lightfriend/trigger-pg-backup.sh
 cat > /opt/lightfriend/promote-backup.sh <<'SCRIPT'
 #!/bin/bash
 set -euo pipefail
-SOURCE_KEY="${1:-}"
+SOURCE_KEY="$${1:-}"
 BUCKET=$(grep S3_BACKUP_BUCKET /opt/lightfriend/.env | cut -d= -f2)
 [ -n "$SOURCE_KEY" ] || { echo "Usage: promote-backup.sh <source-key>"; exit 1; }
 [ -n "$BUCKET" ] || { echo "S3_BACKUP_BUCKET not set in .env"; exit 1; }

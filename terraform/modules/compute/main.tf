@@ -70,7 +70,7 @@ resource "aws_launch_template" "enclave" {
 
   vpc_security_group_ids = [var.security_group_id]
 
-  user_data = base64encode(templatefile("${path.module}/user_data.sh", {
+  user_data = base64gzip(templatefile("${path.module}/user_data.sh", {
     environment = var.environment
     domain      = var.domain
     subdomain   = var.subdomain
