@@ -20,7 +20,7 @@ fn check_secret(headers: &HeaderMap) -> bool {
     headers
         .get("X-Maintenance-Secret")
         .and_then(|v| v.to_str().ok())
-        .map_or(false, |v| v == expected)
+        .is_some_and(|v| v == expected)
 }
 
 pub async fn enable_maintenance(

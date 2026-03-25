@@ -36,13 +36,19 @@ fn test_migrations_apply_cleanly_with_existing_data() {
     // Insert representative test data
     let seed_sql = include_str!("fixtures/seed_data.sql");
     for statement in seed_sql.split(';') {
-        let trimmed = statement.trim();
-        if trimmed.is_empty() || trimmed.starts_with("--") {
+        // Strip comment lines before checking if statement is empty
+        let sql: String = statement
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("--"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let sql = sql.trim();
+        if sql.is_empty() {
             continue;
         }
-        sql_query(trimmed)
+        sql_query(sql)
             .execute(&mut conn)
-            .unwrap_or_else(|e| panic!("Seed data insert failed: {e}\nSQL: {trimmed}"));
+            .unwrap_or_else(|e| panic!("Seed data insert failed: {e}\nSQL: {sql}"));
     }
 
     // Verify data was inserted
