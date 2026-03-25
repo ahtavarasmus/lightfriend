@@ -67,7 +67,7 @@ fn test_upsert_deduplicates_by_name() {
     // Should be 1 person with 2 channels
     let persons = state
         .ontology_repository
-        .get_persons_with_channels(user.id)
+        .get_persons_with_channels(user.id, 100, 0)
         .unwrap();
     assert_eq!(persons.len(), 1);
     assert_eq!(persons[0].person.name, "Bob");
@@ -297,7 +297,7 @@ fn test_delete_person_cascades() {
     // Channels gone (CASCADE)
     let pwc = state
         .ontology_repository
-        .get_persons_with_channels(user.id)
+        .get_persons_with_channels(user.id, 100, 0)
         .unwrap();
     assert!(pwc.is_empty());
 

@@ -5,7 +5,6 @@
 //! data drops, and schema conflicts between new and existing state.
 
 use diesel::prelude::*;
-use diesel::r2d2::{self, ConnectionManager};
 use diesel::sql_query;
 use diesel::RunQueryDsl;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
