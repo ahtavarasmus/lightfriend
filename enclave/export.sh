@@ -10,6 +10,7 @@ set -euo pipefail
 # must come from the live inherited process environment, not from disk.
 if [ -f /etc/lightfriend/env ]; then
     set -a
+    # shellcheck source=/dev/null
     source /etc/lightfriend/env
     set +a
 fi
