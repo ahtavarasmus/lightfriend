@@ -207,11 +207,12 @@ async fn connect_imap(
         }
     }
 
-    let tcp_stream = connected.ok_or_else(|| {
-        last_error
-            .map(|e| format!("Failed to connect to {}:{}: {}", server, port, e))
-            .unwrap_or_else(|| format!("Failed to connect to {}:{}", server, port))
-    })?;
+    let tcp_stream = connected
+        .ok_or_else(|| {
+            last_error
+                .map(|e| format!("Failed to connect to {}:{}: {}", server, port, e))
+                .unwrap_or_else(|| format!("Failed to connect to {}:{}", server, port))
+        })?;
     tcp_stream.set_read_timeout(Some(Duration::from_secs(15)))?;
     tcp_stream.set_write_timeout(Some(Duration::from_secs(15)))?;
 
