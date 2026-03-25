@@ -52,16 +52,17 @@ fn has_property(
 // =============================================================================
 
 #[test]
-fn test_registry_generates_three_tools() {
+fn test_registry_generates_four_tools() {
     let registry = OntologyRegistry::build();
     let tools = registry.build_query_tools(&empty_user_data());
 
-    assert_eq!(tools.len(), 3);
+    assert_eq!(tools.len(), 4);
 
     let names: Vec<&str> = tools.iter().map(|t| t.function.name.as_str()).collect();
     assert!(names.contains(&"query_person"));
     assert!(names.contains(&"query_channel"));
     assert!(names.contains(&"query_message"));
+    assert!(names.contains(&"query_event"));
 }
 
 // =============================================================================
