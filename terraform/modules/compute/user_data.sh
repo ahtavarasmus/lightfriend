@@ -55,32 +55,38 @@ chown -R ec2-user:ec2-user /opt/lightfriend
 
 # ── Install HTTP forward proxy for enclave outbound traffic ──────────────────
 
-echo "Installing tinyproxy and socat for enclave networking..."
-dnf install -y tinyproxy socat jq || echo "WARNING: Failed to install tinyproxy/socat/jq"
+echo "Installing squid and socat for enclave networking..."
+dnf install -y squid socat jq || echo "WARNING: Failed to install squid/socat/jq"
 
-# Configure tinyproxy - localhost only, permissive for enclave traffic
-cat > /etc/tinyproxy/tinyproxy.conf <<'PROXYEOF'
-User tinyproxy
-Group tinyproxy
-Port 3128
-Listen 127.0.0.1
-Timeout 600
-MaxClients 100
-Allow 127.0.0.1/8
-ConnectPort 443
+# Configure squid - localhost only, no caching, permissive HTTPS CONNECT
+mkdir -p /var/spool/squid /var/log/squid
+chown -R squid:squid /var/spool/squid /var/log/squid || true
+
+cat > /etc/squid/squid.conf <<'PROXYEOF'
+http_port 127.0.0.1:3128
+acl localhost src 127.0.0.1/32
+http_access allow localhost
+http_access deny all
+cache deny all
+access_log stdio:/var/log/squid/access.log
+cache_log /var/log/squid/cache.log
+pid_filename /run/squid.pid
+coredump_dir /var/spool/squid
 PROXYEOF
 
-systemctl enable tinyproxy
-systemctl start tinyproxy || echo "WARNING: tinyproxy failed to start"
+squid -k parse || echo "WARNING: squid config validation failed"
+squid -z || echo "WARNING: squid cache init failed"
+systemctl enable squid
+systemctl start squid || echo "WARNING: squid failed to start"
 
 # ── VSOCK services ──────────────────────────────────────────────────────────
 
-# VSOCK bridge: enclave's VSOCK port 8001 -> tinyproxy on localhost:3128
+# VSOCK bridge: enclave's VSOCK port 8001 -> squid on localhost:3128
 cat > /etc/systemd/system/vsock-proxy-bridge.service <<'VSOCKEOF'
 [Unit]
-Description=VSOCK to tinyproxy bridge for Nitro Enclave
-After=tinyproxy.service
-Requires=tinyproxy.service
+Description=VSOCK to squid bridge for Nitro Enclave
+After=squid.service
+Requires=squid.service
 
 [Service]
 ExecStart=/usr/bin/socat VSOCK-LISTEN:8001,reuseaddr,fork TCP:127.0.0.1:3128
@@ -249,7 +255,7 @@ for svc in vsock-proxy-bridge vsock-config-server vsock-backup-receiver vsock-re
     systemctl start "$svc" || echo "WARNING: $svc failed to start"
 done
 
-echo "VSOCK services configured: proxy:8001, config:9000, backup:9001, restore:9002, seed:9003, marlin-kms:9010"
+echo "VSOCK services configured: proxy:8001 via squid:3128, config:9000, backup:9001, restore:9002, seed:9003, marlin-kms:9010"
 
 # ── Enclave launch script ───────────────────────────────────────────────────
 
