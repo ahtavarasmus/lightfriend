@@ -190,6 +190,13 @@ jobs:
           docker manifest inspect "$IMAGE_REF" > /tmp/image-manifest.json
           docker pull "$IMAGE_REF"
           nitro-cli build-enclave --docker-uri "$IMAGE_REF" --output-file lightfriend.eif 2>&1 | tee /tmp/eif-build.log
+          [ -f lightfriend.eif ] || { echo "FATAL: nitro-cli did not produce lightfriend.eif"; tail -50 /tmp/eif-build.log; exit 1; }
+          PCR0=$(grep -Eo 'PCR0: +[0-9a-fA-F]+' /tmp/eif-build.log | awk '{print $2}' | tail -1 | tr '[:upper:]' '[:lower:]')
+          PCR1=$(grep -Eo 'PCR1: +[0-9a-fA-F]+' /tmp/eif-build.log | awk '{print $2}' | tail -1 | tr '[:upper:]' '[:lower:]')
+          PCR2=$(grep -Eo 'PCR2: +[0-9a-fA-F]+' /tmp/eif-build.log | awk '{print $2}' | tail -1 | tr '[:upper:]' '[:lower:]')
+          [ -n "$PCR0" ] || { echo "FATAL: Missing PCR0 from nitro-cli output"; tail -50 /tmp/eif-build.log; exit 1; }
+          [ -n "$PCR1" ] || { echo "FATAL: Missing PCR1 from nitro-cli output"; tail -50 /tmp/eif-build.log; exit 1; }
+          [ -n "$PCR2" ] || { echo "FATAL: Missing PCR2 from nitro-cli output"; tail -50 /tmp/eif-build.log; exit 1; }
 
       - name: Publish EIF metadata
         id: publish
@@ -204,10 +211,6 @@ jobs:
           PCR0=$(grep -Eo 'PCR0: +[0-9a-fA-F]+' /tmp/eif-build.log | awk '{print $2}' | tail -1 | tr '[:upper:]' '[:lower:]')
           PCR1=$(grep -Eo 'PCR1: +[0-9a-fA-F]+' /tmp/eif-build.log | awk '{print $2}' | tail -1 | tr '[:upper:]' '[:lower:]')
           PCR2=$(grep -Eo 'PCR2: +[0-9a-fA-F]+' /tmp/eif-build.log | awk '{print $2}' | tail -1 | tr '[:upper:]' '[:lower:]')
-
-          [ -n "$PCR0" ] || { echo "FATAL: Missing PCR0 from CI EIF build"; exit 1; }
-          [ -n "$PCR1" ] || { echo "FATAL: Missing PCR1 from CI EIF build"; exit 1; }
-          [ -n "$PCR2" ] || { echo "FATAL: Missing PCR2 from CI EIF build"; exit 1; }
 
           aws s3 cp lightfriend.eif "s3://$S3_BUCKET/$EIF_KEY"
 
