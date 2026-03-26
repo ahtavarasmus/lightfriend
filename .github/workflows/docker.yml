@@ -12,6 +12,7 @@ on:
 
 env:
   REGISTRY: docker.io
+  IMAGE_REPO: docker.io/ahtavarasmus/lightfriend-enclave
 
 jobs:
   check-secrets:
@@ -66,7 +67,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/ahtavarasmus/lightfriend-enclave
+          images: ${{ env.IMAGE_REPO }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -143,7 +144,7 @@ jobs:
       - name: Build EIF from immutable image digest
         id: build_meta
         run: |
-          IMAGE_REF="docker.io/ahtavarasmus/lightfriend-enclave@${{ needs.build-and-push.outputs.image_digest }}"
+          IMAGE_REF="${{ env.IMAGE_REPO }}@${{ needs.build-and-push.outputs.image_digest }}"
           echo "image_ref=$IMAGE_REF" >> $GITHUB_OUTPUT
           docker pull "$IMAGE_REF"
           nitro-cli build-enclave --docker-uri "$IMAGE_REF" --output-file lightfriend.eif 2>&1 | tee /tmp/eif-build.log
