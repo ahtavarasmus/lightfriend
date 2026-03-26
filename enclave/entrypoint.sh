@@ -49,12 +49,17 @@ if [ -e /dev/vsock ]; then
             # Show key names (not values) for debugging
             echo "  env keys received: $(grep -c '=' /tmp/host_env) variables"
             echo "  env key names: $(grep '=' /tmp/host_env | cut -d= -f1 | tr '\n' ' ')"
-            set -a
-            set +u  # env values may contain unquoted $ chars
-            # shellcheck source=/dev/null
-            source /tmp/host_env
-            set -u
-            set +a
+            # Load env safely: source is unsafe because values may contain
+            # special chars ($, ^, newlines). Use export per-line instead.
+            ENV_COUNT=0
+            while IFS= read -r line || [[ -n "$line" ]]; do
+                [[ -z "$line" || "$line" == \#* ]] && continue
+                if [[ "$line" =~ ^[A-Za-z_][A-Za-z_0-9]*= ]]; then
+                    export "$line"
+                    ENV_COUNT=$((ENV_COUNT + 1))
+                fi
+            done < /tmp/host_env
+            echo "  Exported $ENV_COUNT variables"
             echo "  Environment loaded from host (attempt $attempt)"
             # Never persist BACKUP_ENCRYPTION_KEY to disk. The trustless backup
             # key must be derived again on each boot and only exist in memory.
