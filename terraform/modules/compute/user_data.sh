@@ -137,18 +137,18 @@ RestartSec=3
 WantedBy=multi-user.target
 KMSBRIDGEEOF
 
-# VSOCK config server (port 9005) - serves .env + any one-shot restore vars
+# VSOCK config server (port 9000) - serves .env + any one-shot restore vars
 cat > /opt/lightfriend/config-server.sh <<'SCRIPT'
 #!/bin/bash
 while true; do
-    socat VSOCK-LISTEN:9005,reuseaddr SYSTEM:"cat /opt/lightfriend/.env; [ -f /opt/lightfriend/runtime.env ] && printf '\n' && cat /opt/lightfriend/runtime.env; [ -f /opt/lightfriend/restore.env ] && printf '\n' && cat /opt/lightfriend/restore.env" 2>/dev/null
+    socat VSOCK-LISTEN:9000,reuseaddr SYSTEM:"cat /opt/lightfriend/.env; [ -f /opt/lightfriend/runtime.env ] && printf '\n' && cat /opt/lightfriend/runtime.env; [ -f /opt/lightfriend/restore.env ] && printf '\n' && cat /opt/lightfriend/restore.env" 2>/dev/null
 done
 SCRIPT
 chmod +x /opt/lightfriend/config-server.sh
 
 cat > /etc/systemd/system/vsock-config-server.service <<'CFGEOF'
 [Unit]
-Description=VSOCK config server for Nitro Enclave (port 9005)
+Description=VSOCK config server for Nitro Enclave (port 9000)
 
 [Service]
 ExecStart=/opt/lightfriend/config-server.sh
@@ -255,7 +255,7 @@ for svc in vsock-proxy-bridge vsock-config-server vsock-backup-receiver vsock-re
     systemctl start "$svc" || echo "WARNING: $svc failed to start"
 done
 
-echo "VSOCK services configured: proxy:8001 via squid:3128, config:9005, backup:9001, restore:9002, seed:9003, marlin-kms:9010"
+echo "VSOCK services configured: proxy:8001 via squid:3128, config:9000, backup:9001, restore:9002, seed:9003, marlin-kms:9010"
 
 # ── Enclave launch script ───────────────────────────────────────────────────
 
@@ -263,6 +263,7 @@ cat > /opt/lightfriend/launch-enclave.sh <<'SCRIPT'
 #!/bin/bash
 set -e
 EIF_PATH="/opt/lightfriend/lightfriend.eif"
+VERIFY="/opt/lightfriend/verify-result.json"
 
 [ -f /opt/lightfriend/.env ] || { echo "ERROR: /opt/lightfriend/.env not found"; exit 1; }
 [ -f "$EIF_PATH" ] || { echo "ERROR: CI-built EIF not found at $EIF_PATH"; exit 1; }
@@ -270,6 +271,10 @@ echo "Using pre-built EIF: $EIF_PATH"
 
 EXISTING=$(nitro-cli describe-enclaves | jq -r '.[0].EnclaveID // empty' 2>/dev/null)
 [ -n "$EXISTING" ] && nitro-cli terminate-enclave --enclave-id "$EXISTING" && sleep 2
+
+rm -f "$VERIFY"
+pkill -f 'VSOCK-LISTEN:9004' 2>/dev/null || true
+nohup socat -u VSOCK-LISTEN:9004,reuseaddr CREATE:"$VERIFY" >/tmp/lightfriend-verify-listener.log 2>&1 &
 
 nitro-cli run-enclave --eif-path "$EIF_PATH" --memory 8192 --cpu-count 4 --enclave-cid 16
 nitro-cli describe-enclaves
