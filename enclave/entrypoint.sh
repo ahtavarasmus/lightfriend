@@ -8,7 +8,7 @@ ENV_LOADED=false
 if [ -e /dev/vsock ]; then
     echo "Fetching environment from host via VSOCK..."
     for attempt in $(seq 1 10); do
-        if socat -T5 - VSOCK-CONNECT:3:9000 > /tmp/host_env 2>/dev/null && [ -s /tmp/host_env ]; then
+        if socat -T5 - VSOCK-CONNECT:3:9005 > /tmp/host_env 2>/dev/null && [ -s /tmp/host_env ]; then
             set -a
             # shellcheck source=/dev/null
             source /tmp/host_env

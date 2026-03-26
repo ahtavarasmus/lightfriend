@@ -137,18 +137,18 @@ RestartSec=3
 WantedBy=multi-user.target
 KMSBRIDGEEOF
 
-# VSOCK config server (port 9000) - serves .env + any one-shot restore vars
+# VSOCK config server (port 9005) - serves .env + any one-shot restore vars
 cat > /opt/lightfriend/config-server.sh <<'SCRIPT'
 #!/bin/bash
 while true; do
-    socat VSOCK-LISTEN:9000,reuseaddr SYSTEM:"cat /opt/lightfriend/.env; [ -f /opt/lightfriend/runtime.env ] && printf '\n' && cat /opt/lightfriend/runtime.env; [ -f /opt/lightfriend/restore.env ] && printf '\n' && cat /opt/lightfriend/restore.env" 2>/dev/null
+    socat VSOCK-LISTEN:9005,reuseaddr SYSTEM:"cat /opt/lightfriend/.env; [ -f /opt/lightfriend/runtime.env ] && printf '\n' && cat /opt/lightfriend/runtime.env; [ -f /opt/lightfriend/restore.env ] && printf '\n' && cat /opt/lightfriend/restore.env" 2>/dev/null
 done
 SCRIPT
 chmod +x /opt/lightfriend/config-server.sh
 
 cat > /etc/systemd/system/vsock-config-server.service <<'CFGEOF'
 [Unit]
-Description=VSOCK config server for Nitro Enclave (port 9000)
+Description=VSOCK config server for Nitro Enclave (port 9005)
 
 [Service]
 ExecStart=/opt/lightfriend/config-server.sh
@@ -255,7 +255,7 @@ for svc in vsock-proxy-bridge vsock-config-server vsock-backup-receiver vsock-re
     systemctl start "$svc" || echo "WARNING: $svc failed to start"
 done
 
-echo "VSOCK services configured: proxy:8001 via squid:3128, config:9000, backup:9001, restore:9002, seed:9003, marlin-kms:9010"
+echo "VSOCK services configured: proxy:8001 via squid:3128, config:9005, backup:9001, restore:9002, seed:9003, marlin-kms:9010"
 
 # ── Enclave launch script ───────────────────────────────────────────────────
 
