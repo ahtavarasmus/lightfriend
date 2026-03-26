@@ -26,6 +26,16 @@ echo "VSOCK device: $([ -e /dev/vsock ] && echo 'present' || echo 'MISSING')"
 echo "Kernel: $(uname -r)"
 echo "Memory: $(free -m 2>/dev/null | awk '/^Mem:/{print $2"MB"}' || echo 'unknown')"
 
+# ── Bring up loopback interface ──────────────────────────────────────────────
+# Nitro enclaves have no network interfaces up by default. Without lo,
+# 127.0.0.1 is unreachable and all localhost services (socat, postgres,
+# tuwunel, bridges, backend) fail.
+if ip link set lo up 2>/dev/null; then
+    echo "Loopback interface: up"
+else
+    echo "WARNING: failed to bring up loopback (ip link set lo up)"
+fi
+
 # ── 0a. Fetch environment from host via VSOCK ────────────────────────────────
 ENV_LOADED=false
 if [ -e /dev/vsock ]; then
