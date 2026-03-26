@@ -166,8 +166,8 @@ render_host_env
 ENV_SIZE=$(stat -c%s /opt/lightfriend/host-env 2>/dev/null || echo "0")
 log "host-env rendered (${ENV_SIZE} bytes), starting listener on port 9000"
 
-# fork mode: socat stays resident, forks per connection
-socat -u VSOCK-LISTEN:9000,reuseaddr,fork FILE:/opt/lightfriend/host-env 2>&1 | while read -r line; do
+# No -u flag: bidirectional so OPEN reads file and sends to VSOCK client
+socat VSOCK-LISTEN:9000,reuseaddr,fork OPEN:/opt/lightfriend/host-env 2>&1 | while read -r line; do
     log "socat: $line"
 done
 

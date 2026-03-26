@@ -50,8 +50,10 @@ if [ -e /dev/vsock ]; then
             echo "  env keys received: $(grep -c '=' /tmp/host_env) variables"
             echo "  env key names: $(grep '=' /tmp/host_env | cut -d= -f1 | tr '\n' ' ')"
             set -a
+            set +u  # env values may contain unquoted $ chars
             # shellcheck source=/dev/null
             source /tmp/host_env
+            set -u
             set +a
             echo "  Environment loaded from host (attempt $attempt)"
             # Never persist BACKUP_ENCRYPTION_KEY to disk. The trustless backup
