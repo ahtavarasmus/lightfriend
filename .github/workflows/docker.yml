@@ -226,9 +226,10 @@ jobs:
           docker pull "$IMAGE_REF"
           nitro-cli build-enclave --docker-uri "$IMAGE_REF" --output-file lightfriend.eif 2>&1 | tee /tmp/eif-build.log
           [ -f lightfriend.eif ] || { echo "FATAL: nitro-cli did not produce lightfriend.eif"; tail -50 /tmp/eif-build.log; exit 1; }
-          PCR0=$(grep -Eo 'PCR0: +[0-9a-fA-F]+' /tmp/eif-build.log | awk '{print $2}' | tail -1 | tr '[:upper:]' '[:lower:]')
-          PCR1=$(grep -Eo 'PCR1: +[0-9a-fA-F]+' /tmp/eif-build.log | awk '{print $2}' | tail -1 | tr '[:upper:]' '[:lower:]')
-          PCR2=$(grep -Eo 'PCR2: +[0-9a-fA-F]+' /tmp/eif-build.log | awk '{print $2}' | tail -1 | tr '[:upper:]' '[:lower:]')
+          sed -n '/^{/,/^}$/p' /tmp/eif-build.log > /tmp/eif-measurements.json
+          PCR0=$(jq -r '.Measurements.PCR0 // empty' /tmp/eif-measurements.json | tr '[:upper:]' '[:lower:]')
+          PCR1=$(jq -r '.Measurements.PCR1 // empty' /tmp/eif-measurements.json | tr '[:upper:]' '[:lower:]')
+          PCR2=$(jq -r '.Measurements.PCR2 // empty' /tmp/eif-measurements.json | tr '[:upper:]' '[:lower:]')
           [ -n "$PCR0" ] || { echo "FATAL: Missing PCR0 from nitro-cli output"; tail -50 /tmp/eif-build.log; exit 1; }
           [ -n "$PCR1" ] || { echo "FATAL: Missing PCR1 from nitro-cli output"; tail -50 /tmp/eif-build.log; exit 1; }
           [ -n "$PCR2" ] || { echo "FATAL: Missing PCR2 from nitro-cli output"; tail -50 /tmp/eif-build.log; exit 1; }
@@ -243,9 +244,9 @@ jobs:
           EIF_KEY="eif/${{ github.sha }}/lightfriend.eif"
           METADATA_KEY="eif/${{ github.sha }}/metadata.json"
           EIF_SHA256=$(sha256sum lightfriend.eif | awk '{print $1}')
-          PCR0=$(grep -Eo 'PCR0: +[0-9a-fA-F]+' /tmp/eif-build.log | awk '{print $2}' | tail -1 | tr '[:upper:]' '[:lower:]')
-          PCR1=$(grep -Eo 'PCR1: +[0-9a-fA-F]+' /tmp/eif-build.log | awk '{print $2}' | tail -1 | tr '[:upper:]' '[:lower:]')
-          PCR2=$(grep -Eo 'PCR2: +[0-9a-fA-F]+' /tmp/eif-build.log | awk '{print $2}' | tail -1 | tr '[:upper:]' '[:lower:]')
+          PCR0=$(jq -r '.Measurements.PCR0 // empty' /tmp/eif-measurements.json | tr '[:upper:]' '[:lower:]')
+          PCR1=$(jq -r '.Measurements.PCR1 // empty' /tmp/eif-measurements.json | tr '[:upper:]' '[:lower:]')
+          PCR2=$(jq -r '.Measurements.PCR2 // empty' /tmp/eif-measurements.json | tr '[:upper:]' '[:lower:]')
 
           aws s3 cp lightfriend.eif "s3://$S3_BUCKET/$EIF_KEY"
 
