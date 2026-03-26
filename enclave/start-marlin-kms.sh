@@ -86,7 +86,33 @@ start_bg "${RUN_DIR}/derive.pid" \
     --secret-path "${RUN_DIR}/id.sec" \
     --contract-address-file "${RUN_DIR}/contract-address"
 
+sleep 1
+DERIVE_PID=$(cat "${RUN_DIR}/derive.pid" 2>/dev/null || echo "")
+if [ -n "${DERIVE_PID}" ] && kill -0 "${DERIVE_PID}" 2>/dev/null; then
+    echo "Derive server running (PID ${DERIVE_PID})" >&2
+else
+    echo "Derive server died immediately (PID ${DERIVE_PID})" >&2
+    echo "Derive log:" >&2
+    cat "${RUN_DIR}/derive.pid.log" 2>/dev/null >&2
+    echo "KMS tunnel log:" >&2
+    cat "${RUN_DIR}/kms-tunnel.pid.log" 2>/dev/null >&2
+    exit 1
+fi
+
+# Test KMS tunnel connectivity
+echo "Testing KMS tunnel (port ${LOCAL_ROOT_TUNNEL_PORT} -> VSOCK:3:9010 -> arbone-v4.kms.box:1100)..." >&2
+if timeout 5 bash -c "echo | socat - TCP:127.0.0.1:${LOCAL_ROOT_TUNNEL_PORT}" 2>/dev/null; then
+    echo "KMS tunnel reachable" >&2
+else
+    echo "WARNING: KMS tunnel not reachable on port ${LOCAL_ROOT_TUNNEL_PORT}" >&2
+fi
+
 if ! wait_http "http://127.0.0.1:${LOCAL_DERIVE_PORT}/derive/x25519?path=${MARLIN_BACKUP_KEY_PATH}" 30 1; then
     echo "Marlin derive server did not become ready or key derivation failed" >&2
+    echo "Derive PID alive: $(kill -0 "${DERIVE_PID}" 2>/dev/null && echo yes || echo no)" >&2
+    echo "Derive log:" >&2
+    tail -20 "${RUN_DIR}/derive.pid.log" 2>/dev/null >&2
+    echo "KMS tunnel log:" >&2
+    tail -10 "${RUN_DIR}/kms-tunnel.pid.log" 2>/dev/null >&2
     exit 1
 fi
