@@ -10,6 +10,7 @@ if [ -e /dev/vsock ]; then
     for attempt in $(seq 1 10); do
         if socat -T5 - VSOCK-CONNECT:3:9000 > /tmp/host_env 2>/dev/null && [ -s /tmp/host_env ]; then
             set -a
+            # shellcheck source=/dev/null
             source /tmp/host_env
             set +a
             echo "Environment loaded from host (attempt $attempt)"
@@ -185,10 +186,11 @@ echo "Bridge databases ready."
 
 # ── 2a. Full encrypted backup restore ────────────────────────────────────
 FULL_RESTORE_DONE=false
+# shellcheck disable=SC2012
 FULL_BACKUP=$(ls /data/seed/lightfriend-full-backup-*.tar.gz.enc 2>/dev/null | head -1 || true)
 
 if [ -n "${FULL_BACKUP}" ]; then
-    echo "=== Full encrypted backup detected: $(basename ${FULL_BACKUP}) ==="
+    echo "=== Full encrypted backup detected: $(basename "${FULL_BACKUP}") ==="
     RESTORE_STATUS="/data/seed/restore-status.json"
     RESTORE_TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
 
@@ -245,6 +247,7 @@ REOF
         || restore_abort "Archive extraction failed - corrupt tar.gz" "extract"
 
     # Find the backup directory (lightfriend-full-backup-*)
+    # shellcheck disable=SC2012
     BACKUP_DIR=$(ls -d lightfriend-full-backup-* 2>/dev/null | head -1)
     if [ -z "${BACKUP_DIR}" ]; then
         restore_abort "No lightfriend-full-backup-* directory found in archive" "extract"
@@ -386,10 +389,11 @@ fi
 # If no full backup exists but a PG-only daily backup does, restore databases
 # only. Bridge/Matrix state starts fresh (users re-link).
 if [ "${FULL_RESTORE_DONE}" = "false" ]; then
+# shellcheck disable=SC2012
 PG_BACKUP=$(ls /data/seed/lightfriend-pg-backup-*.tar.gz.enc 2>/dev/null | head -1 || true)
 
 if [ -n "${PG_BACKUP}" ]; then
-    echo "=== PG-only backup detected: $(basename ${PG_BACKUP}) ==="
+    echo "=== PG-only backup detected: $(basename "${PG_BACKUP}") ==="
     echo "  Databases will be restored. Bridge/Matrix state starts fresh."
     RESTORE_STATUS="/data/seed/restore-status.json"
     RESTORE_TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
@@ -427,6 +431,7 @@ if [ -n "${PG_BACKUP}" ]; then
     tar xzf backup.tar.gz \
         || pg_restore_abort "Archive extraction failed" "extract"
 
+    # shellcheck disable=SC2012
     BACKUP_DIR=$(ls -d lightfriend-pg-backup-* 2>/dev/null | head -1)
     if [ -z "${BACKUP_DIR}" ]; then
         pg_restore_abort "No lightfriend-pg-backup-* directory in archive" "extract"
@@ -576,8 +581,10 @@ substitute_vars() {
     for var in "${vars[@]}"; do
         local value="${!var-}"
         value=$(printf '%s\n' "$value" | sed 's/[&/\]/\\&/g')
+        # shellcheck disable=SC2001
         content=$(echo "$content" | sed "s/\${${var}}/${value}/g")
         # Also handle ${VAR:-default} patterns - strip the default syntax
+        # shellcheck disable=SC2001
         content=$(echo "$content" | sed "s/\${${var}:-[^}]*}/${value}/g")
     done
 

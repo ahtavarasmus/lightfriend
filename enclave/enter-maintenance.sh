@@ -6,6 +6,7 @@
 # Load env for MAINTENANCE_SECRET
 if [ -f /etc/lightfriend/env ]; then
     set -a
+    # shellcheck source=/dev/null
     source /etc/lightfriend/env
     set +a
 fi
@@ -15,7 +16,7 @@ if [ -z "${MAINTENANCE_SECRET:-}" ]; then
     exit 1
 fi
 
-read -t 5 COMMAND
+read -r -t 5 COMMAND
 
 case "$COMMAND" in
     enable)

@@ -740,16 +740,14 @@ impl ToolHandler for UpdateEventHandler {
                 crate::proactive::utils::parse_iso_to_timestamp(s)
                     .ok_or_else(|| "Invalid remind_at timestamp".to_string())
             })
-            .transpose()?
-            .map(|t| t as i32);
+            .transpose()?;
         let due_at = args["due_at"]
             .as_str()
             .map(|s| {
                 crate::proactive::utils::parse_iso_to_timestamp(s)
                     .ok_or_else(|| "Invalid due_at timestamp".to_string())
             })
-            .transpose()?
-            .map(|t| t as i32);
+            .transpose()?;
 
         let event = ctx
             .state

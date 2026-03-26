@@ -575,7 +575,7 @@ mod workflow_tests {
     #[tokio::test]
     async fn test_get_service_rooms_requires_service_member() {
         // Room without service member should be excluded
-        let no_service_room = MockRoom::new("!no:server", "Random Chat (WA)")
+        let no_service_room = MockRoom::new("!no:server", "Random Chat")
             .with_members(vec![member("random_user"), member("me")])
             .with_last_activity(1000);
 
