@@ -477,7 +477,10 @@ jobs:
             exit 1
           fi
 
-      # ── Step 3: Approve new image for Marlin KMS (testing contract, immediate) ──
+      # ── Step 3: Approve new image for Marlin KMS ──
+      # The root server computes image_id = SHA-256(bitflags || PCR0 || PCR1 || PCR2 || PCR16)
+      # and checks oysterKMSVerify(image_id) on the contract. We must register the
+      # same hash on-chain so the root server accepts our enclave's attestation.
       - name: Approve image for Marlin KMS
         id: approve
         env:
@@ -486,33 +489,63 @@ jobs:
           PRIVATE_KEY: ${{ secrets.ARBITRUM_PRIVATE_KEY }}
         run: |
           PCR0="${{ needs.build-eif.outputs.pcr0 }}"
+          PCR1="${{ needs.build-eif.outputs.pcr1 }}"
+          PCR2="${{ needs.build-eif.outputs.pcr2 }}"
           COMMIT_SHA="${{ github.sha }}"
           [ -n "$CONTRACT_ADDRESS" ] || { echo "FATAL: MARLIN_KMS_CONTRACT_ADDRESS secret missing"; exit 1; }
           [ -n "$RPC_URL" ] || { echo "FATAL: ARBITRUM_RPC_URL secret missing"; exit 1; }
           [ -n "$PRIVATE_KEY" ] || { echo "FATAL: ARBITRUM_PRIVATE_KEY secret missing"; exit 1; }
-          [ -n "$PCR0" ] || { echo "FATAL: Missing PCR0 from prewarm"; exit 1; }
+          [ -n "$PCR0" ] || { echo "FATAL: Missing PCR0"; exit 1; }
+          [ -n "$PCR1" ] || { echo "FATAL: Missing PCR1"; exit 1; }
+          [ -n "$PCR2" ] || { echo "FATAL: Missing PCR2"; exit 1; }
 
-          VERIFY_BEFORE=$(cast call "$CONTRACT_ADDRESS" "oysterKMSVerify(bytes32)(bool)" "$PCR0" --rpc-url "$RPC_URL")
+          # Compute image_id matching Marlin root server's algorithm:
+          # SHA-256(bitflags_u32_be(0x00010007) || PCR0[48] || PCR1[48] || PCR2[48] || PCR16[48])
+          # PCR16 is all zeros (no user data passed to attestation server)
+          IMAGE_ID=$(python3 -c "
+          import hashlib, struct
+          bitflags = struct.pack('>I', (1 << 0) | (1 << 1) | (1 << 2) | (1 << 16))
+          pcr0 = bytes.fromhex('${PCR0#0x}')
+          pcr1 = bytes.fromhex('${PCR1#0x}')
+          pcr2 = bytes.fromhex('${PCR2#0x}')
+          pcr16 = b'\x00' * 48
+          image_id = hashlib.sha256(bitflags + pcr0 + pcr1 + pcr2 + pcr16).hexdigest()
+          print('0x' + image_id)
+          ")
+          echo "Computed image_id: $IMAGE_ID"
+          echo "  from PCR0=$PCR0"
+          echo "  from PCR1=$PCR1"
+          echo "  from PCR2=$PCR2"
+          echo "  PCR16=zeros"
+
+          VERIFY_BEFORE=$(cast call "$CONTRACT_ADDRESS" "oysterKMSVerify(bytes32)(bool)" "$IMAGE_ID" --rpc-url "$RPC_URL")
           if [ "$VERIFY_BEFORE" != "true" ]; then
-            cast send "$CONTRACT_ADDRESS" "proposeImage(bytes32,string)" "$PCR0" "$COMMIT_SHA" \
+            echo "Image not yet approved, registering..."
+            cast send "$CONTRACT_ADDRESS" "proposeImage(bytes32,string)" "$IMAGE_ID" "$COMMIT_SHA" \
               --rpc-url "$RPC_URL" \
               --private-key "$PRIVATE_KEY"
 
             cast send "$CONTRACT_ADDRESS" "activateImage()" \
               --rpc-url "$RPC_URL" \
               --private-key "$PRIVATE_KEY"
+          else
+            echo "Image already approved"
           fi
 
-          VERIFY_AFTER=$(cast call "$CONTRACT_ADDRESS" "oysterKMSVerify(bytes32)(bool)" "$PCR0" --rpc-url "$RPC_URL")
+          VERIFY_AFTER=$(cast call "$CONTRACT_ADDRESS" "oysterKMSVerify(bytes32)(bool)" "$IMAGE_ID" --rpc-url "$RPC_URL")
           if [ "$VERIFY_AFTER" != "true" ]; then
-            echo "FATAL: Marlin KMS contract did not verify PCR0 $PCR0 after approval"
+            echo "FATAL: Contract did not verify image_id $IMAGE_ID after approval"
             exit 1
           fi
+          echo "Image approved and verified on Arbitrum"
 
-          echo "approved_pcr0=$PCR0" >> $GITHUB_OUTPUT
-          echo "## Marlin Approval" >> $GITHUB_STEP_SUMMARY
+          echo "image_id=$IMAGE_ID" >> $GITHUB_OUTPUT
+          echo "## Marlin KMS Approval" >> $GITHUB_STEP_SUMMARY
           echo "- Contract: $CONTRACT_ADDRESS" >> $GITHUB_STEP_SUMMARY
-          echo "- Approved PCR0: $PCR0" >> $GITHUB_STEP_SUMMARY
+          echo "- Image ID: $IMAGE_ID" >> $GITHUB_STEP_SUMMARY
+          echo "- PCR0: $PCR0" >> $GITHUB_STEP_SUMMARY
+          echo "- PCR1: $PCR1" >> $GITHUB_STEP_SUMMARY
+          echo "- PCR2: $PCR2" >> $GITHUB_STEP_SUMMARY
 
       # ── Step 4: Set maintenance mode + backup old instance ──
       # Old instance is untouched until this point. Maintenance mode blocks

@@ -1,0 +1,82 @@
+name: Approve KMS Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: 'Commit SHA to approve (uses latest EIF metadata from gh-pages)'
+        required: false
+        default: ''
+
+jobs:
+  approve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Fetch EIF metadata and approve
+        env:
+          CONTRACT_ADDRESS: ${{ secrets.MARLIN_KMS_CONTRACT_ADDRESS }}
+          RPC_URL: ${{ secrets.ARBITRUM_RPC_URL }}
+          PRIVATE_KEY: ${{ secrets.ARBITRUM_PRIVATE_KEY }}
+        run: |
+          COMMIT="${{ github.event.inputs.commit_sha }}"
+          if [ -z "$COMMIT" ]; then
+            COMMIT=$(curl -sf "https://raw.githubusercontent.com/${{ github.repository }}/gh-pages/verification/index.json" | python3 -c "import json,sys; print(json.load(sys.stdin)['latest_commit'])")
+          fi
+          echo "Using commit: $COMMIT"
+
+          META=$(curl -sf "https://raw.githubusercontent.com/${{ github.repository }}/gh-pages/verification/commits/${COMMIT}.json")
+          [ -n "$META" ] || { echo "FATAL: No metadata found for $COMMIT"; exit 1; }
+
+          PCR0=$(echo "$META" | python3 -c "import json,sys; print(json.load(sys.stdin)['pcr0'])")
+          PCR1=$(echo "$META" | python3 -c "import json,sys; print(json.load(sys.stdin)['pcr1'])")
+          PCR2=$(echo "$META" | python3 -c "import json,sys; print(json.load(sys.stdin)['pcr2'])")
+          echo "PCR0: $PCR0"
+          echo "PCR1: $PCR1"
+          echo "PCR2: $PCR2"
+
+          # Compute image_id: SHA-256(bitflags_be(0x00010007) || PCR0 || PCR1 || PCR2 || PCR16_zeros)
+          IMAGE_ID=$(python3 -c "
+          import hashlib, struct
+          bitflags = struct.pack('>I', (1 << 0) | (1 << 1) | (1 << 2) | (1 << 16))
+          pcr0 = bytes.fromhex('${PCR0#0x}')
+          pcr1 = bytes.fromhex('${PCR1#0x}')
+          pcr2 = bytes.fromhex('${PCR2#0x}')
+          pcr16 = b'\x00' * 48
+          print('0x' + hashlib.sha256(bitflags + pcr0 + pcr1 + pcr2 + pcr16).hexdigest())
+          ")
+          echo "Image ID: $IMAGE_ID"
+
+          [ -n "$CONTRACT_ADDRESS" ] || { echo "FATAL: MARLIN_KMS_CONTRACT_ADDRESS missing"; exit 1; }
+          [ -n "$RPC_URL" ] || { echo "FATAL: ARBITRUM_RPC_URL missing"; exit 1; }
+          [ -n "$PRIVATE_KEY" ] || { echo "FATAL: ARBITRUM_PRIVATE_KEY missing"; exit 1; }
+
+          VERIFIED=$(cast call "$CONTRACT_ADDRESS" "oysterKMSVerify(bytes32)(bool)" "$IMAGE_ID" --rpc-url "$RPC_URL")
+          if [ "$VERIFIED" = "true" ]; then
+            echo "Image already approved"
+          else
+            echo "Approving image..."
+            cast send "$CONTRACT_ADDRESS" "proposeImage(bytes32,string)" "$IMAGE_ID" "$COMMIT" \
+              --rpc-url "$RPC_URL" \
+              --private-key "$PRIVATE_KEY"
+
+            cast send "$CONTRACT_ADDRESS" "activateImage()" \
+              --rpc-url "$RPC_URL" \
+              --private-key "$PRIVATE_KEY"
+
+            VERIFIED_AFTER=$(cast call "$CONTRACT_ADDRESS" "oysterKMSVerify(bytes32)(bool)" "$IMAGE_ID" --rpc-url "$RPC_URL")
+            if [ "$VERIFIED_AFTER" != "true" ]; then
+              echo "FATAL: Verification failed after approval"
+              exit 1
+            fi
+            echo "Image approved and verified"
+          fi
+
+          echo "## KMS Approval" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: $COMMIT" >> $GITHUB_STEP_SUMMARY
+          echo "- Image ID: $IMAGE_ID" >> $GITHUB_STEP_SUMMARY
+          echo "- Contract: $CONTRACT_ADDRESS" >> $GITHUB_STEP_SUMMARY
