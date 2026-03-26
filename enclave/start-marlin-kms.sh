@@ -52,8 +52,7 @@ start_bg "${RUN_DIR}/kms-tunnel.pid" \
 
 start_bg "${RUN_DIR}/attestation.pid" \
     /usr/local/bin/oyster-attestation-server \
-    --ip-addr "127.0.0.1:${ATTEST_PORT}" \
-    --pub-key "${RUN_DIR}/id.pub"
+    --ip-addr "127.0.0.1:${ATTEST_PORT}"
 
 if ! wait_http "http://127.0.0.1:${ATTEST_PORT}/attestation/raw" 30 1; then
     echo "Marlin attestation server did not become ready" >&2
