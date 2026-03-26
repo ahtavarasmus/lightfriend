@@ -36,7 +36,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       image_digest: ${{ steps.build.outputs.digest }}
-      image_repo: docker.io/ahtavarasmus/lightfriend-enclave
     permissions:
       contents: read
       packages: write
@@ -144,7 +143,7 @@ jobs:
       - name: Build EIF from immutable image digest
         id: build_meta
         run: |
-          IMAGE_REF="${{ needs.build-and-push.outputs.image_repo }}@${{ needs.build-and-push.outputs.image_digest }}"
+          IMAGE_REF="docker.io/ahtavarasmus/lightfriend-enclave@${{ needs.build-and-push.outputs.image_digest }}"
           echo "image_ref=$IMAGE_REF" >> $GITHUB_OUTPUT
           docker pull "$IMAGE_REF"
           nitro-cli build-enclave --docker-uri "$IMAGE_REF" --output-file lightfriend.eif 2>&1 | tee /tmp/eif-build.log
