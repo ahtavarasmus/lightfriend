@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       image_digest: ${{ steps.build.outputs.digest }}
-      image_repo: ${{ env.REGISTRY }}/ahtavarasmus/lightfriend-enclave
+      image_repo: docker.io/ahtavarasmus/lightfriend-enclave
     permissions:
       contents: read
       packages: write
