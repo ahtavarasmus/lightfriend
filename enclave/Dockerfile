@@ -141,6 +141,7 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     python3-venv \
     ffmpeg \
+    iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Install cloudflared for Cloudflare tunnel (production only) ──────────────
