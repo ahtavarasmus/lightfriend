@@ -165,19 +165,27 @@ jobs:
           sudo install -m 0755 "$(find build -type f -name nitro-cli | head -1)" /usr/local/bin/nitro-cli
           nitro-cli --version
 
-      - name: Prepare Nitro CLI log path
+      - name: Prepare Nitro CLI filesystem layout
         run: |
-          sudo mkdir -p /var/log/nitro_enclaves
+          sudo mkdir -p \
+            /var/log/nitro_enclaves \
+            /usr/share/nitro_enclaves \
+            /usr/share/nitro_enclaves/blobs \
+            /run/nitro_enclaves \
+            /etc/nitro_enclaves
           sudo touch /var/log/nitro_enclaves/nitro_enclaves.log
-          sudo chown "$USER":"$USER" /var/log/nitro_enclaves /var/log/nitro_enclaves/nitro_enclaves.log
-          sudo chmod 755 /var/log/nitro_enclaves
+          sudo chown -R "$USER":"$USER" \
+            /var/log/nitro_enclaves \
+            /usr/share/nitro_enclaves \
+            /run/nitro_enclaves \
+            /etc/nitro_enclaves
+          sudo chmod 755 \
+            /var/log/nitro_enclaves \
+            /usr/share/nitro_enclaves \
+            /usr/share/nitro_enclaves/blobs \
+            /run/nitro_enclaves \
+            /etc/nitro_enclaves
           sudo chmod 664 /var/log/nitro_enclaves/nitro_enclaves.log
-
-      - name: Prepare Nitro CLI blobs path
-        run: |
-          sudo mkdir -p /usr/share/nitro_enclaves/blobs
-          sudo chown "$USER":"$USER" /usr/share/nitro_enclaves /usr/share/nitro_enclaves/blobs
-          sudo chmod 755 /usr/share/nitro_enclaves /usr/share/nitro_enclaves/blobs
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
