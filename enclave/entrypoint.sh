@@ -1,19 +1,59 @@
 #!/bin/bash
 set -euo pipefail
 
-echo "=== Lightfriend Enclave Entrypoint ==="
+# ── Boot trace: capture ALL output to a log file ────────────────────────────
+# In normal Nitro mode the console is invisible. This log gets sent to the
+# host via VSOCK on every exit so we always have diagnostics.
+BOOT_TRACE="/data/seed/boot-trace.log"
+mkdir -p /data/seed
+exec > >(tee "$BOOT_TRACE") 2>&1
+
+send_boot_trace() {
+    local exit_code="${1:-$?}"
+    echo ""
+    echo "=== BOOT TRACE END (exit=$exit_code, $(date -u +%Y-%m-%dT%H:%M:%SZ)) ==="
+    # Small delay to let tee flush its buffer to the file
+    sleep 0.5
+    if [ -e /dev/vsock ] && [ -f "$BOOT_TRACE" ]; then
+        # Port 9007: host-side boot trace receiver
+        socat -T10 -u FILE:"$BOOT_TRACE" VSOCK-CONNECT:3:9007 2>/dev/null || true
+    fi
+}
+trap 'send_boot_trace $?' EXIT
+
+echo "=== Lightfriend Enclave Entrypoint ($(date -u +%Y-%m-%dT%H:%M:%SZ)) ==="
+echo "VSOCK device: $([ -e /dev/vsock ] && echo 'present' || echo 'MISSING')"
+echo "Kernel: $(uname -r)"
+echo "Memory: $(free -m 2>/dev/null | awk '/^Mem:/{print $2"MB"}' || echo 'unknown')"
 
 # ── 0a. Fetch environment from host via VSOCK ────────────────────────────────
 ENV_LOADED=false
 if [ -e /dev/vsock ]; then
-    echo "Fetching environment from host via VSOCK..."
+    echo ""
+    echo "[STEP 0a] Fetching environment from host via VSOCK port 9000..."
     for attempt in $(seq 1 10); do
-        if socat -T5 - VSOCK-CONNECT:3:9000 > /tmp/host_env 2>/dev/null && [ -s /tmp/host_env ]; then
+        echo "  attempt $attempt: connecting to VSOCK-CONNECT:3:9000..."
+        SOCAT_ERR=$(mktemp)
+        if socat -T5 - VSOCK-CONNECT:3:9000 > /tmp/host_env 2>"$SOCAT_ERR"; then
+            SOCAT_RC=0
+        else
+            SOCAT_RC=$?
+        fi
+        ENV_SIZE=$(stat -c%s /tmp/host_env 2>/dev/null || echo "0")
+        SOCAT_ERR_MSG=$(cat "$SOCAT_ERR" 2>/dev/null || true)
+        rm -f "$SOCAT_ERR"
+        echo "  attempt $attempt: socat exit=$SOCAT_RC, received=${ENV_SIZE} bytes"
+        [ -n "$SOCAT_ERR_MSG" ] && echo "  attempt $attempt: socat stderr: $SOCAT_ERR_MSG"
+
+        if [ "$SOCAT_RC" -eq 0 ] && [ "$ENV_SIZE" -gt 0 ]; then
+            # Show key names (not values) for debugging
+            echo "  env keys received: $(grep -c '=' /tmp/host_env) variables"
+            echo "  env key names: $(grep '=' /tmp/host_env | cut -d= -f1 | tr '\n' ' ')"
             set -a
             # shellcheck source=/dev/null
             source /tmp/host_env
             set +a
-            echo "Environment loaded from host (attempt $attempt)"
+            echo "  Environment loaded from host (attempt $attempt)"
             # Never persist BACKUP_ENCRYPTION_KEY to disk. The trustless backup
             # key must be derived again on each boot and only exist in memory.
             if [ -n "${BACKUP_ENCRYPTION_KEY:-}" ] && [ "${ALLOW_INSECURE_BACKUP_KEY_FALLBACK:-false}" = "true" ]; then
@@ -35,6 +75,8 @@ if [ -e /dev/vsock ]; then
 
     if [ "$ENV_LOADED" = "false" ]; then
         echo "FATAL: Failed to load environment from host after 10 attempts"
+        echo "  Last socat exit=$SOCAT_RC, last received bytes=$ENV_SIZE"
+        echo "  Check: is vsock-config-server running on host? Does /opt/lightfriend/host-env exist?"
         exit 1
     fi
 fi
@@ -51,24 +93,36 @@ export SKIP_BACKEND="${SKIP_BACKEND:-false}"
 export RESTORE_MODE="${RESTORE_MODE:-none}"
 
 # ── 0c. Start VSOCK outbound proxy bridge ────────────────────────────────────
+echo ""
+echo "[STEP 0c] Starting VSOCK outbound proxy bridge..."
 
 if [ -e /dev/vsock ]; then
-    echo "VSOCK device detected - starting outbound proxy bridge..."
     socat TCP-LISTEN:3128,reuseaddr,fork VSOCK-CONNECT:3:8001 &
     SOCAT_PID=$!
     sleep 0.5
 
     if ! kill -0 $SOCAT_PID 2>/dev/null; then
-        echo "ERROR: VSOCK bridge failed to start"
+        echo "  ERROR: VSOCK bridge failed to start (PID $SOCAT_PID died)"
         exit 1
     fi
-    echo "VSOCK bridge running (PID $SOCAT_PID)"
+    echo "  VSOCK bridge running (PID $SOCAT_PID, localhost:3128 -> host:8001)"
 
     export HTTP_PROXY="http://127.0.0.1:3128"
     export HTTPS_PROXY="http://127.0.0.1:3128"
     export NO_PROXY="localhost,127.0.0.1"
+
+    # Quick connectivity test through the proxy
+    echo "  Testing outbound connectivity via proxy..."
+    if curl -sf --max-time 10 -x http://127.0.0.1:3128 https://api.cloudflare.com/cdn-cgi/trace > /tmp/proxy-test 2>&1; then
+        echo "  Outbound proxy OK: $(head -1 /tmp/proxy-test)"
+    else
+        echo "  WARNING: outbound proxy test failed (curl exit=$?)"
+        echo "  This may cause cloudflared/API calls to fail later"
+        cat /tmp/proxy-test 2>/dev/null || true
+    fi
+    rm -f /tmp/proxy-test
 else
-    echo "No VSOCK device - running in direct network mode"
+    echo "  No VSOCK device - running in direct network mode"
 fi
 
 # In local Docker mode there is no host-env bootstrap step, so preserve the
@@ -78,20 +132,22 @@ if [ -n "${BACKUP_ENCRYPTION_KEY:-}" ] && [ "${ALLOW_INSECURE_BACKUP_KEY_FALLBAC
 fi
 
 # ── 0d. Derive backup encryption key (runtime only, never persisted) ────────
-echo "Deriving runtime backup encryption key..."
-if ! BACKUP_ENCRYPTION_KEY="$(/usr/local/bin/derive-backup-key.sh)"; then
-    echo "FATAL: Failed to derive BACKUP_ENCRYPTION_KEY"
+echo ""
+echo "[STEP 0d] Deriving runtime backup encryption key..."
+if ! BACKUP_ENCRYPTION_KEY="$(/usr/local/bin/derive-backup-key.sh 2>&1)"; then
+    echo "  FATAL: derive-backup-key.sh failed"
+    echo "  Output was: $BACKUP_ENCRYPTION_KEY"
     exit 1
 fi
 if [ -z "${BACKUP_ENCRYPTION_KEY}" ]; then
-    echo "FATAL: Derived BACKUP_ENCRYPTION_KEY is empty"
+    echo "  FATAL: Derived BACKUP_ENCRYPTION_KEY is empty"
     exit 1
 fi
 export BACKUP_ENCRYPTION_KEY
 unset INSECURE_BACKUP_ENCRYPTION_KEY_FALLBACK
 
 BACKUP_KEY_FINGERPRINT="$(printf '%s' "${BACKUP_ENCRYPTION_KEY}" | sha256sum | awk '{print $1}' | cut -c1-16)"
-echo "Runtime backup key ready (fingerprint: ${BACKUP_KEY_FINGERPRINT})"
+echo "  Backup key ready (fingerprint: ${BACKUP_KEY_FINGERPRINT})"
 
 # ── 0e. Fetch backup from host via VSOCK (explicit restore only) ────────────
 if [ -e /dev/vsock ] && [ "${RESTORE_MODE}" != "none" ]; then
@@ -123,31 +179,70 @@ else
 fi
 
 # ── 0f. Fetch one-time SQL seed from host via VSOCK (first bootstrap only) ──
+echo ""
+echo "[STEP 0f] Checking for SQL seed from host..."
 if [ -e /dev/vsock ] && [ "${RESTORE_MODE}" = "none" ]; then
     mkdir -p /data/seed
     SEED_DUMP="/data/seed/lightfriend_db.sql"
-    if [ ! -f "$SEED_DUMP" ]; then
-        echo "Checking host for one-time SQL seed..."
+    if [ -f "$SEED_DUMP" ]; then
+        EXISTING_SIZE=$(stat -c%s "$SEED_DUMP" 2>/dev/null || echo "unknown")
+        echo "  Seed dump already exists (${EXISTING_SIZE} bytes) - skipping fetch"
+    else
+        echo "  No existing seed dump. Fetching from host port 9003..."
         RECEIVED_SEED="/data/seed/lightfriend_db.seed.tmp"
-        socat -T30 -u VSOCK-CONNECT:3:9003 CREATE:"$RECEIVED_SEED" 2>/dev/null || true
-        if [ -s "$RECEIVED_SEED" ] && ! grep -q "NO_SEED" "$RECEIVED_SEED" 2>/dev/null; then
-            mv "$RECEIVED_SEED" "$SEED_DUMP"
-            SEED_SIZE=$(stat -c%s "$SEED_DUMP" 2>/dev/null || stat -f%z "$SEED_DUMP" 2>/dev/null || echo "unknown")
-            echo "SQL seed received from host (${SEED_SIZE} bytes)"
-        else
+        SEED_FETCHED=false
+        for seed_attempt in $(seq 1 5); do
+            echo "  seed attempt $seed_attempt: connecting to VSOCK-CONNECT:3:9003..."
+            SOCAT_ERR=$(mktemp)
+            socat -T30 -u VSOCK-CONNECT:3:9003 CREATE:"$RECEIVED_SEED" 2>"$SOCAT_ERR" || true
+            SEED_RC=$?
+            SEED_BYTES=$(stat -c%s "$RECEIVED_SEED" 2>/dev/null || echo "0")
+            SOCAT_ERR_MSG=$(cat "$SOCAT_ERR" 2>/dev/null || true)
+            rm -f "$SOCAT_ERR"
+            echo "  seed attempt $seed_attempt: socat exit=$SEED_RC, received=${SEED_BYTES} bytes"
+            [ -n "$SOCAT_ERR_MSG" ] && echo "  seed attempt $seed_attempt: socat stderr: $SOCAT_ERR_MSG"
+
+            if [ "$SEED_BYTES" -gt 0 ]; then
+                FIRST_LINE=$(head -c 200 "$RECEIVED_SEED" 2>/dev/null || true)
+                echo "  seed attempt $seed_attempt: first 200 chars: $FIRST_LINE"
+
+                if grep -q "NO_SEED" "$RECEIVED_SEED" 2>/dev/null; then
+                    echo "  seed attempt $seed_attempt: host says NO_SEED (no seed file staged)"
+                    rm -f "$RECEIVED_SEED"
+                    break
+                fi
+
+                mv "$RECEIVED_SEED" "$SEED_DUMP"
+                SEED_SIZE=$(stat -c%s "$SEED_DUMP" 2>/dev/null || echo "unknown")
+                echo "  SQL seed received from host (${SEED_SIZE} bytes)"
+                SEED_FETCHED=true
+                break
+            fi
+            echo "  seed attempt $seed_attempt: empty response, retrying in 3s..."
             rm -f "$RECEIVED_SEED"
-            echo "No SQL seed available from host"
+            sleep 3
+        done
+
+        if [ "$SEED_FETCHED" = "false" ]; then
+            echo "  No SQL seed available from host after 5 attempts"
+            echo "  Check: is vsock-seed-server running? Is /opt/lightfriend/seed/lightfriend_db.sql staged?"
         fi
     fi
+elif [ "${RESTORE_MODE}" != "none" ]; then
+    echo "  Restore mode=${RESTORE_MODE} - seed fetch skipped (using backup instead)"
+else
+    echo "  No VSOCK device - seed fetch skipped"
 fi
 
 # ── 1. Initialize PostgreSQL if needed ──────────────────────────────────────
+echo ""
+echo "[STEP 1] PostgreSQL initialization..."
 
 PG_DATA="/var/lib/postgresql/data"
 PG_BIN="/usr/lib/postgresql/15/bin"
 
 if [ ! -f "$PG_DATA/PG_VERSION" ]; then
-    echo "Initializing PostgreSQL data directory..."
+    echo "  No PG_VERSION found - initializing fresh PostgreSQL data directory..."
     chown -R postgres:postgres "$PG_DATA"
     su postgres -c "$PG_BIN/initdb -D $PG_DATA"
 
@@ -162,8 +257,8 @@ fi
 chown -R postgres:postgres "$PG_DATA" /run/postgresql
 
 # ── 2. Start PostgreSQL temporarily to create databases ─────────────────────
-
-echo "Starting PostgreSQL for initialization..."
+echo ""
+echo "[STEP 2] Starting PostgreSQL for initialization..."
 su postgres -c "$PG_BIN/pg_ctl -D $PG_DATA -l /var/log/supervisor/postgresql-init.log start -w"
 
 # Create bridge databases if they don't exist
@@ -509,11 +604,18 @@ fi
 
 # ── 2b. Restore lightfriend_db from seed dump if present ─────────────────
 # Skip when full restore was done (all data already restored above)
+echo ""
+echo "[STEP 2b] Seed dump restore check..."
 if [ "${FULL_RESTORE_DONE}" = "false" ]; then
 SEED_DUMP="/data/seed/lightfriend_db.sql"
 if [ -f "$SEED_DUMP" ]; then
-    echo "Restoring lightfriend_db from seed dump..."
-    su postgres -c "psql -d lightfriend_db < $SEED_DUMP"
+    DUMP_SIZE=$(stat -c%s "$SEED_DUMP" 2>/dev/null || echo "unknown")
+    echo "  Restoring lightfriend_db from seed dump (${DUMP_SIZE} bytes)..."
+    if su postgres -c "psql -d lightfriend_db < $SEED_DUMP" 2>&1; then
+        echo "  psql restore succeeded"
+    else
+        echo "  WARNING: psql restore had errors (exit=$?)"
+    fi
 
     # Clean stale Matrix/bridge connection data (homeserver + bridges start fresh)
     echo "Cleaning stale connection data..."
@@ -545,8 +647,8 @@ fi
 
 # ── 3. Generate configs from templates ─────────────────────────────────────
 # Note: Database migrations run automatically at backend startup via embed_migrations!
-
-echo "Generating configuration files from templates..."
+echo ""
+echo "[STEP 3] Generating configuration files from templates..."
 
 substitute_vars() {
     local template_file="$1"
@@ -898,6 +1000,13 @@ fi
 
 # Enable PostgreSQL autostart and run the startup orchestrator in background
 sed -i 's/\[program:postgresql\]/[program:postgresql]/' /etc/supervisor/conf.d/lightfriend.conf
+
+echo ""
+echo "[STEP FINAL] Launching supervisord with startup script: ${STARTUP_SCRIPT}"
+echo "  Entrypoint setup complete at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+# Send boot trace now - exec will replace this shell so the EXIT trap won't fire
+send_boot_trace 0
 
 # Start supervisord (postgresql starts via autostart=true, rest via startup script)
 ${STARTUP_SCRIPT} &

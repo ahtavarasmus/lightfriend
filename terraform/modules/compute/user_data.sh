@@ -140,9 +140,38 @@ KMSBRIDGEEOF
 # VSOCK config server (port 9000) - serves .env + any one-shot restore vars
 cat > /opt/lightfriend/config-server.sh <<'SCRIPT'
 #!/bin/bash
-while true; do
-    socat VSOCK-LISTEN:9000,reuseaddr SYSTEM:"cat /opt/lightfriend/.env; [ -f /opt/lightfriend/runtime.env ] && printf '\n' && cat /opt/lightfriend/runtime.env; [ -f /opt/lightfriend/restore.env ] && printf '\n' && cat /opt/lightfriend/restore.env" 2>/dev/null
+set -eu
+
+LOG="/opt/lightfriend/logs/config-server.log"
+mkdir -p /opt/lightfriend/logs
+
+log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) config-server: $*" | tee -a "$LOG"; }
+
+render_host_env() {
+    TMP=$(mktemp /opt/lightfriend/host-env.XXXXXX)
+    cat /opt/lightfriend/.env > "$TMP"
+    if [ -f /opt/lightfriend/runtime.env ]; then
+        printf '\n' >> "$TMP"
+        cat /opt/lightfriend/runtime.env >> "$TMP"
+    fi
+    if [ -f /opt/lightfriend/restore.env ]; then
+        printf '\n' >> "$TMP"
+        cat /opt/lightfriend/restore.env >> "$TMP"
+    fi
+    chmod 600 "$TMP"
+    mv "$TMP" /opt/lightfriend/host-env
+}
+
+render_host_env
+ENV_SIZE=$(stat -c%s /opt/lightfriend/host-env 2>/dev/null || echo "0")
+log "host-env rendered (${ENV_SIZE} bytes), starting listener on port 9000"
+
+# fork mode: socat stays resident, forks per connection
+socat -u VSOCK-LISTEN:9000,reuseaddr,fork FILE:/opt/lightfriend/host-env 2>&1 | while read -r line; do
+    log "socat: $line"
 done
+
+log "socat exited unexpectedly, restarting via systemd"
 SCRIPT
 chmod +x /opt/lightfriend/config-server.sh
 
@@ -218,18 +247,28 @@ cat > /opt/lightfriend/seed-server.sh <<'SCRIPT'
 SEED_DIR="/opt/lightfriend/seed"
 CURRENT="$${SEED_DIR}/lightfriend_db.sql"
 SERVED_DIR="$${SEED_DIR}/served"
-mkdir -p "$SEED_DIR" "$SERVED_DIR"
+LOG="/opt/lightfriend/logs/seed-server.log"
+mkdir -p "$SEED_DIR" "$SERVED_DIR" /opt/lightfriend/logs
+
+log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) seed-server: $*" | tee -a "$LOG"; }
+
+log "Starting seed server on port 9003"
 
 while true; do
     if [ -f "$CURRENT" ]; then
+        FSIZE=$(stat -c%s "$CURRENT" 2>/dev/null || echo "?")
+        log "Seed file present (${FSIZE} bytes), waiting for connection..."
         TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
-        socat -u VSOCK-LISTEN:9003,reuseaddr FILE:"$CURRENT" 2>/dev/null
+        socat -u VSOCK-LISTEN:9003,reuseaddr FILE:"$CURRENT" 2>&1 | while read -r line; do log "socat: $line"; done
+        log "Connection served"
         if [ -f "$CURRENT" ]; then
             mv "$CURRENT" "$${SERVED_DIR}/lightfriend_db-$${TIMESTAMP}.sql"
-            echo "Served bootstrap SQL seed: lightfriend_db-$${TIMESTAMP}.sql"
+            log "Seed moved to served/lightfriend_db-$${TIMESTAMP}.sql"
         fi
     else
+        log "No seed file at $CURRENT, serving NO_SEED response"
         socat VSOCK-LISTEN:9003,reuseaddr SYSTEM:"echo NO_SEED" 2>/dev/null
+        log "NO_SEED response served"
     fi
 done
 SCRIPT
@@ -248,14 +287,47 @@ RestartSec=3
 WantedBy=multi-user.target
 SEEDSVCEOF
 
+# VSOCK boot trace receiver (port 9007) - receives enclave boot log
+cat > /opt/lightfriend/boot-trace-receiver.sh <<'SCRIPT'
+#!/bin/bash
+LOG_DIR="/opt/lightfriend/logs"
+mkdir -p "$LOG_DIR"
+while true; do
+    TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
+    DEST="$LOG_DIR/boot-trace-${TIMESTAMP}.log"
+    socat -T60 -u VSOCK-LISTEN:9007,reuseaddr CREATE:"$DEST" 2>/dev/null || true
+    if [ -s "$DEST" ]; then
+        echo "$(date -u): Boot trace received ($(stat -c%s "$DEST") bytes) -> $DEST"
+        # Keep a symlink to latest
+        ln -sf "$DEST" "$LOG_DIR/boot-trace-latest.log"
+    else
+        rm -f "$DEST"
+    fi
+done
+SCRIPT
+chmod +x /opt/lightfriend/boot-trace-receiver.sh
+
+cat > /etc/systemd/system/vsock-boot-trace.service <<'BTEOF'
+[Unit]
+Description=VSOCK boot trace receiver for Nitro Enclave (port 9007)
+
+[Service]
+ExecStart=/opt/lightfriend/boot-trace-receiver.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+BTEOF
+
 # Enable and start all VSOCK services
 systemctl daemon-reload
-for svc in vsock-proxy-bridge vsock-config-server vsock-backup-receiver vsock-restore-server vsock-seed-server vsock-marlin-kms-bridge; do
+for svc in vsock-proxy-bridge vsock-config-server vsock-backup-receiver vsock-restore-server vsock-seed-server vsock-marlin-kms-bridge vsock-boot-trace; do
     systemctl enable "$svc"
     systemctl start "$svc" || echo "WARNING: $svc failed to start"
 done
 
-echo "VSOCK services configured: proxy:8001 via squid:3128, config:9000, backup:9001, restore:9002, seed:9003, marlin-kms:9010"
+echo "VSOCK services configured: proxy:8001 via squid:3128, config:9000, backup:9001, restore:9002, seed:9003, boot-trace:9007, marlin-kms:9010"
 
 # ── Enclave launch script ───────────────────────────────────────────────────
 
@@ -280,6 +352,86 @@ nitro-cli run-enclave --eif-path "$EIF_PATH" --memory 8192 --cpu-count 4 --encla
 nitro-cli describe-enclaves
 SCRIPT
 chmod +x /opt/lightfriend/launch-enclave.sh
+
+# ── Host diagnostic script (run after launch to see everything) ──────────────
+
+cat > /opt/lightfriend/diagnose.sh <<'SCRIPT'
+#!/bin/bash
+echo "========================================"
+echo "  Lightfriend Host Diagnostics"
+echo "  $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "========================================"
+
+echo ""
+echo "--- 1. Enclave State ---"
+nitro-cli describe-enclaves 2>&1 | head -20
+
+echo ""
+echo "--- 2. VSOCK Services ---"
+for svc in squid vsock-proxy-bridge vsock-config-server vsock-seed-server vsock-boot-trace vsock-backup-receiver vsock-restore-server vsock-marlin-kms-bridge; do
+    STATUS=$(systemctl is-active "$svc" 2>/dev/null || echo "not-found")
+    printf "  %-30s %s\n" "$svc" "$STATUS"
+done
+
+echo ""
+echo "--- 3. Key Files ---"
+for f in /opt/lightfriend/.env /opt/lightfriend/host-env /opt/lightfriend/lightfriend.eif /opt/lightfriend/seed/lightfriend_db.sql; do
+    if [ -f "$f" ]; then
+        SIZE=$(stat -c%s "$f" 2>/dev/null || echo "?")
+        printf "  %-55s %s bytes\n" "$f" "$SIZE"
+    else
+        printf "  %-55s MISSING\n" "$f"
+    fi
+done
+
+echo ""
+echo "--- 4. Verify Result ---"
+if [ -f /opt/lightfriend/verify-result.json ]; then
+    cat /opt/lightfriend/verify-result.json
+else
+    echo "  No verify-result.json yet"
+fi
+
+echo ""
+echo "--- 5. Boot Trace (last 80 lines) ---"
+LATEST="/opt/lightfriend/logs/boot-trace-latest.log"
+if [ -f "$LATEST" ]; then
+    TRACE_SIZE=$(stat -c%s "$LATEST" 2>/dev/null || echo "?")
+    echo "  File: $(readlink -f "$LATEST") ($TRACE_SIZE bytes)"
+    echo "  ---"
+    tail -80 "$LATEST"
+else
+    echo "  No boot trace received yet"
+    echo "  Check: is vsock-boot-trace service running?"
+fi
+
+echo ""
+echo "--- 6. Nitro Enclave Logs (last 30 lines) ---"
+NITRO_LOG=$(ls -t /var/log/nitro_enclaves/nitro_enclaves.log 2>/dev/null | head -1)
+if [ -n "$NITRO_LOG" ]; then
+    tail -30 "$NITRO_LOG"
+else
+    echo "  No nitro enclave logs found"
+fi
+
+echo ""
+echo "--- 7. Squid Proxy Test ---"
+if curl -sf --max-time 5 -x http://127.0.0.1:3128 https://api.cloudflare.com/cdn-cgi/trace > /tmp/diag-proxy-test 2>&1; then
+    echo "  OK: $(head -1 /tmp/diag-proxy-test)"
+else
+    echo "  FAILED: proxy not reachable or Cloudflare unreachable"
+fi
+rm -f /tmp/diag-proxy-test
+
+echo ""
+echo "--- 8. Public Endpoint ---"
+HTTP_CODE=$(curl -sf --max-time 10 -o /dev/null -w '%{http_code}' https://enclave.lightfriend.ai 2>/dev/null || echo "timeout")
+echo "  https://enclave.lightfriend.ai -> HTTP $HTTP_CODE"
+
+echo ""
+echo "========================================"
+SCRIPT
+chmod +x /opt/lightfriend/diagnose.sh
 
 # ── S3 backup upload/download scripts ───────────────────────────────────────
 
