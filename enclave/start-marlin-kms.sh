@@ -54,8 +54,26 @@ start_bg "${RUN_DIR}/attestation.pid" \
     /usr/local/bin/oyster-attestation-server \
     --ip-addr "127.0.0.1:${ATTEST_PORT}"
 
+sleep 1
+ATTEST_PID=$(cat "${RUN_DIR}/attestation.pid" 2>/dev/null || echo "")
+if [ -n "${ATTEST_PID}" ] && kill -0 "${ATTEST_PID}" 2>/dev/null; then
+    echo "Attestation server running (PID ${ATTEST_PID})" >&2
+else
+    echo "Attestation server died immediately (PID ${ATTEST_PID})" >&2
+    echo "Log:" >&2
+    cat "${RUN_DIR}/attestation.pid.log" 2>/dev/null >&2
+    exit 1
+fi
+
+# Check what's listening
+echo "Checking port ${ATTEST_PORT}..." >&2
+ss -tlnp 2>/dev/null | grep "${ATTEST_PORT}" >&2 || echo "Nothing listening on ${ATTEST_PORT}" >&2
+
 if ! wait_http "http://127.0.0.1:${ATTEST_PORT}/attestation/raw" 30 1; then
     echo "Marlin attestation server did not become ready" >&2
+    echo "Attestation PID alive: $(kill -0 "${ATTEST_PID}" 2>/dev/null && echo yes || echo no)" >&2
+    echo "Last attestation log:" >&2
+    tail -20 "${RUN_DIR}/attestation.pid.log" 2>/dev/null >&2
     exit 1
 fi
 
