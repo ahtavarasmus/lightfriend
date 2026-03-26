@@ -57,8 +57,13 @@ fi
 printf '%s\n' "${MARLIN_KMS_CONTRACT_ADDRESS}" > "${RUN_DIR}/contract-address"
 chmod 600 "${RUN_DIR}/contract-address"
 
+# Route KMS traffic through the outbound HTTP proxy (squid) using CONNECT
+# tunnel. The dedicated VSOCK bridge (port 9010) has VSOCK reliability issues
+# with long-running Scallop connections. The squid proxy is already proven working.
+KMS_HOST="${MARLIN_ROOT_SERVER_ENDPOINT%%:*}"
+KMS_PORT="${MARLIN_ROOT_SERVER_ENDPOINT##*:}"
 start_bg "${RUN_DIR}/kms-tunnel.pid" \
-    /usr/bin/socat TCP-LISTEN:${LOCAL_ROOT_TUNNEL_PORT},reuseaddr,fork VSOCK-CONNECT:3:9010
+    /usr/bin/socat TCP-LISTEN:${LOCAL_ROOT_TUNNEL_PORT},reuseaddr,fork "PROXY:127.0.0.1:${KMS_HOST}:${KMS_PORT},proxyport=3128"
 
 start_bg "${RUN_DIR}/attestation.pid" \
     /usr/local/bin/oyster-attestation-server \
