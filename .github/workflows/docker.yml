@@ -36,7 +36,8 @@ jobs:
     if: needs.check-secrets.outputs.has-secrets == 'true'
     runs-on: ubuntu-latest
     outputs:
-      image_digest: ${{ steps.build.outputs.digest }}
+      image_digest: ${{ steps.image.outputs.image_digest }}
+      image_ref: ${{ steps.image.outputs.image_ref }}
     permissions:
       contents: read
       packages: write
@@ -89,6 +90,30 @@ jobs:
           build-args: |
             BUILDKIT_INLINE_CACHE=1
 
+      - name: Export image outputs
+        id: image
+        run: |
+          DIGEST="${{ steps.build.outputs.digest }}"
+          [ -n "$DIGEST" ] || { echo "FATAL: docker/build-push-action did not return a digest"; exit 1; }
+          case "$DIGEST" in
+            sha256:*) ;;
+            *) echo "FATAL: unexpected image digest format: $DIGEST"; exit 1 ;;
+          esac
+          IMAGE_REF="${{ env.IMAGE_REPO }}@$DIGEST"
+          echo "image_digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "image_ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
+          echo "Resolved image ref: $IMAGE_REF"
+
+          cat > /tmp/image-build.json <<EOF
+          {"image_repo":"${{ env.IMAGE_REPO }}","image_digest":"$DIGEST","image_ref":"$IMAGE_REF","commit_sha":"${{ github.sha }}"}
+          EOF
+
+      - name: Upload image build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-build-${{ github.sha }}
+          path: /tmp/image-build.json
+
   build-eif:
     needs: [check-secrets, build-and-push]
     if: needs.check-secrets.outputs.has-secrets == 'true' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
@@ -108,6 +133,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download image build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: image-build-${{ github.sha }}
+          path: /tmp/image-build
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -144,8 +175,19 @@ jobs:
       - name: Build EIF from immutable image digest
         id: build_meta
         run: |
-          IMAGE_REF="${{ env.IMAGE_REPO }}@${{ needs.build-and-push.outputs.image_digest }}"
+          IMAGE_REF="$(jq -r '.image_ref // empty' /tmp/image-build/image-build.json)"
+          IMAGE_DIGEST="$(jq -r '.image_digest // empty' /tmp/image-build/image-build.json)"
+          [ -n "$IMAGE_REF" ] || { echo "FATAL: build-and-push did not provide image_ref"; exit 1; }
+          case "$IMAGE_DIGEST" in
+            sha256:*) ;;
+            *) echo "FATAL: image build artifact has unexpected digest format: $IMAGE_DIGEST"; exit 1 ;;
+          esac
+          case "$IMAGE_REF" in
+            docker.io/*@sha256:*) ;;
+            *) echo "FATAL: image build artifact has unexpected image_ref format: $IMAGE_REF"; exit 1 ;;
+          esac
           echo "image_ref=$IMAGE_REF" >> $GITHUB_OUTPUT
+          docker manifest inspect "$IMAGE_REF" > /tmp/image-manifest.json
           docker pull "$IMAGE_REF"
           nitro-cli build-enclave --docker-uri "$IMAGE_REF" --output-file lightfriend.eif 2>&1 | tee /tmp/eif-build.log
 
