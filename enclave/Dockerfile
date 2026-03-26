@@ -106,9 +106,10 @@ WORKDIR /src/oyster
 RUN git clone https://github.com/marlinprotocol/oyster-monorepo . && \
     git checkout "${OYSTER_MONOREPO_COMMIT}"
 
-RUN cargo build --release --manifest-path initialization/keygen/Cargo.toml --bin keygen-x25519 && \
-    cargo build --release --manifest-path attestation/server-custom/Cargo.toml && \
-    cargo build --release --manifest-path kms/derive-server/Cargo.toml
+RUN cargo build --release --target-dir /src/oyster/target --manifest-path initialization/keygen/Cargo.toml --bin keygen-x25519 && \
+    cargo build --release --target-dir /src/oyster/target --manifest-path attestation/server-custom/Cargo.toml && \
+    cargo build --release --target-dir /src/oyster/target --manifest-path kms/derive-server/Cargo.toml && \
+    ls -la /src/oyster/target/release/keygen-x25519 /src/oyster/target/release/oyster-attestation-server-custom /src/oyster/target/release/kms-derive-server
 
 # ── Stage 3: Collect bridge binaries from official images ───────────────────
 
@@ -176,13 +177,19 @@ COPY --from=builder /tuwunel_checkpoint /usr/local/bin/tuwunel_checkpoint
 # ── Copy Marlin Oyster binaries (production only, skipped for local builds) ──
 RUN --mount=from=marlin-builder,target=/marlin-img \
     if [ "$BUILD_MODE" = "production" ]; then \
+        echo "Searching for Marlin binaries..." && \
+        find /marlin-img -type f -name 'keygen-x25519' -o -name 'oyster-attestation-server*' -o -name 'kms-derive*' 2>/dev/null && \
         KEYGEN_BIN="$(find /marlin-img -type f -path '*/release/keygen-x25519' | head -1)" && \
         ATTESTATION_BIN="$(find /marlin-img -type f -path '*/release/oyster-attestation-server-custom' | head -1)" && \
         KMS_DERIVE_BIN="$(find /marlin-img -type f -path '*/release/kms-derive-server' | head -1)" && \
-        [ -n "$KEYGEN_BIN" ] && [ -n "$ATTESTATION_BIN" ] && [ -n "$KMS_DERIVE_BIN" ] && \
+        echo "Found: keygen=$KEYGEN_BIN attestation=$ATTESTATION_BIN derive=$KMS_DERIVE_BIN" && \
+        [ -n "$KEYGEN_BIN" ] || { echo "FATAL: keygen-x25519 not found"; exit 1; } && \
+        [ -n "$ATTESTATION_BIN" ] || { echo "FATAL: attestation server not found"; exit 1; } && \
+        [ -n "$KMS_DERIVE_BIN" ] || { echo "FATAL: kms-derive-server not found"; exit 1; } && \
         cp "$KEYGEN_BIN" /usr/local/bin/keygen-x25519 && \
         cp "$ATTESTATION_BIN" /usr/local/bin/oyster-attestation-server && \
-        cp "$KMS_DERIVE_BIN" /usr/local/bin/kms-derive-server; \
+        cp "$KMS_DERIVE_BIN" /usr/local/bin/kms-derive-server && \
+        ls -la /usr/local/bin/keygen-x25519 /usr/local/bin/oyster-attestation-server /usr/local/bin/kms-derive-server; \
     fi
 COPY --from=frontend-builder /app/dist ./public/
 

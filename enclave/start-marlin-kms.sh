@@ -8,6 +8,16 @@ LOCAL_DERIVE_PORT="1101"
 
 mkdir -p "${RUN_DIR}"
 
+# Verify binaries exist
+for bin in keygen-x25519 oyster-attestation-server kms-derive-server; do
+    if [ ! -x "/usr/local/bin/${bin}" ]; then
+        echo "FATAL: /usr/local/bin/${bin} not found or not executable" >&2
+        ls -la /usr/local/bin/keygen* /usr/local/bin/oyster* /usr/local/bin/kms* 2>/dev/null >&2 || echo "No Marlin binaries found" >&2
+        exit 1
+    fi
+done
+echo "Marlin binaries present: keygen, attestation, derive" >&2
+
 start_bg() {
     local pid_file="$1"
     shift
