@@ -173,6 +173,12 @@ jobs:
           sudo chmod 755 /var/log/nitro_enclaves
           sudo chmod 664 /var/log/nitro_enclaves/nitro_enclaves.log
 
+      - name: Prepare Nitro CLI blobs path
+        run: |
+          sudo mkdir -p /usr/share/nitro_enclaves/blobs
+          sudo chown "$USER":"$USER" /usr/share/nitro_enclaves /usr/share/nitro_enclaves/blobs
+          sudo chmod 755 /usr/share/nitro_enclaves /usr/share/nitro_enclaves/blobs
+
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
