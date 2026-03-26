@@ -151,9 +151,17 @@ fi
 # ── 0d. Derive backup encryption key (runtime only, never persisted) ────────
 echo ""
 echo "[STEP 0d] Deriving runtime backup encryption key..."
+echo "  NSM device: $([ -e /dev/nsm ] && echo 'present' || echo 'MISSING')"
+echo "  MARLIN_KMS_CONTRACT_ADDRESS: ${MARLIN_KMS_CONTRACT_ADDRESS:-(not set)}"
+echo "  MARLIN_ROOT_SERVER_ENDPOINT: ${MARLIN_ROOT_SERVER_ENDPOINT:-(not set)}"
+echo "  ALLOW_INSECURE_BACKUP_KEY_FALLBACK: ${ALLOW_INSECURE_BACKUP_KEY_FALLBACK:-(not set)}"
 if ! BACKUP_ENCRYPTION_KEY="$(/usr/local/bin/derive-backup-key.sh 2>&1)"; then
     echo "  FATAL: derive-backup-key.sh failed"
     echo "  Output was: $BACKUP_ENCRYPTION_KEY"
+    # Dump Marlin KMS sidecar logs if they exist
+    for logf in /tmp/marlin-kms/*.log; do
+        [ -f "$logf" ] && echo "  --- $(basename "$logf") ---" && tail -20 "$logf"
+    done
     exit 1
 fi
 if [ -z "${BACKUP_ENCRYPTION_KEY}" ]; then
