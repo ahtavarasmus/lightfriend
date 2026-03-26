@@ -175,9 +175,13 @@ COPY --from=builder /tuwunel_checkpoint /usr/local/bin/tuwunel_checkpoint
 # ── Copy Marlin Oyster binaries (production only, skipped for local builds) ──
 RUN --mount=from=marlin-builder,target=/marlin-img \
     if [ "$BUILD_MODE" = "production" ]; then \
-        cp /marlin-img/src/oyster/target/release/keygen-x25519 /usr/local/bin/keygen-x25519 && \
-        cp /marlin-img/src/oyster/target/release/oyster-attestation-server-custom /usr/local/bin/oyster-attestation-server && \
-        cp /marlin-img/src/oyster/target/release/kms-derive-server /usr/local/bin/kms-derive-server; \
+        KEYGEN_BIN="$(find /marlin-img -type f -path '*/release/keygen-x25519' | head -1)" && \
+        ATTESTATION_BIN="$(find /marlin-img -type f -path '*/release/oyster-attestation-server-custom' | head -1)" && \
+        KMS_DERIVE_BIN="$(find /marlin-img -type f -path '*/release/kms-derive-server' | head -1)" && \
+        [ -n "$KEYGEN_BIN" ] && [ -n "$ATTESTATION_BIN" ] && [ -n "$KMS_DERIVE_BIN" ] && \
+        cp "$KEYGEN_BIN" /usr/local/bin/keygen-x25519 && \
+        cp "$ATTESTATION_BIN" /usr/local/bin/oyster-attestation-server && \
+        cp "$KMS_DERIVE_BIN" /usr/local/bin/kms-derive-server; \
     fi
 COPY --from=frontend-builder /app/dist ./public/
 
