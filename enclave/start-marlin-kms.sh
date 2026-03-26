@@ -87,7 +87,25 @@ if ! wait_http "http://127.0.0.1:${ATTEST_PORT}/attestation/raw" 30 1; then
     exit 1
 fi
 
-start_bg "${RUN_DIR}/derive.pid" \
+# Test KMS tunnel connectivity BEFORE starting derive server
+echo "Testing KMS tunnel (port ${LOCAL_ROOT_TUNNEL_PORT} -> VSOCK:3:9010 -> arbone-v4.kms.box:1100)..." >&2
+sleep 1
+if timeout 5 bash -c "echo | socat - TCP:127.0.0.1:${LOCAL_ROOT_TUNNEL_PORT}" 2>/dev/null; then
+    echo "KMS tunnel: reachable" >&2
+else
+    echo "KMS tunnel: UNREACHABLE on port ${LOCAL_ROOT_TUNNEL_PORT}" >&2
+fi
+
+# Dump key info for debugging
+echo "KMS pubkey: ${MARLIN_ROOT_SERVER_X25519_PUBKEY}" >&2
+echo "Contract address: $(cat "${RUN_DIR}/contract-address")" >&2
+echo "Secret key size: $(wc -c < "${RUN_DIR}/id.sec") bytes" >&2
+echo "Attestation test:" >&2
+ATTEST_RESP=$(curl -sf "http://127.0.0.1:${ATTEST_PORT}/attestation/raw" 2>&1 | wc -c)
+echo "  /attestation/raw response: ${ATTEST_RESP} bytes" >&2
+
+# Start derive server with RUST_LOG for verbose output
+RUST_LOG=debug start_bg "${RUN_DIR}/derive.pid" \
     /usr/local/bin/kms-derive-server \
     --kms-endpoint "127.0.0.1:${LOCAL_ROOT_TUNNEL_PORT}" \
     --kms-pubkey "${MARLIN_ROOT_SERVER_X25519_PUBKEY}" \
@@ -96,25 +114,17 @@ start_bg "${RUN_DIR}/derive.pid" \
     --secret-path "${RUN_DIR}/id.sec" \
     --contract-address-file "${RUN_DIR}/contract-address"
 
-sleep 1
+sleep 3
 DERIVE_PID=$(cat "${RUN_DIR}/derive.pid" 2>/dev/null || echo "")
 if [ -n "${DERIVE_PID}" ] && kill -0 "${DERIVE_PID}" 2>/dev/null; then
     echo "Derive server running (PID ${DERIVE_PID})" >&2
 else
-    echo "Derive server died immediately (PID ${DERIVE_PID})" >&2
+    echo "Derive server died (PID ${DERIVE_PID})" >&2
     echo "Derive log:" >&2
     cat "${RUN_DIR}/derive.pid.log" 2>/dev/null >&2
     echo "KMS tunnel log:" >&2
     cat "${RUN_DIR}/kms-tunnel.pid.log" 2>/dev/null >&2
     exit 1
-fi
-
-# Test KMS tunnel connectivity
-echo "Testing KMS tunnel (port ${LOCAL_ROOT_TUNNEL_PORT} -> VSOCK:3:9010 -> arbone-v4.kms.box:1100)..." >&2
-if timeout 5 bash -c "echo | socat - TCP:127.0.0.1:${LOCAL_ROOT_TUNNEL_PORT}" 2>/dev/null; then
-    echo "KMS tunnel reachable" >&2
-else
-    echo "WARNING: KMS tunnel not reachable on port ${LOCAL_ROOT_TUNNEL_PORT}" >&2
 fi
 
 if ! wait_http "http://127.0.0.1:${LOCAL_DERIVE_PORT}/derive/x25519?path=${MARLIN_BACKUP_KEY_PATH}" 30 1; then
