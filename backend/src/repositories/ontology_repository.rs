@@ -996,7 +996,7 @@ impl OntologyRepository {
         diesel::sql_query(
             "SELECT sender_name, room_id, platform, COUNT(*) as msg_count \
              FROM ont_messages \
-             WHERE user_id = $1 AND person_id IS NULL \
+             WHERE user_id = $1 AND person_id IS NULL AND sender_name != 'You' \
              GROUP BY sender_name, room_id, platform \
              HAVING COUNT(*) >= $2 \
              ORDER BY msg_count DESC",
