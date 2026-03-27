@@ -4,6 +4,9 @@ database_path = "/var/lib/tuwunel"
 address = "0.0.0.0"
 port = 8008
 
+# Nitro enclave filesystem doesn't support Direct I/O
+rocksdb_direct_io = false
+
 # Registration via token (replaces Synapse's shared secret)
 allow_registration = true
 registration_token = "${MATRIX_REGISTRATION_TOKEN}"
