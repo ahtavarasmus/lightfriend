@@ -36,6 +36,9 @@ else
     echo "WARNING: failed to bring up loopback (ip link set lo up)"
 fi
 
+# Set up DNS resolver - Tuwunel needs /etc/resolv.conf
+cp /etc/resolv.conf.enclave /etc/resolv.conf 2>/dev/null || echo "nameserver 127.0.0.1" | tee /etc/resolv.conf >/dev/null 2>&1 || true
+
 
 # ── 0a. Fetch environment from host via VSOCK ────────────────────────────────
 ENV_LOADED=false
