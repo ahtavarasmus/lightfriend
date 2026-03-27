@@ -907,10 +907,15 @@ echo "=== Starting all services via supervisord ==="
 cat > /tmp/start-services.sh << 'STARTUP'
 #!/bin/bash
 # Wait for PostgreSQL to be ready, then start dependent services
+# This script's output goes to stdout which supervisord captures
+exec > /data/seed/startup-services.log 2>&1
+
+echo "=== Service startup $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 
 sleep 2
 
 # Wait for PG
+echo "Waiting for PostgreSQL..."
 for i in $(seq 1 30); do
     if pg_isready -h localhost -U postgres > /dev/null 2>&1; then
         echo "PostgreSQL is ready."
@@ -924,6 +929,7 @@ for i in $(seq 1 30); do
 done
 
 # Start Tuwunel
+echo "Starting Tuwunel..."
 supervisorctl start tuwunel
 
 # Wait for Tuwunel
@@ -939,9 +945,11 @@ for i in $(seq 1 30); do
 done
 
 # Register bridge bots (first run only, idempotent)
-cd /app && bash register-bridge-bots.sh http://localhost:8008 2>/dev/null || true
+echo "Registering bridge bots..."
+cd /app && bash register-bridge-bots.sh http://localhost:8008 2>&1 || true
 
 # Start bridges
+echo "Starting bridges..."
 supervisorctl start mautrix-whatsapp
 supervisorctl start mautrix-signal
 supervisorctl start mautrix-telegram
@@ -949,15 +957,19 @@ supervisorctl start mautrix-telegram
 # Start Lightfriend backend (unless SKIP_BACKEND)
 if [ "${SKIP_BACKEND}" != "true" ]; then
     sleep 2
+    echo "Starting Lightfriend backend..."
     supervisorctl start lightfriend
 fi
 
 if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ] && [ "${DEFER_CLOUDFLARED:-}" != "true" ]; then
+    echo "Starting Cloudflare tunnel..."
     supervisorctl start cloudflared
-    echo "Cloudflare tunnel started"
 fi
 
-echo "=== All services started ==="
+sleep 5
+echo "=== Service status ==="
+supervisorctl status 2>&1
+echo "=== All services started $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 STARTUP
 chmod +x /tmp/start-services.sh
 
@@ -1003,17 +1015,35 @@ else
     # Fresh start (no restore) - run full verification before signaling
     cat > /tmp/start-and-signal.sh <<'SIGNALEOF'
 #!/bin/bash
+exec >> /data/seed/startup-signal.log 2>&1
+echo "=== Signal script $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+
 /tmp/start-services.sh
 
 # Wait for backend to be ready before running verification
 echo "Waiting for backend to start..."
+BACKEND_READY=false
 for i in $(seq 1 60); do
     if curl -sf http://localhost:3000/api/health > /dev/null 2>&1; then
-        echo "Backend ready"
+        echo "Backend ready after $((i * 5))s"
+        BACKEND_READY=true
         break
+    fi
+    if [ "$((i % 12))" -eq 0 ]; then
+        echo "  Still waiting ($((i * 5))s)... supervisorctl:"
+        supervisorctl status 2>&1
     fi
     sleep 5
 done
+
+if [ "$BACKEND_READY" = "false" ]; then
+    echo "WARNING: Backend not ready after 300s"
+    echo "Supervisorctl status:"
+    supervisorctl status 2>&1
+    echo "Backend log (last 30 lines):"
+    tail -30 /var/log/supervisor/lightfriend-err.log 2>/dev/null
+    tail -30 /var/log/supervisor/lightfriend.log 2>/dev/null
+fi
 
 echo "Running verification..."
 sleep 3
@@ -1023,6 +1053,11 @@ sleep 3
 if [ -e /dev/vsock ] && [ -f /data/seed/verify-result.json ]; then
     socat -u FILE:/data/seed/verify-result.json VSOCK-CONNECT:3:9004 2>/dev/null || true
 fi
+
+# Send startup logs to host boot trace receiver
+echo "=== Sending startup logs to host ==="
+cat /data/seed/startup-services.log /data/seed/startup-signal.log 2>/dev/null \
+    | socat -T10 -u STDIN VSOCK-CONNECT:3:9007 2>/dev/null || true
 SIGNALEOF
     chmod +x /tmp/start-and-signal.sh
     STARTUP_SCRIPT="/tmp/start-and-signal.sh"
