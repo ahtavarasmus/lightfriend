@@ -54,6 +54,7 @@ async fn llm_call_with_retry(
     reasoning_tx: &Option<tokio::sync::mpsc::Sender<String>>,
     options: &mut ProcessSmsOptions,
     max_retries: u32,
+    user_id: i32,
 ) -> Result<chat_completion::ChatCompletionResponse, String> {
     let mut last_error = String::new();
 
@@ -68,7 +69,21 @@ async fn llm_call_with_retry(
             .chat_completion_streaming(provider, &request, reasoning_tx.clone())
             .await
         {
-            Ok(result) => return Ok(result),
+            Ok(result) => {
+                let provider_str = match provider {
+                    AiProvider::Tinfoil => "tinfoil",
+                    AiProvider::OpenRouter => "openrouter",
+                };
+                crate::ai_config::log_llm_usage(
+                    &state.llm_usage_repository,
+                    user_id,
+                    provider_str,
+                    model,
+                    "chat_main",
+                    &result,
+                );
+                return Ok(result);
+            }
             Err(e) => {
                 last_error = format!("{:?}", e);
                 tracing::warn!(
@@ -338,10 +353,11 @@ impl SmsResponse {
         state: &Arc<AppState>,
         provider: crate::AiProvider,
         model: &str,
+        user_id: i32,
     ) -> Self {
         let content = if raw.chars().count() > Self::MAX_LENGTH {
             // Try to condense with LLM first, fall back to truncation
-            condense_response(state, provider, &raw, Self::MAX_LENGTH, model)
+            condense_response(state, provider, &raw, Self::MAX_LENGTH, model, user_id)
                 .await
                 .unwrap_or_else(|_| truncate_nicely(&raw, Self::MAX_LENGTH))
         } else {
@@ -434,6 +450,7 @@ async fn condense_response(
     original: &str,
     max_chars: usize,
     model: &str,
+    user_id: i32,
 ) -> Result<String, String> {
     use openai_api_rs::v1::chat_completion::{
         ChatCompletionMessage, ChatCompletionRequest, Content, MessageRole,
@@ -459,6 +476,18 @@ async fn condense_response(
 
     match state.ai_config.chat_completion(provider, &req).await {
         Ok(response) => {
+            let provider_str = match provider {
+                crate::AiProvider::Tinfoil => "tinfoil",
+                crate::AiProvider::OpenRouter => "openrouter",
+            };
+            crate::ai_config::log_llm_usage(
+                &state.llm_usage_repository,
+                user_id,
+                provider_str,
+                model,
+                "condense_sms",
+                &response,
+            );
             if let Some(choice) = response.choices.first() {
                 if let Some(content) = &choice.message.content {
                     let condensed = content.trim().to_string();
@@ -1025,6 +1054,7 @@ NEVER use emojis - they cost extra in SMS encoding. Respond in plain text only. 
                     &reasoning_tx,
                     &mut options,
                     MAX_RETRIES,
+                    user.id,
                 )
                 .await
                 {
@@ -1045,6 +1075,7 @@ NEVER use emojis - they cost extra in SMS encoding. Respond in plain text only. 
                 &reasoning_tx,
                 &mut options,
                 MAX_RETRIES,
+                user.id,
             )
             .await
             {
@@ -1378,7 +1409,7 @@ NEVER use emojis - they cost extra in SMS encoding. Respond in plain text only. 
     // Ensure response is within SMS character limit (truncate text BEFORE adding media)
     let final_response = if !fail {
         // For successful responses, use LLM condensing if needed
-        SmsResponse::new(final_response, state, provider, &model)
+        SmsResponse::new(final_response, state, provider, &model, user.id)
             .await
             .into_inner()
     } else {

@@ -208,6 +208,7 @@ pub async fn select_most_relevant_email(
     model: String,
     query: &str,
     emails: &str,
+    user_id: i32,
 ) -> Result<(String, Option<String>), Box<dyn std::error::Error>> {
     let select_messages = vec![
         chat_completion::ChatCompletionMessage {
@@ -246,12 +247,24 @@ pub async fn select_most_relevant_email(
         },
     }];
 
-    let select_req = chat_completion::ChatCompletionRequest::new(model, select_messages)
+    let select_req = chat_completion::ChatCompletionRequest::new(model.clone(), select_messages)
         .tools(select_tools)
         .tool_choice(chat_completion::ToolChoiceType::Required);
 
     match state.ai_config.chat_completion(provider, &select_req).await {
         Ok(result) => {
+            let provider_str = match provider {
+                crate::AiProvider::Tinfoil => "tinfoil",
+                crate::AiProvider::OpenRouter => "openrouter",
+            };
+            crate::ai_config::log_llm_usage(
+                &state.llm_usage_repository,
+                user_id,
+                provider_str,
+                &model,
+                "email_select",
+                &result,
+            );
             if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
                 if let Some(first_call) = tool_calls.first() {
                     if let Some(args) = &first_call.function.arguments {

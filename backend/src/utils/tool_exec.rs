@@ -217,6 +217,7 @@ pub async fn ask_perplexity(
     state: &Arc<AppState>,
     message: &str,
     system_prompt: &str,
+    user_id: i32,
 ) -> Result<String, Box<dyn Error>> {
     // Always use OpenRouter for Perplexity since it's an OpenRouter-specific model
     let _client = create_openai_client(state)?;
@@ -247,6 +248,15 @@ pub async fn ask_perplexity(
         .ai_config
         .chat_completion(crate::AiProvider::OpenRouter, &request)
         .await?;
+
+    crate::ai_config::log_llm_usage(
+        &state.llm_usage_repository,
+        user_id,
+        "openrouter",
+        "perplexity/sonar-reasoning-pro",
+        "perplexity",
+        &response,
+    );
 
     let content = response.choices[0]
         .message

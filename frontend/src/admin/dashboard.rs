@@ -135,6 +135,41 @@ struct ActivityTypeBreakdown {
     total_credits: f32,
 }
 
+// LLM Usage Stats
+#[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
+struct LlmUsageStatsResponse {
+    total_calls: i64,
+    total_prompt_tokens: i64,
+    total_completion_tokens: i64,
+    total_tokens: i64,
+    by_callsite: Vec<LlmCallsiteBreakdown>,
+    by_model: Vec<LlmModelBreakdown>,
+    daily_stats: Vec<DailyLlmStat>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct LlmCallsiteBreakdown {
+    callsite: String,
+    calls: i64,
+    total_tokens: i64,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct LlmModelBreakdown {
+    model: String,
+    calls: i64,
+    total_tokens: i64,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct DailyLlmStat {
+    date: String,
+    calls: i64,
+    prompt_tokens: i64,
+    completion_tokens: i64,
+}
+
 // Admin Alert types
 #[derive(Deserialize, Clone, Debug)]
 struct AdminAlert {
@@ -380,6 +415,8 @@ pub fn admin_dashboard() -> Html {
     // Cost and usage stats state
     let cost_stats: UseStateHandle<Option<CostStatsResponse>> = use_state(|| None);
     let usage_stats: UseStateHandle<Option<UsageStatsResponse>> = use_state(|| None);
+    let llm_stats: UseStateHandle<Option<LlmUsageStatsResponse>> = use_state(|| None);
+    let show_llm_section = use_state(|| false);
     let stats_days = use_state(|| 30i32);
     // Admin alerts state
     let admin_alerts: UseStateHandle<Vec<AdminAlert>> = use_state(|| Vec::new());
@@ -396,6 +433,7 @@ pub fn admin_dashboard() -> Html {
     let global_stats_effect = global_stats.clone();
     let cost_stats_effect = cost_stats.clone();
     let usage_stats_effect = usage_stats.clone();
+    let llm_stats_effect = llm_stats.clone();
     let stats_days_effect = (*stats_days).clone();
     let admin_alerts_effect = admin_alerts.clone();
     let disabled_types_effect = disabled_alert_types.clone();
@@ -408,6 +446,7 @@ pub fn admin_dashboard() -> Html {
             let global_stats = global_stats_effect;
             let cost_stats = cost_stats_effect;
             let usage_stats = usage_stats_effect;
+            let llm_stats = llm_stats_effect;
             let stats_days = stats_days_effect;
             let admin_alerts = admin_alerts_effect;
             let disabled_types = disabled_types_effect;
@@ -466,6 +505,17 @@ pub fn admin_dashboard() -> Html {
                     if response.ok() {
                         if let Ok(data) = response.json::<UsageStatsResponse>().await {
                             usage_stats.set(Some(data));
+                        }
+                    }
+                }
+
+                // Fetch LLM usage stats
+                if let Ok(response) =
+                    Api::get("/api/admin/stats/llm?days=14").send().await
+                {
+                    if response.ok() {
+                        if let Ok(data) = response.json::<LlmUsageStatsResponse>().await {
+                            llm_stats.set(Some(data));
                         }
                     }
                 }
@@ -965,6 +1015,138 @@ pub fn admin_dashboard() -> Html {
                             }
                         }
                                     </div>
+                                }
+                            } else {
+                                html! {}
+                            }
+                        }
+                    </div>
+
+                    // LLM Usage Stats Section
+                    <div class="collapsible-section llm-stats-section">
+                        <div class="collapsible-header" onclick={{
+                            let show_llm_section = show_llm_section.clone();
+                            Callback::from(move |_| {
+                                show_llm_section.set(!*show_llm_section);
+                            })
+                        }}>
+                            <h2>
+                                {"LLM Usage "}
+                                {
+                                    if let Some(stats) = (*llm_stats).as_ref() {
+                                        html! {
+                                            <span class="header-stat">
+                                                {format!("({} calls, {} tokens)", stats.total_calls, stats.total_tokens)}
+                                            </span>
+                                        }
+                                    } else {
+                                        html! {}
+                                    }
+                                }
+                            </h2>
+                            <span class="toggle-indicator">{if *show_llm_section { "\u{25BC}" } else { "\u{25B6}" }}</span>
+                        </div>
+                        {
+                            if *show_llm_section {
+                                if let Some(stats) = (*llm_stats).as_ref() {
+                                    html! {
+                                        <div class="collapsible-content">
+                                            <div class="stats-grid">
+                                                <div class="stat-card">
+                                                    <div class="stat-value">{stats.total_calls}</div>
+                                                    <div class="stat-label">{"Total Calls (14d)"}</div>
+                                                </div>
+                                                <div class="stat-card">
+                                                    <div class="stat-value">{stats.total_prompt_tokens}</div>
+                                                    <div class="stat-label">{"Prompt Tokens"}</div>
+                                                </div>
+                                                <div class="stat-card">
+                                                    <div class="stat-value">{stats.total_completion_tokens}</div>
+                                                    <div class="stat-label">{"Completion Tokens"}</div>
+                                                </div>
+                                                <div class="stat-card">
+                                                    <div class="stat-value">{stats.total_tokens}</div>
+                                                    <div class="stat-label">{"Total Tokens"}</div>
+                                                </div>
+                                            </div>
+
+                                            <h3>{"By Callsite"}</h3>
+                                            <table class="stats-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>{"Callsite"}</th>
+                                                        <th>{"Calls"}</th>
+                                                        <th>{"Tokens"}</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {
+                                                        stats.by_callsite.iter().map(|cs| {
+                                                            html! {
+                                                                <tr key={cs.callsite.clone()}>
+                                                                    <td>{&cs.callsite}</td>
+                                                                    <td>{cs.calls}</td>
+                                                                    <td>{cs.total_tokens}</td>
+                                                                </tr>
+                                                            }
+                                                        }).collect::<Html>()
+                                                    }
+                                                </tbody>
+                                            </table>
+
+                                            <h3>{"By Model"}</h3>
+                                            <table class="stats-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>{"Model"}</th>
+                                                        <th>{"Calls"}</th>
+                                                        <th>{"Tokens"}</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {
+                                                        stats.by_model.iter().map(|m| {
+                                                            html! {
+                                                                <tr key={m.model.clone()}>
+                                                                    <td>{&m.model}</td>
+                                                                    <td>{m.calls}</td>
+                                                                    <td>{m.total_tokens}</td>
+                                                                </tr>
+                                                            }
+                                                        }).collect::<Html>()
+                                                    }
+                                                </tbody>
+                                            </table>
+
+                                            <h3>{"Daily Stats (14d)"}</h3>
+                                            <table class="stats-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>{"Date"}</th>
+                                                        <th>{"Calls"}</th>
+                                                        <th>{"Prompt"}</th>
+                                                        <th>{"Completion"}</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {
+                                                        stats.daily_stats.iter().map(|d| {
+                                                            html! {
+                                                                <tr key={d.date.clone()}>
+                                                                    <td>{&d.date}</td>
+                                                                    <td>{d.calls}</td>
+                                                                    <td>{d.prompt_tokens}</td>
+                                                                    <td>{d.completion_tokens}</td>
+                                                                </tr>
+                                                            }
+                                                        }).collect::<Html>()
+                                                    }
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    }
+                                } else {
+                                    html! { <p class="loading">{"Loading LLM stats..."}</p> }
                                 }
                             } else {
                                 html! {}

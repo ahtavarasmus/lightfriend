@@ -100,6 +100,9 @@ pub fn create_test_state() -> Arc<crate::AppState> {
     );
     let metrics_repository =
         Arc::new(crate::repositories::metrics_repository::MetricsRepository::new(pg_pool.clone()));
+    let llm_usage_repository = Arc::new(
+        crate::repositories::llm_usage_repository::LlmUsageRepository::new(pg_pool.clone()),
+    );
     let ontology_repository = Arc::new(
         crate::repositories::ontology_repository::OntologyRepository::new(pg_pool.clone()),
     );
@@ -147,6 +150,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         session_to_token: DashMap::new(),
         totp_verify_limiter: DashMap::new(),
         webauthn_verify_limiter: DashMap::new(),
+        llm_usage_repository,
         ontology_repository,
         ontology_registry: crate::ontology::registry::OntologyRegistry::build(),
         tool_registry: crate::build_tool_registry(),

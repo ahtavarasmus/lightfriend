@@ -10,6 +10,7 @@ use serde_json::json;
 use std::sync::Arc;
 
 use crate::pg_schema::{message_status_log, usage_logs, users};
+use crate::repositories::llm_usage_repository::{CallsiteBreakdown, DailyLlmStat, ModelBreakdown};
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -459,5 +460,60 @@ pub async fn get_usage_stats(
         active_users_7d,
         active_users_30d,
         breakdown_by_type,
+    }))
+}
+
+// LLM Usage Stats Response
+#[derive(Serialize)]
+pub struct LlmUsageStatsResponse {
+    pub total_calls: i64,
+    pub total_prompt_tokens: i64,
+    pub total_completion_tokens: i64,
+    pub total_tokens: i64,
+    pub by_callsite: Vec<CallsiteBreakdown>,
+    pub by_model: Vec<ModelBreakdown>,
+    pub daily_stats: Vec<DailyLlmStat>,
+}
+
+/// Get LLM usage statistics
+/// GET /api/admin/stats/llm
+pub async fn get_llm_stats(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<StatsQuery>,
+) -> Result<Json<LlmUsageStatsResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let days = params.days.unwrap_or(14);
+    let now = chrono::Utc::now().timestamp() as i32;
+    let from_timestamp = now - (days * 86400);
+
+    let stats = state
+        .llm_usage_repository
+        .get_stats(from_timestamp)
+        .map_err(|e| {
+            tracing::error!("Failed to get LLM stats: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get LLM stats"})),
+            )
+        })?;
+
+    let daily_stats = state
+        .llm_usage_repository
+        .get_daily_stats(from_timestamp)
+        .map_err(|e| {
+            tracing::error!("Failed to get daily LLM stats: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get daily LLM stats"})),
+            )
+        })?;
+
+    Ok(Json(LlmUsageStatsResponse {
+        total_calls: stats.total_calls,
+        total_prompt_tokens: stats.total_prompt_tokens,
+        total_completion_tokens: stats.total_completion_tokens,
+        total_tokens: stats.total_tokens,
+        by_callsite: stats.by_callsite,
+        by_model: stats.by_model,
+        daily_stats,
     }))
 }

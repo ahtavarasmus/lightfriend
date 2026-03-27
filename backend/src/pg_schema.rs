@@ -441,6 +441,20 @@ diesel::table! {
 }
 
 diesel::table! {
+    llm_usage_logs (id) {
+        id -> Int4,
+        user_id -> Int4,
+        provider -> Text,
+        model -> Text,
+        callsite -> Text,
+        prompt_tokens -> Int4,
+        completion_tokens -> Int4,
+        total_tokens -> Int4,
+        created_at -> Int4,
+    }
+}
+
+diesel::table! {
     ont_rules (id) {
         id -> Int4,
         user_id -> Int4,
@@ -502,4 +516,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     ont_messages,
     ont_events,
     ont_rules,
+    llm_usage_logs,
 );
