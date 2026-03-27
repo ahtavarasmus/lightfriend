@@ -252,7 +252,6 @@ pub fn build_tool_registry() -> tools::registry::ToolRegistry {
 
     // Rules (Automation -> Logic -> Action)
     registry.register(Arc::new(tools::rules::SetReminderHandler));
-    registry.register(Arc::new(tools::rules::CreateRuleHandler));
     registry.register(Arc::new(tools::rules::CreateEventHandler));
     registry.register(Arc::new(tools::rules::UpdateEventHandler));
 

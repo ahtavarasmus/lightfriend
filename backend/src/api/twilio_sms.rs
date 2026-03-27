@@ -833,10 +833,7 @@ pub async fn process_sms(
 
 ### Behavior:
 - 'remind me', 'notify me at X', 'wake me at Y' -> use set_reminder immediately. Never answer these directly.
-- Recurring reminders ('daily at 9am remind me to X', 'every weekday at 8am') -> use set_reminder with a recurring pattern.
-- Complex recurring schedules with AI logic or tool actions (daily email briefings, check conditions) -> use create_rule with recurring schedule + llm logic.
-- Tracking conditions (notify me when X emails me, alert me if Y happens) -> use create_rule with ontology_change trigger.
-- When in doubt between set_reminder and create_rule: if it's just a notification with a message, use set_reminder. If it needs LLM evaluation, data fetching, or tool execution, use create_rule.
+- For recurring reminders or complex rules (daily briefings, event triggers, conditional automations), tell the user to set them from the dashboard rule builder.
 
 ### Date and Time:
 - User timezone: {} with offset {}. Nearest future occurrence for ambiguous times.
@@ -1023,7 +1020,7 @@ NEVER use emojis - they cost extra in SMS encoding. Respond in plain text only. 
         };
 
     // Terminal tools: produce final response, break the loop without going back to LLM
-    let terminal_tools = ["create_rule", "set_reminder"];
+    let terminal_tools = ["set_reminder"];
 
     let mut fail = false;
     let mut tool_answers: HashMap<String, String> = HashMap::new();
