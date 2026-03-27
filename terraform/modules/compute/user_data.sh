@@ -164,7 +164,7 @@ render_host_env() {
 
 render_host_env
 ENV_SIZE=$(stat -c%s /opt/lightfriend/host-env 2>/dev/null || echo "0")
-log "host-env rendered (${ENV_SIZE} bytes), starting listener on port 9000"
+log "host-env rendered ($${ENV_SIZE} bytes), starting listener on port 9000"
 
 # No -u flag: bidirectional so OPEN reads file and sends to VSOCK client
 socat VSOCK-LISTEN:9000,reuseaddr,fork OPEN:/opt/lightfriend/host-env 2>&1 | while read -r line; do
@@ -257,7 +257,7 @@ log "Starting seed server on port 9003"
 while true; do
     if [ -f "$CURRENT" ]; then
         FSIZE=$(stat -c%s "$CURRENT" 2>/dev/null || echo "?")
-        log "Seed file present (${FSIZE} bytes), waiting for connection..."
+        log "Seed file present ($${FSIZE} bytes), waiting for connection..."
         TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
         socat -u VSOCK-LISTEN:9003,reuseaddr FILE:"$CURRENT" 2>&1 | while read -r line; do log "socat: $line"; done
         log "Connection served"
@@ -294,7 +294,7 @@ LOG_DIR="/opt/lightfriend/logs"
 mkdir -p "$LOG_DIR"
 while true; do
     TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
-    DEST="$LOG_DIR/boot-trace-${TIMESTAMP}.log"
+    DEST="$LOG_DIR/boot-trace-$${TIMESTAMP}.log"
     socat -T60 -u VSOCK-LISTEN:9007,reuseaddr CREATE:"$DEST" 2>/dev/null || true
     if [ -s "$DEST" ]; then
         echo "$(date -u): Boot trace received ($(stat -c%s "$DEST") bytes) -> $DEST"
@@ -862,7 +862,8 @@ echo "Lightfriend enclave host setup complete!"
 BUCKET=$(aws ssm get-parameter --name /lightfriend/s3-bucket --query Parameter.Value --output text 2>/dev/null || echo "")
 
 if [ -n "$BUCKET" ] && aws s3 ls "s3://$BUCKET/config/.env" 2>/dev/null; then
-    INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+    IMDS_TOKEN=$(curl -sf -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+    INSTANCE_ID=$(curl -sf -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
     VERIFY="/opt/lightfriend/verify-result.json"
 
     # ── Phase 1: Pre-warm ─────────────────────────────────────────────────
