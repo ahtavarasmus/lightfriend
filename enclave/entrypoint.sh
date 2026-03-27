@@ -204,11 +204,9 @@ else
 fi
 
 # ── 0f. Fetch one-time SQL seed from host (first bootstrap only) ─────────────
-# Raw VSOCK drops large payloads (17MB seed gets 0 bytes). Use HTTP through
-# the already-working squid proxy instead. Host runs python3 http.server on
-# port 9080 serving /opt/lightfriend/seed/. The proxy chain is:
-# enclave curl -> 127.0.0.1:3128 (local socat) -> VSOCK:8001 -> host squid
-# -> 127.0.0.1:9080 (host HTTP seed server)
+# Host runs python3 http.server on port 9080 serving /opt/lightfriend/seed/.
+# We bridge to it via VSOCK and fetch with curl (HTTP framing handles large files
+# reliably, unlike raw VSOCK dumps which drop 17MB payloads).
 echo ""
 echo "[STEP 0f] Checking for SQL seed from host..."
 if [ "${RESTORE_MODE}" = "none" ]; then
@@ -218,31 +216,42 @@ if [ "${RESTORE_MODE}" = "none" ]; then
         EXISTING_SIZE=$(stat -c%s "$SEED_DUMP" 2>/dev/null || echo "unknown")
         echo "  Seed dump already exists (${EXISTING_SIZE} bytes) - skipping fetch"
     else
-        echo "  No existing seed dump. Fetching via HTTP proxy..."
+        echo "  No existing seed dump. Fetching via HTTP..."
+        # Bridge local port 9080 to host's seed HTTP server via VSOCK
+        if [ -e /dev/vsock ]; then
+            socat TCP-LISTEN:9080,reuseaddr,fork VSOCK-CONNECT:3:9080 &
+            SEED_BRIDGE_PID=$!
+            sleep 0.5
+        fi
+
         RECEIVED_SEED="/data/seed/lightfriend_db.seed.tmp"
         SEED_FETCHED=false
         for seed_attempt in $(seq 1 5); do
-            echo "  seed attempt $seed_attempt: curl http://127.0.0.1:9080/lightfriend_db.sql via proxy..."
-            HTTP_CODE=$(curl -sf --max-time 60 -x http://127.0.0.1:3128 \
+            echo "  seed attempt $seed_attempt: curl http://127.0.0.1:9080/lightfriend_db.sql..."
+            CURL_OUT=$(curl -s --max-time 120 \
                 -o "$RECEIVED_SEED" -w '%{http_code}' \
-                http://127.0.0.1:9080/lightfriend_db.sql 2>/dev/null || echo "000")
+                http://127.0.0.1:9080/lightfriend_db.sql 2>&1)
+            CURL_RC=$?
             SEED_BYTES=$(stat -c%s "$RECEIVED_SEED" 2>/dev/null || echo "0")
-            echo "  seed attempt $seed_attempt: HTTP $HTTP_CODE, received ${SEED_BYTES} bytes"
+            echo "  seed attempt $seed_attempt: curl exit=$CURL_RC, http=$CURL_OUT, received ${SEED_BYTES} bytes"
 
-            if [ "$HTTP_CODE" = "200" ] && [ "$SEED_BYTES" -gt 100 ]; then
+            if [ "$CURL_RC" -eq 0 ] && [ "$SEED_BYTES" -gt 100 ]; then
                 mv "$RECEIVED_SEED" "$SEED_DUMP"
                 echo "  SQL seed received from host (${SEED_BYTES} bytes)"
                 SEED_FETCHED=true
                 break
-            elif [ "$HTTP_CODE" = "404" ]; then
+            elif echo "$CURL_OUT" | grep -q "404"; then
                 echo "  seed attempt $seed_attempt: no seed file on host (HTTP 404)"
                 rm -f "$RECEIVED_SEED"
                 break
             fi
-            echo "  seed attempt $seed_attempt: failed (HTTP $HTTP_CODE), retrying in 3s..."
+            echo "  seed attempt $seed_attempt: failed, retrying in 3s..."
             rm -f "$RECEIVED_SEED"
             sleep 3
         done
+
+        # Clean up bridge
+        [ -n "${SEED_BRIDGE_PID:-}" ] && kill "$SEED_BRIDGE_PID" 2>/dev/null || true
 
         if [ "$SEED_FETCHED" = "false" ]; then
             echo "  No SQL seed available from host"
