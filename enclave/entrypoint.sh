@@ -1099,6 +1099,7 @@ echo "  Entrypoint setup complete at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # Send boot trace now - exec will replace this shell so the EXIT trap won't fire
 send_boot_trace 0
 
-# Start supervisord (postgresql starts via autostart=true, rest via startup script)
-${STARTUP_SCRIPT} &
+# Start supervisord. The startup-orchestrator program (priority=99) runs
+# /tmp/start-services.sh which starts tuwunel, bridges, backend, cloudflared
+# in the correct order. No background process needed.
 exec /usr/bin/supervisord -c /etc/supervisor/conf.d/lightfriend.conf
