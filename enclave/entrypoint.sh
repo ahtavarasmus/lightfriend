@@ -36,10 +36,6 @@ else
     echo "WARNING: failed to bring up loopback (ip link set lo up)"
 fi
 
-# Create /etc/resolv.conf - Nitro enclaves have no DNS config.
-# Point to localhost (no real DNS server, but prevents services from
-# crashing on missing resolv.conf). Actual DNS goes through DoT bridge.
-echo "nameserver 127.0.0.1" > /etc/resolv.conf
 
 # ── 0a. Fetch environment from host via VSOCK ────────────────────────────────
 ENV_LOADED=false
