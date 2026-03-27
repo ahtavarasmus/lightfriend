@@ -350,6 +350,79 @@ RestartSec=3
 WantedBy=multi-user.target
 SEEDHTTPVSOCKEOF
 
+# Backup upload receiver (port 9081) - accepts HTTP PUT from enclave
+cat > /opt/lightfriend/backup-upload-server.py <<'PYEOF'
+#!/usr/bin/env python3
+"""Simple HTTP server that accepts PUT uploads to /upload/<filename>."""
+import os
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+BACKUP_DIR = "/opt/lightfriend/backups"
+os.makedirs(BACKUP_DIR, exist_ok=True)
+
+class UploadHandler(BaseHTTPRequestHandler):
+    def do_PUT(self):
+        if not self.path.startswith("/upload/"):
+            self.send_response(404)
+            self.end_headers()
+            return
+        filename = os.path.basename(self.path[8:])
+        if not filename:
+            self.send_response(400)
+            self.end_headers()
+            return
+        dest = os.path.join(BACKUP_DIR, filename)
+        length = int(self.headers.get("Content-Length", 0))
+        with open(dest, "wb") as f:
+            remaining = length
+            while remaining > 0:
+                chunk = self.rfile.read(min(remaining, 65536))
+                if not chunk:
+                    break
+                f.write(chunk)
+                remaining -= len(chunk)
+        size = os.path.getsize(dest)
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(f"OK {size} bytes\n".encode())
+        print(f"Received {filename}: {size} bytes")
+
+    def log_message(self, format, *args):
+        pass  # silence per-request logs
+
+HTTPServer(("0.0.0.0", 9081), UploadHandler).serve_forever()
+PYEOF
+chmod +x /opt/lightfriend/backup-upload-server.py
+
+cat > /etc/systemd/system/backup-upload-server.service <<'UPLOADEOF'
+[Unit]
+Description=HTTP backup upload receiver for enclave (port 9081)
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/lightfriend/backup-upload-server.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+UPLOADEOF
+
+# VSOCK bridge for backup uploads (port 9081)
+cat > /etc/systemd/system/vsock-backup-upload.service <<'UPLOADVSOCKEOF'
+[Unit]
+Description=VSOCK bridge to backup upload server for enclave (port 9081)
+After=backup-upload-server.service
+
+[Service]
+ExecStart=/usr/bin/socat VSOCK-LISTEN:9081,reuseaddr,fork TCP:127.0.0.1:9081
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+UPLOADVSOCKEOF
+
 # VSOCK bridge for cloudflared edge connections (port 7844)
 # Enclave's cloudflared connects to Cloudflare edge via this bridge
 cat > /opt/lightfriend/cloudflared-edge-bridge.sh <<'SCRIPT'
@@ -391,7 +464,7 @@ DOTEOF
 
 # Enable and start all VSOCK services
 systemctl daemon-reload
-for svc in vsock-proxy-bridge vsock-config-server vsock-backup-receiver vsock-restore-server vsock-seed-server vsock-marlin-kms-bridge vsock-boot-trace seed-http-server vsock-seed-http vsock-cloudflared-edge vsock-dot-bridge; do
+for svc in vsock-proxy-bridge vsock-config-server vsock-backup-receiver vsock-restore-server vsock-seed-server vsock-marlin-kms-bridge vsock-boot-trace seed-http-server vsock-seed-http vsock-cloudflared-edge vsock-dot-bridge backup-upload-server vsock-backup-upload; do
     systemctl enable "$svc"
     systemctl start "$svc" || echo "WARNING: $svc failed to start"
 done
@@ -405,7 +478,7 @@ cat > /opt/lightfriend/launch-enclave.sh <<'SCRIPT'
 set -e
 EIF_PATH="/opt/lightfriend/lightfriend.eif"
 VERIFY="/opt/lightfriend/verify-result.json"
-VSOCK_SVCS="vsock-proxy-bridge vsock-config-server vsock-seed-server vsock-boot-trace vsock-backup-receiver vsock-restore-server vsock-marlin-kms-bridge vsock-seed-http vsock-cloudflared-edge vsock-dot-bridge"
+VSOCK_SVCS="vsock-proxy-bridge vsock-config-server vsock-seed-server vsock-boot-trace vsock-backup-receiver vsock-restore-server vsock-marlin-kms-bridge vsock-seed-http vsock-cloudflared-edge vsock-dot-bridge vsock-backup-upload"
 
 [ -f /opt/lightfriend/.env ] || { echo "ERROR: /opt/lightfriend/.env not found"; exit 1; }
 [ -f "$EIF_PATH" ] || { echo "ERROR: CI-built EIF not found at $EIF_PATH"; exit 1; }

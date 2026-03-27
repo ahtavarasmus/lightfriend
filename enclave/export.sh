@@ -285,12 +285,23 @@ ENCRYPTED_SIZE=$(stat -c%s "${ENCRYPTED}" 2>/dev/null || stat -f%z "${ENCRYPTED}
 echo "  Encrypted: ${ENCRYPTED_SIZE} bytes, decrypt-verify OK"
 echo "Phase D complete."
 
-# ── Phase E: Transfer to host via VSOCK ──────────────────────────────────────
+# ── Phase E: Transfer to host ─────────────────────────────────────────────────
+# Raw VSOCK drops large payloads. Use HTTP PUT through the VSOCK-bridged
+# backup receiver on host port 9081.
 if [ -e /dev/vsock ]; then
-    echo "Phase E: Transferring backup to host via VSOCK..."
-    socat -u FILE:"${ENCRYPTED}" VSOCK-CONNECT:3:9001 \
-        || abort "VSOCK transfer to host failed" "transfer"
-    echo "Phase E complete."
+    echo "Phase E: Transferring backup to host via HTTP..."
+    # Bridge to host backup receiver
+    socat TCP-LISTEN:9081,reuseaddr VSOCK-CONNECT:3:9081 &
+    BRIDGE_PID=$!
+    sleep 0.5
+
+    BACKUP_NAME=$(basename "${ENCRYPTED}")
+    curl -sf --max-time 600 -T "${ENCRYPTED}" \
+        "http://127.0.0.1:9081/upload/${BACKUP_NAME}" \
+        || abort "HTTP backup transfer to host failed" "transfer"
+
+    kill "$BRIDGE_PID" 2>/dev/null || true
+    echo "Phase E complete (${ENCRYPTED_SIZE} bytes transferred)."
 fi
 
 # ── Write success status ────────────────────────────────────────────────────
