@@ -153,10 +153,6 @@ impl AiConfig {
                 })?;
                 if let Some(obj) = body.as_object_mut() {
                     obj.insert("stream".into(), serde_json::json!(true));
-                    obj.insert(
-                        "stream_options".into(),
-                        serde_json::json!({"include_usage": true}),
-                    );
                     // Remove max_tokens for reasoning models - reasoning tokens count
                     // against the budget, causing finish_reason:length before the
                     // actual tool call is produced
@@ -547,10 +543,6 @@ impl AiConfig {
             })?;
             if let Some(obj) = body.as_object_mut() {
                 obj.insert("stream".into(), serde_json::json!(true));
-                obj.insert(
-                    "stream_options".into(),
-                    serde_json::json!({"include_usage": true}),
-                );
                 obj.remove("max_tokens");
             }
             Self::sanitize_request_body(&mut body);
