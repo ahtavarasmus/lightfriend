@@ -203,60 +203,54 @@ else
     echo "No restore requested - starting with current state"
 fi
 
-# ── 0f. Fetch one-time SQL seed from host via VSOCK (first bootstrap only) ──
+# ── 0f. Fetch one-time SQL seed from host (first bootstrap only) ─────────────
+# Raw VSOCK drops large payloads (17MB seed gets 0 bytes). Use HTTP through
+# the already-working squid proxy instead. Host runs python3 http.server on
+# port 9080 serving /opt/lightfriend/seed/. The proxy chain is:
+# enclave curl -> 127.0.0.1:3128 (local socat) -> VSOCK:8001 -> host squid
+# -> 127.0.0.1:9080 (host HTTP seed server)
 echo ""
 echo "[STEP 0f] Checking for SQL seed from host..."
-if [ -e /dev/vsock ] && [ "${RESTORE_MODE}" = "none" ]; then
+if [ "${RESTORE_MODE}" = "none" ]; then
     mkdir -p /data/seed
     SEED_DUMP="/data/seed/lightfriend_db.sql"
     if [ -f "$SEED_DUMP" ]; then
         EXISTING_SIZE=$(stat -c%s "$SEED_DUMP" 2>/dev/null || echo "unknown")
         echo "  Seed dump already exists (${EXISTING_SIZE} bytes) - skipping fetch"
     else
-        echo "  No existing seed dump. Fetching from host port 9003..."
+        echo "  No existing seed dump. Fetching via HTTP proxy..."
         RECEIVED_SEED="/data/seed/lightfriend_db.seed.tmp"
         SEED_FETCHED=false
         for seed_attempt in $(seq 1 5); do
-            echo "  seed attempt $seed_attempt: connecting to VSOCK-CONNECT:3:9003..."
-            SOCAT_ERR=$(mktemp)
-            socat -T30 -u VSOCK-CONNECT:3:9003 CREATE:"$RECEIVED_SEED" 2>"$SOCAT_ERR" || true
-            SEED_RC=$?
+            echo "  seed attempt $seed_attempt: curl http://127.0.0.1:9080/lightfriend_db.sql via proxy..."
+            HTTP_CODE=$(curl -sf --max-time 60 -x http://127.0.0.1:3128 \
+                -o "$RECEIVED_SEED" -w '%{http_code}' \
+                http://127.0.0.1:9080/lightfriend_db.sql 2>/dev/null || echo "000")
             SEED_BYTES=$(stat -c%s "$RECEIVED_SEED" 2>/dev/null || echo "0")
-            SOCAT_ERR_MSG=$(cat "$SOCAT_ERR" 2>/dev/null || true)
-            rm -f "$SOCAT_ERR"
-            echo "  seed attempt $seed_attempt: socat exit=$SEED_RC, received=${SEED_BYTES} bytes"
-            [ -n "$SOCAT_ERR_MSG" ] && echo "  seed attempt $seed_attempt: socat stderr: $SOCAT_ERR_MSG"
+            echo "  seed attempt $seed_attempt: HTTP $HTTP_CODE, received ${SEED_BYTES} bytes"
 
-            if [ "$SEED_BYTES" -gt 0 ]; then
-                FIRST_LINE=$(head -c 200 "$RECEIVED_SEED" 2>/dev/null || true)
-                echo "  seed attempt $seed_attempt: first 200 chars: $FIRST_LINE"
-
-                if grep -q "NO_SEED" "$RECEIVED_SEED" 2>/dev/null; then
-                    echo "  seed attempt $seed_attempt: host says NO_SEED (no seed file staged)"
-                    rm -f "$RECEIVED_SEED"
-                    break
-                fi
-
+            if [ "$HTTP_CODE" = "200" ] && [ "$SEED_BYTES" -gt 100 ]; then
                 mv "$RECEIVED_SEED" "$SEED_DUMP"
-                SEED_SIZE=$(stat -c%s "$SEED_DUMP" 2>/dev/null || echo "unknown")
-                echo "  SQL seed received from host (${SEED_SIZE} bytes)"
+                echo "  SQL seed received from host (${SEED_BYTES} bytes)"
                 SEED_FETCHED=true
                 break
+            elif [ "$HTTP_CODE" = "404" ]; then
+                echo "  seed attempt $seed_attempt: no seed file on host (HTTP 404)"
+                rm -f "$RECEIVED_SEED"
+                break
             fi
-            echo "  seed attempt $seed_attempt: empty response, retrying in 3s..."
+            echo "  seed attempt $seed_attempt: failed (HTTP $HTTP_CODE), retrying in 3s..."
             rm -f "$RECEIVED_SEED"
             sleep 3
         done
 
         if [ "$SEED_FETCHED" = "false" ]; then
-            echo "  No SQL seed available from host after 5 attempts"
-            echo "  Check: is vsock-seed-server running? Is /opt/lightfriend/seed/lightfriend_db.sql staged?"
+            echo "  No SQL seed available from host"
+            echo "  Check: is seed-http-server running? Is /opt/lightfriend/seed/lightfriend_db.sql staged?"
         fi
     fi
-elif [ "${RESTORE_MODE}" != "none" ]; then
-    echo "  Restore mode=${RESTORE_MODE} - seed fetch skipped (using backup instead)"
 else
-    echo "  No VSOCK device - seed fetch skipped"
+    echo "  Restore mode=${RESTORE_MODE} - seed fetch skipped"
 fi
 
 # ── 1. Initialize PostgreSQL if needed ──────────────────────────────────────
