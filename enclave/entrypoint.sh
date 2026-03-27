@@ -903,27 +903,22 @@ fi
 echo ""
 echo "=== Starting all services via supervisord ==="
 
-# ── Set up transparent proxy for cloudflared ─────────────────────────────────
+# ── Set up cloudflared edge routing via DNS override ─────────────────────────
 # Cloudflared does NOT support HTTPS_PROXY for edge connections (raw TCP/UDP).
-# We use iptables to transparently redirect its edge traffic through redsocks
-# to the squid proxy. Since squid only handles CONNECT (not transparent), we
-# instead create a direct VSOCK bridge for cloudflared's edge traffic.
-# Cloudflare tunnel edge IPs: 198.41.192.0/24 and 198.41.200.0/24, port 7844.
-# With --protocol http2, cloudflared connects via TCP.
+# iptables not available in Nitro enclave kernel. Instead, override DNS so
+# cloudflared's edge hostnames resolve to 127.0.0.1, where a socat bridge
+# forwards via VSOCK to the host (which has direct internet).
 if [ -e /dev/vsock ] && [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
     echo ""
     echo "[STEP CF] Setting up cloudflared edge routing..."
-    # Bridge cloudflared's edge connections through VSOCK to the host,
-    # which has direct internet. Use iptables DNAT to redirect traffic
-    # destined for Cloudflare edge IPs to a local socat bridge.
+    # Bridge local port 7844 to host VSOCK:7844 -> Cloudflare edge
     socat TCP-LISTEN:7844,reuseaddr,fork VSOCK-CONNECT:3:7844 &
     CF_BRIDGE_PID=$!
     sleep 0.3
-    # Redirect Cloudflare edge traffic to our local bridge
-    iptables -t nat -A OUTPUT -d 198.41.192.0/24 -p tcp --dport 7844 -j DNAT --to-destination 127.0.0.1:7844 2>/dev/null \
-        && iptables -t nat -A OUTPUT -d 198.41.200.0/24 -p tcp --dport 7844 -j DNAT --to-destination 127.0.0.1:7844 2>/dev/null \
-        && echo "  iptables DNAT rules set for Cloudflare edge -> local:7844 -> VSOCK:3:7844" \
-        || echo "  WARNING: iptables failed - cloudflared may not connect"
+
+    # Override DNS: make cloudflared resolve edge hostnames to localhost
+    echo "127.0.0.1 region1.v2.argotunnel.com region2.v2.argotunnel.com h2.cftunnel.com" >> /etc/hosts
+    echo "  /etc/hosts updated: edge hostnames -> 127.0.0.1:7844 -> VSOCK -> host"
 fi
 
 # Use a startup script that starts services in order
