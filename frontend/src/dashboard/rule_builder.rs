@@ -1273,7 +1273,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
     let event_filter_key = use_state(|| "sender".to_string());
     let event_filter_value = use_state(|| String::new());
     let event_fire_once = use_state(|| true); // default: one-shot
-    let event_delay = use_state(|| 300i32); // default: 5 min delay before rule fires
+    let event_delay = use_state(|| 600i32); // default: 10 min delay before rule fires
                                             // (display_name, platform, is_group, group_mode)
                                             // group_mode: None for non-groups, Some("all") or Some("mention_only") for groups
     let sender_suggestions =
@@ -1594,11 +1594,11 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                             .and_then(|v| v.as_bool())
                             .unwrap_or(true);
                         event_fire_once.set(fo);
-                        // delay_seconds defaults to 300 if not set
+                        // delay_seconds defaults to 600 if not set
                         let ds = tc
                             .get("delay_seconds")
                             .and_then(|v| v.as_i64())
-                            .unwrap_or(300) as i32;
+                            .unwrap_or(600) as i32;
                         event_delay.set(ds);
                         // Restore group_mode if present
                         if let Some(gm) = tc.get("group_mode").and_then(|v| v.as_str()) {
@@ -1832,6 +1832,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
         let tool_name = tool_name.clone();
         let expanded_card = expanded_card.clone();
         let else_flow = else_flow.clone();
+        let event_delay = event_delay.clone();
 
         use_effect_with_deps(
             move |tmpl: &Option<RuleTemplate>| {
@@ -1887,6 +1888,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                 event_entity.set("Message".to_string());
                                 event_change.set("created".to_string());
                                 event_fire_once.set(false);
+                                event_delay.set(0);
                                 event_filter_key.set("none".to_string());
                                 logic_mode.set(LogicMode::Llm);
                                 selected_template.set(PromptTemplate::TrackItemsUpdate);

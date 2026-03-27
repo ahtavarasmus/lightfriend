@@ -624,6 +624,7 @@ pub async fn handle_fetch_specific_email(
                 ctx.model.clone(),
                 &enhanced_query,
                 &formatted_emails,
+                user_id,
             )
             .await
             {

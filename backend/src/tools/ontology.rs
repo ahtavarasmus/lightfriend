@@ -19,7 +19,6 @@ pub async fn handle_query(
 
     match entity_type {
         "person" => query_person(&params, state, user_id),
-        "channel" => query_channel(&params, state, user_id),
         "message" => query_message(&params, state, user_id),
         "event" => query_event(&params, state, user_id),
         _ => Err(format!("Unknown ontology entity type: {}", entity_type)),
@@ -107,113 +106,6 @@ fn query_person(
         }
 
         output.push('\n');
-    }
-
-    Ok(output.trim().to_string())
-}
-
-fn query_channel(
-    params: &serde_json::Value,
-    state: &Arc<AppState>,
-    user_id: i32,
-) -> Result<String, String> {
-    let platform_filter = param_str(params, "platform");
-    let person_name_filter = param_str(params, "person_name");
-    let notif_filter = param_str(params, "notification_mode");
-    let query_filter = param_str(params, "query");
-    let linked = param_str_array(params, "linked_entities");
-
-    if platform_filter.is_none()
-        && person_name_filter.is_none()
-        && notif_filter.is_none()
-        && query_filter.is_none()
-    {
-        return Err(
-            "Please specify at least one filter parameter (platform, person_name, notification_mode, or query).".to_string()
-        );
-    }
-
-    // Load all persons with channels, then filter
-    let all_persons = state
-        .ontology_repository
-        .get_persons_with_channels(user_id, 500, 0)
-        .map_err(|e| format!("Failed to query channels: {}", e))?;
-
-    let mut results: Vec<(
-        &PersonWithChannels,
-        &crate::models::ontology_models::OntChannel,
-    )> = Vec::new();
-
-    for p in &all_persons {
-        // Filter by person_name
-        if let Some(ref pn) = person_name_filter {
-            if pn != "all" && p.display_name().to_lowercase() != pn.to_lowercase() {
-                continue;
-            }
-        }
-
-        for ch in &p.channels {
-            // Filter by platform
-            if let Some(ref plat) = platform_filter {
-                if plat != "all" && ch.platform != *plat {
-                    continue;
-                }
-            }
-
-            // Filter by notification_mode
-            if let Some(ref nm) = notif_filter {
-                if nm != "all" && ch.notification_mode != *nm {
-                    continue;
-                }
-            }
-
-            // Filter by query
-            if let Some(ref q) = query_filter {
-                let q_lower = q.to_lowercase();
-                let matches = ch.platform.to_lowercase().contains(&q_lower)
-                    || ch
-                        .handle
-                        .as_ref()
-                        .map(|h| h.to_lowercase().contains(&q_lower))
-                        .unwrap_or(false)
-                    || p.display_name().to_lowercase().contains(&q_lower);
-                if !matches {
-                    continue;
-                }
-            }
-
-            results.push((p, ch));
-        }
-    }
-
-    if results.is_empty() {
-        return Ok("No channels found matching your query.".to_string());
-    }
-
-    let want_person = linked.contains(&"Person".to_string());
-
-    let mut output = String::new();
-    for (person, ch) in &results {
-        let handle_str = ch
-            .handle
-            .as_deref()
-            .map(|h| format!(": {}", h))
-            .unwrap_or_default();
-        output.push_str(&format!(
-            "Channel: {}{} (notification: {}, person: {})\n",
-            ch.platform,
-            handle_str,
-            ch.notification_mode,
-            person.display_name()
-        ));
-
-        if want_person {
-            output.push_str(&format!(
-                "  Parent Person: {} (channels: {})\n",
-                person.display_name(),
-                person.channels.len()
-            ));
-        }
     }
 
     Ok(output.trim().to_string())

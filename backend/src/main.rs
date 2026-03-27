@@ -25,8 +25,8 @@ use tracing::Level;
 // Import modules and types from library crate
 use api::{elevenlabs, elevenlabs_webhook, twilio_sms};
 use backend::{
-    api, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState, TotpRepository, UserCore,
-    UserCoreOps, UserRepository, WebauthnRepository,
+    api, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState, LlmUsageRepository,
+    TotpRepository, UserCore, UserCoreOps, UserRepository, WebauthnRepository,
 };
 use handlers::{
     admin_handlers, attestation_handlers, auth_handlers, billing_handlers, bridge_auth_common,
@@ -327,6 +327,8 @@ async fn main() {
     let webauthn_repository = Arc::new(WebauthnRepository::new(pg_pool.clone()));
     let admin_alert_repository = Arc::new(AdminAlertRepository::new(pg_pool.clone()));
     let metrics_repository = Arc::new(backend::MetricsRepository::new(pg_pool.clone()));
+    let llm_usage_repository = Arc::new(LlmUsageRepository::new(pg_pool.clone()));
+    let bandwidth_repository = Arc::new(backend::BandwidthRepository::new(pg_pool.clone()));
     let ontology_repository = Arc::new(backend::OntologyRepository::new(pg_pool.clone()));
     let server_url_oauth =
         std::env::var("SERVER_URL_OAUTH").unwrap_or_else(|_| "http://localhost:3000".to_string());
@@ -422,6 +424,8 @@ async fn main() {
         session_to_token: DashMap::new(),
         totp_verify_limiter: DashMap::new(),
         webauthn_verify_limiter: DashMap::new(),
+        llm_usage_repository,
+        bandwidth_repository,
         ontology_repository,
         ontology_registry: backend::ontology::registry::OntologyRegistry::build(),
         tool_registry: backend::build_tool_registry(),
@@ -660,6 +664,14 @@ async fn main() {
         .route(
             "/api/admin/stats/usage",
             get(handlers::admin_stats_handlers::get_usage_stats),
+        )
+        .route(
+            "/api/admin/stats/llm",
+            get(handlers::admin_stats_handlers::get_llm_stats),
+        )
+        .route(
+            "/api/admin/stats/bandwidth",
+            get(handlers::admin_stats_handlers::get_bandwidth_stats),
         )
         // Alert management routes
         .route("/api/admin/alerts", get(admin_handlers::get_alerts))

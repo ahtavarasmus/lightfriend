@@ -157,6 +157,25 @@ fn infer_service(room_name: &str, sender_localpart: &str) -> Option<String> {
     None
 }
 
+/// When `infer_service()` fails (sender is user, not a bridge ghost),
+/// scan room members for ghost bot localparts to determine platform.
+async fn infer_service_from_room_members(room: &Room) -> Option<String> {
+    let members = room.members(matrix_sdk::RoomMemberships::JOIN).await.ok()?;
+    for member in &members {
+        let localpart = member.user_id().localpart();
+        if localpart.starts_with("whatsapp_") {
+            return Some("whatsapp".to_string());
+        }
+        if localpart.starts_with("telegram_") {
+            return Some("telegram".to_string());
+        }
+        if localpart.starts_with("signal_") {
+            return Some("signal".to_string());
+        }
+    }
+    None
+}
+
 pub async fn get_service_rooms(client: &MatrixClient, service: &str) -> Result<Vec<BridgeRoom>> {
     let joined_rooms = client.joined_rooms();
     let service_cap = capitalize(service);
@@ -1310,13 +1329,79 @@ pub async fn handle_bridge_message(
     let service = match infer_service(&room_name, &sender_localpart) {
         Some(s) => s,
         None => {
-            tracing::error!("Could not infer service, skipping");
-            return;
+            // Not a ghost sender - try room members (user's own message in bridge room)
+            match infer_service_from_room_members(&room).await {
+                Some(s) => s,
+                None => {
+                    tracing::debug!("Could not infer service, skipping");
+                    return;
+                }
+            }
         }
     };
-    // Check this is an incoming bridge message (not user's own)
+
+    // Check if sender is a bridge ghost or the user themselves
     let sender_prefix = get_sender_prefix(&service);
     if !sender_localpart.starts_with(&sender_prefix) {
+        // User's own outgoing message - store in ontology for context, skip AI processing
+        let content = match &event.content.msgtype {
+            MessageType::Text(t) => t.body.clone(),
+            MessageType::Notice(n) => n.body.clone(),
+            MessageType::Emote(t) => t.body.clone(),
+            _ => return, // Skip user media (no useful text for LLM)
+        };
+        if is_error_message(&content) {
+            return;
+        }
+        let current_room_id = room.room_id().to_string();
+        let is_group = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
+            Ok(members) => {
+                let localparts: Vec<String> = members
+                    .iter()
+                    .map(|m| m.user_id().localpart().to_string())
+                    .collect();
+                is_group_room(&service, &localparts)
+            }
+            Err(_) => false,
+        };
+        let msg = crate::models::ontology_models::NewOntMessage {
+            user_id,
+            room_id: current_room_id.clone(),
+            platform: service.clone(),
+            sender_name: "You".to_string(),
+            content: content.clone(),
+            person_id: None,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i32,
+        };
+        let state_clone = state.clone();
+        tokio::spawn(async move {
+            match state_clone.ontology_repository.insert_message(&msg) {
+                Ok(created) => {
+                    let snapshot = serde_json::json!({
+                        "message_id": created.id,
+                        "platform": msg.platform,
+                        "sender_name": "You",
+                        "content": msg.content,
+                        "room_id": msg.room_id,
+                        "is_group": is_group,
+                        "is_outgoing": true,
+                    });
+                    crate::proactive::rules::emit_ontology_change(
+                        &state_clone,
+                        user_id,
+                        "Message",
+                        created.id as i32,
+                        "created",
+                        snapshot,
+                    )
+                    .await;
+                }
+                Err(e) => tracing::warn!("Failed to store user message: {}", e),
+            }
+        });
         return;
     }
 
@@ -1342,18 +1427,59 @@ pub async fn handle_bridge_message(
         return;
     }
 
-    // Extract message content
-    let content = match event.content.msgtype {
-        MessageType::Text(t) => t.body,
-        MessageType::Notice(n) => n.body,
-        MessageType::Image(_) => "IMAGE".into(),
-        MessageType::Video(_) => "VIDEO".into(),
-        MessageType::File(_) => "FILE".into(),
-        MessageType::Audio(_) => "AUDIO".into(),
-        MessageType::Location(_) => "LOCATION".into(),
-        MessageType::Emote(t) => t.body,
+    // Extract message content and estimate message size for bandwidth tracking
+    let (content, bytes_estimate) = match event.content.msgtype {
+        MessageType::Text(ref t) => (t.body.clone(), t.body.len() as i32),
+        MessageType::Notice(ref n) => (n.body.clone(), n.body.len() as i32),
+        MessageType::Image(ref img) => {
+            let size = img
+                .info
+                .as_ref()
+                .and_then(|i| i.size)
+                .map(|s| u64::from(s).min(i32::MAX as u64) as i32)
+                .unwrap_or(50_000i32);
+            ("IMAGE".into(), size)
+        }
+        MessageType::Video(ref vid) => {
+            let size = vid
+                .info
+                .as_ref()
+                .and_then(|i| i.size)
+                .map(|s| u64::from(s).min(i32::MAX as u64) as i32)
+                .unwrap_or(500_000i32);
+            ("VIDEO".into(), size)
+        }
+        MessageType::File(ref f) => {
+            let size = f
+                .info
+                .as_ref()
+                .and_then(|i| i.size)
+                .map(|s| u64::from(s).min(i32::MAX as u64) as i32)
+                .unwrap_or(100_000i32);
+            ("FILE".into(), size)
+        }
+        MessageType::Audio(ref a) => {
+            let size = a
+                .info
+                .as_ref()
+                .and_then(|i| i.size)
+                .map(|s| u64::from(s).min(i32::MAX as u64) as i32)
+                .unwrap_or(100_000i32);
+            ("AUDIO".into(), size)
+        }
+        MessageType::Location(_) => ("LOCATION".into(), 200i32),
+        MessageType::Emote(ref t) => (t.body.clone(), t.body.len() as i32),
         _ => return,
     };
+
+    // Log bandwidth estimate for bridge traffic tracking
+    if let Err(e) =
+        state
+            .bandwidth_repository
+            .log_bandwidth(user_id, &service, "inbound", bytes_estimate)
+    {
+        tracing::warn!("Failed to log bandwidth for user {}: {}", user_id, e);
+    }
 
     // Skip error messages
     if is_error_message(&content) {

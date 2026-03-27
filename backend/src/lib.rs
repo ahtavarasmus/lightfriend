@@ -83,7 +83,6 @@ pub mod tools {
     pub mod ontology;
     pub mod quiet_mode;
     pub mod registry;
-    pub mod respond;
     pub mod rules;
     pub mod search;
     pub mod tesla;
@@ -97,6 +96,8 @@ pub mod models {
 }
 pub mod repositories {
     pub mod admin_alert_repository;
+    pub mod bandwidth_repository;
+    pub mod llm_usage_repository;
     pub mod mcp_repository;
     pub mod metrics_repository;
     pub mod mock_signup_repository;
@@ -141,6 +142,8 @@ pub use api::matrix_client::{
 };
 pub use api::twilio_client::RealTwilioClient;
 pub use repositories::admin_alert_repository::AdminAlertRepository;
+pub use repositories::bandwidth_repository::BandwidthRepository;
+pub use repositories::llm_usage_repository::LlmUsageRepository;
 pub use repositories::metrics_repository::MetricsRepository;
 pub use repositories::ontology_repository::OntologyRepository;
 pub use repositories::totp_repository::TotpRepository;
@@ -217,6 +220,8 @@ pub struct AppState {
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     pub webauthn_verify_limiter:
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+    pub llm_usage_repository: Arc<LlmUsageRepository>,
+    pub bandwidth_repository: Arc<BandwidthRepository>,
     pub ontology_repository: Arc<OntologyRepository>,
     pub ontology_registry: ontology::registry::OntologyRegistry,
     pub tool_registry: tools::registry::ToolRegistry,
@@ -239,20 +244,14 @@ pub fn build_tool_registry() -> tools::registry::ToolRegistry {
     registry.register(Arc::new(tools::weather::WeatherHandler));
 
     // Email tools
-    registry.register(Arc::new(tools::email::FetchEmailsHandler));
-    registry.register(Arc::new(tools::email::FetchSpecificEmailHandler));
     registry.register(Arc::new(tools::email::SendEmailHandler));
     registry.register(Arc::new(tools::email::RespondEmailHandler));
 
     // Messaging tools
-    registry.register(Arc::new(tools::messaging::SearchContactsHandler));
-    registry.register(Arc::new(tools::messaging::FetchRecentHandler));
-    registry.register(Arc::new(tools::messaging::FetchMessagesHandler));
     registry.register(Arc::new(tools::messaging::SendMessageHandler));
 
     // Rules (Automation -> Logic -> Action)
     registry.register(Arc::new(tools::rules::SetReminderHandler));
-    registry.register(Arc::new(tools::rules::CreateRuleHandler));
     registry.register(Arc::new(tools::rules::CreateEventHandler));
     registry.register(Arc::new(tools::rules::UpdateEventHandler));
 
@@ -261,9 +260,6 @@ pub fn build_tool_registry() -> tools::registry::ToolRegistry {
 
     // YouTube
     registry.register(Arc::new(tools::youtube::YouTubeHandler));
-
-    // Direct response
-    registry.register(Arc::new(tools::respond::DirectResponseHandler));
 
     // Quiet mode
     registry.register(Arc::new(tools::quiet_mode::QuietModeHandler));

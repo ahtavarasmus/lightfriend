@@ -54,6 +54,7 @@ async fn llm_call_with_retry(
     reasoning_tx: &Option<tokio::sync::mpsc::Sender<String>>,
     options: &mut ProcessSmsOptions,
     max_retries: u32,
+    user_id: i32,
 ) -> Result<chat_completion::ChatCompletionResponse, String> {
     let mut last_error = String::new();
 
@@ -61,14 +62,28 @@ async fn llm_call_with_retry(
         let request =
             chat_completion::ChatCompletionRequest::new(model.to_string(), messages.to_vec())
                 .tools(tools.to_vec())
-                .tool_choice(chat_completion::ToolChoiceType::Required);
+                .tool_choice(chat_completion::ToolChoiceType::Auto);
 
         match state
             .ai_config
             .chat_completion_streaming(provider, &request, reasoning_tx.clone())
             .await
         {
-            Ok(result) => return Ok(result),
+            Ok(result) => {
+                let provider_str = match provider {
+                    AiProvider::Tinfoil => "tinfoil",
+                    AiProvider::OpenRouter => "openrouter",
+                };
+                crate::ai_config::log_llm_usage(
+                    &state.llm_usage_repository,
+                    user_id,
+                    provider_str,
+                    model,
+                    "chat_main",
+                    &result,
+                );
+                return Ok(result);
+            }
             Err(e) => {
                 last_error = format!("{:?}", e);
                 tracing::warn!(
@@ -338,10 +353,11 @@ impl SmsResponse {
         state: &Arc<AppState>,
         provider: crate::AiProvider,
         model: &str,
+        user_id: i32,
     ) -> Self {
         let content = if raw.chars().count() > Self::MAX_LENGTH {
             // Try to condense with LLM first, fall back to truncation
-            condense_response(state, provider, &raw, Self::MAX_LENGTH, model)
+            condense_response(state, provider, &raw, Self::MAX_LENGTH, model, user_id)
                 .await
                 .unwrap_or_else(|_| truncate_nicely(&raw, Self::MAX_LENGTH))
         } else {
@@ -434,6 +450,7 @@ async fn condense_response(
     original: &str,
     max_chars: usize,
     model: &str,
+    user_id: i32,
 ) -> Result<String, String> {
     use openai_api_rs::v1::chat_completion::{
         ChatCompletionMessage, ChatCompletionRequest, Content, MessageRole,
@@ -459,6 +476,18 @@ async fn condense_response(
 
     match state.ai_config.chat_completion(provider, &req).await {
         Ok(response) => {
+            let provider_str = match provider {
+                crate::AiProvider::Tinfoil => "tinfoil",
+                crate::AiProvider::OpenRouter => "openrouter",
+            };
+            crate::ai_config::log_llm_usage(
+                &state.llm_usage_repository,
+                user_id,
+                provider_str,
+                model,
+                "condense_sms",
+                &response,
+            );
             if let Some(choice) = response.choices.first() {
                 if let Some(content) = &choice.message.content {
                     let condensed = content.trim().to_string();
@@ -783,6 +812,7 @@ pub async fn process_sms(
     let timezone_str = &tz.tz_str;
     let offset = &tz.offset_string;
     let contacts_info = ctx.contacts_prompt_fragment.as_deref().unwrap_or("");
+    let events_info = ctx.events_prompt_fragment.as_deref().unwrap_or("");
     let user_given_info = ctx.user_given_info.as_deref().unwrap_or("");
     let cancel_hint = if options.skip_twilio_send {
         ""
@@ -793,19 +823,17 @@ pub async fn process_sms(
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
-        content: chat_completion::Content::Text(format!("You are lightfriend, a concise AI assistant. Current date: {}. Max 480 characters per response. Characters are expensive - be succinct! ALWAYS list multiple items one per line, never in a paragraph. Example:\n1. Dad (WhatsApp) - Pick up car\n2. Lisa (Signal) - Review contract Provide all information immediately; only ask follow-ups when confirming send/create actions. Call all needed tools upfront.{contacts_info}
+        content: chat_completion::Content::Text(format!("You are lightfriend, a concise AI assistant. Current date: {}. Max 480 characters per response. Characters are expensive - be succinct! ALWAYS list multiple items one per line, never in a paragraph. Example:\n1. Dad (WhatsApp) - Pick up car\n2. Lisa (Signal) - Review contract Provide all information immediately; only ask follow-ups when confirming send/create actions. Call all needed tools upfront.{contacts_info}{events_info}
 
 ### Tool Usage:
+- Always use tools to fetch current data. Never answer data questions from conversation history alone - the history may be days old.
 - Use tools to fetch information directly (users may only have a dumbphone).
 - Send/create tools queue content for 60 seconds.{cancel_hint}
 - State only what tool results returned. Note any gaps in data coverage.
 
 ### Behavior:
 - 'remind me', 'notify me at X', 'wake me at Y' -> use set_reminder immediately. Never answer these directly.
-- Recurring reminders ('daily at 9am remind me to X', 'every weekday at 8am') -> use set_reminder with a recurring pattern.
-- Complex recurring schedules with AI logic or tool actions (daily email briefings, check conditions) -> use create_rule with recurring schedule + llm logic.
-- Tracking conditions (notify me when X emails me, alert me if Y happens) -> use create_rule with ontology_change trigger.
-- When in doubt between set_reminder and create_rule: if it's just a notification with a message, use set_reminder. If it needs LLM evaluation, data fetching, or tool execution, use create_rule.
+- For recurring reminders or complex rules (daily briefings, event triggers, conditional automations), tell the user to set them from the dashboard rule builder.
 
 ### Date and Time:
 - User timezone: {} with offset {}. Nearest future occurrence for ambiguous times.
@@ -813,7 +841,7 @@ pub async fn process_sms(
 - Display: 12-hour AM/PM, 'today'/'tomorrow'/date. Default range: now to 24h ahead.
 - 'Today' = 00:00-23:59 today. 'Tomorrow' = 00:00-23:59 tomorrow. 'This week' = remaining days. 'Next week' = Mon-Sun.
 
-Respond in plain text only. User information: {}. Use tools to fetch latest information before answering.", formatted_time, timezone_str, offset, user_given_info)),
+NEVER use emojis - they cost extra in SMS encoding. Respond in plain text only. User information: {}. Use tools to fetch latest information before answering.", formatted_time, timezone_str, offset, user_given_info)),
         tool_calls: None,
         tool_call_id: None,
     }];
@@ -992,7 +1020,7 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
         };
 
     // Terminal tools: produce final response, break the loop without going back to LLM
-    let terminal_tools = ["direct_response", "create_rule", "set_reminder"];
+    let terminal_tools = ["set_reminder"];
 
     let mut fail = false;
     let mut tool_answers: HashMap<String, String> = HashMap::new();
@@ -1023,6 +1051,7 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
                     &reasoning_tx,
                     &mut options,
                     MAX_RETRIES,
+                    user.id,
                 )
                 .await
                 {
@@ -1043,6 +1072,7 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
                 &reasoning_tx,
                 &mut options,
                 MAX_RETRIES,
+                user.id,
             )
             .await
             {
@@ -1274,7 +1304,13 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
                                 } else {
                                     tool_error_messages::INTERNAL_ERROR.to_string()
                                 };
-                                round_answers.insert(tool_call_id, user_facing_msg);
+                                round_answers.insert(tool_call_id, user_facing_msg.clone());
+                                // Terminal tools that error should still break the loop
+                                if terminal_tools.contains(&name.as_str()) {
+                                    final_response = user_facing_msg;
+                                    tool_answers.extend(round_answers);
+                                    break 'agentic;
+                                }
                             }
                         },
                         None => {
@@ -1370,7 +1406,7 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
     // Ensure response is within SMS character limit (truncate text BEFORE adding media)
     let final_response = if !fail {
         // For successful responses, use LLM condensing if needed
-        SmsResponse::new(final_response, state, provider, &model)
+        SmsResponse::new(final_response, state, provider, &model, user.id)
             .await
             .into_inner()
     } else {

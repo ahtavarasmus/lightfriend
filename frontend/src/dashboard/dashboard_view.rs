@@ -322,6 +322,21 @@ const DASHBOARD_STYLES: &str = r#"
     margin-bottom: 0.25rem;
 }
 
+.connect-prompt {
+    font-size: 0.8rem;
+    color: #888;
+    text-align: center;
+    margin-top: 0.5rem;
+    padding: 0.4rem 0.8rem;
+}
+.connect-prompt a {
+    color: #7c9eff;
+    text-decoration: none;
+}
+.connect-prompt a:hover {
+    text-decoration: underline;
+}
+
 /* ---- Responsive: single column on mobile ---- */
 @media (max-width: 768px) {
     .palantir-dashboard {
@@ -491,6 +506,8 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let summary_loading = use_state(|| true);
     let youtube_connected = use_state(|| false);
     let tesla_connected = use_state(|| false);
+    let has_any_bridge = use_state(|| false);
+    let has_email = use_state(|| false);
     let settings_open = use_state(|| false);
     let expanded_event_id = use_state(|| None::<i32>);
     let event_details = use_state(std::collections::HashMap::<i32, EventDetailResponse>::new);
@@ -619,6 +636,49 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         );
     }
 
+    // Check bridge connections (any of whatsapp/signal/telegram)
+    {
+        let has_any_bridge = has_any_bridge.clone();
+        use_effect_with_deps(
+            move |_| {
+                spawn_local(async move {
+                    for bridge in &["whatsapp", "signal", "telegram"] {
+                        let url = format!("/api/auth/{}/status", bridge);
+                        if let Ok(r) = Api::get(&url).send().await {
+                            if let Ok(data) = r.json::<serde_json::Value>().await {
+                                if data.get("connected").and_then(|v| v.as_bool()) == Some(true) {
+                                    has_any_bridge.set(true);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                });
+                || ()
+            },
+            (),
+        );
+    }
+    // Check email connection
+    {
+        let has_email = has_email.clone();
+        use_effect_with_deps(
+            move |_| {
+                spawn_local(async move {
+                    if let Ok(r) = Api::get("/api/auth/imap/status").send().await {
+                        if let Ok(data) = r.json::<serde_json::Value>().await {
+                            if data.get("connected").and_then(|v| v.as_bool()) == Some(true) {
+                                has_email.set(true);
+                            }
+                        }
+                    }
+                });
+                || ()
+            },
+            (),
+        );
+    }
+
     // Fetch dashboard summary
     let fetch_summary = {
         let summary = summary.clone();
@@ -690,6 +750,16 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let on_settings_close = {
         let settings_open = settings_open.clone();
         Callback::from(move |_| settings_open.set(false))
+    };
+
+    let open_capabilities = {
+        let settings_open = settings_open.clone();
+        let settings_initial_tab = settings_initial_tab.clone();
+        Callback::from(move |e: web_sys::MouseEvent| {
+            e.prevent_default();
+            settings_initial_tab.set(SettingsTab::Capabilities);
+            settings_open.set(true);
+        })
     };
 
     let on_usage_change = fetch_summary.clone();
@@ -1011,6 +1081,22 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                             prefill_text={(*chat_prefill).clone()}
                             on_prefill_consumed={on_prefill_consumed}
                         />
+                        if !*has_any_bridge && !*has_email {
+                            <div class="connect-prompt">
+                                {"Connect a messaging app or email to get the most out of your assistant. "}
+                                <a href="#" onclick={open_capabilities.clone()}>{"Set up connections"}</a>
+                            </div>
+                        } else if !*has_any_bridge {
+                            <div class="connect-prompt">
+                                {"Connect WhatsApp, Signal, or Telegram to manage your messages. "}
+                                <a href="#" onclick={open_capabilities.clone()}>{"Set up connections"}</a>
+                            </div>
+                        } else if !*has_email {
+                            <div class="connect-prompt">
+                                {"Connect your email to read and send emails through your assistant. "}
+                                <a href="#" onclick={open_capabilities.clone()}>{"Set up connections"}</a>
+                            </div>
+                        }
                     </div>
 
                     <div class="peace-separator"></div>

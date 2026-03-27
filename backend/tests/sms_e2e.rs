@@ -30,13 +30,13 @@ fn test_mock_llm_response_creates_valid_response() {
     let response = mock.to_response();
 
     assert_eq!(response.choices.len(), 1);
-    assert!(response.choices[0].message.tool_calls.is_some());
-
-    let tool_calls = response.choices[0].message.tool_calls.as_ref().unwrap();
-    assert_eq!(tool_calls.len(), 1);
     assert_eq!(
-        tool_calls[0].function.name,
-        Some("direct_response".to_string())
+        response.choices[0].message.content,
+        Some("Test response".to_string())
+    );
+    assert_eq!(
+        response.choices[0].finish_reason,
+        Some(openai_api_rs::v1::chat_completion::FinishReason::stop)
     );
 }
 
@@ -892,9 +892,9 @@ async fn test_process_sms_empty_llm_response() {
 
     let (status, _headers, _response) = process_sms(&state, payload, options).await;
 
-    // Empty LLM response is a system error - should return failure
-    // This is abnormal processing behavior, not a user input issue
-    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    // With tool_choice: Auto, an empty text response with finish_reason: stop
+    // is valid (LLM chose to respond with empty text). Returns OK.
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]
@@ -1080,14 +1080,14 @@ async fn test_process_sms_malformed_json_continues_gracefully() {
 
     // LLM returns tool call with malformed JSON arguments (use terminal tool
     // so the single-response mock doesn't cause a second LLM call)
-    let mock = MockLlmResponse::with_malformed_json_arguments("direct_response");
+    let mock = MockLlmResponse::with_malformed_json_arguments("set_reminder");
     let options = ProcessSmsOptions::test_with_mock(mock.to_response());
 
     let (status, _headers, response) = process_sms(&state, payload, options).await;
 
     // Should return OK with a fallback response (graceful degradation)
     assert_eq!(status, StatusCode::OK);
-    // With malformed JSON, direct_response falls back to a default message
+    // With malformed JSON, set_reminder fails and the error becomes the response
     assert!(
         !response.message.is_empty(),
         "Response should not be empty: {}",

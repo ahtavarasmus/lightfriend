@@ -10,6 +10,9 @@ use serde_json::json;
 use std::sync::Arc;
 
 use crate::pg_schema::{message_status_log, usage_logs, users};
+use crate::repositories::llm_usage_repository::{
+    CallsiteBreakdown, DailyLlmStat, ModelBreakdown, UserLlmUsage,
+};
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -45,6 +48,8 @@ pub struct UserCostEntry {
     pub sms_cost: f32,
     pub sms_count: i64,
     pub is_international: bool,
+    pub llm_calls: i64,
+    pub llm_tokens: i64,
 }
 
 // Usage Stats Response
@@ -239,11 +244,28 @@ pub async fn get_cost_stats(
         0.0
     };
 
-    // Build per-user cost list for graph (excluding BYOT users)
-    let mut costs_per_user: Vec<UserCostEntry> = user_costs_30d
+    // Get per-user LLM token usage (last 30 days)
+    let llm_per_user: Vec<UserLlmUsage> = state
+        .llm_usage_repository
+        .get_per_user_stats(from_30d)
+        .unwrap_or_default();
+
+    let llm_map: std::collections::HashMap<i32, (i64, i64)> = llm_per_user
         .into_iter()
-        .filter(|(user_id, _)| !byot_users.contains(user_id))
-        .map(|(user_id, (sms_cost, sms_count))| {
+        .map(|u| (u.user_id, (u.calls, u.total_tokens)))
+        .collect();
+
+    // Collect all user IDs that have either SMS costs or LLM usage
+    let mut all_user_ids: std::collections::HashSet<i32> = user_costs_30d.keys().cloned().collect();
+    all_user_ids.extend(llm_map.keys());
+
+    // Build per-user cost list (excluding BYOT users)
+    let mut costs_per_user: Vec<UserCostEntry> = all_user_ids
+        .into_iter()
+        .filter(|user_id| !byot_users.contains(user_id))
+        .map(|user_id| {
+            let (sms_cost, sms_count) = user_costs_30d.get(&user_id).cloned().unwrap_or((0.0, 0));
+            let (llm_calls, llm_tokens) = llm_map.get(&user_id).cloned().unwrap_or((0, 0));
             let country = country_map
                 .get(&user_id)
                 .cloned()
@@ -255,14 +277,18 @@ pub async fn get_cost_stats(
                 sms_cost,
                 sms_count,
                 is_international,
+                llm_calls,
+                llm_tokens,
             }
         })
         .collect();
 
-    // Sort by cost descending
+    // Sort by total cost (SMS + estimated LLM) descending
     costs_per_user.sort_by(|a, b| {
-        b.sms_cost
-            .partial_cmp(&a.sms_cost)
+        let a_total = a.sms_cost + (a.llm_tokens as f32 * 0.00001); // rough token cost weight
+        let b_total = b.sms_cost + (b.llm_tokens as f32 * 0.00001);
+        b_total
+            .partial_cmp(&a_total)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
@@ -459,5 +485,118 @@ pub async fn get_usage_stats(
         active_users_7d,
         active_users_30d,
         breakdown_by_type,
+    }))
+}
+
+// LLM Usage Stats Response
+#[derive(Serialize)]
+pub struct LlmUsageStatsResponse {
+    pub total_calls: i64,
+    pub total_prompt_tokens: i64,
+    pub total_completion_tokens: i64,
+    pub total_tokens: i64,
+    pub by_callsite: Vec<CallsiteBreakdown>,
+    pub by_model: Vec<ModelBreakdown>,
+    pub per_user: Vec<UserLlmUsage>,
+    pub daily_stats: Vec<DailyLlmStat>,
+}
+
+/// Get LLM usage statistics
+/// GET /api/admin/stats/llm
+pub async fn get_llm_stats(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<StatsQuery>,
+) -> Result<Json<LlmUsageStatsResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let days = params.days.unwrap_or(14);
+    let now = chrono::Utc::now().timestamp() as i32;
+    let from_timestamp = now - (days * 86400);
+
+    let stats = state
+        .llm_usage_repository
+        .get_stats(from_timestamp)
+        .map_err(|e| {
+            tracing::error!("Failed to get LLM stats: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get LLM stats"})),
+            )
+        })?;
+
+    let daily_stats = state
+        .llm_usage_repository
+        .get_daily_stats(from_timestamp)
+        .map_err(|e| {
+            tracing::error!("Failed to get daily LLM stats: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get daily LLM stats"})),
+            )
+        })?;
+
+    let per_user = state
+        .llm_usage_repository
+        .get_per_user_stats(from_timestamp)
+        .map_err(|e| {
+            tracing::error!("Failed to get per-user LLM stats: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get per-user LLM stats"})),
+            )
+        })?;
+
+    Ok(Json(LlmUsageStatsResponse {
+        total_calls: stats.total_calls,
+        total_prompt_tokens: stats.total_prompt_tokens,
+        total_completion_tokens: stats.total_completion_tokens,
+        total_tokens: stats.total_tokens,
+        by_callsite: stats.by_callsite,
+        by_model: stats.by_model,
+        per_user,
+        daily_stats,
+    }))
+}
+
+// Bandwidth Stats Response
+#[derive(Serialize)]
+pub struct BandwidthStatsResponse {
+    pub total_bytes: i64,
+    pub per_user: Vec<crate::repositories::bandwidth_repository::UserBandwidthUsage>,
+}
+
+/// Get bridge bandwidth statistics
+/// GET /api/admin/stats/bandwidth
+pub async fn get_bandwidth_stats(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<StatsQuery>,
+) -> Result<Json<BandwidthStatsResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let days = params.days.unwrap_or(30);
+    let now = chrono::Utc::now().timestamp() as i32;
+    let from_timestamp = now - (days * 86400);
+
+    let total_bytes = state
+        .bandwidth_repository
+        .get_total_bandwidth(from_timestamp)
+        .map_err(|e| {
+            tracing::error!("Failed to get bandwidth stats: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get bandwidth stats"})),
+            )
+        })?;
+
+    let per_user = state
+        .bandwidth_repository
+        .get_per_user_stats(from_timestamp)
+        .map_err(|e| {
+            tracing::error!("Failed to get per-user bandwidth stats: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get per-user bandwidth stats"})),
+            )
+        })?;
+
+    Ok(Json(BandwidthStatsResponse {
+        total_bytes,
+        per_user,
     }))
 }

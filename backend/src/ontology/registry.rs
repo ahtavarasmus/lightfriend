@@ -59,48 +59,6 @@ static PERSON_DEF: ObjectTypeDef = ObjectTypeDef {
     linkable_to: &["Channel"],
 };
 
-static CHANNEL_PROPS: &[PropertyDef] = &[
-    PropertyDef {
-        name: "platform",
-        description: "Filter by platform type, or 'all' for every platform.",
-        prop_type: "String",
-        filter: Some(FilterSource::Static(&[
-            "whatsapp", "telegram", "signal", "email",
-        ])),
-    },
-    PropertyDef {
-        name: "person_name",
-        description: "Filter channels belonging to a specific person, or 'all'.",
-        prop_type: "String",
-        filter: Some(FilterSource::Dynamic("person_names")),
-    },
-    PropertyDef {
-        name: "handle",
-        description: "The contact handle (phone number, email address, etc.).",
-        prop_type: "Optional<String>",
-        filter: None,
-    },
-    PropertyDef {
-        name: "room_id",
-        description: "The Matrix room ID for this channel.",
-        prop_type: "Optional<String>",
-        filter: None,
-    },
-    PropertyDef {
-        name: "notification_mode",
-        description: "Filter by notification mode, or 'all'.",
-        prop_type: "String",
-        filter: Some(FilterSource::Static(&["alert", "silent", "off"])),
-    },
-];
-
-static CHANNEL_DEF: ObjectTypeDef = ObjectTypeDef {
-    name: "Channel",
-    description: "Query communication channels. Returns channels with their parent person.",
-    properties: CHANNEL_PROPS,
-    linkable_to: &["Person"],
-};
-
 static MESSAGE_PROPS: &[PropertyDef] = &[
     PropertyDef {
         name: "platform",
@@ -151,7 +109,7 @@ static EVENT_DEF: ObjectTypeDef = ObjectTypeDef {
 impl OntologyRegistry {
     pub fn build() -> Self {
         Self {
-            object_types: vec![&PERSON_DEF, &CHANNEL_DEF, &MESSAGE_DEF, &EVENT_DEF],
+            object_types: vec![&PERSON_DEF, &MESSAGE_DEF, &EVENT_DEF],
         }
     }
 

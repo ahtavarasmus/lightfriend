@@ -569,6 +569,7 @@ pub(crate) async fn prefetch_sources(
                     state,
                     query,
                     "Return factual information concisely.",
+                    rule.user_id,
                 )
                 .await
                 {
@@ -718,7 +719,7 @@ pub(crate) async fn call_llm_condition(
         Instructions: {}\n\
         {}\n\n\
         Call the `rule_result` tool with your decision. Set condition_met=true when this IF condition matches and the true branch should run. Set condition_met=false when it does not match and the false branch should run. Fill the `message` field only if the downstream action will actually use it.{}\n\
-        Keep messages concise (max 480 chars), direct, second person.",
+        Keep messages concise (max 480 chars), direct, second person. NEVER use emojis.",
         rule.name, prompt, tz_info, extra_instructions
     );
 
@@ -801,6 +802,18 @@ pub(crate) async fn call_llm_condition(
         .chat_completion(request)
         .await
         .map_err(|e| format!("LLM call failed: {}", e))?;
+
+    crate::ai_config::log_llm_usage(
+        &state.llm_usage_repository,
+        rule.user_id,
+        match ctx.provider {
+            crate::AiProvider::Tinfoil => "tinfoil",
+            crate::AiProvider::OpenRouter => "openrouter",
+        },
+        &ctx.model,
+        "rule_eval",
+        &result,
+    );
 
     let choice = result.choices.first().ok_or("No choices in LLM response")?;
 
@@ -1076,7 +1089,7 @@ async fn check_message_seen(
             let uid = room_id.strip_prefix("email_").unwrap_or(room_id);
             check_email_seen(state, user_id, uid).await
         }
-        // Bridge platforms: check Matrix read receipts
+        // Bridge platforms: check Matrix read receipts + user reply history
         _ => check_bridge_seen(state, user_id, room_id, message_created_at).await,
     }
 }
@@ -1225,7 +1238,7 @@ pub async fn emit_ontology_change(
             // Parse delay from trigger config (default 300s for ontology_change)
             let trigger: TriggerConfig =
                 serde_json::from_str(&rule.trigger_config).unwrap_or_default();
-            let delay = trigger.delay_seconds.unwrap_or(300);
+            let delay = trigger.delay_seconds.unwrap_or(600);
 
             tokio::spawn(async move {
                 if delay > 0 && is_message {
