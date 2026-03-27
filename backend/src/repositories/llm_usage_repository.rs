@@ -1,7 +1,7 @@
 use crate::pg_models::NewPgLlmUsageLog;
 use crate::pg_schema::llm_usage_logs;
 use crate::PgDbPool;
-use diesel::dsl::{count, sum};
+use diesel::dsl::count;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use serde::Serialize;
@@ -99,9 +99,9 @@ impl LlmUsageRepository {
             .filter(llm_usage_logs::created_at.ge(from_timestamp))
             .select((
                 count(llm_usage_logs::id),
-                sum(llm_usage_logs::prompt_tokens),
-                sum(llm_usage_logs::completion_tokens),
-                sum(llm_usage_logs::total_tokens),
+                diesel::dsl::sum(llm_usage_logs::prompt_tokens),
+                diesel::dsl::sum(llm_usage_logs::completion_tokens),
+                diesel::dsl::sum(llm_usage_logs::total_tokens),
             ))
             .first(&mut conn)?;
 
@@ -112,7 +112,7 @@ impl LlmUsageRepository {
             .select((
                 llm_usage_logs::callsite,
                 count(llm_usage_logs::id),
-                sum(llm_usage_logs::total_tokens),
+                diesel::dsl::sum(llm_usage_logs::total_tokens),
             ))
             .order(count(llm_usage_logs::id).desc())
             .load(&mut conn)?;
@@ -124,7 +124,7 @@ impl LlmUsageRepository {
             .select((
                 llm_usage_logs::model,
                 count(llm_usage_logs::id),
-                sum(llm_usage_logs::total_tokens),
+                diesel::dsl::sum(llm_usage_logs::total_tokens),
             ))
             .order(count(llm_usage_logs::id).desc())
             .load(&mut conn)?;
@@ -165,9 +165,9 @@ impl LlmUsageRepository {
             .select((
                 llm_usage_logs::user_id,
                 count(llm_usage_logs::id),
-                sum(llm_usage_logs::total_tokens),
+                diesel::dsl::sum(llm_usage_logs::total_tokens),
             ))
-            .order(sum(llm_usage_logs::total_tokens).desc())
+            .order(diesel::dsl::sum(llm_usage_logs::total_tokens).desc())
             .load(&mut conn)?;
 
         Ok(rows

@@ -1,7 +1,6 @@
 use crate::pg_models::NewBridgeBandwidthLog;
 use crate::pg_schema::bridge_bandwidth_logs;
 use crate::PgDbPool;
-use diesel::dsl::sum;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use serde::Serialize;
@@ -106,7 +105,7 @@ impl BandwidthRepository {
 
         let total: Option<i64> = bridge_bandwidth_logs::table
             .filter(bridge_bandwidth_logs::created_at.ge(from_timestamp))
-            .select(sum(bridge_bandwidth_logs::bytes_estimate))
+            .select(diesel::dsl::sum(bridge_bandwidth_logs::bytes_estimate))
             .first(&mut conn)?;
 
         Ok(total.unwrap_or(0))
