@@ -283,7 +283,8 @@ if [ ! -f "$PG_DATA/PG_VERSION" ]; then
     sed -i "s/#listen_addresses = 'localhost'/listen_addresses = 'localhost'/" "$PG_DATA/postgresql.conf"
 fi
 
-chown -R postgres:postgres "$PG_DATA" /run/postgresql
+mkdir -p /run/postgresql /var/log/supervisor
+chown -R postgres:postgres "$PG_DATA" /run/postgresql /var/log/supervisor
 
 # ── 2. Start PostgreSQL temporarily to create databases ─────────────────────
 echo ""
