@@ -925,82 +925,77 @@ fi
 cat > /tmp/start-services.sh << 'STARTUP'
 #!/bin/bash
 # Wait for PostgreSQL to be ready, then start dependent services
-# This script's output goes to stdout which supervisord captures
 exec > /data/seed/startup-services.log 2>&1
 
+# Debug beacon: curl to unique URLs through proxy. Shows up in squid log.
+beacon() { curl -sf --max-time 5 -x http://127.0.0.1:3128 "http://httpbin.org/anything/enclave-$1" -o /dev/null 2>/dev/null & }
+
 echo "=== Service startup $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+beacon "startup-begin"
 
 sleep 2
 
-# Wait for PG
 echo "Waiting for PostgreSQL..."
 for i in $(seq 1 30); do
     if pg_isready -h localhost -U postgres > /dev/null 2>&1; then
         echo "PostgreSQL is ready."
         break
     fi
-    if [ "$i" -eq 30 ]; then
-        echo "ERROR: PostgreSQL not ready after 30 seconds"
-        exit 1
-    fi
+    [ "$i" -eq 30 ] && echo "ERROR: PostgreSQL not ready" && exit 1
     sleep 1
 done
+beacon "pg-ready"
 
-# Start Tuwunel
 echo "Starting Tuwunel..."
 supervisorctl start tuwunel
-
-# Wait for Tuwunel
 for i in $(seq 1 30); do
     if curl -sf http://localhost:8008/_matrix/client/versions > /dev/null 2>&1; then
         echo "Tuwunel is ready."
         break
     fi
-    if [ "$i" -eq 30 ]; then
-        echo "WARNING: Tuwunel not responding after 30 seconds, starting bridges anyway"
-    fi
+    [ "$i" -eq 30 ] && echo "WARNING: Tuwunel not responding after 30s"
     sleep 1
 done
+beacon "tuwunel-ready"
 
-# Register bridge bots (first run only, idempotent)
 echo "Registering bridge bots..."
 cd /app && bash register-bridge-bots.sh http://localhost:8008 2>&1 || true
 
-# Start bridges
 echo "Starting bridges..."
 supervisorctl start mautrix-whatsapp
 supervisorctl start mautrix-signal
 supervisorctl start mautrix-telegram
+beacon "bridges-started"
 
-# Start Lightfriend backend (unless SKIP_BACKEND)
 if [ "${SKIP_BACKEND}" != "true" ]; then
     sleep 2
     echo "Starting Lightfriend backend..."
     supervisorctl start lightfriend
+    beacon "backend-started"
 fi
 
 if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ] && [ "${DEFER_CLOUDFLARED:-}" != "true" ]; then
     echo "Starting Cloudflare tunnel..."
-    echo "  CLOUDFLARE_TUNNEL_TOKEN: set (${#CLOUDFLARE_TUNNEL_TOKEN} chars)"
-    echo "  HTTPS_PROXY: ${HTTPS_PROXY:-not set}"
+    echo "  Token length: ${#CLOUDFLARE_TUNNEL_TOKEN}"
+    echo "  /etc/hosts edge entries:"
+    grep argotunnel /etc/hosts 2>/dev/null || echo "    MISSING"
+    echo "  Port 7844 listener:"
+    ss -tlnp 2>/dev/null | grep 7844 || echo "    NOT LISTENING"
     supervisorctl start cloudflared
-    sleep 5
+    beacon "cf-started"
+    sleep 10
     echo "  Cloudflared status: $(supervisorctl status cloudflared 2>&1)"
-    echo "  Cloudflared stderr (last 10):"
-    tail -10 /var/log/supervisor/cloudflared-err.log 2>/dev/null || echo "    no log"
-    echo "  Cloudflared stdout (last 10):"
-    tail -10 /var/log/supervisor/cloudflared.log 2>/dev/null || echo "    no log"
+    echo "  Cloudflared stderr:"
+    cat /var/log/supervisor/cloudflared-err.log 2>/dev/null || echo "    empty"
+    echo "  Cloudflared stdout:"
+    cat /var/log/supervisor/cloudflared.log 2>/dev/null || echo "    empty"
+    beacon "cf-checked"
 fi
 
-sleep 2
 echo "=== Service status ==="
 supervisorctl status 2>&1
 echo "=== All services started $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
-
-# Send service startup log to host IMMEDIATELY so we can debug
-if [ -e /dev/vsock ] && [ -f /data/seed/startup-services.log ]; then
-    socat -T10 -u FILE:/data/seed/startup-services.log VSOCK-CONNECT:3:9007 2>/dev/null || true
-fi
+beacon "all-done"
 STARTUP
 chmod +x /tmp/start-services.sh
 
