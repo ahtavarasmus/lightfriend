@@ -37,16 +37,9 @@ else
 fi
 
 # Set up DNS resolver - Tuwunel needs /etc/resolv.conf
-echo "Setting up /etc/resolv.conf..."
-if [ -f /etc/resolv.conf.enclave ]; then
-    cp /etc/resolv.conf.enclave /etc/resolv.conf && echo "  Copied from template" || echo "  cp failed: $?"
-elif printf 'nameserver 127.0.0.1\n' > /etc/resolv.conf 2>/dev/null; then
-    echo "  Created directly"
-else
-    echo "  WARNING: Could not create /etc/resolv.conf (exit $?)"
-    echo "  /etc writable test: $(touch /etc/.test 2>&1 && echo yes && rm /etc/.test || echo no)"
-    echo "  ls -la /etc/resolv*: $(ls -la /etc/resolv* 2>&1)"
-fi
+# Docker leaves a dangling symlink; remove it and create a real file.
+rm -f /etc/resolv.conf 2>/dev/null || true
+echo "nameserver 127.0.0.1" > /etc/resolv.conf 2>/dev/null && echo "/etc/resolv.conf: created" || echo "WARNING: could not create /etc/resolv.conf"
 
 
 # ── 0a. Fetch environment from host via VSOCK ────────────────────────────────
