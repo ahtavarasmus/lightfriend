@@ -143,6 +143,7 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     ffmpeg \
     iproute2 \
+    iptables \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Install cloudflared for Cloudflare tunnel (production only) ──────────────

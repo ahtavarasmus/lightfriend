@@ -903,6 +903,29 @@ fi
 echo ""
 echo "=== Starting all services via supervisord ==="
 
+# ── Set up transparent proxy for cloudflared ─────────────────────────────────
+# Cloudflared does NOT support HTTPS_PROXY for edge connections (raw TCP/UDP).
+# We use iptables to transparently redirect its edge traffic through redsocks
+# to the squid proxy. Since squid only handles CONNECT (not transparent), we
+# instead create a direct VSOCK bridge for cloudflared's edge traffic.
+# Cloudflare tunnel edge IPs: 198.41.192.0/24 and 198.41.200.0/24, port 7844.
+# With --protocol http2, cloudflared connects via TCP.
+if [ -e /dev/vsock ] && [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
+    echo ""
+    echo "[STEP CF] Setting up cloudflared edge routing..."
+    # Bridge cloudflared's edge connections through VSOCK to the host,
+    # which has direct internet. Use iptables DNAT to redirect traffic
+    # destined for Cloudflare edge IPs to a local socat bridge.
+    socat TCP-LISTEN:7844,reuseaddr,fork VSOCK-CONNECT:3:7844 &
+    CF_BRIDGE_PID=$!
+    sleep 0.3
+    # Redirect Cloudflare edge traffic to our local bridge
+    iptables -t nat -A OUTPUT -d 198.41.192.0/24 -p tcp --dport 7844 -j DNAT --to-destination 127.0.0.1:7844 2>/dev/null \
+        && iptables -t nat -A OUTPUT -d 198.41.200.0/24 -p tcp --dport 7844 -j DNAT --to-destination 127.0.0.1:7844 2>/dev/null \
+        && echo "  iptables DNAT rules set for Cloudflare edge -> local:7844 -> VSOCK:3:7844" \
+        || echo "  WARNING: iptables failed - cloudflared may not connect"
+fi
+
 # Use a startup script that starts services in order
 cat > /tmp/start-services.sh << 'STARTUP'
 #!/bin/bash
@@ -963,10 +986,18 @@ fi
 
 if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ] && [ "${DEFER_CLOUDFLARED:-}" != "true" ]; then
     echo "Starting Cloudflare tunnel..."
+    echo "  CLOUDFLARE_TUNNEL_TOKEN: set (${#CLOUDFLARE_TUNNEL_TOKEN} chars)"
+    echo "  HTTPS_PROXY: ${HTTPS_PROXY:-not set}"
     supervisorctl start cloudflared
+    sleep 5
+    echo "  Cloudflared status: $(supervisorctl status cloudflared 2>&1)"
+    echo "  Cloudflared stderr (last 10):"
+    tail -10 /var/log/supervisor/cloudflared-err.log 2>/dev/null || echo "    no log"
+    echo "  Cloudflared stdout (last 10):"
+    tail -10 /var/log/supervisor/cloudflared.log 2>/dev/null || echo "    no log"
 fi
 
-sleep 5
+sleep 2
 echo "=== Service status ==="
 supervisorctl status 2>&1
 echo "=== All services started $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
