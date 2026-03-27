@@ -48,6 +48,7 @@ impl LlmUsageRepository {
         Self { pool }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn log_usage(
         &self,
         user_id: i32,

@@ -861,11 +861,7 @@ pub fn log_llm_usage(
     response: &openai_api_rs::v1::chat_completion::ChatCompletionResponse,
 ) {
     let u = &response.usage;
-    let (pt, ct, tt) = (
-        u.prompt_tokens as i32,
-        u.completion_tokens as i32,
-        u.total_tokens as i32,
-    );
+    let (pt, ct, tt) = (u.prompt_tokens, u.completion_tokens, u.total_tokens);
 
     if let Err(e) = repo.log_usage(user_id, provider, model, callsite, pt, ct, tt) {
         tracing::warn!("Failed to log LLM usage for callsite {}: {}", callsite, e);
