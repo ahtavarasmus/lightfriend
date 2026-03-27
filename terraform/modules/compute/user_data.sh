@@ -320,14 +320,83 @@ RestartSec=3
 WantedBy=multi-user.target
 BTEOF
 
+# Seed HTTP server (port 9080) - serves seed SQL via HTTP for enclave download
+cat > /etc/systemd/system/seed-http-server.service <<'SEEDHTTPEOF'
+[Unit]
+Description=HTTP seed file server for enclave (port 9080)
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 -m http.server 9080 --directory /opt/lightfriend/seed/
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+SEEDHTTPEOF
+
+# VSOCK bridge for seed HTTP (port 9080) - enclave fetches seed via HTTP
+cat > /etc/systemd/system/vsock-seed-http.service <<'SEEDHTTPVSOCKEOF'
+[Unit]
+Description=VSOCK bridge to seed HTTP server for enclave (port 9080)
+After=seed-http-server.service
+
+[Service]
+ExecStart=/usr/bin/socat VSOCK-LISTEN:9080,reuseaddr,fork TCP:127.0.0.1:9080
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+SEEDHTTPVSOCKEOF
+
+# VSOCK bridge for cloudflared edge connections (port 7844)
+# Enclave's cloudflared connects to Cloudflare edge via this bridge
+cat > /opt/lightfriend/cloudflared-edge-bridge.sh <<'SCRIPT'
+#!/bin/bash
+LOG="/opt/lightfriend/logs/cloudflared-edge.log"
+mkdir -p /opt/lightfriend/logs
+echo "$(date -u): Starting cloudflared edge bridge on VSOCK:7844" >> "$LOG"
+socat -d -d VSOCK-LISTEN:7844,reuseaddr,fork TCP:region1.v2.argotunnel.com:7844 2>>"$LOG"
+SCRIPT
+chmod +x /opt/lightfriend/cloudflared-edge-bridge.sh
+
+cat > /etc/systemd/system/vsock-cloudflared-edge.service <<'CFEDGEEOF'
+[Unit]
+Description=VSOCK bridge for cloudflared edge connections (port 7844)
+
+[Service]
+ExecStart=/opt/lightfriend/cloudflared-edge-bridge.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+CFEDGEEOF
+
+# VSOCK bridge for DNS-over-TLS (port 8530 -> 1.1.1.1:853)
+# Cloudflared uses DoT for SRV record lookups
+cat > /etc/systemd/system/vsock-dot-bridge.service <<'DOTEOF'
+[Unit]
+Description=VSOCK bridge for DNS-over-TLS to 1.1.1.1:853
+
+[Service]
+ExecStart=/usr/bin/socat VSOCK-LISTEN:8530,reuseaddr,fork TCP:1.1.1.1:853
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+DOTEOF
+
 # Enable and start all VSOCK services
 systemctl daemon-reload
-for svc in vsock-proxy-bridge vsock-config-server vsock-backup-receiver vsock-restore-server vsock-seed-server vsock-marlin-kms-bridge vsock-boot-trace; do
+for svc in vsock-proxy-bridge vsock-config-server vsock-backup-receiver vsock-restore-server vsock-seed-server vsock-marlin-kms-bridge vsock-boot-trace seed-http-server vsock-seed-http vsock-cloudflared-edge vsock-dot-bridge; do
     systemctl enable "$svc"
     systemctl start "$svc" || echo "WARNING: $svc failed to start"
 done
 
-echo "VSOCK services configured: proxy:8001 via squid:3128, config:9000, backup:9001, restore:9002, seed:9003, boot-trace:9007, marlin-kms:9010"
+echo "VSOCK services configured: proxy:8001, config:9000, backup:9001, restore:9002, seed:9003, boot-trace:9007, seed-http:9080, cf-edge:7844, dot:8530, marlin-kms:9010"
 
 # ── Enclave launch script ───────────────────────────────────────────────────
 
@@ -336,6 +405,7 @@ cat > /opt/lightfriend/launch-enclave.sh <<'SCRIPT'
 set -e
 EIF_PATH="/opt/lightfriend/lightfriend.eif"
 VERIFY="/opt/lightfriend/verify-result.json"
+VSOCK_SVCS="vsock-proxy-bridge vsock-config-server vsock-seed-server vsock-boot-trace vsock-backup-receiver vsock-restore-server vsock-marlin-kms-bridge vsock-seed-http vsock-cloudflared-edge vsock-dot-bridge"
 
 [ -f /opt/lightfriend/.env ] || { echo "ERROR: /opt/lightfriend/.env not found"; exit 1; }
 [ -f "$EIF_PATH" ] || { echo "ERROR: CI-built EIF not found at $EIF_PATH"; exit 1; }
@@ -344,11 +414,23 @@ echo "Using pre-built EIF: $EIF_PATH"
 EXISTING=$(nitro-cli describe-enclaves | jq -r '.[0].EnclaveID // empty' 2>/dev/null)
 [ -n "$EXISTING" ] && nitro-cli terminate-enclave --enclave-id "$EXISTING" && sleep 2
 
+# Stop VSOCK services before launch (port conflict with Nitro heartbeat)
+echo "Stopping VSOCK services..."
+for svc in $VSOCK_SVCS; do systemctl stop "$svc" 2>/dev/null; done
+pkill -f 'socat.*VSOCK' 2>/dev/null || true
+sleep 2
+
 rm -f "$VERIFY"
 pkill -f 'VSOCK-LISTEN:9004' 2>/dev/null || true
 nohup socat -u VSOCK-LISTEN:9004,reuseaddr CREATE:"$VERIFY" >/tmp/lightfriend-verify-listener.log 2>&1 &
 
+echo "Launching enclave..."
 nitro-cli run-enclave --eif-path "$EIF_PATH" --memory 8192 --cpu-count 4 --enclave-cid 16
+
+# Restart VSOCK services after launch
+echo "Restarting VSOCK services..."
+for svc in $VSOCK_SVCS; do systemctl start "$svc" 2>/dev/null || echo "WARNING: $svc failed"; done
+
 nitro-cli describe-enclaves
 SCRIPT
 chmod +x /opt/lightfriend/launch-enclave.sh
