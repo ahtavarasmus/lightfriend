@@ -224,7 +224,8 @@ COPY enclave/enter-maintenance.sh /app/enter-maintenance.sh
 COPY enclave/diagnose-enclave.sh /app/diagnose-enclave.sh
 COPY enclave/service-watchdog.sh /app/service-watchdog.sh
 # Create resolv.conf - Nitro enclaves have no DNS. Tuwunel needs this file.
-RUN echo "nameserver 127.0.0.1" > /etc/resolv.conf
+# /etc/resolv.conf may be a symlink managed by the base image; remove and recreate.
+RUN rm -f /etc/resolv.conf && echo "nameserver 127.0.0.1" > /etc/resolv.conf
 
 RUN chmod +x /entrypoint.sh /usr/local/bin/derive-backup-key.sh /usr/local/bin/start-marlin-kms.sh /app/export.sh /app/pg-backup.sh /app/verify.sh /app/enter-maintenance.sh /app/service-watchdog.sh /app/diagnose-enclave.sh
 
