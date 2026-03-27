@@ -92,8 +92,17 @@ if ! wait_http "http://127.0.0.1:${ATTEST_PORT}/attestation/raw" 30 1; then
     exit 1
 fi
 
-# Test KMS tunnel connectivity BEFORE starting derive server
-echo "Testing KMS tunnel (port ${LOCAL_ROOT_TUNNEL_PORT} -> VSOCK:3:9010 -> arbone-v4.kms.box:1100)..." >&2
+# Build attestation URL with the X25519 public key as a query parameter.
+# The Scallop/Noise handshake sends this key to the root server.
+# The root server verifies that the attestation document contains the SAME
+# public key to bind the attestation to this handshake (prevents relay attacks).
+# Without it, the root server cannot verify key ownership and rejects.
+PUBKEY_HEX=$(xxd -p -c 256 "${RUN_DIR}/id.pub" | tr -d '\n')
+ATTESTATION_URL="http://127.0.0.1:${ATTEST_PORT}/attestation/raw?public_key=${PUBKEY_HEX}"
+echo "Attestation URL: ${ATTESTATION_URL}" >&2
+
+# Test KMS tunnel connectivity
+echo "Testing KMS tunnel (${KMS_HOST}:${KMS_PORT} via squid proxy)..." >&2
 sleep 1
 if timeout 5 bash -c "echo | socat - TCP:127.0.0.1:${LOCAL_ROOT_TUNNEL_PORT}" 2>/dev/null; then
     echo "KMS tunnel: reachable" >&2
@@ -101,21 +110,17 @@ else
     echo "KMS tunnel: UNREACHABLE on port ${LOCAL_ROOT_TUNNEL_PORT}" >&2
 fi
 
-# Dump key info for debugging
 echo "KMS pubkey: ${MARLIN_ROOT_SERVER_X25519_PUBKEY}" >&2
-echo "Contract address: $(cat "${RUN_DIR}/contract-address")" >&2
-echo "Secret key size: $(wc -c < "${RUN_DIR}/id.sec") bytes" >&2
-echo "Attestation test:" >&2
-ATTEST_RESP=$(curl -sf "http://127.0.0.1:${ATTEST_PORT}/attestation/raw" 2>&1 | wc -c)
-echo "  /attestation/raw response: ${ATTEST_RESP} bytes" >&2
+echo "Contract: $(cat "${RUN_DIR}/contract-address")" >&2
+echo "Pubkey hex: ${PUBKEY_HEX}" >&2
 
-# Start derive server with RUST_LOG for verbose output
+# Start derive server
 RUST_LOG=debug start_bg "${RUN_DIR}/derive.pid" \
     /usr/local/bin/kms-derive-server \
     --kms-endpoint "127.0.0.1:${LOCAL_ROOT_TUNNEL_PORT}" \
     --kms-pubkey "${MARLIN_ROOT_SERVER_X25519_PUBKEY}" \
     --listen-addr "127.0.0.1:${LOCAL_DERIVE_PORT}" \
-    --attestation-endpoint "http://127.0.0.1:${ATTEST_PORT}/attestation/raw" \
+    --attestation-endpoint "${ATTESTATION_URL}" \
     --secret-path "${RUN_DIR}/id.sec" \
     --contract-address-file "${RUN_DIR}/contract-address"
 
