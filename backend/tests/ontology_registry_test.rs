@@ -52,15 +52,14 @@ fn has_property(
 // =============================================================================
 
 #[test]
-fn test_registry_generates_four_tools() {
+fn test_registry_generates_three_tools() {
     let registry = OntologyRegistry::build();
     let tools = registry.build_query_tools(&empty_user_data());
 
-    assert_eq!(tools.len(), 4);
+    assert_eq!(tools.len(), 3);
 
     let names: Vec<&str> = tools.iter().map(|t| t.function.name.as_str()).collect();
     assert!(names.contains(&"query_person"));
-    assert!(names.contains(&"query_channel"));
     assert!(names.contains(&"query_message"));
     assert!(names.contains(&"query_event"));
 }
@@ -74,28 +73,14 @@ fn test_registry_static_enums_include_all() {
     let registry = OntologyRegistry::build();
     let tools = registry.build_query_tools(&empty_user_data());
 
-    // Platform enum on channel: "all" + static values
-    let platform_vals =
-        get_enum_values(&tools, "query_channel", "platform").expect("platform enum should exist");
-    assert!(platform_vals.contains(&"all".to_string()));
-    assert!(platform_vals.contains(&"whatsapp".to_string()));
-    assert!(platform_vals.contains(&"telegram".to_string()));
-    assert!(platform_vals.contains(&"signal".to_string()));
-    assert!(platform_vals.contains(&"email".to_string()));
-
-    // Platform enum on message
+    // Platform enum on message: "all" + static values
     let msg_platform_vals = get_enum_values(&tools, "query_message", "platform")
         .expect("message platform enum should exist");
     assert!(msg_platform_vals.contains(&"all".to_string()));
     assert!(msg_platform_vals.contains(&"whatsapp".to_string()));
-
-    // Notification mode enum
-    let notif_vals = get_enum_values(&tools, "query_channel", "notification_mode")
-        .expect("notification_mode enum should exist");
-    assert!(notif_vals.contains(&"all".to_string()));
-    assert!(notif_vals.contains(&"alert".to_string()));
-    assert!(notif_vals.contains(&"silent".to_string()));
-    assert!(notif_vals.contains(&"off".to_string()));
+    assert!(msg_platform_vals.contains(&"telegram".to_string()));
+    assert!(msg_platform_vals.contains(&"signal".to_string()));
+    assert!(msg_platform_vals.contains(&"email".to_string()));
 }
 
 // =============================================================================
@@ -113,13 +98,6 @@ fn test_registry_dynamic_enums_injected() {
     assert!(name_vals.contains(&"all".to_string()));
     assert!(name_vals.contains(&"Alice".to_string()));
     assert!(name_vals.contains(&"Bob".to_string()));
-
-    // Also injected into channel's person_name
-    let person_name_vals = get_enum_values(&tools, "query_channel", "person_name")
-        .expect("person_name enum should exist");
-    assert!(person_name_vals.contains(&"all".to_string()));
-    assert!(person_name_vals.contains(&"Alice".to_string()));
-    assert!(person_name_vals.contains(&"Bob".to_string()));
 
     // Also injected into message's sender_name
     let sender_name_vals = get_enum_values(&tools, "query_message", "sender_name")
@@ -153,11 +131,6 @@ fn test_registry_linked_entities_param() {
     assert!(has_property(&tools, "query_person", "linked_entities"));
     let person_linkable = get_linked_entities_enum(&tools, "query_person");
     assert!(person_linkable.contains(&"Channel".to_string()));
-
-    // Channel linkable_to: Person
-    assert!(has_property(&tools, "query_channel", "linked_entities"));
-    let channel_linkable = get_linked_entities_enum(&tools, "query_channel");
-    assert!(channel_linkable.contains(&"Person".to_string()));
 
     // Message has no linked_entities (linkable_to is empty)
     assert!(!has_property(&tools, "query_message", "linked_entities"));

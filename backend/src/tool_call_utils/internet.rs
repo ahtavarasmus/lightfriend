@@ -284,33 +284,3 @@ pub async fn scan_qr_code(image_url: &str) -> Result<MenuContent, Box<dyn Error>
     tracing::info!("No QR code found in image");
     Ok(MenuContent::Unknown("No QR code found".to_string()))
 }
-
-pub fn get_direct_response_tool() -> openai_api_rs::v1::chat_completion::Tool {
-    use openai_api_rs::v1::{chat_completion, types};
-    use std::collections::HashMap;
-
-    let mut properties = HashMap::new();
-    properties.insert(
-        "response".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The response to give to the user".to_string()),
-            ..Default::default()
-        }),
-    );
-
-    chat_completion::Tool {
-        r#type: chat_completion::ToolType::Function,
-        function: types::Function {
-            name: String::from("direct_response"),
-            description: Some(String::from(
-                "For greetings, acknowledgments, simple math, and responses based entirely on current conversation context. NEVER use for reminders, scheduling, or notifications - use create_rule instead. Use ask_perplexity for factual questions."
-            )),
-            parameters: types::FunctionParameters {
-                schema_type: types::JSONSchemaType::Object,
-                properties: Some(properties),
-                required: Some(vec![String::from("response")]),
-            },
-        },
-    }
-}

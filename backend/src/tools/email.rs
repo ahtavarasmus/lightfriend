@@ -1,92 +1,10 @@
 use axum::http::StatusCode;
 use openai_api_rs::v1::chat_completion;
-use serde::Deserialize;
 
 use crate::api::twilio_sms::TwilioResponse;
 use crate::tools::registry::{
     write_outgoing_error_history, write_outgoing_history, ToolContext, ToolHandler, ToolResult,
 };
-
-// ─── fetch_emails ────────────────────────────────────────────────────────────
-
-pub struct FetchEmailsHandler;
-
-#[async_trait::async_trait]
-impl ToolHandler for FetchEmailsHandler {
-    fn name(&self) -> &'static str {
-        "fetch_emails"
-    }
-
-    fn definition(&self) -> chat_completion::Tool {
-        crate::tool_call_utils::email::get_fetch_emails_tool()
-    }
-
-    async fn execute(&self, ctx: ToolContext<'_>) -> Result<ToolResult, String> {
-        tracing::debug!("Executing fetch_emails tool call");
-        let response =
-            crate::tool_call_utils::email::handle_fetch_emails(ctx.state, ctx.user_id).await;
-        Ok(ToolResult::Answer(response))
-    }
-}
-
-// ─── fetch_specific_email ────────────────────────────────────────────────────
-
-pub struct FetchSpecificEmailHandler;
-
-#[derive(Deserialize)]
-struct EmailQuery {
-    query: String,
-}
-
-#[async_trait::async_trait]
-impl ToolHandler for FetchSpecificEmailHandler {
-    fn name(&self) -> &'static str {
-        "fetch_specific_email"
-    }
-
-    fn definition(&self) -> chat_completion::Tool {
-        crate::tool_call_utils::email::get_fetch_specific_email_tool()
-    }
-
-    async fn execute(&self, ctx: ToolContext<'_>) -> Result<ToolResult, String> {
-        tracing::debug!("Executing fetch_specific_email tool call");
-        let query: EmailQuery = serde_json::from_str(ctx.arguments).map_err(|e| e.to_string())?;
-
-        // First get the email ID
-        let email_id = crate::tool_call_utils::email::handle_fetch_specific_email(
-            ctx.state,
-            ctx.user_id,
-            &query.query,
-        )
-        .await;
-
-        let auth_user = crate::handlers::auth_middleware::AuthUser {
-            user_id: ctx.user_id,
-            is_admin: false,
-        };
-
-        // Then fetch the complete email with that ID
-        match crate::handlers::imap_handlers::fetch_single_imap_email(
-            axum::extract::State(ctx.state.clone()),
-            auth_user,
-            axum::extract::Path(email_id),
-        )
-        .await
-        {
-            Ok(email) => {
-                let email = &email["email"];
-                let response = format!(
-                    "From: {}\nSubject: {}\nDate: {}\n\n{}",
-                    email["from"], email["subject"], email["date_formatted"], email["body"]
-                );
-                Ok(ToolResult::Answer(response))
-            }
-            Err(_) => Ok(ToolResult::Answer(
-                "Failed to fetch the complete email".to_string(),
-            )),
-        }
-    }
-}
 
 // ─── send_email (outgoing) ───────────────────────────────────────────────────
 

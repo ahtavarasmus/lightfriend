@@ -718,7 +718,7 @@ pub(crate) async fn call_llm_condition(
         Instructions: {}\n\
         {}\n\n\
         Call the `rule_result` tool with your decision. Set condition_met=true when this IF condition matches and the true branch should run. Set condition_met=false when it does not match and the false branch should run. Fill the `message` field only if the downstream action will actually use it.{}\n\
-        Keep messages concise (max 480 chars), direct, second person.",
+        Keep messages concise (max 480 chars), direct, second person. NEVER use emojis.",
         rule.name, prompt, tz_info, extra_instructions
     );
 

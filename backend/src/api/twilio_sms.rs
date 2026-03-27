@@ -61,7 +61,7 @@ async fn llm_call_with_retry(
         let request =
             chat_completion::ChatCompletionRequest::new(model.to_string(), messages.to_vec())
                 .tools(tools.to_vec())
-                .tool_choice(chat_completion::ToolChoiceType::Required);
+                .tool_choice(chat_completion::ToolChoiceType::Auto);
 
         match state
             .ai_config
@@ -783,6 +783,7 @@ pub async fn process_sms(
     let timezone_str = &tz.tz_str;
     let offset = &tz.offset_string;
     let contacts_info = ctx.contacts_prompt_fragment.as_deref().unwrap_or("");
+    let events_info = ctx.events_prompt_fragment.as_deref().unwrap_or("");
     let user_given_info = ctx.user_given_info.as_deref().unwrap_or("");
     let cancel_hint = if options.skip_twilio_send {
         ""
@@ -793,9 +794,10 @@ pub async fn process_sms(
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
-        content: chat_completion::Content::Text(format!("You are lightfriend, a concise AI assistant. Current date: {}. Max 480 characters per response. Characters are expensive - be succinct! ALWAYS list multiple items one per line, never in a paragraph. Example:\n1. Dad (WhatsApp) - Pick up car\n2. Lisa (Signal) - Review contract Provide all information immediately; only ask follow-ups when confirming send/create actions. Call all needed tools upfront.{contacts_info}
+        content: chat_completion::Content::Text(format!("You are lightfriend, a concise AI assistant. Current date: {}. Max 480 characters per response. Characters are expensive - be succinct! ALWAYS list multiple items one per line, never in a paragraph. Example:\n1. Dad (WhatsApp) - Pick up car\n2. Lisa (Signal) - Review contract Provide all information immediately; only ask follow-ups when confirming send/create actions. Call all needed tools upfront.{contacts_info}{events_info}
 
 ### Tool Usage:
+- Always use tools to fetch current data. Never answer data questions from conversation history alone - the history may be days old.
 - Use tools to fetch information directly (users may only have a dumbphone).
 - Send/create tools queue content for 60 seconds.{cancel_hint}
 - State only what tool results returned. Note any gaps in data coverage.
@@ -813,7 +815,7 @@ pub async fn process_sms(
 - Display: 12-hour AM/PM, 'today'/'tomorrow'/date. Default range: now to 24h ahead.
 - 'Today' = 00:00-23:59 today. 'Tomorrow' = 00:00-23:59 tomorrow. 'This week' = remaining days. 'Next week' = Mon-Sun.
 
-Respond in plain text only. User information: {}. Use tools to fetch latest information before answering.", formatted_time, timezone_str, offset, user_given_info)),
+NEVER use emojis - they cost extra in SMS encoding. Respond in plain text only. User information: {}. Use tools to fetch latest information before answering.", formatted_time, timezone_str, offset, user_given_info)),
         tool_calls: None,
         tool_call_id: None,
     }];
@@ -992,7 +994,7 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
         };
 
     // Terminal tools: produce final response, break the loop without going back to LLM
-    let terminal_tools = ["direct_response", "create_rule", "set_reminder"];
+    let terminal_tools = ["create_rule", "set_reminder"];
 
     let mut fail = false;
     let mut tool_answers: HashMap<String, String> = HashMap::new();
@@ -1274,7 +1276,13 @@ Respond in plain text only. User information: {}. Use tools to fetch latest info
                                 } else {
                                     tool_error_messages::INTERNAL_ERROR.to_string()
                                 };
-                                round_answers.insert(tool_call_id, user_facing_msg);
+                                round_answers.insert(tool_call_id, user_facing_msg.clone());
+                                // Terminal tools that error should still break the loop
+                                if terminal_tools.contains(&name.as_str()) {
+                                    final_response = user_facing_msg;
+                                    tool_answers.extend(round_answers);
+                                    break 'agentic;
+                                }
                             }
                         },
                         None => {

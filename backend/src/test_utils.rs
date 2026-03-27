@@ -195,26 +195,17 @@ pub fn create_test_user(
 pub struct MockLlmResponse {
     pub content: Option<String>,
     pub tool_calls: Option<Vec<chat_completion::ToolCall>>,
+    /// When true, to_response() uses finish_reason: stop instead of tool_calls
+    pub is_text_response: bool,
 }
 
 impl MockLlmResponse {
-    /// Create a response with direct_response tool call (LLM always uses tools via tool_choice: Required)
+    /// Create a text response (LLM responds directly with tool_choice: Auto)
     pub fn with_direct_response(response: &str) -> Self {
         Self {
-            content: None,
-            tool_calls: Some(vec![chat_completion::ToolCall {
-                id: "call_test_123".to_string(),
-                r#type: "function".to_string(),
-                function: chat_completion::ToolCallFunction {
-                    name: Some("direct_response".to_string()),
-                    arguments: Some(
-                        serde_json::json!({
-                            "response": response
-                        })
-                        .to_string(),
-                    ),
-                },
-            }]),
+            content: Some(response.to_string()),
+            tool_calls: None,
+            is_text_response: true,
         }
     }
 
@@ -235,6 +226,7 @@ impl MockLlmResponse {
                     ),
                 },
             }]),
+            is_text_response: false,
         }
     }
 
@@ -257,6 +249,7 @@ impl MockLlmResponse {
                     ),
                 },
             }]),
+            is_text_response: false,
         }
     }
 
@@ -265,10 +258,11 @@ impl MockLlmResponse {
         Self {
             content: Some("".to_string()),
             tool_calls: None,
+            is_text_response: true,
         }
     }
 
-    /// Create a response with a very long direct_response
+    /// Create a text response with specified length
     pub fn with_long_response(length: usize) -> Self {
         let long_text = "a".repeat(length);
         Self::with_direct_response(&long_text)
@@ -286,6 +280,7 @@ impl MockLlmResponse {
                     arguments: Some("invalid json {{{".to_string()),
                 },
             }]),
+            is_text_response: false,
         }
     }
 
@@ -301,6 +296,7 @@ impl MockLlmResponse {
                     arguments: Some("{}".to_string()),
                 },
             }]),
+            is_text_response: false,
         }
     }
 
@@ -316,6 +312,7 @@ impl MockLlmResponse {
                     arguments: None, // Missing arguments
                 },
             }]),
+            is_text_response: false,
         }
     }
 
@@ -331,12 +328,18 @@ impl MockLlmResponse {
                     arguments: Some("{invalid json".to_string()),
                 },
             }]),
+            is_text_response: false,
         }
     }
 
     /// Convert to full ChatCompletionResponse for use with ProcessSmsOptions::test_with_mock()
     pub fn to_response(&self) -> chat_completion::ChatCompletionResponse {
         use openai_api_rs::v1::common;
+        let finish_reason = if self.is_text_response {
+            Some(chat_completion::FinishReason::stop)
+        } else {
+            Some(chat_completion::FinishReason::tool_calls)
+        };
         chat_completion::ChatCompletionResponse {
             id: Some("test_response_id".to_string()),
             object: "chat.completion".to_string(),
@@ -350,7 +353,7 @@ impl MockLlmResponse {
                     name: None,
                     tool_calls: self.tool_calls.clone(),
                 },
-                finish_reason: Some(chat_completion::FinishReason::tool_calls),
+                finish_reason,
                 finish_details: None,
             }],
             usage: common::Usage {
@@ -1222,14 +1225,9 @@ mod tests {
     #[test]
     fn test_mock_direct_response() {
         let mock = MockLlmResponse::with_direct_response("Hello, world!");
-        assert!(mock.tool_calls.is_some());
-
-        let tool_calls = mock.tool_calls.as_ref().unwrap();
-        assert_eq!(tool_calls.len(), 1);
-        assert_eq!(
-            tool_calls[0].function.name,
-            Some("direct_response".to_string())
-        );
+        assert!(mock.is_text_response);
+        assert_eq!(mock.content, Some("Hello, world!".to_string()));
+        assert!(mock.tool_calls.is_none());
     }
 
     #[test]
@@ -1238,10 +1236,13 @@ mod tests {
         let response = mock.to_response();
 
         assert_eq!(response.choices.len(), 1);
-        assert!(response.choices[0].message.tool_calls.is_some());
+        assert_eq!(
+            response.choices[0].message.content,
+            Some("Test".to_string())
+        );
         assert_eq!(
             response.choices[0].finish_reason,
-            Some(chat_completion::FinishReason::tool_calls)
+            Some(chat_completion::FinishReason::stop)
         );
     }
 

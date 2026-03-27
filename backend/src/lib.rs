@@ -83,7 +83,6 @@ pub mod tools {
     pub mod ontology;
     pub mod quiet_mode;
     pub mod registry;
-    pub mod respond;
     pub mod rules;
     pub mod search;
     pub mod tesla;
@@ -239,15 +238,10 @@ pub fn build_tool_registry() -> tools::registry::ToolRegistry {
     registry.register(Arc::new(tools::weather::WeatherHandler));
 
     // Email tools
-    registry.register(Arc::new(tools::email::FetchEmailsHandler));
-    registry.register(Arc::new(tools::email::FetchSpecificEmailHandler));
     registry.register(Arc::new(tools::email::SendEmailHandler));
     registry.register(Arc::new(tools::email::RespondEmailHandler));
 
     // Messaging tools
-    registry.register(Arc::new(tools::messaging::SearchContactsHandler));
-    registry.register(Arc::new(tools::messaging::FetchRecentHandler));
-    registry.register(Arc::new(tools::messaging::FetchMessagesHandler));
     registry.register(Arc::new(tools::messaging::SendMessageHandler));
 
     // Rules (Automation -> Logic -> Action)
@@ -261,9 +255,6 @@ pub fn build_tool_registry() -> tools::registry::ToolRegistry {
 
     // YouTube
     registry.register(Arc::new(tools::youtube::YouTubeHandler));
-
-    // Direct response
-    registry.register(Arc::new(tools::respond::DirectResponseHandler));
 
     // Quiet mode
     registry.register(Arc::new(tools::quiet_mode::QuietModeHandler));

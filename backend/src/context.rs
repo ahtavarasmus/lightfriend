@@ -106,6 +106,7 @@ pub struct AgentContext {
     pub persons: Option<Vec<crate::models::ontology_models::PersonWithChannels>>,
     pub user_given_info: Option<String>,
     pub contacts_prompt_fragment: Option<String>,
+    pub events_prompt_fragment: Option<String>,
 
     // Opt-in via .with_tools() / .with_mcp_tools()
     pub tools: Option<Vec<chat_completion::Tool>>,
@@ -258,6 +259,7 @@ impl ContextBuilder {
             persons,
             user_given_info,
             contacts_prompt_fragment,
+            events_prompt_fragment,
         ) = if self.want_user_context {
             let settings = self.state.user_core.get_user_settings(user_id)?;
             let info = self.state.user_core.get_user_info(user_id)?;
@@ -288,6 +290,41 @@ impl ContextBuilder {
                 String::new()
             };
 
+            // Fetch active events/reminders to inject into prompt
+            let now_ts = current_time_unix;
+            let events_fragment = match self
+                .state
+                .ontology_repository
+                .get_events(user_id, Some("active"))
+            {
+                Ok(events) if !events.is_empty() => {
+                    let mut f = String::from("\n\nYour active reminders/events:\n");
+                    for e in &events {
+                        let deadline_str = match e.due_at {
+                            Some(ts) => {
+                                let remaining = ts - now_ts;
+                                let days = remaining / 86400;
+                                if remaining < 0 {
+                                    " [OVERDUE]".to_string()
+                                } else if days == 0 {
+                                    let hours = (remaining / 3600).max(1);
+                                    format!(" [due in {} hours]", hours)
+                                } else {
+                                    format!(" [due in {} days]", days)
+                                }
+                            }
+                            None => String::new(),
+                        };
+                        f.push_str(&format!(
+                            "- [id={}]{} {}\n",
+                            e.id, deadline_str, e.description
+                        ));
+                    }
+                    f
+                }
+                _ => String::new(),
+            };
+
             let given_info = info.info.clone().unwrap_or_default();
 
             (
@@ -297,9 +334,10 @@ impl ContextBuilder {
                 persons,
                 Some(given_info),
                 Some(fragment),
+                Some(events_fragment),
             )
         } else {
-            (None, None, None, None, None, None)
+            (None, None, None, None, None, None, None)
         };
 
         // 4. Tools (opt-in)
@@ -351,6 +389,7 @@ impl ContextBuilder {
             persons,
             user_given_info,
             contacts_prompt_fragment,
+            events_prompt_fragment,
             tools,
             conversation_history,
         })
@@ -361,14 +400,7 @@ impl ContextBuilder {
 // History conversion
 // ---------------------------------------------------------------------------
 
-const SKIP_FROM_HISTORY: &[&str] = &[
-    "fetch_chat_messages",
-    "fetch_recent_messages",
-    "fetch_emails",
-    "fetch_specific_email",
-    "get_weather",
-    "direct_response",
-];
+const SKIP_FROM_HISTORY: &[&str] = &["get_weather"];
 
 pub fn convert_history(raw: Vec<crate::pg_models::PgMessageHistory>) -> Vec<ChatCompletionMessage> {
     let mut out = Vec::new();
