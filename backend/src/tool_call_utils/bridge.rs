@@ -345,6 +345,21 @@ pub async fn handle_send_chat_message(
     let cloned_platform = args.platform.clone();
     let cloned_exact_name = exact_name.clone();
     let cloned_message = args.message.clone();
+    // Log outbound bandwidth estimate
+    let outbound_bytes = args.message.len() as i32 + if image_url.is_some() { 50_000 } else { 0 };
+    if let Err(e) = state.bandwidth_repository.log_bandwidth(
+        user_id,
+        &args.platform,
+        "outbound",
+        outbound_bytes,
+    ) {
+        tracing::warn!(
+            "Failed to log outbound bandwidth for user {}: {}",
+            user_id,
+            e
+        );
+    }
+
     let cloned_image_url = image_url.map(|s| s.to_string());
     tokio::spawn(async move {
         let reason = tokio::select! {

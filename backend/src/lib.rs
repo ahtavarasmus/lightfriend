@@ -96,6 +96,7 @@ pub mod models {
 }
 pub mod repositories {
     pub mod admin_alert_repository;
+    pub mod bandwidth_repository;
     pub mod llm_usage_repository;
     pub mod mcp_repository;
     pub mod metrics_repository;
@@ -141,6 +142,7 @@ pub use api::matrix_client::{
 };
 pub use api::twilio_client::RealTwilioClient;
 pub use repositories::admin_alert_repository::AdminAlertRepository;
+pub use repositories::bandwidth_repository::BandwidthRepository;
 pub use repositories::llm_usage_repository::LlmUsageRepository;
 pub use repositories::metrics_repository::MetricsRepository;
 pub use repositories::ontology_repository::OntologyRepository;
@@ -219,6 +221,7 @@ pub struct AppState {
     pub webauthn_verify_limiter:
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     pub llm_usage_repository: Arc<LlmUsageRepository>,
+    pub bandwidth_repository: Arc<BandwidthRepository>,
     pub ontology_repository: Arc<OntologyRepository>,
     pub ontology_registry: ontology::registry::OntologyRegistry,
     pub tool_registry: tools::registry::ToolRegistry,

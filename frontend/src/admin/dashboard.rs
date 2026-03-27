@@ -104,6 +104,8 @@ struct UserCostEntry {
     sms_cost: f32,
     sms_count: i64,
     is_international: bool,
+    llm_calls: i64,
+    llm_tokens: i64,
 }
 
 // Usage Stats Response
@@ -145,7 +147,15 @@ struct LlmUsageStatsResponse {
     total_tokens: i64,
     by_callsite: Vec<LlmCallsiteBreakdown>,
     by_model: Vec<LlmModelBreakdown>,
+    per_user: Vec<LlmUserUsage>,
     daily_stats: Vec<DailyLlmStat>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct LlmUserUsage {
+    user_id: i32,
+    calls: i64,
+    total_tokens: i64,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -878,7 +888,7 @@ pub fn admin_dashboard() -> Html {
                                                                             <div class="chart-bar-container">
                                                                                 <div class={bar_class} style={format!("width: {}%", bar_width)}></div>
                                                                             </div>
-                                                                            <span class="chart-value">{format!("${:.4} ({} msgs)", u.sms_cost, u.sms_count)}</span>
+                                                                            <span class="chart-value">{format!("${:.4} ({} msgs, {}k tokens)", u.sms_cost, u.sms_count, u.llm_tokens / 1000)}</span>
                                                                         </div>
                                                                     }
                                                                 }).collect::<Html>()
@@ -1111,6 +1121,30 @@ pub fn admin_dashboard() -> Html {
                                                                     <td>{&m.model}</td>
                                                                     <td>{m.calls}</td>
                                                                     <td>{m.total_tokens}</td>
+                                                                </tr>
+                                                            }
+                                                        }).collect::<Html>()
+                                                    }
+                                                </tbody>
+                                            </table>
+
+                                            <h3>{"By User"}</h3>
+                                            <table class="stats-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>{"User ID"}</th>
+                                                        <th>{"Calls"}</th>
+                                                        <th>{"Tokens"}</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {
+                                                        stats.per_user.iter().map(|u| {
+                                                            html! {
+                                                                <tr key={u.user_id}>
+                                                                    <td>{u.user_id}</td>
+                                                                    <td>{u.calls}</td>
+                                                                    <td>{u.total_tokens}</td>
                                                                 </tr>
                                                             }
                                                         }).collect::<Html>()

@@ -43,6 +43,13 @@ pub struct DailyLlmStat {
     pub completion_tokens: i64,
 }
 
+#[derive(Debug, Serialize)]
+pub struct UserLlmUsage {
+    pub user_id: i32,
+    pub calls: i64,
+    pub total_tokens: i64,
+}
+
 impl LlmUsageRepository {
     pub fn new(pool: PgDbPool) -> Self {
         Self { pool }
@@ -144,6 +151,33 @@ impl LlmUsageRepository {
                 })
                 .collect(),
         })
+    }
+
+    pub fn get_per_user_stats(
+        &self,
+        from_timestamp: i32,
+    ) -> Result<Vec<UserLlmUsage>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let rows: Vec<(i32, i64, Option<i64>)> = llm_usage_logs::table
+            .filter(llm_usage_logs::created_at.ge(from_timestamp))
+            .group_by(llm_usage_logs::user_id)
+            .select((
+                llm_usage_logs::user_id,
+                count(llm_usage_logs::id),
+                sum(llm_usage_logs::total_tokens),
+            ))
+            .order(sum(llm_usage_logs::total_tokens).desc())
+            .load(&mut conn)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(user_id, calls, tokens)| UserLlmUsage {
+                user_id,
+                calls,
+                total_tokens: tokens.unwrap_or(0),
+            })
+            .collect())
     }
 
     pub fn get_daily_stats(&self, from_timestamp: i32) -> Result<Vec<DailyLlmStat>, DieselError> {

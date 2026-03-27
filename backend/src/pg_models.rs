@@ -4,11 +4,11 @@
 //! If any code tries to use these with a SQLite connection, it won't compile.
 
 use crate::pg_schema::{
-    admin_alerts, bridge_disconnection_events, bridges, country_availability, disabled_alert_types,
-    imap_connection, llm_usage_logs, mcp_servers, message_history, message_status_log,
-    processed_emails, refund_info, site_metrics, tesla, totp_backup_codes, totp_secrets,
-    usage_logs, user_info, user_secrets, waitlist, webauthn_challenges, webauthn_credentials,
-    youtube,
+    admin_alerts, bridge_bandwidth_logs, bridge_disconnection_events, bridges,
+    country_availability, disabled_alert_types, imap_connection, llm_usage_logs, mcp_servers,
+    message_history, message_status_log, processed_emails, refund_info, site_metrics, tesla,
+    totp_backup_codes, totp_secrets, usage_logs, user_info, user_secrets, waitlist,
+    webauthn_challenges, webauthn_credentials, youtube,
 };
 use diesel::prelude::*;
 use serde::Serialize;
@@ -611,5 +611,15 @@ pub struct NewPgLlmUsageLog {
     pub prompt_tokens: i32,
     pub completion_tokens: i32,
     pub total_tokens: i32,
+    pub created_at: i32,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = bridge_bandwidth_logs)]
+pub struct NewBridgeBandwidthLog {
+    pub user_id: i32,
+    pub bridge_type: String,
+    pub direction: String,
+    pub bytes_estimate: i32,
     pub created_at: i32,
 }

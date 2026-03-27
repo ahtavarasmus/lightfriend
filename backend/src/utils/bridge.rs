@@ -1342,18 +1342,59 @@ pub async fn handle_bridge_message(
         return;
     }
 
-    // Extract message content
-    let content = match event.content.msgtype {
-        MessageType::Text(t) => t.body,
-        MessageType::Notice(n) => n.body,
-        MessageType::Image(_) => "IMAGE".into(),
-        MessageType::Video(_) => "VIDEO".into(),
-        MessageType::File(_) => "FILE".into(),
-        MessageType::Audio(_) => "AUDIO".into(),
-        MessageType::Location(_) => "LOCATION".into(),
-        MessageType::Emote(t) => t.body,
+    // Extract message content and estimate message size for bandwidth tracking
+    let (content, bytes_estimate) = match event.content.msgtype {
+        MessageType::Text(ref t) => (t.body.clone(), t.body.len() as i32),
+        MessageType::Notice(ref n) => (n.body.clone(), n.body.len() as i32),
+        MessageType::Image(ref img) => {
+            let size = img
+                .info
+                .as_ref()
+                .and_then(|i| i.size)
+                .map(|s| u64::from(s).min(i32::MAX as u64) as i32)
+                .unwrap_or(50_000i32);
+            ("IMAGE".into(), size)
+        }
+        MessageType::Video(ref vid) => {
+            let size = vid
+                .info
+                .as_ref()
+                .and_then(|i| i.size)
+                .map(|s| u64::from(s).min(i32::MAX as u64) as i32)
+                .unwrap_or(500_000i32);
+            ("VIDEO".into(), size)
+        }
+        MessageType::File(ref f) => {
+            let size = f
+                .info
+                .as_ref()
+                .and_then(|i| i.size)
+                .map(|s| u64::from(s).min(i32::MAX as u64) as i32)
+                .unwrap_or(100_000i32);
+            ("FILE".into(), size)
+        }
+        MessageType::Audio(ref a) => {
+            let size = a
+                .info
+                .as_ref()
+                .and_then(|i| i.size)
+                .map(|s| u64::from(s).min(i32::MAX as u64) as i32)
+                .unwrap_or(100_000i32);
+            ("AUDIO".into(), size)
+        }
+        MessageType::Location(_) => ("LOCATION".into(), 200i32),
+        MessageType::Emote(ref t) => (t.body.clone(), t.body.len() as i32),
         _ => return,
     };
+
+    // Log bandwidth estimate for bridge traffic tracking
+    if let Err(e) =
+        state
+            .bandwidth_repository
+            .log_bandwidth(user_id, &service, "inbound", bytes_estimate)
+    {
+        tracing::warn!("Failed to log bandwidth for user {}: {}", user_id, e);
+    }
 
     // Skip error messages
     if is_error_message(&content) {

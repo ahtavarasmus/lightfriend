@@ -328,6 +328,7 @@ async fn main() {
     let admin_alert_repository = Arc::new(AdminAlertRepository::new(pg_pool.clone()));
     let metrics_repository = Arc::new(backend::MetricsRepository::new(pg_pool.clone()));
     let llm_usage_repository = Arc::new(LlmUsageRepository::new(pg_pool.clone()));
+    let bandwidth_repository = Arc::new(backend::BandwidthRepository::new(pg_pool.clone()));
     let ontology_repository = Arc::new(backend::OntologyRepository::new(pg_pool.clone()));
     let server_url_oauth =
         std::env::var("SERVER_URL_OAUTH").unwrap_or_else(|_| "http://localhost:3000".to_string());
@@ -424,6 +425,7 @@ async fn main() {
         totp_verify_limiter: DashMap::new(),
         webauthn_verify_limiter: DashMap::new(),
         llm_usage_repository,
+        bandwidth_repository,
         ontology_repository,
         ontology_registry: backend::ontology::registry::OntologyRegistry::build(),
         tool_registry: backend::build_tool_registry(),
@@ -666,6 +668,10 @@ async fn main() {
         .route(
             "/api/admin/stats/llm",
             get(handlers::admin_stats_handlers::get_llm_stats),
+        )
+        .route(
+            "/api/admin/stats/bandwidth",
+            get(handlers::admin_stats_handlers::get_bandwidth_stats),
         )
         // Alert management routes
         .route("/api/admin/alerts", get(admin_handlers::get_alerts))
