@@ -97,7 +97,7 @@ fi
 # The root server verifies that the attestation document contains the SAME
 # public key to bind the attestation to this handshake (prevents relay attacks).
 # Without it, the root server cannot verify key ownership and rejects.
-PUBKEY_HEX=$(xxd -p -c 256 "${RUN_DIR}/id.pub" | tr -d '\n')
+PUBKEY_HEX=$(od -A n -t x1 "${RUN_DIR}/id.pub" | tr -d ' \n')
 ATTESTATION_URL="http://127.0.0.1:${ATTEST_PORT}/attestation/raw?public_key=${PUBKEY_HEX}"
 echo "Attestation URL: ${ATTESTATION_URL}" >&2
 
