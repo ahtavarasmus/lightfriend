@@ -126,7 +126,10 @@ if [ -e /dev/vsock ]; then
 
     export HTTP_PROXY="http://127.0.0.1:3128"
     export HTTPS_PROXY="http://127.0.0.1:3128"
-    export NO_PROXY="localhost,127.0.0.1"
+    export http_proxy="http://127.0.0.1:3128"
+    export https_proxy="http://127.0.0.1:3128"
+    export NO_PROXY="localhost,127.0.0.1,::1"
+    export no_proxy="localhost,127.0.0.1,::1"
 
     # Quick connectivity test through the proxy
     echo "  Testing outbound connectivity via proxy..."
