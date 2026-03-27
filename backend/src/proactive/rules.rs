@@ -1089,7 +1089,7 @@ async fn check_message_seen(
             let uid = room_id.strip_prefix("email_").unwrap_or(room_id);
             check_email_seen(state, user_id, uid).await
         }
-        // Bridge platforms: check Matrix read receipts
+        // Bridge platforms: check Matrix read receipts + user reply history
         _ => check_bridge_seen(state, user_id, room_id, message_created_at).await,
     }
 }
@@ -1238,7 +1238,7 @@ pub async fn emit_ontology_change(
             // Parse delay from trigger config (default 300s for ontology_change)
             let trigger: TriggerConfig =
                 serde_json::from_str(&rule.trigger_config).unwrap_or_default();
-            let delay = trigger.delay_seconds.unwrap_or(300);
+            let delay = trigger.delay_seconds.unwrap_or(600);
 
             tokio::spawn(async move {
                 if delay > 0 && is_message {
