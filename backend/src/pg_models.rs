@@ -5,9 +5,10 @@
 
 use crate::pg_schema::{
     admin_alerts, bridge_disconnection_events, bridges, country_availability, disabled_alert_types,
-    imap_connection, mcp_servers, message_history, message_status_log, processed_emails,
-    refund_info, site_metrics, tesla, totp_backup_codes, totp_secrets, usage_logs, user_info,
-    user_secrets, waitlist, webauthn_challenges, webauthn_credentials, youtube,
+    imap_connection, llm_usage_logs, mcp_servers, message_history, message_status_log,
+    processed_emails, refund_info, site_metrics, tesla, totp_backup_codes, totp_secrets,
+    usage_logs, user_info, user_secrets, waitlist, webauthn_challenges, webauthn_credentials,
+    youtube,
 };
 use diesel::prelude::*;
 use serde::Serialize;
@@ -580,5 +581,35 @@ pub struct PgWaitlistEntry {
 #[diesel(table_name = waitlist)]
 pub struct NewPgWaitlistEntry {
     pub email: String,
+    pub created_at: i32,
+}
+
+// -- llm_usage_logs --
+
+#[derive(Queryable, Selectable, Clone, Debug)]
+#[diesel(table_name = llm_usage_logs)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct PgLlmUsageLog {
+    pub id: i32,
+    pub user_id: i32,
+    pub provider: String,
+    pub model: String,
+    pub callsite: String,
+    pub prompt_tokens: i32,
+    pub completion_tokens: i32,
+    pub total_tokens: i32,
+    pub created_at: i32,
+}
+
+#[derive(Insertable, Debug)]
+#[diesel(table_name = llm_usage_logs)]
+pub struct NewPgLlmUsageLog {
+    pub user_id: i32,
+    pub provider: String,
+    pub model: String,
+    pub callsite: String,
+    pub prompt_tokens: i32,
+    pub completion_tokens: i32,
+    pub total_tokens: i32,
     pub created_at: i32,
 }

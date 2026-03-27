@@ -569,6 +569,7 @@ pub(crate) async fn prefetch_sources(
                     state,
                     query,
                     "Return factual information concisely.",
+                    rule.user_id,
                 )
                 .await
                 {
@@ -801,6 +802,18 @@ pub(crate) async fn call_llm_condition(
         .chat_completion(request)
         .await
         .map_err(|e| format!("LLM call failed: {}", e))?;
+
+    crate::ai_config::log_llm_usage(
+        &state.llm_usage_repository,
+        rule.user_id,
+        match ctx.provider {
+            crate::AiProvider::Tinfoil => "tinfoil",
+            crate::AiProvider::OpenRouter => "openrouter",
+        },
+        &ctx.model,
+        "rule_eval",
+        &result,
+    );
 
     let choice = result.choices.first().ok_or("No choices in LLM response")?;
 

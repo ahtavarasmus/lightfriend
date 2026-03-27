@@ -153,6 +153,10 @@ impl AiConfig {
                 })?;
                 if let Some(obj) = body.as_object_mut() {
                     obj.insert("stream".into(), serde_json::json!(true));
+                    obj.insert(
+                        "stream_options".into(),
+                        serde_json::json!({"include_usage": true}),
+                    );
                     // Remove max_tokens for reasoning models - reasoning tokens count
                     // against the budget, causing finish_reason:length before the
                     // actual tool call is produced
@@ -323,6 +327,9 @@ impl AiConfig {
         let mut tool_calls: std::collections::BTreeMap<i64, (String, String, String, String)> =
             std::collections::BTreeMap::new();
         let mut has_data = false;
+        let mut usage_prompt_tokens: i64 = 0;
+        let mut usage_completion_tokens: i64 = 0;
+        let mut usage_total_tokens: i64 = 0;
 
         for line in sse_text.lines() {
             let line = line.trim();
@@ -336,6 +343,19 @@ impl AiConfig {
                 Err(_) => continue,
             };
             has_data = true;
+
+            // Capture usage from the final SSE chunk (sent when stream_options.include_usage=true)
+            if let Some(usage) = chunk.get("usage") {
+                if let Some(pt) = usage.get("prompt_tokens").and_then(|v| v.as_i64()) {
+                    usage_prompt_tokens = pt;
+                }
+                if let Some(ct) = usage.get("completion_tokens").and_then(|v| v.as_i64()) {
+                    usage_completion_tokens = ct;
+                }
+                if let Some(tt) = usage.get("total_tokens").and_then(|v| v.as_i64()) {
+                    usage_total_tokens = tt;
+                }
+            }
 
             // Check for error in chunk
             if chunk.get("error").is_some() {
@@ -459,9 +479,9 @@ impl AiConfig {
                 "finish_reason": finish_reason,
             }],
             "usage": {
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0
+                "prompt_tokens": usage_prompt_tokens,
+                "completion_tokens": usage_completion_tokens,
+                "total_tokens": usage_total_tokens
             }
         });
 
@@ -527,6 +547,10 @@ impl AiConfig {
             })?;
             if let Some(obj) = body.as_object_mut() {
                 obj.insert("stream".into(), serde_json::json!(true));
+                obj.insert(
+                    "stream_options".into(),
+                    serde_json::json!({"include_usage": true}),
+                );
                 obj.remove("max_tokens");
             }
             Self::sanitize_request_body(&mut body);
@@ -572,6 +596,9 @@ impl AiConfig {
             let mut has_data = false;
             let mut last_reasoning_send = std::time::Instant::now();
             let mut stream_error: Option<String> = None;
+            let mut usage_prompt_tokens: i64 = 0;
+            let mut usage_completion_tokens: i64 = 0;
+            let mut usage_total_tokens: i64 = 0;
 
             while let Some(chunk_result) = stream.next().await {
                 let bytes = match chunk_result {
@@ -599,6 +626,19 @@ impl AiConfig {
                         Err(_) => continue,
                     };
                     has_data = true;
+
+                    // Capture usage from the final SSE chunk
+                    if let Some(usage) = chunk.get("usage") {
+                        if let Some(pt) = usage.get("prompt_tokens").and_then(|v| v.as_i64()) {
+                            usage_prompt_tokens = pt;
+                        }
+                        if let Some(ct) = usage.get("completion_tokens").and_then(|v| v.as_i64()) {
+                            usage_completion_tokens = ct;
+                        }
+                        if let Some(tt) = usage.get("total_tokens").and_then(|v| v.as_i64()) {
+                            usage_total_tokens = tt;
+                        }
+                    }
 
                     if chunk.get("error").is_some() {
                         stream_error = Some(format!("Streaming error: {}", data));
@@ -778,9 +818,9 @@ impl AiConfig {
                     "finish_reason": finish_reason,
                 }],
                 "usage": {
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": 0
+                    "prompt_tokens": usage_prompt_tokens,
+                    "completion_tokens": usage_completion_tokens,
+                    "total_tokens": usage_total_tokens
                 }
             });
 
@@ -806,5 +846,28 @@ impl AiConfig {
         Err(openai_api_rs::v1::error::APIError::CustomError {
             message: format!("All 3 attempts failed: {}", last_error),
         })
+    }
+}
+
+/// Fire-and-forget helper to log LLM usage from a ChatCompletionResponse.
+/// Extracts token counts from the response's `usage` field and writes to the repository.
+/// Logs a warning on failure but never panics.
+pub fn log_llm_usage(
+    repo: &std::sync::Arc<crate::repositories::llm_usage_repository::LlmUsageRepository>,
+    user_id: i32,
+    provider: &str,
+    model: &str,
+    callsite: &str,
+    response: &openai_api_rs::v1::chat_completion::ChatCompletionResponse,
+) {
+    let u = &response.usage;
+    let (pt, ct, tt) = (
+        u.prompt_tokens as i32,
+        u.completion_tokens as i32,
+        u.total_tokens as i32,
+    );
+
+    if let Err(e) = repo.log_usage(user_id, provider, model, callsite, pt, ct, tt) {
+        tracing::warn!("Failed to log LLM usage for callsite {}: {}", callsite, e);
     }
 }
