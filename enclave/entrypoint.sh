@@ -996,6 +996,11 @@ sleep 2
 echo "=== Service status ==="
 supervisorctl status 2>&1
 echo "=== All services started $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+
+# Send service startup log to host IMMEDIATELY so we can debug
+if [ -e /dev/vsock ] && [ -f /data/seed/startup-services.log ]; then
+    socat -T10 -u FILE:/data/seed/startup-services.log VSOCK-CONNECT:3:9007 2>/dev/null || true
+fi
 STARTUP
 chmod +x /tmp/start-services.sh
 
