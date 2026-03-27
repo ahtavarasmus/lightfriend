@@ -547,11 +547,11 @@ jobs:
           echo "- PCR1: $PCR1" >> $GITHUB_STEP_SUMMARY
           echo "- PCR2: $PCR2" >> $GITHUB_STEP_SUMMARY
 
-      # ── Step 4: Set maintenance mode + backup old instance ──
-      # Old instance is untouched until this point. Maintenance mode blocks
-      # writes (503) so the backup captures ALL data. If anything fails later,
-      # we disable maintenance mode and old resumes normally.
-      - name: Maintenance mode and backup
+      # ── Step 4: Backup old instance (old stays live) ──
+      # Old instance keeps serving traffic throughout backup and until new
+      # instance is verified healthy. Only cloudflared on old is stopped
+      # after new passes health checks (Step 8).
+      - name: Backup old instance
         if: steps.infra.outputs.old_instance != ''
         id: backup
         run: |
@@ -566,9 +566,8 @@ jobs:
             exit 1
           fi
 
-          # Trigger backup (pre-deploy.sh enables maintenance mode first, then exports + uploads)
-          echo "Triggering pre-deploy on $OLD_INSTANCE (maintenance mode + backup + upload)..."
-          echo "maintenance_enabled=true" >> $GITHUB_OUTPUT
+          # Trigger backup (old instance stays live - no maintenance mode)
+          echo "Triggering pre-deploy on $OLD_INSTANCE (backup + upload, old stays live)..."
           echo '{"github_run_id":"${{ github.run_id }}","old_instance":"'$OLD_INSTANCE'","state":"backup_started","started_at":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' | \
             aws s3 cp - "s3://$S3_BUCKET/deploy/deploy-state.json"
 
@@ -737,12 +736,37 @@ jobs:
           echo "FATAL: Health check timed out after 20 minutes"; exit 1
 
       # ── Step 8: Switch traffic to new instance ──
+      # New enclave is healthy and serving via its own cloudflared.
+      # Now stop old cloudflared so Cloudflare routes all traffic to new,
+      # then terminate old instance.
       - name: Switch to new instance
         if: steps.health.outputs.healthy == 'true'
         run: |
           NEW_INSTANCE="${{ steps.launch.outputs.new_instance }}"
           OLD_INSTANCE="${{ steps.infra.outputs.old_instance }}"
           S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
+
+          # Enable maintenance mode on old instance to stop cloudflared and block writes
+          if [ -n "$OLD_INSTANCE" ] && [ "$OLD_INSTANCE" != "$NEW_INSTANCE" ]; then
+            echo "Enabling maintenance mode on old instance to stop cloudflared..."
+            MAINT_CMD=$(aws ssm send-command \
+              --instance-ids "$OLD_INSTANCE" \
+              --document-name "AWS-RunShellScript" \
+              --parameters 'commands=["sudo /opt/lightfriend/trigger-maintenance.sh enable"]' \
+              --timeout-seconds 30 \
+              --query "Command.CommandId" --output text 2>/dev/null || echo "")
+            if [ -n "$MAINT_CMD" ]; then
+              for i in $(seq 1 6); do
+                MAINT_STATUS=$(aws ssm get-command-invocation --command-id "$MAINT_CMD" --instance-id "$OLD_INSTANCE" \
+                  --query "Status" --output text 2>/dev/null || echo "Pending")
+                case "$MAINT_STATUS" in
+                  Success) echo "Old instance maintenance mode enabled"; break ;;
+                  Failed|TimedOut|Cancelled) echo "WARNING: Maintenance enable $MAINT_STATUS (non-fatal, terminating anyway)"; break ;;
+                esac
+                sleep 5
+              done
+            fi
+          fi
 
           aws ssm put-parameter --name /lightfriend/instance-id \
             --value "$NEW_INSTANCE" --type String --overwrite
@@ -769,7 +793,7 @@ jobs:
 
           echo "## Deploy Complete" >> $GITHUB_STEP_SUMMARY
 
-      # ── Rollback: disable maintenance on old, terminate new ──
+      # ── Rollback: terminate new instance, old stays live ──
       - name: Rollback on failure
         if: failure() && steps.launch.outputs.new_instance != ''
         env:
@@ -783,39 +807,7 @@ jobs:
           PCR0="${{ needs.build-eif.outputs.pcr0 }}"
 
           echo "ROLLING BACK: terminating new instance $NEW_INSTANCE"
-
-          # Disable maintenance mode on old instance (restore normal operation)
-          if [ -n "$OLD_INSTANCE" ] && [ "${{ steps.backup.outputs.maintenance_enabled }}" = "true" ]; then
-            echo "Disabling maintenance mode on old instance..."
-            MAINT_CMD=$(aws ssm send-command \
-              --instance-ids "$OLD_INSTANCE" \
-              --document-name "AWS-RunShellScript" \
-              --parameters 'commands=["sudo /opt/lightfriend/trigger-maintenance.sh disable"]' \
-              --timeout-seconds 30 \
-              --query "Command.CommandId" --output text 2>/dev/null || echo "")
-
-            if [ -n "$MAINT_CMD" ]; then
-              # Wait for SSM command to complete (up to 60s)
-              for i in $(seq 1 12); do
-                MAINT_STATUS=$(aws ssm get-command-invocation --command-id "$MAINT_CMD" --instance-id "$OLD_INSTANCE" \
-                  --query "Status" --output text 2>/dev/null || echo "Pending")
-                case "$MAINT_STATUS" in
-                  Success) echo "Maintenance mode disabled - old instance fully operational"; break ;;
-                  Failed|TimedOut|Cancelled)
-                    echo "WARNING: Maintenance disable command $MAINT_STATUS - retrying..."
-                    aws ssm send-command --instance-ids "$OLD_INSTANCE" \
-                      --document-name "AWS-RunShellScript" \
-                      --parameters 'commands=["sudo /opt/lightfriend/trigger-maintenance.sh disable"]' \
-                      --timeout-seconds 30 2>/dev/null || true
-                    break ;;
-                esac
-                sleep 5
-              done
-            else
-              echo "CRITICAL: Could not send maintenance disable command via SSM"
-              echo "MANUAL ACTION REQUIRED: SSH to $OLD_INSTANCE and run: sudo /opt/lightfriend/trigger-maintenance.sh disable"
-            fi
-          fi
+          echo "Old instance $OLD_INSTANCE was never put in maintenance mode - still serving traffic"
 
           # Restore SSM to old instance
           if [ -n "$OLD_INSTANCE" ]; then

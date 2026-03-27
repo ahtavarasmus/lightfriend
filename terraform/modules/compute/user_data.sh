@@ -703,28 +703,13 @@ set -e
 LOCKFILE="/tmp/lightfriend-backup.lock"
 exec 200>"$LOCKFILE"
 flock -n 200 || { echo "FATAL: Another backup/export is already running"; exit 1; }
-echo "=== Pre-deploy: maintenance mode + export + upload ==="
-echo "Enabling maintenance mode..."
-/opt/lightfriend/trigger-maintenance.sh enable
+echo "=== Pre-deploy: export + upload (old instance stays live) ==="
 /opt/lightfriend/trigger-export.sh
 BACKUP_TIER=hourly /opt/lightfriend/upload-backup.sh
 /opt/lightfriend/upload-env.sh
 echo "=== Pre-deploy complete ==="
 SCRIPT
 chmod +x /opt/lightfriend/pre-deploy.sh
-
-# ── PG-only backup trigger script ────────────────────────────────────────
-
-cat > /opt/lightfriend/trigger-pg-backup.sh <<'SCRIPT'
-#!/bin/bash
-set -e
-echo "Triggering PG-only backup in enclave via VSOCK port 9006..."
-echo "This runs against live PostgreSQL (zero downtime)..."
-timeout 300 socat -T300 - VSOCK-CONNECT:16:9006 || { echo "PG backup trigger failed or timed out"; exit 1; }
-echo "PG backup complete."
-ls -la /opt/lightfriend/backups/ | tail -3
-SCRIPT
-chmod +x /opt/lightfriend/trigger-pg-backup.sh
 
 # ── Scheduled hourly full snapshot backup ────────────────────────────────
 # Runs the same full export path used during deploys, but without enabling

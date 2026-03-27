@@ -218,7 +218,6 @@ COPY enclave/entrypoint.sh /entrypoint.sh
 COPY enclave/derive-backup-key.sh /usr/local/bin/derive-backup-key.sh
 COPY enclave/start-marlin-kms.sh /usr/local/bin/start-marlin-kms.sh
 COPY enclave/export.sh /app/export.sh
-COPY enclave/pg-backup.sh /app/pg-backup.sh
 COPY enclave/verify.sh /app/verify.sh
 COPY enclave/enter-maintenance.sh /app/enter-maintenance.sh
 COPY enclave/diagnose-enclave.sh /app/diagnose-enclave.sh
@@ -227,7 +226,7 @@ COPY enclave/service-watchdog.sh /app/service-watchdog.sh
 # so we can't modify it here. Store a template and copy at container start.
 RUN echo "nameserver 127.0.0.1" > /etc/resolv.conf.enclave
 
-RUN chmod +x /entrypoint.sh /usr/local/bin/derive-backup-key.sh /usr/local/bin/start-marlin-kms.sh /app/export.sh /app/pg-backup.sh /app/verify.sh /app/enter-maintenance.sh /app/service-watchdog.sh /app/diagnose-enclave.sh
+RUN chmod +x /entrypoint.sh /usr/local/bin/derive-backup-key.sh /usr/local/bin/start-marlin-kms.sh /app/export.sh /app/verify.sh /app/enter-maintenance.sh /app/service-watchdog.sh /app/diagnose-enclave.sh
 
 # Copy bridge bot registration script
 COPY enclave/register-bridge-bots.sh /app/register-bridge-bots.sh
