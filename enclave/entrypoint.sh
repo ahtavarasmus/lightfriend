@@ -268,6 +268,7 @@ PG_BIN="/usr/lib/postgresql/15/bin"
 
 if [ ! -f "$PG_DATA/PG_VERSION" ]; then
     echo "  No PG_VERSION found - initializing fresh PostgreSQL data directory..."
+    mkdir -p "$PG_DATA"
     chown -R postgres:postgres "$PG_DATA"
     su postgres -c "$PG_BIN/initdb -D $PG_DATA"
 
