@@ -216,6 +216,13 @@ fi
 # Host runs python3 http.server on port 9080 serving /opt/lightfriend/seed/.
 # We bridge to it via VSOCK and fetch with curl (HTTP framing handles large files
 # reliably, unlike raw VSOCK dumps which drop 17MB payloads).
+# Bridge local port 9080 to host's seed HTTP server via VSOCK.
+# Used for seed download AND export-watcher polling. Must stay alive.
+if [ -e /dev/vsock ]; then
+    socat TCP-LISTEN:9080,reuseaddr,fork VSOCK-CONNECT:3:9080 &
+    sleep 0.3
+fi
+
 echo ""
 echo "[STEP 0f] Checking for SQL seed from host..."
 if [ "${RESTORE_MODE}" = "none" ]; then
@@ -226,12 +233,6 @@ if [ "${RESTORE_MODE}" = "none" ]; then
         echo "  Seed dump already exists (${EXISTING_SIZE} bytes) - skipping fetch"
     else
         echo "  No existing seed dump. Fetching via HTTP..."
-        # Bridge local port 9080 to host's seed HTTP server via VSOCK
-        if [ -e /dev/vsock ]; then
-            socat TCP-LISTEN:9080,reuseaddr,fork VSOCK-CONNECT:3:9080 &
-            SEED_BRIDGE_PID=$!
-            sleep 0.5
-        fi
 
         RECEIVED_SEED="/data/seed/lightfriend_db.seed.tmp"
         SEED_FETCHED=false
