@@ -588,7 +588,7 @@ EXISTING=$(nitro-cli describe-enclaves | jq -r '.[0].EnclaveID // empty' 2>/dev/
 echo "Stopping VSOCK services..."
 for svc in $VSOCK_SVCS; do systemctl stop "$svc" 2>/dev/null; done
 pkill -f 'socat.*VSOCK' 2>/dev/null || true
-sleep 2
+sleep 5
 
 rm -f "$VERIFY"
 # Verify result now arrives via HTTP upload (backup-upload-server on port 9081)
