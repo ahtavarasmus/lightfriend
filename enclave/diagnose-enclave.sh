@@ -36,7 +36,17 @@ echo "port 8008: $(ss -tlnp 2>/dev/null | grep ':8008' || echo 'not listening')"
 echo "port 7844: $(ss -tlnp 2>/dev/null | grep ':7844' || echo 'not listening')"
 echo ""
 
-for svc in lightfriend cloudflared tuwunel postgresql whatsapp signal telegram; do
+echo "port 9080: $(ss -tlnp 2>/dev/null | grep ':9080' || echo 'not listening')"
+echo "port 9081: $(ss -tlnp 2>/dev/null | grep ':9081' || echo 'not listening')"
+echo ""
+
+echo "--- export-watcher test ---"
+echo "  curl 9080: $(curl -sf --max-time 3 http://127.0.0.1:9080/ 2>&1 | head -1 || echo 'unreachable')"
+echo "  curl 9081: $(curl -sf --max-time 3 http://127.0.0.1:9081/ 2>&1 | head -1 || echo 'unreachable')"
+echo "  last run log: $(tail -5 /tmp/export-watcher-last-run.log 2>/dev/null || echo 'none')"
+echo ""
+
+for svc in lightfriend cloudflared tuwunel postgresql whatsapp signal telegram export-watcher vsock-bridge-9080 vsock-bridge-9081; do
     LOG="/var/log/supervisor/${svc}-err.log"
     if [ -f "$LOG" ] && [ -s "$LOG" ]; then
         echo "--- ${svc} stderr (last 30 lines) ---"
