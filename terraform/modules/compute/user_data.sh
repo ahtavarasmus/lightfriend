@@ -471,6 +471,41 @@ done
 
 echo "VSOCK services configured: proxy:8001, config:9000, backup:9001, restore:9002, seed:9003, boot-trace:9007, seed-http:9080, cf-edge:7844, dot:8530, marlin-kms:9010"
 
+# S3 deploy signal poller - polls S3 for export-request.json and copies locally.
+# Needed because SSM send-command from the deploy runner stays Pending.
+cat > /opt/lightfriend/s3-signal-poller.sh <<'SCRIPT'
+#!/bin/bash
+BUCKET=$(aws ssm get-parameter --name /lightfriend/s3-bucket --query Parameter.Value --output text 2>/dev/null || echo "")
+[ -z "$BUCKET" ] && exit 0
+while true; do
+    if aws s3 cp "s3://$BUCKET/deploy/export-request.json" /opt/lightfriend/seed/export-request.json 2>/dev/null; then
+        echo "$(date -u): export-request.json copied from S3"
+        rm -f /opt/lightfriend/backups/export-complete.json
+        aws s3 rm "s3://$BUCKET/deploy/export-request.json" 2>/dev/null || true
+    fi
+    sleep 5
+done
+SCRIPT
+chmod +x /opt/lightfriend/s3-signal-poller.sh
+
+cat > /etc/systemd/system/s3-signal-poller.service <<'POLLEREOF'
+[Unit]
+Description=S3 deploy signal poller
+After=network-online.target
+
+[Service]
+ExecStart=/opt/lightfriend/s3-signal-poller.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+POLLEREOF
+
+systemctl daemon-reload
+systemctl enable s3-signal-poller
+systemctl start s3-signal-poller || echo "WARNING: s3-signal-poller failed to start"
+
 # ── Enclave launch script ───────────────────────────────────────────────────
 
 cat > /opt/lightfriend/launch-enclave.sh <<'SCRIPT'
