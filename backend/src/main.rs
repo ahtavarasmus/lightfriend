@@ -431,6 +431,7 @@ async fn main() {
         tool_registry: backend::build_tool_registry(),
         pending_rule_tests: Arc::new(DashMap::new()),
         maintenance_mode: Arc::new(AtomicBool::new(false)),
+        system_notify_cooldowns: DashMap::new(),
     });
     // SMS server route - validates signature using user lookup
     let twilio_sms_routes = Router::new()

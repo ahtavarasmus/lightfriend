@@ -1,11 +1,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use chrono::{TimeZone, Utc};
+
 use crate::context::ContextBuilder;
 use crate::proactive::utils::send_notification;
 use crate::repositories::user_core::UserCoreOps;
 use crate::AppState;
 use openai_api_rs::v1::{chat_completion, types};
+
+const COOLDOWN_SECS: i32 = 1800; // 30 minutes per room
 
 pub async fn run_system_behaviors(
     state: &Arc<AppState>,
@@ -33,17 +37,58 @@ pub async fn run_system_behaviors(
         .get("room_id")
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    let person_id = entity_snapshot
+        .get("person_id")
+        .and_then(|v| v.as_i64())
+        .map(|v| v as i32);
 
-    // Compute sender signals from message history
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i32;
+
+    // Per-room cooldown: skip if we already notified for this room recently
+    let cooldown_key = (user_id, room_id.to_string());
+    if let Some(last_notify) = state.system_notify_cooldowns.get(&cooldown_key) {
+        if now - *last_notify < COOLDOWN_SECS {
+            return Ok(());
+        }
+    }
+
+    // Compute sender signals from message history
     let signals =
         state
             .ontology_repository
             .compute_sender_signals(user_id, room_id, sender_name, now);
     let sender_context = signals.format_for_prompt(sender_name);
+
+    // Cross-platform escalation: check if this person also messaged on other platforms recently
+    let cross_platform_ctx = if let Some(pid) = person_id {
+        let one_hour_ago = now - 3600;
+        match state.ontology_repository.get_cross_platform_messages(
+            user_id,
+            pid,
+            platform,
+            one_hour_ago,
+        ) {
+            Ok(msgs) if !msgs.is_empty() => {
+                let platforms: Vec<_> = msgs
+                    .iter()
+                    .map(|m| m.platform.as_str())
+                    .collect::<std::collections::HashSet<_>>()
+                    .into_iter()
+                    .collect();
+                format!(
+                    "{} also messaged you on {} in the last hour.",
+                    sender_name,
+                    platforms.join(", ")
+                )
+            }
+            _ => String::new(),
+        }
+    } else {
+        String::new()
+    };
 
     // Build context
     let ctx = ContextBuilder::for_user(state, user_id)
@@ -51,34 +96,120 @@ pub async fn run_system_behaviors(
         .build()
         .await?;
 
-    let tz_info = ctx
-        .timezone
-        .as_ref()
-        .map(|t| format!("Current time: {}", t.formatted_now))
+    // Fetch recent conversation history for this room (last 10 messages)
+    let recent_messages = state
+        .ontology_repository
+        .get_messages_for_room(user_id, room_id, 10)
         .unwrap_or_default();
 
+    // Get room seen timestamp for marking messages as seen/unseen
+    let seen_ts = get_room_seen_ts(state, user_id, room_id, platform).await;
+
+    // Format conversation with timestamps in user's timezone
+    let tz_offset = ctx
+        .timezone
+        .as_ref()
+        .map(|t| t.fixed_offset)
+        .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).unwrap());
+
+    let fmt_ts = |unix: i32| -> String {
+        Utc.timestamp_opt(unix as i64, 0)
+            .single()
+            .map(|dt| {
+                dt.with_timezone(&tz_offset)
+                    .format("%b %d %H:%M")
+                    .to_string()
+            })
+            .unwrap_or_else(|| "??:??".to_string())
+    };
+
+    let now_formatted = fmt_ts(now);
+
+    let conversation = if recent_messages.len() > 1 {
+        // Messages come DESC, reverse for chronological order
+        let mut chronological: Vec<_> = recent_messages.iter().collect();
+        chronological.reverse();
+
+        // Find the last "You" message index - everything at or before it is seen
+        let last_you_idx = chronological.iter().rposition(|m| m.sender_name == "You");
+
+        let lines: Vec<String> = chronological
+            .iter()
+            .enumerate()
+            .map(|(i, m)| {
+                let ts = fmt_ts(m.created_at);
+
+                // Determine seen status
+                let is_seen = if m.sender_name == "You" {
+                    true
+                } else if let Some(you_idx) = last_you_idx {
+                    i <= you_idx
+                } else {
+                    // No "You" messages - use bridge read receipt
+                    seen_ts
+                        .map(|st| (m.created_at as i64) <= st)
+                        .unwrap_or(false)
+                };
+
+                let seen_marker = if is_seen { "seen" } else { "unseen" };
+                let eval_marker = if i == chronological.len() - 1 {
+                    " <-- evaluate this"
+                } else {
+                    ""
+                };
+                format!(
+                    "[{}] [{}] {}: {}{}",
+                    ts, seen_marker, m.sender_name, m.content, eval_marker
+                )
+            })
+            .collect();
+
+        format!(
+            "Conversation on {} (latest message is being evaluated):\n{}",
+            platform,
+            lines.join("\n")
+        )
+    } else {
+        format!(
+            "[{}] [unseen] Message from {} on {}:\n{}",
+            fmt_ts(now),
+            sender_name,
+            platform,
+            content
+        )
+    };
+
+    // Build full sender context with cross-platform signal
+    let full_sender_ctx = if cross_platform_ctx.is_empty() {
+        sender_context
+    } else {
+        format!("{}\n{}", sender_context, cross_platform_ctx)
+    };
+
     let system_prompt = format!(
-        "You are evaluating whether an incoming message is important enough to notify the user.\n\
+        "You are evaluating whether an incoming message requires the user's immediate attention.\n\
+        The user has muted all phone notifications and relies on you to catch time-critical messages. \
+        If you miss something important, they won't see it for hours.\n\
         \n\
-        {}\n\
+        Current time: {}\n\
         \n\
         Sender context:\n\
         {}\n\
         \n\
-        Only set should_notify=true if delaying this message over 2 hours could cause harm, \
-        financial loss, or miss a time-sensitive opportunity. Examples: emergencies, someone \
-        asking to meet now, immediate decisions needed. Routine updates, casual messages, \
-        and vague requests are NOT important.\n\
+        The last message in the conversation is being evaluated. Each message is marked [seen] or \
+        [unseen] - unseen messages have not been read by the user yet. Use the conversation history, \
+        timestamps, and seen status to understand context and urgency. Compare mentioned times against \
+        the current time.\n\
         \n\
-        Use the sender context to calibrate: a rare contact reaching out is more likely important \
-        than a frequent chatter. If you typically respond fast to this person, they matter to you.\n\
+        should_notify=true only if a 2-hour delay would cause real consequences for the user. \
+        Use the sender context to calibrate - who this person is to the user matters.\n\
         \n\
         If should_notify=false, set notification_message to empty string.\n\
         If should_notify=true, write a concise notification (max 480 chars, second person).",
-        tz_info, sender_context
+        now_formatted, full_sender_ctx
     );
 
-    let user_msg = format!("Message from {} on {}:\n{}", sender_name, platform, content);
+    let user_msg = conversation;
 
     let messages = vec![
         chat_completion::ChatCompletionMessage {
@@ -182,6 +313,11 @@ pub async fn run_system_behaviors(
                         .unwrap_or("");
 
                     if !notification_message.is_empty() {
+                        // Record cooldown before sending
+                        state
+                            .system_notify_cooldowns
+                            .insert((user_id, room_id.to_string()), now);
+
                         send_notification(
                             state,
                             user_id,
@@ -199,4 +335,23 @@ pub async fn run_system_behaviors(
     }
 
     Ok(())
+}
+
+/// Get the room's seen-up-to timestamp from bridge read receipts.
+/// Returns None for email or if the lookup fails.
+async fn get_room_seen_ts(
+    state: &Arc<AppState>,
+    user_id: i32,
+    room_id: &str,
+    platform: &str,
+) -> Option<i64> {
+    if platform == "email" {
+        return None;
+    }
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, state)
+        .await
+        .ok()?;
+    let matrix_room_id = matrix_sdk::ruma::OwnedRoomId::try_from(room_id).ok()?;
+    let room = client.get_room(&matrix_room_id)?;
+    crate::utils::bridge::get_room_seen_timestamp(&room, &client).await
 }

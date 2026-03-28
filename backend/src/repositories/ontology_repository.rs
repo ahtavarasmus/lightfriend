@@ -1097,6 +1097,27 @@ impl OntologyRepository {
         }
     }
 
+    /// Get recent messages from a known person on OTHER platforms (cross-platform escalation).
+    /// Returns messages from the given person_id on platforms != exclude_platform, since since_ts.
+    pub fn get_cross_platform_messages(
+        &self,
+        user_id: i32,
+        person_id: i32,
+        exclude_platform: &str,
+        since_ts: i32,
+    ) -> Result<Vec<OntMessage>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::person_id.eq(person_id))
+            .filter(ont_messages::platform.ne(exclude_platform))
+            .filter(ont_messages::sender_name.ne("You"))
+            .filter(ont_messages::created_at.gt(since_ts))
+            .order(ont_messages::created_at.desc())
+            .limit(5)
+            .load::<OntMessage>(&mut conn)
+    }
+
     /// Purge messages older than max_age_secs.
     pub fn purge_old_messages(&self, max_age_secs: i32) -> Result<usize, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
