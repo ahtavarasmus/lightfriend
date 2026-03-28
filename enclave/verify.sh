@@ -248,16 +248,12 @@ else
 fi
 
 if [ ${#FAILED_CHECKS[@]} -eq 0 ]; then
-    # Use python3 for safe JSON generation
+    # Use python3 for safe JSON generation (json.loads handles true/false natively)
     python3 -c "
-import json, sys
-print(json.dumps({
-    'status': 'HEALTHY',
-    'restore_type': '${RESTORE_TYPE}',
-    'timestamp': '${TIMESTAMP}',
-    'checks': ${CHECKS_JSON},
-    'user_count': ${DB_USER_COUNT:-0}
-}))
+import json
+checks = json.loads('''${CHECKS_JSON}''')
+result = {'status': 'HEALTHY', 'restore_type': '${RESTORE_TYPE}', 'timestamp': '${TIMESTAMP}', 'checks': checks, 'user_count': ${DB_USER_COUNT:-0}}
+print(json.dumps(result))
 " > "${RESULT_FILE}"
     echo ""
     echo "=== Verification: HEALTHY ==="
@@ -266,16 +262,10 @@ else
     FAILED_LIST=$(printf '"%s", ' "${FAILED_CHECKS[@]}")
     FAILED_LIST="${FAILED_LIST%, }"
     python3 -c "
-import json, sys
+import json
 details = '''${CHECK_DETAILS}'''
-print(json.dumps({
-    'status': 'FAILED',
-    'restore_type': '${RESTORE_TYPE}',
-    'timestamp': '${TIMESTAMP}',
-    'failed_checks': [${FAILED_LIST}],
-    'details': details.strip(),
-    'user_count': ${DB_USER_COUNT:-0}
-}))
+result = {'status': 'FAILED', 'restore_type': '${RESTORE_TYPE}', 'timestamp': '${TIMESTAMP}', 'failed_checks': [${FAILED_LIST}], 'details': details.strip(), 'user_count': ${DB_USER_COUNT:-0}}
+print(json.dumps(result))
 " > "${RESULT_FILE}"
     echo ""
     echo "=== Verification: FAILED ==="
