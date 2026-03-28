@@ -9,10 +9,13 @@ set -euo pipefail
 # Load non-secret env vars persisted by entrypoint.sh. BACKUP_ENCRYPTION_KEY
 # must come from the live inherited process environment, not from disk.
 if [ -f /etc/lightfriend/env ]; then
-    set -a
-    # shellcheck source=/dev/null
-    source /etc/lightfriend/env
-    set +a
+    # Safe line-by-line loading (source crashes on values with $ and ^)
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -z "$line" || "$line" == \#* ]] && continue
+        if [[ "$line" =~ ^[A-Za-z_][A-Za-z_0-9]*= ]]; then
+            export "$line"
+        fi
+    done < /etc/lightfriend/env
 fi
 
 TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
