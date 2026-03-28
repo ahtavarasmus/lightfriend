@@ -15,6 +15,8 @@ POLL_URL="http://127.0.0.1:9080/export-request.json"
 RESULT_UPLOAD_URL="http://127.0.0.1:9081/upload"
 POLL_INTERVAL=5
 
+LAST_PROCESSED=""
+
 echo "export-watcher: starting (poll every ${POLL_INTERVAL}s)"
 echo "export-watcher: poll URL = ${POLL_URL}"
 echo "export-watcher: result upload URL = ${RESULT_UPLOAD_URL}"
@@ -23,14 +25,14 @@ while true; do
     # Check for export request via the seed HTTP server
     REQUEST=$(curl -sf --max-time 5 "${POLL_URL}" 2>/dev/null || true)
 
-    if [ -n "${REQUEST}" ] && echo "${REQUEST}" | jq -e '.action == "export"' >/dev/null 2>&1; then
+    if [ -n "${REQUEST}" ] && [ "${REQUEST}" != "${LAST_PROCESSED}" ] && echo "${REQUEST}" | jq -e '.action == "export"' >/dev/null 2>&1; then
         TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
         echo "export-watcher: export request received at ${TIMESTAMP}"
         echo "export-watcher: request payload: ${REQUEST}"
 
         # Write in-progress marker so the host knows we started
-        echo "{\"status\":\"IN_PROGRESS\",\"started_at\":\"${TIMESTAMP}\"}" | \
-            curl -sf --max-time 10 -T - "${RESULT_UPLOAD_URL}/export-complete.json" 2>/dev/null || true
+        echo "{\"status\":\"IN_PROGRESS\",\"started_at\":\"${TIMESTAMP}\"}" > /tmp/export-complete-payload.json
+        curl -sf --max-time 10 -T /tmp/export-complete-payload.json "${RESULT_UPLOAD_URL}/export-complete.json" 2>/dev/null || true
 
         # Run the existing export logic
         /app/export.sh 2>&1 | tee /tmp/export-watcher-last-run.log
@@ -57,11 +59,11 @@ while true; do
                 COMPLETION="{\"status\":\"SUCCESS\",\"started_at\":\"${TIMESTAMP}\",\"finished_at\":\"${FINISHED_AT}\"}"
             fi
 
-            echo "${COMPLETION}" | curl -sf --max-time 10 -T - "${RESULT_UPLOAD_URL}/export-complete.json" 2>/dev/null
+            echo "${COMPLETION}" > /tmp/export-complete-payload.json && curl -sf --max-time 10 -T /tmp/export-complete-payload.json "${RESULT_UPLOAD_URL}/export-complete.json" 2>/dev/null
             if [ $? -ne 0 ]; then
                 echo "export-watcher: WARNING - failed to upload completion marker, retrying..."
                 sleep 2
-                echo "${COMPLETION}" | curl -sf --max-time 10 -T - "${RESULT_UPLOAD_URL}/export-complete.json" 2>/dev/null || \
+                echo "${COMPLETION}" > /tmp/export-complete-payload.json && curl -sf --max-time 10 -T /tmp/export-complete-payload.json "${RESULT_UPLOAD_URL}/export-complete.json" 2>/dev/null || \
                     echo "export-watcher: ERROR - completion marker upload failed after retry"
             fi
         else
@@ -71,15 +73,14 @@ while true; do
             ERROR_TAIL=$(tail -20 /tmp/export-watcher-last-run.log 2>/dev/null | tr '\n' ' ' | head -c 500 || echo "no output")
 
             FAILURE="{\"status\":\"FAILED\",\"exit_code\":${EXIT_CODE},\"started_at\":\"${TIMESTAMP}\",\"finished_at\":\"${FINISHED_AT}\",\"error\":\"${ERROR_TAIL}\"}"
-            echo "${FAILURE}" | curl -sf --max-time 10 -T - "${RESULT_UPLOAD_URL}/export-complete.json" 2>/dev/null || \
+            echo "${FAILURE}" > /tmp/export-complete-payload.json && curl -sf --max-time 10 -T /tmp/export-complete-payload.json "${RESULT_UPLOAD_URL}/export-complete.json" 2>/dev/null || \
                 echo "export-watcher: ERROR - failed to upload failure marker"
         fi
 
-        # Brief cooldown to avoid re-triggering on the same request file
-        # The host deploy pipeline should remove the request file after reading completion.
-        # But just in case, sleep a bit before resuming polling.
-        echo "export-watcher: cooldown 10s before resuming poll"
-        sleep 10
+        # Remember we processed this request (use timestamp as dedup key)
+        LAST_PROCESSED="${REQUEST}"
+        echo "export-watcher: cooldown 30s before resuming poll"
+        sleep 30
     fi
 
     sleep ${POLL_INTERVAL}
