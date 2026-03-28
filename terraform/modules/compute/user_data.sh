@@ -487,7 +487,7 @@ POLL_COUNT=0
 while true; do
     POLL_COUNT=$((POLL_COUNT + 1))
     # Heartbeat every 60 iterations (~5 min)
-    [ $((POLL_COUNT % 60)) -eq 0 ] && echo "$(date -u): heartbeat poll=$POLL_COUNT last_trigger=${LAST_TRIGGER:-none}"
+    [ $((POLL_COUNT % 60)) -eq 0 ] && echo "$(date -u): heartbeat poll=$POLL_COUNT last_trigger=$${LAST_TRIGGER:-none}"
 
     # Check for export trigger in S3
     S3_ERR=$(aws s3 cp "s3://$BUCKET/deploy/export-request.json" /tmp/export-request-check.json 2>&1)
