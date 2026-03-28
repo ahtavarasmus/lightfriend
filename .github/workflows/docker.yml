@@ -551,6 +551,13 @@ jobs:
       # Old instance keeps serving traffic throughout backup and until new
       # instance is verified healthy. Only cloudflared on old is stopped
       # after new passes health checks (Step 8).
+      #
+      # Signal flow (avoids unreliable long-running VSOCK connections):
+      # 1. CI writes export-request.json to host's seed dir via SSM
+      # 2. Enclave's export-watcher polls seed HTTP (port 9080) and sees it
+      # 3. Enclave runs export.sh, uploads backup via HTTP PUT (port 9081)
+      # 4. Enclave writes export-complete.json to host's backups dir via HTTP PUT
+      # 5. CI polls host for export-complete.json via SSM
       - name: Backup old instance
         if: steps.infra.outputs.old_instance != ''
         id: backup
@@ -566,38 +573,97 @@ jobs:
             exit 1
           fi
 
-          # Trigger backup (old instance stays live - no maintenance mode)
-          echo "Triggering pre-deploy on $OLD_INSTANCE (backup + upload, old stays live)..."
+          echo "Triggering export via signal file on $OLD_INSTANCE..."
           echo '{"github_run_id":"${{ github.run_id }}","old_instance":"'$OLD_INSTANCE'","state":"backup_started","started_at":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' | \
             aws s3 cp - "s3://$S3_BUCKET/deploy/deploy-state.json"
 
-          COMMAND_ID=$(aws ssm send-command \
+          # Step 4a: Write export-request.json to host's seed directory.
+          # The enclave's export-watcher polls this via HTTP on port 9080.
+          TRIGGER_CMD=$(aws ssm send-command \
             --instance-ids "$OLD_INSTANCE" \
             --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["sudo /opt/lightfriend/pre-deploy.sh"]' \
-            --timeout-seconds 900 \
+            --parameters 'commands=["echo '\''{ \"action\": \"export\", \"deploy_id\": \"${{ github.run_id }}\", \"timestamp\": \"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'\" }'\'' | sudo tee /opt/lightfriend/seed/export-request.json > /dev/null && sudo rm -f /opt/lightfriend/backups/export-complete.json"]' \
+            --timeout-seconds 30 \
             --query "Command.CommandId" --output text)
 
-          for i in $(seq 1 90); do
-            STATUS=$(aws ssm get-command-invocation \
-              --command-id "$COMMAND_ID" --instance-id "$OLD_INSTANCE" \
+          # Wait for trigger write to succeed
+          for i in $(seq 1 12); do
+            TRIGGER_STATUS=$(aws ssm get-command-invocation \
+              --command-id "$TRIGGER_CMD" --instance-id "$OLD_INSTANCE" \
               --query "Status" --output text 2>/dev/null || echo "Pending")
-            echo "Backup status ($i/90): $STATUS"
-            case "$STATUS" in
-              Success) echo "Backup completed"; break ;;
+            case "$TRIGGER_STATUS" in
+              Success) echo "Export request written to seed directory"; break ;;
               Failed|TimedOut|Cancelled)
-                echo "FATAL: Backup failed: $STATUS"
-                aws ssm get-command-invocation --command-id "$COMMAND_ID" \
+                echo "FATAL: Could not write export-request.json: $TRIGGER_STATUS"
+                aws ssm get-command-invocation --command-id "$TRIGGER_CMD" \
                   --instance-id "$OLD_INSTANCE" --query "StandardErrorContent" \
                   --output text 2>/dev/null || true
                 exit 1 ;;
             esac
-            sleep 10
+            sleep 5
           done
-          if [ "$STATUS" != "Success" ]; then
-            echo "FATAL: Backup timed out"; exit 1
+          if [ "$TRIGGER_STATUS" != "Success" ]; then
+            echo "FATAL: Timed out writing export trigger"; exit 1
           fi
 
+          # Step 4b: Poll for export-complete.json on the host's backups dir.
+          # The enclave writes this via HTTP PUT to port 9081 when export finishes.
+          echo "Polling for export completion (timeout: 15 min)..."
+          COMPLETE_STATUS=""
+          for i in $(seq 1 180); do
+            POLL_CMD=$(aws ssm send-command \
+              --instance-ids "$OLD_INSTANCE" \
+              --document-name "AWS-RunShellScript" \
+              --parameters 'commands=["cat /opt/lightfriend/backups/export-complete.json 2>/dev/null || echo NOTFOUND"]' \
+              --timeout-seconds 30 \
+              --query "Command.CommandId" --output text)
+
+            # Wait for SSM command to finish (short timeout per poll)
+            POLL_RESULT=""
+            for j in $(seq 1 6); do
+              POLL_STATUS=$(aws ssm get-command-invocation \
+                --command-id "$POLL_CMD" --instance-id "$OLD_INSTANCE" \
+                --query "Status" --output text 2>/dev/null || echo "Pending")
+              case "$POLL_STATUS" in
+                Success)
+                  POLL_RESULT=$(aws ssm get-command-invocation \
+                    --command-id "$POLL_CMD" --instance-id "$OLD_INSTANCE" \
+                    --query "StandardOutputContent" --output text 2>/dev/null || echo "")
+                  break ;;
+                Failed|TimedOut|Cancelled) break ;;
+              esac
+              sleep 3
+            done
+
+            if [ -n "$POLL_RESULT" ] && [ "$POLL_RESULT" != "NOTFOUND" ]; then
+              COMPLETE_STATUS=$(echo "$POLL_RESULT" | jq -r '.status // "UNKNOWN"' 2>/dev/null || echo "UNKNOWN")
+              if [ "$COMPLETE_STATUS" = "IN_PROGRESS" ]; then
+                echo "Export in progress ($i/180)..."
+              elif [ "$COMPLETE_STATUS" = "SUCCESS" ]; then
+                echo "Export completed successfully"
+                break
+              elif [ "$COMPLETE_STATUS" = "FAILED" ]; then
+                echo "FATAL: Export failed inside enclave"
+                echo "$POLL_RESULT" | jq . 2>/dev/null || echo "$POLL_RESULT"
+                exit 1
+              else
+                echo "Unexpected completion status: $COMPLETE_STATUS ($i/180)..."
+              fi
+            else
+              echo "Waiting for export ($i/180)..."
+            fi
+            sleep 5
+          done
+
+          if [ "$COMPLETE_STATUS" != "SUCCESS" ]; then
+            echo "FATAL: Export timed out or did not succeed (last status: $COMPLETE_STATUS)"
+            exit 1
+          fi
+
+          # Step 4c: Read the host's last-upload.json for backup details.
+          # export.sh writes export-status.json to /data/seed/ inside the enclave,
+          # and the backup file is uploaded to /opt/lightfriend/backups/ on the host.
+          # The host's upload receiver writes last-upload.json with S3 key and SHA.
           RESULT_CMD=$(aws ssm send-command \
             --instance-ids "$OLD_INSTANCE" \
             --document-name "AWS-RunShellScript" \
@@ -638,6 +704,14 @@ jobs:
             echo "$RESULT_JSON"
             exit 1
           fi
+
+          # Step 4d: Clean up signal files on the host
+          aws ssm send-command \
+            --instance-ids "$OLD_INSTANCE" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["sudo rm -f /opt/lightfriend/seed/export-request.json /opt/lightfriend/backups/export-complete.json"]' \
+            --timeout-seconds 30 \
+            --query "Command.CommandId" --output text 2>/dev/null || true
 
           echo "backup_key=$BACKUP_KEY" >> $GITHUB_OUTPUT
           echo "backup_sha=$BACKUP_SHA" >> $GITHUB_OUTPUT
