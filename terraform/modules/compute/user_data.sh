@@ -819,6 +819,12 @@ RESTORE_DEPLOY_ID=$${DEPLOY_ID}
 EOF
 printf '%s\n' "$ARTIFACT" > /opt/lightfriend/restore/current-path
 
+# Copy backup to seed dir so enclave can download via HTTP (port 9080)
+# Raw VSOCK (port 9002) drops large payloads - HTTP framing works reliably
+SEED_BACKUP="/opt/lightfriend/seed/restore-backup.tar.gz.enc"
+cp "$ARTIFACT" "$SEED_BACKUP"
+echo "Backup available via HTTP seed server: restore-backup.tar.gz.enc ($(stat -c%s "$SEED_BACKUP") bytes)"
+
 rm -f "$VERIFY"
 VERIFY_SRC="/opt/lightfriend/backups/verify-result.json"
 rm -f "$VERIFY_SRC"

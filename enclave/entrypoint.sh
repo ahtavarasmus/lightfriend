@@ -183,12 +183,30 @@ unset INSECURE_BACKUP_ENCRYPTION_KEY_FALLBACK
 BACKUP_KEY_FINGERPRINT="$(printf '%s' "${BACKUP_ENCRYPTION_KEY}" | sha256sum | awk '{print $1}' | cut -c1-16)"
 echo "  Backup key ready (fingerprint: ${BACKUP_KEY_FINGERPRINT})"
 
-# ── 0e. Fetch backup from host via VSOCK (explicit restore only) ────────────
-if [ -e /dev/vsock ] && [ "${RESTORE_MODE}" != "none" ]; then
+# ── 0e. Fetch backup from host (explicit restore only) ──────────────────────
+if [ "${RESTORE_MODE}" != "none" ]; then
     echo "Restore requested (mode: ${RESTORE_MODE}) - fetching backup from host..."
     mkdir -p /data/seed
     RECEIVED="/data/seed/backup-received.tar.gz.enc"
-    socat -T300 -u VSOCK-CONNECT:3:9002 CREATE:"$RECEIVED" 2>/dev/null || true
+
+    # Try HTTP first (reliable for large files), fall back to raw VSOCK
+    BACKUP_URL="http://127.0.0.1:9080/restore-backup.tar.gz.enc"
+    echo "  Downloading backup via HTTP (port 9080)..."
+    HTTP_OK=false
+    for attempt in $(seq 1 30); do
+        if curl -sf --max-time 300 -o "$RECEIVED" "$BACKUP_URL" 2>/dev/null && [ -s "$RECEIVED" ]; then
+            HTTP_OK=true
+            break
+        fi
+        echo "  HTTP attempt ${attempt}/30 - waiting for seed server..."
+        sleep 5
+    done
+
+    if [ "$HTTP_OK" = "false" ] && [ -e /dev/vsock ]; then
+        echo "  HTTP failed, trying raw VSOCK port 9002..."
+        socat -T300 -u VSOCK-CONNECT:3:9002 CREATE:"$RECEIVED" 2>/dev/null || true
+    fi
+
     if [ -s "$RECEIVED" ] && ! grep -q "NO_BACKUP" "$RECEIVED" 2>/dev/null; then
         RECEIVED_SIZE=$(stat -c%s "$RECEIVED" 2>/dev/null || stat -f%z "$RECEIVED" 2>/dev/null || echo "unknown")
         echo "Backup received from host (${RECEIVED_SIZE} bytes)"
@@ -205,9 +223,6 @@ if [ -e /dev/vsock ] && [ "${RESTORE_MODE}" != "none" ]; then
         echo "FATAL: Restore requested but no backup available from host"
         exit 1
     fi
-elif [ "${RESTORE_MODE}" != "none" ]; then
-    echo "FATAL: Restore requested but no VSOCK device is available"
-    exit 1
 else
     echo "No restore requested - starting with current state"
 fi
