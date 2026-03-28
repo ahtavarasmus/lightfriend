@@ -1171,4 +1171,7 @@ STARTEOF
     echo "  Injected startup-script program into supervisord config"
 fi
 
+# Reset CWD to / before exec - restore process may have cd'd to /tmp dirs that get cleaned up,
+# leaving child processes with invalid CWD (PostgreSQL "could not locate my own executable path")
+cd /
 exec /usr/bin/supervisord -c /etc/supervisor/conf.d/lightfriend.conf
