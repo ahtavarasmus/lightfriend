@@ -1023,6 +1023,80 @@ impl OntologyRepository {
         .execute(&mut conn)
     }
 
+    /// Compute sender signals from message history for importance evaluation.
+    /// Returns empty signals on any error - never fails.
+    pub fn compute_sender_signals(
+        &self,
+        user_id: i32,
+        room_id: &str,
+        sender_name: &str,
+        now: i32,
+    ) -> crate::models::ontology_models::SenderSignals {
+        use crate::models::ontology_models::SenderSignals;
+
+        let messages = match self.get_messages_for_room(user_id, room_id, 500) {
+            Ok(msgs) => msgs,
+            Err(_) => return SenderSignals::empty(),
+        };
+
+        let thirty_days_ago = now - 30 * 86400;
+
+        // Messages are returned DESC, filter to last 30 days
+        let recent: Vec<_> = messages
+            .iter()
+            .filter(|m| m.created_at >= thirty_days_ago)
+            .collect();
+
+        // Separate sender messages and user replies
+        let sender_msgs: Vec<_> = recent
+            .iter()
+            .filter(|m| m.sender_name == sender_name)
+            .collect();
+        let user_msgs: Vec<_> = recent.iter().filter(|m| m.sender_name == "You").collect();
+
+        let message_count_30d = sender_msgs.len() as i64;
+        if message_count_30d == 0 {
+            return SenderSignals::empty();
+        }
+
+        // Last contact: second-most-recent sender message (since newest is the current one)
+        // Messages are DESC so index 1 is second-most-recent
+        let last_contact_ago_secs = sender_msgs.get(1).map(|m| (now - m.created_at) as i64);
+
+        // Reply analysis: for each sender message, check if user replied within 2 hours
+        let mut replied_count = 0i64;
+        let mut total_response_secs = 0i64;
+
+        for sender_msg in &sender_msgs {
+            // Find earliest "You" message after this sender message within 7200s
+            if let Some(reply) = user_msgs.iter().find(|u| {
+                u.created_at > sender_msg.created_at && u.created_at <= sender_msg.created_at + 7200
+            }) {
+                replied_count += 1;
+                total_response_secs += (reply.created_at - sender_msg.created_at) as i64;
+            }
+        }
+
+        let user_reply_rate = if message_count_30d > 0 {
+            replied_count as f32 / message_count_30d as f32
+        } else {
+            0.0
+        };
+
+        let avg_response_secs = if replied_count > 0 {
+            Some(total_response_secs / replied_count)
+        } else {
+            None
+        };
+
+        SenderSignals {
+            message_count_30d,
+            last_contact_ago_secs,
+            user_reply_rate,
+            avg_response_secs,
+        }
+    }
+
     /// Purge messages older than max_age_secs.
     pub fn purge_old_messages(&self, max_age_secs: i32) -> Result<usize, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");

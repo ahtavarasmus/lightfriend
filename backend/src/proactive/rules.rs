@@ -1191,7 +1191,11 @@ pub async fn emit_ontology_change(
     }
 
     // === System behaviors (automatic, no user rules needed) ===
-    if entity_type == "Message" {
+    let is_group = entity_snapshot
+        .get("is_group")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if entity_type == "Message" && !is_group {
         let state_sys = Arc::clone(state);
         let snap_sys = entity_snapshot.clone();
         let platform_sys = entity_snapshot

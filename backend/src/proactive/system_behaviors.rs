@@ -17,60 +17,6 @@ pub async fn run_system_behaviors(
         return Ok(());
     }
 
-    // Skip group messages - too noisy for system defaults
-    if entity_snapshot
-        .get("is_group")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-    {
-        return Ok(());
-    }
-
-    let ctx = ContextBuilder::for_user(state, user_id)
-        .with_user_context()
-        .build()
-        .await?;
-
-    let tz_info = ctx
-        .timezone
-        .as_ref()
-        .map(|t| format!("Current time: {}", t.formatted_now))
-        .unwrap_or_default();
-
-    // Build contacts context from persons
-    let contacts_ctx = ctx
-        .persons
-        .as_ref()
-        .map(|persons| {
-            let names: Vec<String> = persons
-                .iter()
-                .map(|p| p.person.name.clone())
-                .take(20)
-                .collect();
-            if names.is_empty() {
-                String::new()
-            } else {
-                format!("Known contacts: {}", names.join(", "))
-            }
-        })
-        .unwrap_or_default();
-
-    let system_prompt = format!(
-        "You are evaluating whether an incoming message is important enough to notify the user.\n\
-        \n\
-        {}\n\
-        {}\n\
-        \n\
-        Only set should_notify=true if delaying this message over 2 hours could cause harm, \
-        financial loss, or miss a time-sensitive opportunity. Examples: emergencies, someone \
-        asking to meet now, immediate decisions needed. Routine updates, casual messages, \
-        and vague requests are NOT important.\n\
-        \n\
-        If should_notify=false, set notification_message to empty string.\n\
-        If should_notify=true, write a concise notification (max 480 chars, second person).",
-        tz_info, contacts_ctx
-    );
-
     let sender_name = entity_snapshot
         .get("sender_name")
         .and_then(|v| v.as_str())
@@ -83,6 +29,54 @@ pub async fn run_system_behaviors(
         .get("content")
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    let room_id = entity_snapshot
+        .get("room_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    // Compute sender signals from message history
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i32;
+    let signals =
+        state
+            .ontology_repository
+            .compute_sender_signals(user_id, room_id, sender_name, now);
+    let sender_context = signals.format_for_prompt(sender_name);
+
+    // Build context
+    let ctx = ContextBuilder::for_user(state, user_id)
+        .with_user_context()
+        .build()
+        .await?;
+
+    let tz_info = ctx
+        .timezone
+        .as_ref()
+        .map(|t| format!("Current time: {}", t.formatted_now))
+        .unwrap_or_default();
+
+    let system_prompt = format!(
+        "You are evaluating whether an incoming message is important enough to notify the user.\n\
+        \n\
+        {}\n\
+        \n\
+        Sender context:\n\
+        {}\n\
+        \n\
+        Only set should_notify=true if delaying this message over 2 hours could cause harm, \
+        financial loss, or miss a time-sensitive opportunity. Examples: emergencies, someone \
+        asking to meet now, immediate decisions needed. Routine updates, casual messages, \
+        and vague requests are NOT important.\n\
+        \n\
+        Use the sender context to calibrate: a rare contact reaching out is more likely important \
+        than a frequent chatter. If you typically respond fast to this person, they matter to you.\n\
+        \n\
+        If should_notify=false, set notification_message to empty string.\n\
+        If should_notify=true, write a concise notification (max 480 chars, second person).",
+        tz_info, sender_context
+    );
 
     let user_msg = format!("Message from {} on {}:\n{}", sender_name, platform, content);
 
