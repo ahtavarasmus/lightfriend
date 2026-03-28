@@ -50,6 +50,7 @@ pub mod utils {
 }
 pub mod proactive {
     pub mod rules;
+    pub mod system_behaviors;
     pub mod utils;
 }
 pub mod tool_call_utils {

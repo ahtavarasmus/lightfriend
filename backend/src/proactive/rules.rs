@@ -1076,7 +1076,7 @@ fn parse_hhmm(s: &str) -> Option<(u32, u32)> {
 
 /// Check if the user has already seen a message (via read receipts or email
 /// Seen flag). Returns true if the message was seen and should be skipped.
-async fn check_message_seen(
+pub(crate) async fn check_message_seen(
     state: &Arc<AppState>,
     user_id: i32,
     platform: &str,
@@ -1190,6 +1190,51 @@ pub async fn emit_ontology_change(
         }
     }
 
+    // === System behaviors (automatic, no user rules needed) ===
+    if entity_type == "Message" {
+        let state_sys = Arc::clone(state);
+        let snap_sys = entity_snapshot.clone();
+        let platform_sys = entity_snapshot
+            .get("platform")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let room_id_sys = entity_snapshot
+            .get("room_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let created_at_sys = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i32;
+
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
+
+            if check_message_seen(
+                &state_sys,
+                user_id,
+                &platform_sys,
+                &room_id_sys,
+                created_at_sys,
+            )
+            .await
+            {
+                return;
+            }
+
+            if let Err(e) = crate::proactive::system_behaviors::run_system_behaviors(
+                &state_sys, user_id, &snap_sys,
+            )
+            .await
+            {
+                error!("System behaviors failed for user {}: {}", user_id, e);
+            }
+        });
+    }
+
+    // === Custom rules ===
     let rules = match state.ontology_repository.get_ontology_change_rules(user_id) {
         Ok(r) => r,
         Err(e) => {

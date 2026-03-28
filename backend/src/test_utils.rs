@@ -966,6 +966,18 @@ pub mod mock_user_core {
             Ok(false)
         }
 
+        fn update_system_important_notify(
+            &self,
+            _user_id: i32,
+            _value: bool,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_system_important_notify(&self, _user_id: i32) -> Result<bool, DieselError> {
+            Ok(true)
+        }
+
         fn get_default_notification_mode(&self, _user_id: i32) -> Result<String, DieselError> {
             Ok("critical".to_string())
         }
