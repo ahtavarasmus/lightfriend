@@ -189,17 +189,26 @@ if [ "${RESTORE_MODE}" != "none" ]; then
     mkdir -p /data/seed
     RECEIVED="/data/seed/backup-received.tar.gz.enc"
 
+    # Start temporary VSOCK bridge for HTTP seed server (port 9080)
+    # Supervisord's vsock-bridge-9080 isn't running yet at this point
+    if [ -e /dev/vsock ]; then
+        socat TCP-LISTEN:9080,reuseaddr,fork VSOCK-CONNECT:3:9080 &
+        RESTORE_BRIDGE_PID=$!
+        echo "  Started temporary VSOCK bridge (PID ${RESTORE_BRIDGE_PID})"
+        sleep 1
+    fi
+
     # Try HTTP first (reliable for large files), fall back to raw VSOCK
     BACKUP_URL="http://127.0.0.1:9080/restore-backup.tar.gz.enc"
     echo "  Downloading backup via HTTP (port 9080)..."
     HTTP_OK=false
-    for attempt in $(seq 1 30); do
+    for attempt in $(seq 1 10); do
         if curl -sf --max-time 300 -o "$RECEIVED" "$BACKUP_URL" 2>/dev/null && [ -s "$RECEIVED" ]; then
             HTTP_OK=true
             break
         fi
-        echo "  HTTP attempt ${attempt}/30 - waiting for seed server..."
-        sleep 5
+        echo "  HTTP attempt ${attempt}/10 - waiting for seed server..."
+        sleep 3
     done
 
     if [ "$HTTP_OK" = "false" ] && [ -e /dev/vsock ]; then
@@ -226,6 +235,9 @@ if [ "${RESTORE_MODE}" != "none" ]; then
 else
     echo "No restore requested - starting with current state"
 fi
+
+# Kill temporary restore bridge (step 0f starts its own)
+[ -n "${RESTORE_BRIDGE_PID:-}" ] && kill "$RESTORE_BRIDGE_PID" 2>/dev/null && wait "$RESTORE_BRIDGE_PID" 2>/dev/null || true
 
 # ── 0f. Fetch one-time SQL seed from host (first bootstrap only) ─────────────
 # Host runs python3 http.server on port 9080 serving /opt/lightfriend/seed/.
