@@ -40,6 +40,23 @@ echo "port 9080: $(ss -tlnp 2>/dev/null | grep ':9080' || echo 'not listening')"
 echo "port 9081: $(ss -tlnp 2>/dev/null | grep ':9081' || echo 'not listening')"
 echo ""
 
+echo "--- KMS derive test ---"
+if curl -sf --max-time 5 http://127.0.0.1:1101/derive/x25519?path=lightfriend/backup > /tmp/diag-key1.bin 2>/dev/null; then
+    curl -sf --max-time 5 http://127.0.0.1:1101/derive/x25519?path=lightfriend/backup > /tmp/diag-key2.bin 2>/dev/null
+    FP1=$(cat /tmp/diag-key1.bin | base64 | tr -d '\n' | sha256sum | cut -c1-16)
+    FP2=$(cat /tmp/diag-key2.bin | base64 | tr -d '\n' | sha256sum | cut -c1-16)
+    SZ1=$(stat -c%s /tmp/diag-key1.bin 2>/dev/null || echo "?")
+    echo "  derive call 1: ${SZ1} bytes, fp=${FP1}"
+    echo "  derive call 2: ${SZ1} bytes, fp=${FP2}"
+    if [ "$FP1" = "$FP2" ]; then echo "  DETERMINISTIC: yes"; else echo "  DETERMINISTIC: NO - keys differ!"; fi
+    ENVFP=$(printf '%s' "${BACKUP_ENCRYPTION_KEY:-}" | sha256sum | cut -c1-16)
+    echo "  env BACKUP_ENCRYPTION_KEY fp=${ENVFP} len=${#BACKUP_ENCRYPTION_KEY}"
+    rm -f /tmp/diag-key1.bin /tmp/diag-key2.bin
+else
+    echo "  derive server not reachable on port 1101"
+fi
+echo ""
+
 echo "--- export-watcher test ---"
 echo "  curl 9080: $(curl -sf --max-time 3 http://127.0.0.1:9080/ 2>&1 | head -1 || echo 'unreachable')"
 echo "  curl 9081: $(curl -sf --max-time 3 http://127.0.0.1:9081/ 2>&1 | head -1 || echo 'unreachable')"
