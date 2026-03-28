@@ -299,7 +299,6 @@ if [ -e /dev/vsock ]; then
         "http://127.0.0.1:9081/upload/${BACKUP_NAME}" \
         || abort "HTTP backup transfer to host failed" "transfer"
 
-    kill "$BRIDGE_PID" 2>/dev/null || true
     echo "Phase E complete (${ENCRYPTED_SIZE} bytes transferred)."
 fi
 
