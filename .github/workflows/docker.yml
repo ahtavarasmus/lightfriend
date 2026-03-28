@@ -582,7 +582,7 @@ jobs:
           TRIGGER_CMD=$(aws ssm send-command \
             --instance-ids "$OLD_INSTANCE" \
             --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["echo '\''{ \"action\": \"export\", \"deploy_id\": \"${{ github.run_id }}\", \"timestamp\": \"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'\" }'\'' | sudo tee /opt/lightfriend/seed/export-request.json > /dev/null && sudo rm -f /opt/lightfriend/backups/export-complete.json"]' \
+            --parameters '{"commands":["printf '\''{\"action\":\"export\"}'\'' > /opt/lightfriend/seed/export-request.json","rm -f /opt/lightfriend/backups/export-complete.json"]}' \
             --timeout-seconds 30 \
             --query "Command.CommandId" --output text)
 
@@ -614,7 +614,7 @@ jobs:
             POLL_CMD=$(aws ssm send-command \
               --instance-ids "$OLD_INSTANCE" \
               --document-name "AWS-RunShellScript" \
-              --parameters 'commands=["cat /opt/lightfriend/backups/export-complete.json 2>/dev/null || echo NOTFOUND"]' \
+              --parameters '{"commands":["cat /opt/lightfriend/backups/export-complete.json 2>/dev/null || echo NOTFOUND"]}' \
               --timeout-seconds 30 \
               --query "Command.CommandId" --output text)
 
@@ -667,7 +667,7 @@ jobs:
           RESULT_CMD=$(aws ssm send-command \
             --instance-ids "$OLD_INSTANCE" \
             --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["sudo cat /opt/lightfriend/last-upload.json"]' \
+            --parameters '{"commands":["cat /opt/lightfriend/last-upload.json"]}' \
             --timeout-seconds 30 \
             --query "Command.CommandId" --output text)
 
@@ -709,7 +709,7 @@ jobs:
           aws ssm send-command \
             --instance-ids "$OLD_INSTANCE" \
             --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["sudo rm -f /opt/lightfriend/seed/export-request.json /opt/lightfriend/backups/export-complete.json"]' \
+            --parameters '{"commands":["rm -f /opt/lightfriend/seed/export-request.json /opt/lightfriend/backups/export-complete.json"]}' \
             --timeout-seconds 30 \
             --query "Command.CommandId" --output text 2>/dev/null || true
 
@@ -826,7 +826,7 @@ jobs:
             MAINT_CMD=$(aws ssm send-command \
               --instance-ids "$OLD_INSTANCE" \
               --document-name "AWS-RunShellScript" \
-              --parameters 'commands=["sudo /opt/lightfriend/trigger-maintenance.sh enable"]' \
+              --parameters '{"commands":["/opt/lightfriend/trigger-maintenance.sh enable"]}' \
               --timeout-seconds 30 \
               --query "Command.CommandId" --output text 2>/dev/null || echo "")
             if [ -n "$MAINT_CMD" ]; then
