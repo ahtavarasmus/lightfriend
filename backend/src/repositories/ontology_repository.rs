@@ -29,6 +29,76 @@ struct SuggestionCandidate {
     msg_count: i64,
 }
 
+fn format_hour(h: usize) -> String {
+    match h {
+        0 => "12am".to_string(),
+        1..=11 => format!("{}am", h),
+        12 => "12pm".to_string(),
+        13..=23 => format!("{}pm", h - 12),
+        _ => format!("{}:00", h),
+    }
+}
+
+/// Compute temporal anomaly score using Laplace-smoothed surprisal with confidence gating.
+/// Returns (score, current_hour) where score scales with both how unusual the hour is AND
+/// how much data we have. Handles wildly different message volumes correctly:
+/// - 30-msg sender, hour=0: score ~3.2 (not enough data to be confident)
+/// - 3000-msg sender, hour=0: score ~12.4 (genuinely anomalous)
+fn compute_temporal_score(hour_buckets: &[u32; 24], total: u32, current_hour: usize) -> f64 {
+    let total_f = total as f64;
+    // Laplace smoothing: add 0.5 pseudocount per bucket (Jeffreys prior)
+    let smoothed = (hour_buckets[current_hour] as f64 + 0.5) / (total_f + 12.0);
+    let surprisal = -smoothed.log2();
+    // Confidence ramps from 0 toward 1; reaches 0.5 at 30 messages
+    let confidence = total_f / (total_f + 30.0);
+    surprisal * confidence
+}
+
+/// Bucket timestamps into 24 hourly bins in the given timezone.
+fn bucket_by_hour(timestamps: &[i32], tz_offset_secs: i32) -> [u32; 24] {
+    let mut buckets = [0u32; 24];
+    for &ts in timestamps {
+        let local_ts = ts as i64 + tz_offset_secs as i64;
+        let hour = ((local_ts % 86400 + 86400) % 86400 / 3600) as usize;
+        if hour < 24 {
+            buckets[hour] += 1;
+        }
+    }
+    buckets
+}
+
+fn current_local_hour(now: i32, tz_offset_secs: i32) -> usize {
+    let local_ts = now as i64 + tz_offset_secs as i64;
+    ((local_ts % 86400 + 86400) % 86400 / 3600) as usize
+}
+
+/// Find active hours (top hours covering ~80% of activity) for context string.
+fn active_hour_range(hour_buckets: &[u32; 24], total: u32) -> Option<(usize, usize)> {
+    let mut indexed: Vec<(usize, u32)> = hour_buckets
+        .iter()
+        .enumerate()
+        .filter(|(_, &c)| c > 0)
+        .map(|(h, &c)| (h, c))
+        .collect();
+    if indexed.len() < 2 {
+        return None;
+    }
+    // Sort by count descending, accumulate until 80%
+    indexed.sort_by(|a, b| b.1.cmp(&a.1));
+    let threshold = (total as f64 * 0.8) as u32;
+    let mut acc = 0u32;
+    let mut active: Vec<usize> = Vec::new();
+    for (h, c) in &indexed {
+        acc += c;
+        active.push(*h);
+        if acc >= threshold {
+            break;
+        }
+    }
+    active.sort();
+    Some((active[0], active[active.len() - 1]))
+}
+
 pub struct OntologyRepository {
     pub pool: PgDbPool,
 }
@@ -1031,6 +1101,7 @@ impl OntologyRepository {
         room_id: &str,
         sender_name: &str,
         now: i32,
+        tz_offset_secs: i32,
     ) -> crate::models::ontology_models::SenderSignals {
         use crate::models::ontology_models::SenderSignals;
 
@@ -1089,11 +1160,120 @@ impl OntologyRepository {
             None
         };
 
+        // Temporal anomaly: Laplace-smoothed surprisal with confidence gating.
+        // Scales naturally with message volume - low-volume senders don't produce
+        // false anomalies, high-volume senders with zero activity at an hour do.
+        let temporal_anomaly = {
+            let timestamps: Vec<i32> = sender_msgs.iter().map(|m| m.created_at).collect();
+            let hour_buckets = bucket_by_hour(&timestamps, tz_offset_secs);
+            let current_hour = current_local_hour(now, tz_offset_secs);
+
+            if current_hour < 24 {
+                let score =
+                    compute_temporal_score(&hour_buckets, message_count_30d as u32, current_hour);
+                let range_ctx = active_hour_range(&hour_buckets, message_count_30d as u32)
+                    .map(|(first, last)| {
+                        format!(
+                            " Their {} messages are typically between {}-{}.",
+                            message_count_30d,
+                            format_hour(first),
+                            format_hour(last),
+                        )
+                    })
+                    .unwrap_or_default();
+
+                if score > 10.0 {
+                    Some(format!(
+                        "This person messaging at {} is highly unusual.{}",
+                        format_hour(current_hour),
+                        range_ctx,
+                    ))
+                } else if score > 7.0 {
+                    Some(format!(
+                        "This person messaging at {} is somewhat unusual.{}",
+                        format_hour(current_hour),
+                        range_ctx,
+                    ))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
         SenderSignals {
             message_count_30d,
             last_contact_ago_secs,
             user_reply_rate,
             avg_response_secs,
+            temporal_anomaly,
+        }
+    }
+
+    /// Detect if user is likely sleeping based on their sent-message activity patterns.
+    /// Uses Laplace-smoothed surprisal with confidence gating - same math as sender
+    /// temporal anomaly, applied to the user's own "You" messages across all rooms.
+    pub fn compute_user_sleep_context(
+        &self,
+        user_id: i32,
+        now: i32,
+        tz_offset_secs: i32,
+    ) -> Option<String> {
+        use crate::pg_schema::ont_messages;
+
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let thirty_days_ago = now - 30 * 86400;
+
+        let user_messages: Vec<OntMessage> = ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::sender_name.eq("You"))
+            .filter(ont_messages::created_at.ge(thirty_days_ago))
+            .select(OntMessage::as_select())
+            .load(&mut conn)
+            .unwrap_or_default();
+
+        if user_messages.is_empty() {
+            return None;
+        }
+
+        let timestamps: Vec<i32> = user_messages.iter().map(|m| m.created_at).collect();
+        let total = timestamps.len() as u32;
+        let hour_buckets = bucket_by_hour(&timestamps, tz_offset_secs);
+        let current_hour = current_local_hour(now, tz_offset_secs);
+        if current_hour >= 24 {
+            return None;
+        }
+
+        let score = compute_temporal_score(&hour_buckets, total, current_hour);
+
+        let range_ctx = active_hour_range(&hour_buckets, total)
+            .map(|(first, last)| {
+                format!(
+                    "The user is typically active between {}-{}. ",
+                    format_hour(first),
+                    format_hour(last),
+                )
+            })
+            .unwrap_or_default();
+
+        if score > 10.0 {
+            Some(format!(
+                "{}Current time is {} - the user is almost certainly sleeping. \
+                 Only notify for genuinely urgent messages where a delay until morning \
+                 would cause real harm.",
+                range_ctx,
+                format_hour(current_hour),
+            ))
+        } else if score > 7.0 {
+            Some(format!(
+                "{}Current time is {} - the user is likely sleeping. \
+                 Apply a higher bar for notification urgency.",
+                range_ctx,
+                format_hour(current_hour),
+            ))
+        } else {
+            None
         }
     }
 
