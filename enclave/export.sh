@@ -290,11 +290,7 @@ echo "Phase D complete."
 # backup receiver on host port 9081.
 if [ -e /dev/vsock ]; then
     echo "Phase E: Transferring backup to host via HTTP..."
-    # Bridge to host backup receiver
-    socat TCP-LISTEN:9081,reuseaddr VSOCK-CONNECT:3:9081 &
-    BRIDGE_PID=$!
-    sleep 0.5
-
+    # Port 9081 VSOCK bridge managed by supervisord (vsock-bridge-9081)
     BACKUP_NAME=$(basename "${ENCRYPTED}")
     curl -sf --max-time 600 -T "${ENCRYPTED}" \
         "http://127.0.0.1:9081/upload/${BACKUP_NAME}" \
