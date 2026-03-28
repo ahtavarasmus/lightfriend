@@ -483,9 +483,16 @@ BUCKET=$(aws ssm get-parameter --name /lightfriend/s3-bucket --query Parameter.V
 echo "s3-signal-poller: bucket=$BUCKET"
 
 LAST_TRIGGER=""
+POLL_COUNT=0
 while true; do
+    POLL_COUNT=$((POLL_COUNT + 1))
+    # Heartbeat every 60 iterations (~5 min)
+    [ $((POLL_COUNT % 60)) -eq 0 ] && echo "$(date -u): heartbeat poll=$POLL_COUNT last_trigger=${LAST_TRIGGER:-none}"
+
     # Check for export trigger in S3
-    if aws s3 cp "s3://$BUCKET/deploy/export-request.json" /tmp/export-request-check.json 2>/dev/null; then
+    S3_ERR=$(aws s3 cp "s3://$BUCKET/deploy/export-request.json" /tmp/export-request-check.json 2>&1)
+    S3_RC=$?
+    if [ $S3_RC -eq 0 ] && [ -s /tmp/export-request-check.json ]; then
         TRIGGER=$(cat /tmp/export-request-check.json)
         if [ "$TRIGGER" != "$LAST_TRIGGER" ]; then
             echo "$(date -u): New export request: $TRIGGER"
@@ -497,6 +504,9 @@ while true; do
             aws s3 rm "s3://$BUCKET/deploy/export-request.json" 2>/dev/null || true
         fi
         rm -f /tmp/export-request-check.json
+    elif [ $S3_RC -ne 0 ] && ! echo "$S3_ERR" | grep -q "404\|NoSuchKey\|Not Found"; then
+        # Log unexpected S3 errors (not 404)
+        echo "$(date -u): S3 poll error (rc=$S3_RC): $S3_ERR"
     fi
 
     # Check for completed export and upload to S3
