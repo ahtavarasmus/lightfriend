@@ -226,7 +226,14 @@ fi
 
 # ── Write result ───────────────────────────────────────────────────────────
 
-CHECKS_JSON=$(printf '%s' "${ALL_CHECKS[*]}" | sed 's/" "/", "/g')
+# Build checks JSON object properly
+CHECKS_JSON="{"
+FIRST=true
+for check in "${ALL_CHECKS[@]}"; do
+    [ "$FIRST" = "true" ] && FIRST=false || CHECKS_JSON="${CHECKS_JSON}, "
+    CHECKS_JSON="${CHECKS_JSON}${check}"
+done
+CHECKS_JSON="${CHECKS_JSON}}"
 
 # Determine restore type
 if [ -f /tmp/backup-manifest.json ]; then
@@ -241,18 +248,25 @@ else
 fi
 
 if [ ${#FAILED_CHECKS[@]} -eq 0 ]; then
-    cat > "${RESULT_FILE}" <<EOF
-{"status": "HEALTHY", "restore_type": "${RESTORE_TYPE}", "timestamp": "${TIMESTAMP}", "checks": {${CHECKS_JSON}}, "user_count": ${DB_USER_COUNT:-0}}
-EOF
+    # Use python3 for safe JSON generation (json.loads handles true/false natively)
+    python3 -c "
+import json
+checks = json.loads('''${CHECKS_JSON}''')
+result = {'status': 'HEALTHY', 'restore_type': '${RESTORE_TYPE}', 'timestamp': '${TIMESTAMP}', 'checks': checks, 'user_count': ${DB_USER_COUNT:-0}}
+print(json.dumps(result))
+" > "${RESULT_FILE}"
     echo ""
     echo "=== Verification: HEALTHY ==="
     exit 0
 else
     FAILED_LIST=$(printf '"%s", ' "${FAILED_CHECKS[@]}")
     FAILED_LIST="${FAILED_LIST%, }"
-    cat > "${RESULT_FILE}" <<EOF
-{"status": "FAILED", "restore_type": "${RESTORE_TYPE}", "timestamp": "${TIMESTAMP}", "failed_checks": [${FAILED_LIST}], "details": "${CHECK_DETAILS}", "user_count": ${DB_USER_COUNT:-0}}
-EOF
+    python3 -c "
+import json
+details = '''${CHECK_DETAILS}'''
+result = {'status': 'FAILED', 'restore_type': '${RESTORE_TYPE}', 'timestamp': '${TIMESTAMP}', 'failed_checks': [${FAILED_LIST}], 'details': details.strip(), 'user_count': ${DB_USER_COUNT:-0}}
+print(json.dumps(result))
+" > "${RESULT_FILE}"
     echo ""
     echo "=== Verification: FAILED ==="
     echo "Failed checks: ${FAILED_CHECKS[*]}"
