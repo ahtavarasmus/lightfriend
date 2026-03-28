@@ -259,8 +259,7 @@ if [ "${RESTORE_MODE}" = "none" ]; then
             sleep 3
         done
 
-        # Clean up bridge
-        [ -n "${SEED_BRIDGE_PID:-}" ] && kill "$SEED_BRIDGE_PID" 2>/dev/null || true
+        # Keep bridge alive - export-watcher also uses port 9080 to poll for export requests
 
         if [ "$SEED_FETCHED" = "false" ]; then
             echo "  No SQL seed available from host"
