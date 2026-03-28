@@ -116,7 +116,7 @@ RUN cargo build --release --target-dir /src/oyster/target --manifest-path initia
 FROM jevolk/tuwunel:latest AS tuwunel-src
 FROM dock.mau.dev/mautrix/whatsapp:latest AS whatsapp-src
 FROM dock.mau.dev/mautrix/signal:latest AS signal-src
-FROM dock.mau.dev/mautrix/telegram:latest AS telegram-src
+# mautrix-telegram installed via pip (no binary image needed)
 
 # ── Stage 4: Runtime - single container with all services ───────────────────
 
@@ -166,8 +166,8 @@ COPY --from=signal-src /usr/bin/mautrix-signal /usr/local/bin/mautrix-signal
 
 # ── Install mautrix-telegram into a local venv ────────────────────────────
 ARG MAUTRIX_TELEGRAM_VERSION=0.15.3
-COPY --from=telegram-src /opt/mautrix-telegram /opt/mautrix-telegram
-RUN python3 -m venv /opt/mautrix-telegram-venv && \
+RUN mkdir -p /opt/mautrix-telegram && \
+    python3 -m venv /opt/mautrix-telegram-venv && \
     /opt/mautrix-telegram-venv/bin/pip install --upgrade pip && \
     /opt/mautrix-telegram-venv/bin/pip install "mautrix-telegram[all]==${MAUTRIX_TELEGRAM_VERSION}"
 
