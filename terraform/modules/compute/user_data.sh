@@ -475,14 +475,66 @@ echo "VSOCK services configured: proxy:8001, config:9000, backup:9001, restore:9
 # Needed because SSM send-command from the deploy runner stays Pending.
 cat > /opt/lightfriend/s3-signal-poller.sh <<'SCRIPT'
 #!/bin/bash
+# Bridges the deploy pipeline (S3) with the enclave (local HTTP).
+# Pipeline writes to S3, this poller copies locally, and when done
+# uploads results back to S3. No SSM needed.
 BUCKET=$(aws ssm get-parameter --name /lightfriend/s3-bucket --query Parameter.Value --output text 2>/dev/null || echo "")
-[ -z "$BUCKET" ] && exit 0
+[ -z "$BUCKET" ] && echo "No S3 bucket configured" && exit 0
+echo "s3-signal-poller: bucket=$BUCKET"
+
+LAST_TRIGGER=""
 while true; do
-    if aws s3 cp "s3://$BUCKET/deploy/export-request.json" /opt/lightfriend/seed/export-request.json 2>/dev/null; then
-        echo "$(date -u): export-request.json copied from S3"
-        rm -f /opt/lightfriend/backups/export-complete.json
-        aws s3 rm "s3://$BUCKET/deploy/export-request.json" 2>/dev/null || true
+    # Check for export trigger in S3
+    if aws s3 cp "s3://$BUCKET/deploy/export-request.json" /tmp/export-request-check.json 2>/dev/null; then
+        TRIGGER=$(cat /tmp/export-request-check.json)
+        if [ "$TRIGGER" != "$LAST_TRIGGER" ]; then
+            echo "$(date -u): New export request: $TRIGGER"
+            LAST_TRIGGER="$TRIGGER"
+            # Copy to seed dir for enclave's watcher
+            cp /tmp/export-request-check.json /opt/lightfriend/seed/export-request.json
+            rm -f /opt/lightfriend/backups/export-complete.json
+            # Remove from S3 so we don't re-trigger
+            aws s3 rm "s3://$BUCKET/deploy/export-request.json" 2>/dev/null || true
+        fi
+        rm -f /tmp/export-request-check.json
     fi
+
+    # Check for completed export and upload to S3
+    if [ -f /opt/lightfriend/backups/export-complete.json ] && [ -s /opt/lightfriend/backups/export-complete.json ]; then
+        STATUS=$(cat /opt/lightfriend/backups/export-complete.json | python3 -c "import json,sys; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
+        if [ "$STATUS" = "SUCCESS" ] || [ "$STATUS" = "FAILED" ]; then
+            echo "$(date -u): Export $STATUS, uploading results to S3..."
+            # Upload the backup .enc file to S3 if successful
+            if [ "$STATUS" = "SUCCESS" ]; then
+                BACKUP_FILE=$(ls -t /opt/lightfriend/backups/*.enc 2>/dev/null | head -1)
+                if [ -n "$BACKUP_FILE" ]; then
+                    BACKUP_KEY="backups/deploy/$(basename $BACKUP_FILE)"
+                    aws s3 cp "$BACKUP_FILE" "s3://$BUCKET/$BACKUP_KEY" 2>/dev/null
+                    BACKUP_SHA=$(sha256sum "$BACKUP_FILE" | awk '{print $1}')
+                    BACKUP_SIZE=$(stat -c%s "$BACKUP_FILE")
+                    # Add S3 key to completion JSON
+                    python3 -c "
+import json
+with open('/opt/lightfriend/backups/export-complete.json') as f:
+    data = json.load(f)
+data['backup_key'] = '$BACKUP_KEY'
+data['backup_sha256'] = '$BACKUP_SHA'
+data['backup_size'] = $BACKUP_SIZE
+print(json.dumps(data))
+" > /tmp/export-complete-s3.json
+                    aws s3 cp /tmp/export-complete-s3.json "s3://$BUCKET/deploy/export-complete.json" 2>/dev/null
+                    echo "$(date -u): Backup uploaded: s3://$BUCKET/$BACKUP_KEY ($BACKUP_SIZE bytes)"
+                fi
+            else
+                # Upload failure status as-is
+                aws s3 cp /opt/lightfriend/backups/export-complete.json "s3://$BUCKET/deploy/export-complete.json" 2>/dev/null
+            fi
+            # Clean up local files
+            rm -f /opt/lightfriend/backups/export-complete.json
+            rm -f /opt/lightfriend/seed/export-request.json
+        fi
+    fi
+
     sleep 5
 done
 SCRIPT

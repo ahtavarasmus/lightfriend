@@ -587,123 +587,51 @@ jobs:
           echo '{"action":"export","deploy_id":"${{ github.run_id }}"}' | \
             aws s3 cp - "s3://$S3_BUCKET/deploy/export-request.json"
           echo "Trigger written to S3"
+          echo "Host's s3-signal-poller will copy it locally within 5s"
 
-          # Also write directly to host filesystem via a simple S3-poll loop
-          # that the host runs. For now, add a one-shot SSM as best-effort.
-          aws ssm send-command --instance-ids "$OLD_INSTANCE" \
-            --document-name "AWS-RunShellScript" \
-            --parameters '{"commands":["aws s3 cp s3://'"$S3_BUCKET"'/deploy/export-request.json /opt/lightfriend/seed/export-request.json 2>/dev/null || echo s3-copy-failed","rm -f /opt/lightfriend/backups/export-complete.json","cat /opt/lightfriend/seed/export-request.json 2>/dev/null"]}' \
-            --timeout-seconds 30 2>/dev/null || true
-          # Don't wait for SSM - it might stay Pending. The S3 trigger is the primary mechanism.
-          sleep 15
-          echo "Trigger dispatch complete"
-
-          # Step 4b: Poll for export-complete.json on the host's backups dir.
-          # The enclave writes this via HTTP PUT to port 9081 when export finishes.
-          echo "Polling for export completion (timeout: 15 min)..."
+          # Poll S3 for completion. The host's s3-signal-poller handles:
+          # 1. Copy trigger from S3 to local seed dir
+          # 2. Enclave detects trigger, runs export, uploads to host
+          # 3. Host detects completion, uploads backup to S3, writes completion to S3
+          # No SSM needed - everything goes through S3.
+          echo "Polling S3 for export completion (timeout: 15 min)..."
           COMPLETE_STATUS=""
           for i in $(seq 1 180); do
-            POLL_CMD=$(aws ssm send-command \
-              --instance-ids "$OLD_INSTANCE" \
-              --document-name "AWS-RunShellScript" \
-              --parameters '{"commands":["cat /opt/lightfriend/backups/export-complete.json 2>/dev/null || echo NOTFOUND"]}' \
-              --timeout-seconds 30 \
-              --query "Command.CommandId" --output text)
-
-            # Wait for SSM command to finish (short timeout per poll)
-            POLL_RESULT=""
-            for j in $(seq 1 6); do
-              POLL_STATUS=$(aws ssm get-command-invocation \
-                --command-id "$POLL_CMD" --instance-id "$OLD_INSTANCE" \
-                --query "Status" --output text 2>/dev/null || echo "Pending")
-              case "$POLL_STATUS" in
-                Success)
-                  POLL_RESULT=$(aws ssm get-command-invocation \
-                    --command-id "$POLL_CMD" --instance-id "$OLD_INSTANCE" \
-                    --query "StandardOutputContent" --output text 2>/dev/null || echo "")
-                  break ;;
-                Failed|TimedOut|Cancelled) break ;;
-              esac
-              sleep 3
-            done
-
-            if [ -n "$POLL_RESULT" ] && [ "$POLL_RESULT" != "NOTFOUND" ]; then
-              COMPLETE_STATUS=$(echo "$POLL_RESULT" | jq -r '.status // "UNKNOWN"' 2>/dev/null || echo "UNKNOWN")
-              if [ "$COMPLETE_STATUS" = "IN_PROGRESS" ]; then
-                echo "Export in progress ($i/180)..."
-              elif [ "$COMPLETE_STATUS" = "SUCCESS" ]; then
-                echo "Export completed successfully"
+            COMPLETE_JSON=$(aws s3 cp "s3://$S3_BUCKET/deploy/export-complete.json" - 2>/dev/null || echo "")
+            if [ -n "$COMPLETE_JSON" ]; then
+              COMPLETE_STATUS=$(echo "$COMPLETE_JSON" | jq -r '.status // "UNKNOWN"' 2>/dev/null || echo "UNKNOWN")
+              if [ "$COMPLETE_STATUS" = "SUCCESS" ]; then
+                echo "Export completed successfully!"
+                echo "$COMPLETE_JSON" | jq . 2>/dev/null || echo "$COMPLETE_JSON"
                 break
               elif [ "$COMPLETE_STATUS" = "FAILED" ]; then
                 echo "FATAL: Export failed inside enclave"
-                echo "$POLL_RESULT" | jq . 2>/dev/null || echo "$POLL_RESULT"
+                echo "$COMPLETE_JSON" | jq . 2>/dev/null || echo "$COMPLETE_JSON"
                 exit 1
-              else
-                echo "Unexpected completion status: $COMPLETE_STATUS ($i/180)..."
               fi
-            else
-              echo "Waiting for export ($i/180)..."
             fi
+            [ $((i % 6)) -eq 0 ] && echo "Waiting for export ($i/180, status: ${COMPLETE_STATUS:-pending})..."
             sleep 5
           done
 
           if [ "$COMPLETE_STATUS" != "SUCCESS" ]; then
-            echo "FATAL: Export timed out or did not succeed (last status: $COMPLETE_STATUS)"
+            echo "FATAL: Export timed out (last status: $COMPLETE_STATUS)"
             exit 1
           fi
 
-          # Step 4c: Read the host's last-upload.json for backup details.
-          # export.sh writes export-status.json to /data/seed/ inside the enclave,
-          # and the backup file is uploaded to /opt/lightfriend/backups/ on the host.
-          # The host's upload receiver writes last-upload.json with S3 key and SHA.
-          RESULT_CMD=$(aws ssm send-command \
-            --instance-ids "$OLD_INSTANCE" \
-            --document-name "AWS-RunShellScript" \
-            --parameters '{"commands":["cat /opt/lightfriend/last-upload.json"]}' \
-            --timeout-seconds 30 \
-            --query "Command.CommandId" --output text)
-
-          for i in $(seq 1 12); do
-            RESULT_STATUS=$(aws ssm get-command-invocation \
-              --command-id "$RESULT_CMD" --instance-id "$OLD_INSTANCE" \
-              --query "Status" --output text 2>/dev/null || echo "Pending")
-            case "$RESULT_STATUS" in
-              Success) break ;;
-              Failed|TimedOut|Cancelled)
-                echo "FATAL: Could not read /opt/lightfriend/last-upload.json: $RESULT_STATUS"
-                exit 1 ;;
-            esac
-            sleep 5
-          done
-          if [ "$RESULT_STATUS" != "Success" ]; then
-            echo "FATAL: Timed out reading /opt/lightfriend/last-upload.json"
-            exit 1
-          fi
-
-          RESULT_JSON=$(aws ssm get-command-invocation \
-            --command-id "$RESULT_CMD" --instance-id "$OLD_INSTANCE" \
-            --query "StandardOutputContent" --output text 2>/dev/null || true)
-          if [ -z "$RESULT_JSON" ]; then
-            echo "FATAL: Could not read upload result JSON"
-            exit 1
-          fi
-
-          BACKUP_KEY=$(echo "$RESULT_JSON" | jq -r '.backup_key // empty')
-          BACKUP_SHA=$(echo "$RESULT_JSON" | jq -r '.sha256 // empty')
-          BACKUP_SIZE=$(echo "$RESULT_JSON" | jq -r '.size_bytes // 0')
+          # Read backup details from completion JSON (s3-signal-poller adds these)
+          BACKUP_KEY=$(echo "$COMPLETE_JSON" | jq -r '.backup_key // empty')
+          BACKUP_SHA=$(echo "$COMPLETE_JSON" | jq -r '.backup_sha256 // empty')
+          BACKUP_SIZE=$(echo "$COMPLETE_JSON" | jq -r '.backup_size // 0')
           if [ -z "$BACKUP_KEY" ] || [ -z "$BACKUP_SHA" ]; then
-            echo "FATAL: UPLOAD_RESULT missing backup_key or sha256"
-            echo "$RESULT_JSON"
+            echo "FATAL: Completion JSON missing backup_key or backup_sha256"
+            echo "$COMPLETE_JSON"
             exit 1
           fi
 
-          # Step 4d: Clean up signal files on the host
-          aws ssm send-command \
-            --instance-ids "$OLD_INSTANCE" \
-            --document-name "AWS-RunShellScript" \
-            --parameters '{"commands":["rm -f /opt/lightfriend/seed/export-request.json /opt/lightfriend/backups/export-complete.json"]}' \
-            --timeout-seconds 30 \
-            --query "Command.CommandId" --output text 2>/dev/null || true
+          # Clean up S3 signals
+          aws s3 rm "s3://$S3_BUCKET/deploy/export-complete.json" 2>/dev/null || true
+          aws s3 rm "s3://$S3_BUCKET/deploy/export-request.json" 2>/dev/null || true
 
           echo "backup_key=$BACKUP_KEY" >> $GITHUB_OUTPUT
           echo "backup_sha=$BACKUP_SHA" >> $GITHUB_OUTPUT
