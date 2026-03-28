@@ -164,15 +164,21 @@ echo "  NSM device: $([ -e /dev/nsm ] && echo 'present' || echo 'MISSING')"
 echo "  MARLIN_KMS_CONTRACT_ADDRESS: ${MARLIN_KMS_CONTRACT_ADDRESS:-(not set)}"
 echo "  MARLIN_ROOT_SERVER_ENDPOINT: ${MARLIN_ROOT_SERVER_ENDPOINT:-(not set)}"
 echo "  ALLOW_INSECURE_BACKUP_KEY_FALLBACK: ${ALLOW_INSECURE_BACKUP_KEY_FALLBACK:-(not set)}"
-if ! BACKUP_ENCRYPTION_KEY="$(/usr/local/bin/derive-backup-key.sh 2>&1)"; then
+KMS_STDERR="/tmp/derive-backup-key.stderr"
+if ! BACKUP_ENCRYPTION_KEY="$(/usr/local/bin/derive-backup-key.sh 2>"$KMS_STDERR")"; then
     echo "  FATAL: derive-backup-key.sh failed"
-    echo "  Output was: $BACKUP_ENCRYPTION_KEY"
+    echo "  stderr:"
+    cat "$KMS_STDERR" 2>/dev/null
     # Dump Marlin KMS sidecar logs if they exist
     for logf in /tmp/marlin-kms/*.log; do
         [ -f "$logf" ] && echo "  --- $(basename "$logf") ---" && tail -20 "$logf"
     done
+    rm -f "$KMS_STDERR"
     exit 1
 fi
+# Log KMS startup info (was previously polluting the key via 2>&1)
+cat "$KMS_STDERR" 2>/dev/null
+rm -f "$KMS_STDERR"
 if [ -z "${BACKUP_ENCRYPTION_KEY}" ]; then
     echo "  FATAL: Derived BACKUP_ENCRYPTION_KEY is empty"
     exit 1
