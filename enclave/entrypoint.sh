@@ -216,9 +216,11 @@ fi
 # Host runs python3 http.server on port 9080 serving /opt/lightfriend/seed/.
 # We bridge to it via VSOCK and fetch with curl (HTTP framing handles large files
 # reliably, unlike raw VSOCK dumps which drop 17MB payloads).
-# Bridge for seed fetch (dies on exec supervisord, supervisord takes over)
+# Temporary bridge for seed fetch. Killed before exec supervisord so
+# the vsock-bridge-9080 supervisord program can take over.
 if [ -e /dev/vsock ]; then
     socat TCP-LISTEN:9080,reuseaddr,fork VSOCK-CONNECT:3:9080 &
+    SEED_BRIDGE_PID=$!
     sleep 0.3
 fi
 
@@ -1114,7 +1116,8 @@ echo "  Entrypoint setup complete at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # Send boot trace now - exec will replace this shell so the EXIT trap won't fire
 send_boot_trace 0
 
-# Start supervisord. The startup-orchestrator program (priority=99) runs
-# /tmp/start-services.sh which starts tuwunel, bridges, backend, cloudflared
-# in the correct order. No background process needed.
+# Kill entrypoint bridges so supervisord can bind the same ports
+[ -n "${SEED_BRIDGE_PID:-}" ] && kill "$SEED_BRIDGE_PID" 2>/dev/null || true
+sleep 0.2
+
 exec /usr/bin/supervisord -c /etc/supervisor/conf.d/lightfriend.conf
