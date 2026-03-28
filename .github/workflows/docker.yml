@@ -6,6 +6,10 @@ on:
       - main
       - master
 
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: docker.io
   IMAGE_REPO: docker.io/ahtavarasmus/lightfriend-enclave
