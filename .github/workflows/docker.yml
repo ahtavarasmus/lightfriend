@@ -561,6 +561,8 @@ jobs:
       - name: Backup old instance
         if: steps.infra.outputs.old_instance != ''
         id: backup
+        env:
+          AWS_DEFAULT_REGION: us-east-1
         run: |
           OLD_INSTANCE="${{ steps.infra.outputs.old_instance }}"
           S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
@@ -830,6 +832,8 @@ jobs:
       # then terminate old instance.
       - name: Switch to new instance
         if: steps.health.outputs.healthy == 'true'
+        env:
+          AWS_DEFAULT_REGION: us-east-1
         run: |
           NEW_INSTANCE="${{ steps.launch.outputs.new_instance }}"
           OLD_INSTANCE="${{ steps.infra.outputs.old_instance }}"
@@ -886,6 +890,7 @@ jobs:
       - name: Rollback on failure
         if: failure() && steps.launch.outputs.new_instance != ''
         env:
+          AWS_DEFAULT_REGION: us-east-1
           CONTRACT_ADDRESS: ${{ secrets.MARLIN_KMS_CONTRACT_ADDRESS }}
           RPC_URL: ${{ secrets.ARBITRUM_RPC_URL }}
           PRIVATE_KEY: ${{ secrets.ARBITRUM_PRIVATE_KEY }}
