@@ -1155,20 +1155,14 @@ send_boot_trace 0
 [ -n "${SEED_BRIDGE_PID:-}" ] && kill "$SEED_BRIDGE_PID" 2>/dev/null || true
 sleep 0.2
 
-# Inject startup script as a supervisord program so it runs after services start
+# Run startup script (verify + signal) in background after supervisord starts.
+# The nohup process survives exec (becomes orphan adopted by PID 1).
+# Sleep 20s to give supervisord time to start all services before verify runs.
 if [ -n "${STARTUP_SCRIPT:-}" ] && [ -x "${STARTUP_SCRIPT}" ]; then
-    cat >> /etc/supervisor/conf.d/lightfriend.conf <<STARTEOF
-
-[program:startup-script]
-command=${STARTUP_SCRIPT}
-autostart=true
-autorestart=false
-startsecs=0
-priority=99
-stdout_logfile=/var/log/supervisor/startup-script.log
-stderr_logfile=/var/log/supervisor/startup-script-err.log
-STARTEOF
-    echo "  Injected startup-script program into supervisord config"
+    echo "  Launching startup script in background: ${STARTUP_SCRIPT}"
+    nohup bash -c 'sleep 20 && '"${STARTUP_SCRIPT}" \
+        >> /var/log/supervisor/startup-script.log 2>&1 &
+    echo "  Background PID: $!"
 fi
 
 # Reset CWD to / before exec - restore process may have cd'd to /tmp dirs that get cleaned up,
