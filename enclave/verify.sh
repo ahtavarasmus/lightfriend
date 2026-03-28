@@ -67,7 +67,8 @@ fi
 # ── 3. Backend health ─────────────────────────────────────────────────────
 
 echo "Check 3: backend health..."
-if curl -sf http://localhost:3000/api/health > /dev/null 2>&1; then
+BACKEND_PORT="${PORT:-3100}"
+if curl -sf http://localhost:${BACKEND_PORT}/api/health > /dev/null 2>&1; then
     echo "  OK: backend responding"
     record_check "backend_health" "true"
 else

@@ -1155,4 +1155,20 @@ send_boot_trace 0
 [ -n "${SEED_BRIDGE_PID:-}" ] && kill "$SEED_BRIDGE_PID" 2>/dev/null || true
 sleep 0.2
 
+# Inject startup script as a supervisord program so it runs after services start
+if [ -n "${STARTUP_SCRIPT:-}" ] && [ -x "${STARTUP_SCRIPT}" ]; then
+    cat >> /etc/supervisor/conf.d/lightfriend.conf <<STARTEOF
+
+[program:startup-script]
+command=${STARTUP_SCRIPT}
+autostart=true
+autorestart=false
+startsecs=0
+priority=99
+stdout_logfile=/var/log/supervisor/startup-script.log
+stderr_logfile=/var/log/supervisor/startup-script-err.log
+STARTEOF
+    echo "  Injected startup-script program into supervisord config"
+fi
+
 exec /usr/bin/supervisord -c /etc/supervisor/conf.d/lightfriend.conf
