@@ -1053,19 +1053,31 @@ chmod +x /tmp/start-services.sh
 if [ "${FULL_RESTORE_DONE}" = "true" ]; then
     cat > /tmp/start-and-verify.sh <<'VERIFYEOF'
 #!/bin/bash
-# Start services but DO NOT start cloudflared yet (defer until verified)
-DEFER_CLOUDFLARED=true
-export DEFER_CLOUDFLARED
-/tmp/start-services.sh
+set -x  # Trace all commands for debugging
+echo "=== start-and-verify.sh started at $(date -u) ==="
 
-echo "Running post-restore verification (pre-cloudflared)..."
-sleep 5
+# Wait for backend to be healthy before running verify
+echo "Waiting for backend health..."
+BACKEND_PORT="${PORT:-3100}"
+BACKEND_READY=false
+for i in $(seq 1 60); do
+    if curl -sf --max-time 3 "http://localhost:${BACKEND_PORT}/api/health" > /dev/null 2>&1; then
+        echo "Backend healthy after $((i * 5))s"
+        BACKEND_READY=true
+        break
+    fi
+    [ $((i % 6)) -eq 0 ] && echo "  Still waiting for backend ($((i * 5))s)..."
+    sleep 5
+done
+if [ "$BACKEND_READY" = "false" ]; then
+    echo "WARNING: Backend not ready after 300s, running verify anyway"
+    supervisorctl status 2>&1
+fi
 
 # Start cloudflared BEFORE final verify so the check includes tunnel status
 if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
-    supervisorctl start cloudflared
-    echo "Cloudflare tunnel starting..."
-    # Wait for cloudflared to be RUNNING (up to 30s)
+    echo "Ensuring cloudflared is running..."
+    supervisorctl start cloudflared 2>&1 || true
     for i in $(seq 1 15); do
         if supervisorctl status cloudflared 2>/dev/null | grep -q "RUNNING"; then
             echo "Cloudflare tunnel confirmed running"
@@ -1075,16 +1087,26 @@ if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
     done
 fi
 
-# Now run verification (includes cloudflared check)
-/app/verify.sh || echo "WARNING: Post-restore verification reported failures. Check /data/seed/verify-result.json"
+# Run verification
+echo "Running verify.sh..."
+/app/verify.sh
+VERIFY_RC=$?
+echo "verify.sh exited with rc=$VERIFY_RC"
 
 # Send verify result to host via HTTP (port 9081 VSOCK bridge, managed by supervisord)
 if [ -f /data/seed/verify-result.json ]; then
-    echo "Sending verify result to host via HTTP..."
-    curl -sf --max-time 30 -T /data/seed/verify-result.json \
-        "http://127.0.0.1:9081/upload/verify-result.json" 2>/dev/null \
-        || echo "WARNING: Failed to send verify result via HTTP"
+    echo "Verify result contents:"
+    cat /data/seed/verify-result.json
+    echo ""
+    echo "Uploading verify result to host via HTTP port 9081..."
+    UPLOAD_RESP=$(curl -v --max-time 30 -T /data/seed/verify-result.json \
+        "http://127.0.0.1:9081/upload/verify-result.json" 2>&1)
+    echo "Upload response: $UPLOAD_RESP"
+else
+    echo "FATAL: /data/seed/verify-result.json does not exist!"
+    ls -la /data/seed/ 2>&1
 fi
+echo "=== start-and-verify.sh finished at $(date -u) ==="
 VERIFYEOF
     chmod +x /tmp/start-and-verify.sh
     STARTUP_SCRIPT="/tmp/start-and-verify.sh"
