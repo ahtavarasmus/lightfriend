@@ -1045,11 +1045,12 @@ fi
 # Now run verification (includes cloudflared check)
 /app/verify.sh || echo "WARNING: Post-restore verification reported failures. Check /data/seed/verify-result.json"
 
-# Send verify result to host via VSOCK port 9004
-if [ -e /dev/vsock ] && [ -f /data/seed/verify-result.json ]; then
-    echo "Sending verify result to host via VSOCK..."
-    socat -u FILE:/data/seed/verify-result.json VSOCK-CONNECT:3:9004 2>/dev/null \
-        || echo "WARNING: Failed to send verify result via VSOCK"
+# Send verify result to host via HTTP (port 9081 VSOCK bridge, managed by supervisord)
+if [ -f /data/seed/verify-result.json ]; then
+    echo "Sending verify result to host via HTTP..."
+    curl -sf --max-time 30 -T /data/seed/verify-result.json \
+        "http://127.0.0.1:9081/upload/verify-result.json" 2>/dev/null \
+        || echo "WARNING: Failed to send verify result via HTTP"
 fi
 VERIFYEOF
     chmod +x /tmp/start-and-verify.sh
@@ -1092,9 +1093,10 @@ echo "Running verification..."
 sleep 3
 /app/verify.sh || echo "WARNING: Verification reported failures"
 
-# Send verify result to host via VSOCK port 9004
-if [ -e /dev/vsock ] && [ -f /data/seed/verify-result.json ]; then
-    socat -u FILE:/data/seed/verify-result.json VSOCK-CONNECT:3:9004 2>/dev/null || true
+# Send verify result to host via HTTP (port 9081 VSOCK bridge, managed by supervisord)
+if [ -f /data/seed/verify-result.json ]; then
+    curl -sf --max-time 30 -T /data/seed/verify-result.json \
+        "http://127.0.0.1:9081/upload/verify-result.json" 2>/dev/null || true
 fi
 
 # Send startup logs to host boot trace receiver

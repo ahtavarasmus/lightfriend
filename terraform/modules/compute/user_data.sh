@@ -581,8 +581,8 @@ pkill -f 'socat.*VSOCK' 2>/dev/null || true
 sleep 2
 
 rm -f "$VERIFY"
-pkill -f 'VSOCK-LISTEN:9004' 2>/dev/null || true
-nohup socat -u VSOCK-LISTEN:9004,reuseaddr CREATE:"$VERIFY" >/tmp/lightfriend-verify-listener.log 2>&1 &
+# Verify result now arrives via HTTP upload (backup-upload-server on port 9081)
+# No VSOCK listener needed - restore-enclave.sh polls the filesystem
 
 echo "Launching enclave..."
 nitro-cli run-enclave --eif-path "$EIF_PATH" --memory 8192 --cpu-count 4 --enclave-cid 16
@@ -810,9 +810,21 @@ EOF
 printf '%s\n' "$ARTIFACT" > /opt/lightfriend/restore/current-path
 
 rm -f "$VERIFY"
+VERIFY_SRC="/opt/lightfriend/backups/verify-result.json"
+rm -f "$VERIFY_SRC"
 /opt/lightfriend/launch-enclave.sh
 
-timeout 900 socat -u VSOCK-LISTEN:9004,reuseaddr CREATE:"$VERIFY" 2>/dev/null || echo "Verify signal timeout"
+# Poll for verify result uploaded via HTTP (backup-upload-server on port 9081)
+echo "Waiting for verify result via HTTP upload..."
+for i in $(seq 1 180); do
+    if [ -s "$VERIFY_SRC" ]; then
+        cp "$VERIFY_SRC" "$VERIFY"
+        rm -f "$VERIFY_SRC"
+        echo "Verify result received after $((i * 5))s"
+        break
+    fi
+    sleep 5
+done
 
 [ -s "$VERIFY" ] || exit 1
 SUCCESS=true
