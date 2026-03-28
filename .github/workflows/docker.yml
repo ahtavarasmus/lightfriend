@@ -579,15 +579,31 @@ jobs:
           echo '{"github_run_id":"${{ github.run_id }}","old_instance":"'$OLD_INSTANCE'","state":"backup_started","started_at":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' | \
             aws s3 cp - "s3://$S3_BUCKET/deploy/deploy-state.json"
 
-          # Step 4a: Write export-request.json via SSM.
-          # Using JSON params format (not string) to avoid quoting issues.
-          # Write trigger to S3. The host polls S3 and writes locally.
-          # SSM send-command from deploy runner stays Pending (delivery issue).
+          # Restart the s3-signal-poller on the old instance to ensure it's not stuck.
+          # The poller's aws s3 cp can hang indefinitely, blocking the loop.
+          echo "Restarting s3-signal-poller on old instance..."
+          RESTART_CMD=$(aws ssm send-command --instance-ids "$OLD_INSTANCE" \
+            --document-name "AWS-RunShellScript" \
+            --parameters '{"commands":["systemctl restart s3-signal-poller && rm -f /opt/lightfriend/backups/export-complete.json"]}' \
+            --timeout-seconds 30 \
+            --query 'Command.CommandId' --output text 2>/dev/null || echo "")
+          [ -n "$RESTART_CMD" ] && echo "Poller restart command: $RESTART_CMD" || echo "WARNING: Poller restart via SSM failed (non-fatal)"
+          sleep 5
+
+          # Write trigger to S3 (primary path - poller picks it up)
+          TRIGGER='{"action":"export","deploy_id":"${{ github.run_id }}"}'
           echo "Writing export trigger to S3..."
-          echo '{"action":"export","deploy_id":"${{ github.run_id }}"}' | \
-            aws s3 cp - "s3://$S3_BUCKET/deploy/export-request.json"
+          echo "$TRIGGER" | aws s3 cp - "s3://$S3_BUCKET/deploy/export-request.json"
           echo "Trigger written to S3"
-          echo "Host's s3-signal-poller will copy it locally within 5s"
+
+          # Also write trigger directly to host via SSM (backup path)
+          # SSM send-command from deploy runner sometimes stays Pending, but
+          # combined with the S3 path above, at least one should work.
+          echo "Also writing trigger directly to host via SSM..."
+          aws ssm send-command --instance-ids "$OLD_INSTANCE" \
+            --document-name "AWS-RunShellScript" \
+            --parameters '{"commands":["echo '"'"''"$TRIGGER"''"'"' > /opt/lightfriend/seed/export-request.json"]}' \
+            --timeout-seconds 30 2>/dev/null || echo "WARNING: Direct SSM trigger failed (non-fatal, S3 path active)"
 
           # Poll S3 for completion. The host's s3-signal-poller handles:
           # 1. Copy trigger from S3 to local seed dir
