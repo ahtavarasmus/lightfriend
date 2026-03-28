@@ -9,7 +9,7 @@ mkdir -p /data/seed
 exec > >(tee "$BOOT_TRACE") 2>&1
 
 send_boot_trace() {
-    local exit_code="${1:-$?}"
+    local exit_code="${1:-0}"
     echo ""
     echo "=== BOOT TRACE END (exit=$exit_code, $(date -u +%Y-%m-%dT%H:%M:%SZ)) ==="
     # Small delay to let tee flush its buffer to the file
@@ -71,7 +71,7 @@ if [ -e /dev/vsock ]; then
             while IFS= read -r line || [[ -n "$line" ]]; do
                 [[ -z "$line" || "$line" == \#* ]] && continue
                 if [[ "$line" =~ ^[A-Za-z_][A-Za-z_0-9]*= ]]; then
-                    export "$line"
+                    export "${line?}"
                     ENV_COUNT=$((ENV_COUNT + 1))
                 fi
             done < /tmp/host_env
@@ -243,7 +243,7 @@ else
 fi
 
 # Kill temporary restore bridge (step 0f starts its own)
-[ -n "${RESTORE_BRIDGE_PID:-}" ] && kill "$RESTORE_BRIDGE_PID" 2>/dev/null && wait "$RESTORE_BRIDGE_PID" 2>/dev/null || true
+if [ -n "${RESTORE_BRIDGE_PID:-}" ]; then kill "$RESTORE_BRIDGE_PID" 2>/dev/null && wait "$RESTORE_BRIDGE_PID" 2>/dev/null; fi || true
 
 # ── 0f. Fetch one-time SQL seed from host (first bootstrap only) ─────────────
 # Host runs python3 http.server on port 9080 serving /opt/lightfriend/seed/.
@@ -1174,7 +1174,7 @@ echo "  Entrypoint setup complete at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 send_boot_trace 0
 
 # Kill entrypoint bridges so supervisord can bind the same ports
-[ -n "${SEED_BRIDGE_PID:-}" ] && kill "$SEED_BRIDGE_PID" 2>/dev/null || true
+if [ -n "${SEED_BRIDGE_PID:-}" ]; then kill "$SEED_BRIDGE_PID" 2>/dev/null; fi || true
 sleep 0.2
 
 # Startup script runs via supervisord's post-boot-verify program (see supervisord.conf).
