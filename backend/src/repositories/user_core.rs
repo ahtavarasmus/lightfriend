@@ -104,6 +104,10 @@ pub trait UserCoreOps: Send + Sync {
     fn update_auto_create_items(&self, user_id: i32, value: bool) -> Result<(), DieselError>;
     fn get_auto_create_items(&self, user_id: i32) -> Result<bool, DieselError>;
 
+    // System important notify
+    fn update_system_important_notify(&self, user_id: i32, value: bool) -> Result<(), DieselError>;
+    fn get_system_important_notify(&self, user_id: i32) -> Result<bool, DieselError>;
+
     // Notification settings
     fn get_default_notification_mode(&self, user_id: i32) -> Result<String, DieselError>;
     fn set_default_notification_mode(&self, user_id: i32, mode: &str) -> Result<(), DieselError>;
@@ -799,6 +803,25 @@ impl UserCoreOps for UserCore {
         let result = user_settings::table
             .filter(user_settings::user_id.eq(user_id))
             .select(user_settings::auto_create_items)
+            .first::<bool>(&mut pg_conn)?;
+        Ok(result)
+    }
+
+    fn update_system_important_notify(&self, user_id: i32, value: bool) -> Result<(), DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        self.ensure_user_settings_exist(user_id)?;
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set(user_settings::system_important_notify.eq(value))
+            .execute(&mut pg_conn)?;
+        Ok(())
+    }
+
+    fn get_system_important_notify(&self, user_id: i32) -> Result<bool, DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        self.ensure_user_settings_exist(user_id)?;
+        let result = user_settings::table
+            .filter(user_settings::user_id.eq(user_id))
+            .select(user_settings::system_important_notify)
             .first::<bool>(&mut pg_conn)?;
         Ok(result)
     }

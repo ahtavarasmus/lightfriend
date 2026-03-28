@@ -50,6 +50,7 @@ pub mod utils {
 }
 pub mod proactive {
     pub mod rules;
+    pub mod system_behaviors;
     pub mod utils;
 }
 pub mod tool_call_utils {
@@ -227,6 +228,8 @@ pub struct AppState {
     pub tool_registry: tools::registry::ToolRegistry,
     pub pending_rule_tests: Arc<DashMap<String, handlers::rule_handlers::PendingRuleTest>>,
     pub maintenance_mode: Arc<AtomicBool>,
+    // (user_id, room_id) -> unix timestamp of last system_important notification
+    pub system_notify_cooldowns: DashMap<(i32, String), i32>,
 }
 
 /// Build the tool registry with all static tool handlers.
