@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lightfriend - Enclave Verification</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 2rem; }
+        .container { max-width: 720px; width: 100%; }
+        h1 { font-size: 1.8rem; margin-bottom: 0.5rem; color: #fff; }
+        .subtitle { color: #888; margin-bottom: 2rem; }
+        a { color: #5b9bf5; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .card { background: #151515; border: 1px solid #2a2a2a; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; }
+        .card h2 { font-size: 1.1rem; margin-bottom: 0.75rem; color: #fff; }
+        .field { margin-bottom: 0.5rem; }
+        .label { color: #888; font-size: 0.85rem; }
+        .value { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.82rem; word-break: break-all; color: #c0c0c0; }
+        .loading { color: #888; }
+        .links { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-top: 0.75rem; }
+        .links a { font-size: 0.9rem; }
+        .footer { margin-top: 2rem; color: #555; font-size: 0.8rem; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Lightfriend Enclave Verification</h1>
+        <p class="subtitle">Independently verify that the production deployment matches the open source code.</p>
+
+        <div class="card" id="latest-card">
+            <h2>Latest Build</h2>
+            <p class="loading" id="loading">Loading verification data...</p>
+            <div id="fields" style="display:none;">
+                <div class="field">
+                    <div class="label">Commit</div>
+                    <div class="value"><a id="commit-link" href="#"></a></div>
+                </div>
+                <div class="field">
+                    <div class="label">EIF SHA-256</div>
+                    <div class="value" id="eif-hash"></div>
+                </div>
+                <div class="field">
+                    <div class="label">PCR0</div>
+                    <div class="value" id="pcr0"></div>
+                </div>
+                <div class="field">
+                    <div class="label">PCR1</div>
+                    <div class="value" id="pcr1"></div>
+                </div>
+                <div class="field">
+                    <div class="label">PCR2</div>
+                    <div class="value" id="pcr2"></div>
+                </div>
+                <div class="field">
+                    <div class="label">Built at</div>
+                    <div class="value" id="built-at"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>How to Verify</h2>
+            <p style="color: #bbb; font-size: 0.9rem; line-height: 1.6;">
+                The production Lightfriend instance runs inside an AWS Nitro Enclave. The PCR values above are
+                cryptographic measurements of the enclave image. You can reproduce the build from source and
+                compare the measurements to confirm that production runs the exact same code as the public repo.
+            </p>
+            <div class="links">
+                <a href="https://github.com/ahtavarasmus/lightfriend">Source Code</a>
+                <a href="verification/latest.json">Raw Metadata (JSON)</a>
+                <a href="https://lightfriend.com">Lightfriend</a>
+            </div>
+        </div>
+
+        <div class="footer">
+            This page is updated automatically on every build.
+        </div>
+    </div>
+
+    <script>
+        fetch('verification/latest.json')
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('fields').style.display = 'block';
+                const commitEl = document.getElementById('commit-link');
+                commitEl.textContent = data.commit_sha;
+                commitEl.href = 'https://github.com/ahtavarasmus/lightfriend/commit/' + data.commit_sha;
+                document.getElementById('eif-hash').textContent = data.eif_sha256;
+                document.getElementById('pcr0').textContent = data.pcr0;
+                document.getElementById('pcr1').textContent = data.pcr1;
+                document.getElementById('pcr2').textContent = data.pcr2;
+                document.getElementById('built-at').textContent = new Date(data.built_at).toLocaleString();
+            })
+            .catch(() => {
+                document.getElementById('loading').textContent = 'Failed to load verification data.';
+            });
+    </script>
+</body>
+</html>
