@@ -263,6 +263,7 @@ diesel::table! {
         phone_contact_notification_type -> Nullable<Text>,
         phone_contact_notify_on_call -> Int4,
         auto_create_items -> Bool,
+        system_important_notify -> Bool,
     }
 }
 

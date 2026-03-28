@@ -160,6 +160,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         tool_registry: crate::build_tool_registry(),
         pending_rule_tests: Arc::new(dashmap::DashMap::new()),
         maintenance_mode: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        system_notify_cooldowns: dashmap::DashMap::new(),
     })
 }
 
@@ -964,6 +965,18 @@ pub mod mock_user_core {
 
         fn get_auto_create_items(&self, _user_id: i32) -> Result<bool, DieselError> {
             Ok(false)
+        }
+
+        fn update_system_important_notify(
+            &self,
+            _user_id: i32,
+            _value: bool,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn get_system_important_notify(&self, _user_id: i32) -> Result<bool, DieselError> {
+            Ok(true)
         }
 
         fn get_default_notification_mode(&self, _user_id: i32) -> Result<String, DieselError> {

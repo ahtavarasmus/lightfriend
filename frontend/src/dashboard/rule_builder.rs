@@ -1042,13 +1042,6 @@ pub fn rule_template_picker(props: &TemplatePickerProps) -> Html {
                 })
                 .unwrap_or(false)
     });
-    let has_tracking = existing_rules.iter().any(|r| {
-        r.trigger_type == "ontology_change"
-            && r.status == "active"
-            && (r.action_config.contains("create_event")
-                || r.action_config.contains("update_event"))
-    });
-
     // For digest, find existing schedule times to suggest alternatives
     let existing_digest_times: Vec<String> = existing_rules
         .iter()
@@ -1117,13 +1110,6 @@ pub fn rule_template_picker(props: &TemplatePickerProps) -> Html {
             },
             digest_label.to_string(),
             digest_desc.to_string(),
-        ));
-    }
-    if !has_tracking {
-        templates.push((
-            RuleTemplate::TrackItems,
-            RuleTemplate::TrackItems.label().to_string(),
-            RuleTemplate::TrackItems.description().to_string(),
         ));
     }
     templates.push((

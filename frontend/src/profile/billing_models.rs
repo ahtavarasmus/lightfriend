@@ -55,6 +55,7 @@ pub struct UserProfile {
     pub phone_service_active: Option<bool>, // whether phone service is active - can be disabled for security
     pub llm_provider: Option<String>, // "openai" (default) or "tinfoil" - user's LLM provider preference
     pub auto_create_items: Option<bool>, // whether to auto-detect and create trackable items from emails/messages
+    pub system_important_notify: Option<bool>, // whether system auto-notifies for important messages
     pub has_any_connection: bool, // whether user has connected any service (for onboarding modal)
 }
 

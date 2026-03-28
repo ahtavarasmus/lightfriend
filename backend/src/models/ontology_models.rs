@@ -242,6 +242,90 @@ pub struct NewOntRule {
     pub flow_config: Option<String>,
 }
 
+// -- Sender signals for importance evaluation --
+
+pub struct SenderSignals {
+    pub message_count_30d: i64,
+    pub last_contact_ago_secs: Option<i64>,
+    pub user_reply_rate: f32,
+    pub avg_response_secs: Option<i64>,
+}
+
+impl SenderSignals {
+    pub fn empty() -> Self {
+        Self {
+            message_count_30d: 0,
+            last_contact_ago_secs: None,
+            user_reply_rate: 0.0,
+            avg_response_secs: None,
+        }
+    }
+
+    pub fn format_for_prompt(&self, sender_name: &str) -> String {
+        if self.message_count_30d == 0 {
+            return format!(
+                "No message history with {} in the last 30 days.",
+                sender_name
+            );
+        }
+
+        let mut parts = Vec::new();
+
+        // Frequency description
+        let freq = if self.message_count_30d >= 100 {
+            "very frequently (multiple times per day)".to_string()
+        } else if self.message_count_30d >= 30 {
+            "about once per day".to_string()
+        } else if self.message_count_30d >= 8 {
+            format!("about {} times per week", self.message_count_30d / 4)
+        } else if self.message_count_30d >= 2 {
+            format!("about {} times per month", self.message_count_30d)
+        } else {
+            "rarely (once in the last 30 days)".to_string()
+        };
+        parts.push(format!("{} messages you {}.", sender_name, freq));
+
+        // Last contact
+        if let Some(ago) = self.last_contact_ago_secs {
+            let desc = if ago < 3600 {
+                "less than an hour ago".to_string()
+            } else if ago < 86400 {
+                format!("{} hours ago", ago / 3600)
+            } else {
+                format!("{} days ago", ago / 86400)
+            };
+            parts.push(format!("Their previous message was {}.", desc));
+        }
+
+        // Reply pattern
+        if self.message_count_30d >= 3 {
+            let pct = (self.user_reply_rate * 100.0) as i32;
+            if pct >= 80 {
+                parts.push(format!("You reply to {}% of their messages.", pct));
+            } else if pct >= 30 {
+                parts.push(format!("You reply to about {}% of their messages.", pct));
+            } else {
+                parts.push("You rarely reply to their messages.".to_string());
+            }
+
+            if let Some(avg) = self.avg_response_secs {
+                let resp_desc = if avg < 120 {
+                    "within a couple minutes".to_string()
+                } else if avg < 900 {
+                    format!("within about {} minutes", avg / 60)
+                } else if avg < 3600 {
+                    "within an hour".to_string()
+                } else {
+                    format!("within about {} hours", avg / 3600)
+                };
+                parts.push(format!("You typically respond {}.", resp_desc));
+            }
+        }
+
+        parts.join(" ")
+    }
+}
+
 // -- Composite view types for API responses --
 
 #[derive(Debug, Clone, Serialize)]

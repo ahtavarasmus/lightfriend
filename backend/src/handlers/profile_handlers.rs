@@ -95,10 +95,11 @@ pub struct ProfileResponse {
     estimated_monitoring_cost: f32,
     location: Option<String>,
     nearby_places: Option<String>,
-    plan_type: Option<String>,    // "assistant", "autopilot", or "byot"
-    phone_service_active: bool,   // whether phone service is active - can be disabled for security
+    plan_type: Option<String>,     // "assistant", "autopilot", or "byot"
+    phone_service_active: bool,    // whether phone service is active - can be disabled for security
     llm_provider: Option<String>, // "openai" (default) or "tinfoil" - user's LLM provider preference
     auto_create_items: bool, // whether to auto-detect and create trackable items from emails/messages
+    system_important_notify: bool, // whether system auto-notifies for important messages
     has_any_connection: bool, // whether user has connected any service (email, bridges)
 }
 use crate::handlers::auth_middleware::AuthUser;
@@ -236,6 +237,7 @@ pub async fn get_profile(
                 phone_service_active: user_settings.phone_service_active,
                 llm_provider: user_settings.llm_provider,
                 auto_create_items: user_settings.auto_create_items,
+                system_important_notify: user_settings.system_important_notify,
                 has_any_connection,
             }))
         }
@@ -624,6 +626,23 @@ pub async fn patch_profile_field(
             state
                 .user_core
                 .update_auto_create_items(user_id, value)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
+        }
+        "system_important_notify" => {
+            let value = request.value.as_bool().ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "system_important_notify must be a boolean"})),
+                )
+            })?;
+            state
+                .user_core
+                .update_system_important_notify(user_id, value)
                 .map_err(|e| {
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,

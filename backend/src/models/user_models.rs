@@ -59,6 +59,7 @@ pub struct UserSettings {
     pub phone_contact_notification_type: Option<String>,
     pub phone_contact_notify_on_call: i32,
     pub auto_create_items: bool,
+    pub system_important_notify: bool,
 }
 
 #[derive(Insertable)]
