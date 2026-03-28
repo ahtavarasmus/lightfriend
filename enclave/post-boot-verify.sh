@@ -22,15 +22,34 @@ for script in /tmp/start-and-verify.sh /tmp/start-and-signal.sh; do
     fi
 done
 
-echo "FATAL: No startup script found. Running verify directly as fallback..."
+echo "No startup script found. Running verify directly as fallback..."
 # Fallback: wait for backend, run verify, upload result
 BACKEND_PORT="${PORT:-3100}"
+BACKEND_READY=false
 for i in $(seq 1 60); do
-    curl -sf --max-time 3 "http://localhost:${BACKEND_PORT}/api/health" > /dev/null 2>&1 && break
+    if curl -sf --max-time 3 "http://localhost:${BACKEND_PORT}/api/health" > /dev/null 2>&1; then
+        echo "Backend healthy after $((i * 5))s"
+        BACKEND_READY=true
+        break
+    fi
     [ $((i % 12)) -eq 0 ] && echo "  Waiting for backend ($((i * 5))s)..."
     sleep 5
 done
-/app/verify.sh || echo "verify.sh failed with rc=$?"
+[ "$BACKEND_READY" = "false" ] && echo "WARNING: Backend not ready after 300s"
+
+# Ensure cloudflared is running
+if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
+    supervisorctl start cloudflared 2>/dev/null || true
+    for i in $(seq 1 15); do
+        supervisorctl status cloudflared 2>/dev/null | grep -q RUNNING && break
+        sleep 2
+    done
+fi
+
+echo "Running verify.sh..."
+/app/verify.sh
+VERIFY_RC=$?
+echo "verify.sh exited with rc=$VERIFY_RC"
 if [ -f /data/seed/verify-result.json ]; then
     echo "Uploading verify result..."
     cat /data/seed/verify-result.json
