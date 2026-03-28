@@ -1155,15 +1155,8 @@ send_boot_trace 0
 [ -n "${SEED_BRIDGE_PID:-}" ] && kill "$SEED_BRIDGE_PID" 2>/dev/null || true
 sleep 0.2
 
-# Run startup script (verify + signal) in background after supervisord starts.
-# The nohup process survives exec (becomes orphan adopted by PID 1).
-# Sleep 20s to give supervisord time to start all services before verify runs.
-if [ -n "${STARTUP_SCRIPT:-}" ] && [ -x "${STARTUP_SCRIPT}" ]; then
-    echo "  Launching startup script in background: ${STARTUP_SCRIPT}"
-    nohup bash -c 'sleep 20 && '"${STARTUP_SCRIPT}" \
-        >> /var/log/supervisor/startup-script.log 2>&1 &
-    echo "  Background PID: $!"
-fi
+# Startup script runs via supervisord's post-boot-verify program (see supervisord.conf).
+# It detects /tmp/start-and-verify.sh or /tmp/start-and-signal.sh created above.
 
 # Reset CWD to / before exec - restore process may have cd'd to /tmp dirs that get cleaned up,
 # leaving child processes with invalid CWD (PostgreSQL "could not locate my own executable path")

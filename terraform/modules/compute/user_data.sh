@@ -489,8 +489,8 @@ while true; do
     # Heartbeat every 60 iterations (~5 min)
     [ $((POLL_COUNT % 60)) -eq 0 ] && echo "$(date -u): heartbeat poll=$POLL_COUNT last_trigger=$${LAST_TRIGGER:-none}"
 
-    # Check for export trigger in S3
-    S3_ERR=$(aws s3 cp "s3://$BUCKET/deploy/export-request.json" /tmp/export-request-check.json 2>&1)
+    # Check for export trigger in S3 (timeout prevents hanging on DNS/credential issues)
+    S3_ERR=$(timeout 10 aws s3 cp "s3://$BUCKET/deploy/export-request.json" /tmp/export-request-check.json 2>&1)
     S3_RC=$?
     if [ $S3_RC -eq 0 ] && [ -s /tmp/export-request-check.json ]; then
         TRIGGER=$(cat /tmp/export-request-check.json)
@@ -519,7 +519,7 @@ while true; do
                 BACKUP_FILE=$(ls -t /opt/lightfriend/backups/*.enc 2>/dev/null | head -1)
                 if [ -n "$BACKUP_FILE" ]; then
                     BACKUP_KEY="backups/deploy/$(basename $BACKUP_FILE)"
-                    aws s3 cp "$BACKUP_FILE" "s3://$BUCKET/$BACKUP_KEY" 2>/dev/null
+                    timeout 120 aws s3 cp "$BACKUP_FILE" "s3://$BUCKET/$BACKUP_KEY" 2>/dev/null
                     BACKUP_SHA=$(sha256sum "$BACKUP_FILE" | awk '{print $1}')
                     BACKUP_SIZE=$(stat -c%s "$BACKUP_FILE")
                     # Add S3 key to completion JSON
@@ -532,7 +532,7 @@ data['backup_sha256'] = '$BACKUP_SHA'
 data['backup_size'] = $BACKUP_SIZE
 print(json.dumps(data))
 " > /tmp/export-complete-s3.json
-                    aws s3 cp /tmp/export-complete-s3.json "s3://$BUCKET/deploy/export-complete.json" 2>/dev/null
+                    timeout 30 aws s3 cp /tmp/export-complete-s3.json "s3://$BUCKET/deploy/export-complete.json" 2>/dev/null
                     echo "$(date -u): Backup uploaded: s3://$BUCKET/$BACKUP_KEY ($BACKUP_SIZE bytes)"
                 fi
             else
