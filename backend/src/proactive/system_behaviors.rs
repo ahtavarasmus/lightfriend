@@ -44,10 +44,7 @@ pub async fn run_system_behaviors(
         .map(|persons| {
             let names: Vec<String> = persons
                 .iter()
-                .filter_map(|p| {
-                    let name = &p.person.name;
-                    Some(name.clone())
-                })
+                .map(|p| p.person.name.clone())
                 .take(20)
                 .collect();
             if names.is_empty() {
