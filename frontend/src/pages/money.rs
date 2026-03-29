@@ -1890,7 +1890,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             Feature { text: "SMS and voice access to your AI assistant".to_string(), sub_items: vec![] },
                             Feature { text: "Connect WhatsApp, email, Telegram, Signal".to_string(), sub_items: vec![] },
                             Feature { text: "Set reminders and scheduled alerts".to_string(), sub_items: vec![] },
-                            Feature { text: "Daily digests of your messages".to_string(), sub_items: vec![] },
+                            Feature { text: "Web search, ask questions, get answers".to_string(), sub_items: vec![] },
                             Feature { text: "$25/month in messaging credits included".to_string(), sub_items: vec![] },
                         ];
                         let autopilot_features = vec![
@@ -1898,7 +1898,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             Feature { text: "AI monitors your messages in the background".to_string(), sub_items: vec![] },
                             Feature { text: "Only important messages reach you".to_string(), sub_items: vec![] },
                             Feature { text: "Automatic tracking of deadlines and commitments".to_string(), sub_items: vec![] },
-                            Feature { text: "Custom automation rules".to_string(), sub_items: vec![] },
+                            Feature { text: "Daily digests and custom automation rules".to_string(), sub_items: vec![] },
                             Feature { text: "$25/month in messaging credits included".to_string(), sub_items: vec![] },
                         ];
                         html! {
@@ -1985,7 +1985,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             Feature { text: "SMS and voice access to your AI assistant".to_string(), sub_items: vec![] },
                             Feature { text: "Connect WhatsApp, email, Telegram, Signal".to_string(), sub_items: vec![] },
                             Feature { text: "Set reminders and scheduled alerts".to_string(), sub_items: vec![] },
-                            Feature { text: "Daily digests of your messages".to_string(), sub_items: vec![] },
+                            Feature { text: "Web search, ask questions, get answers".to_string(), sub_items: vec![] },
                             Feature { text: "$25/month in messaging credits included".to_string(), sub_items: vec![] },
                         ];
                         let autopilot_features = vec![
@@ -1993,7 +1993,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             Feature { text: "AI monitors your messages in the background".to_string(), sub_items: vec![] },
                             Feature { text: "Only important messages reach you".to_string(), sub_items: vec![] },
                             Feature { text: "Automatic tracking of deadlines and commitments".to_string(), sub_items: vec![] },
-                            Feature { text: "Custom automation rules".to_string(), sub_items: vec![] },
+                            Feature { text: "Daily digests and custom automation rules".to_string(), sub_items: vec![] },
                             Feature { text: "$25/month in messaging credits included".to_string(), sub_items: vec![] },
                         ];
 
