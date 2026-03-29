@@ -45,6 +45,27 @@ else
 fi
 echo ""
 
+echo "--- tap0 networking (gvisor-tap-vsock) ---"
+if ip addr show tap0 2>/dev/null | grep -q 'inet '; then
+    echo "  tap0: UP"
+    ip addr show tap0 2>/dev/null | grep -E 'inet |link/ether'
+    echo "  default route: $(ip route show default 2>/dev/null)"
+    echo "  gvforwarder: $(pgrep -f gvforwarder >/dev/null 2>&1 && echo 'running' || echo 'NOT running')"
+    echo "  DNS: $(cat /etc/resolv.conf 2>/dev/null | head -3)"
+    echo "  gateway ping: $(timeout 2 ping -c1 -W1 192.168.127.1 >/dev/null 2>&1 && echo 'OK' || echo 'FAIL')"
+    echo "  internet test: $(timeout 3 curl -sf --noproxy '*' --max-time 2 https://api.cloudflare.com/cdn-cgi/trace 2>/dev/null | head -1 || echo 'FAIL')"
+    echo "  gvforwarder log (last 5 lines):"
+    tail -5 /var/log/gvforwarder.log 2>/dev/null || echo "    no log"
+else
+    echo "  tap0: NOT CONFIGURED"
+    echo "  gvforwarder: $(pgrep -f gvforwarder >/dev/null 2>&1 && echo 'running but no IP' || echo 'NOT running')"
+    if [ -f /var/log/gvforwarder.log ]; then
+        echo "  gvforwarder log (last 10 lines):"
+        tail -10 /var/log/gvforwarder.log 2>/dev/null
+    fi
+fi
+echo ""
+
 echo "--- network: all listeners ---"
 ss -tlnp 2>/dev/null
 echo ""

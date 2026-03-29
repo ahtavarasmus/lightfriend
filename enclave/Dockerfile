@@ -144,6 +144,8 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     iproute2 \
     jq \
+    busybox \
+    && ln -sf /bin/busybox /usr/sbin/udhcpc \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Install cloudflared for Cloudflare tunnel (production only) ──────────────
@@ -151,6 +153,14 @@ ARG TARGETARCH
 RUN if [ "$BUILD_MODE" = "production" ]; then \
         curl -L "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${TARGETARCH}" \
             -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared; \
+    fi
+
+# ── Install gvforwarder for tap networking (IMAP/SMTP outbound) ──────────────
+# gvforwarder creates a tap0 interface over VSOCK to the host's gvproxy,
+# giving the enclave real TCP/IP networking for protocols that can't use HTTP proxy.
+RUN if [ "$BUILD_MODE" = "production" ]; then \
+        curl -L "https://github.com/containers/gvisor-tap-vsock/releases/download/v0.8.8/gvforwarder" \
+            -o /usr/local/bin/gvforwarder && chmod +x /usr/local/bin/gvforwarder; \
     fi
 
 # ── Copy Tuwunel binary (path varies by arch: /usr/local/bin on amd64, /usr/bin on arm64)

@@ -401,14 +401,40 @@ RestartSec=3
 WantedBy=multi-user.target
 DOTEOF
 
-# Enable and start all VSOCK services
+# ── gvproxy for enclave tap networking (IMAP/SMTP outbound) ──────────────────
+# gvisor-tap-vsock provides a real network interface to the enclave over VSOCK.
+# gvproxy runs on the host, gvforwarder runs inside the enclave.
+# This enables protocols that can't use HTTP proxy (IMAP, SMTP, Telegram MTProto).
+echo "Installing gvproxy for enclave tap networking..."
+curl -sL -o /usr/local/bin/gvproxy \
+    https://github.com/containers/gvisor-tap-vsock/releases/download/v0.8.8/gvproxy-linux-amd64
+chmod +x /usr/local/bin/gvproxy
+
+cat > /etc/systemd/system/gvproxy.service <<'GVPROXYEOF'
+[Unit]
+Description=gvisor-tap-vsock proxy for enclave networking (VSOCK port 1024)
+After=network.target
+
+[Service]
+ExecStartPre=/bin/sh -c '[ -S /tmp/network.sock ] && rm -f /tmp/network.sock || true'
+ExecStart=/usr/local/bin/gvproxy -listen vsock://:1024 -listen unix:///tmp/network.sock -debug
+Restart=always
+RestartSec=3
+StandardOutput=append:/opt/lightfriend/logs/gvproxy.log
+StandardError=append:/opt/lightfriend/logs/gvproxy-err.log
+
+[Install]
+WantedBy=multi-user.target
+GVPROXYEOF
+
+# Enable and start all VSOCK services + gvproxy
 systemctl daemon-reload
-for svc in vsock-proxy-bridge vsock-config-server vsock-marlin-kms-bridge vsock-boot-trace seed-http-server vsock-seed-http vsock-cloudflared-edge vsock-dot-bridge backup-upload-server vsock-backup-upload; do
+for svc in vsock-proxy-bridge vsock-config-server vsock-marlin-kms-bridge vsock-boot-trace seed-http-server vsock-seed-http vsock-cloudflared-edge vsock-dot-bridge backup-upload-server vsock-backup-upload gvproxy; do
     systemctl enable "$svc"
     systemctl start "$svc" || echo "WARNING: $svc failed to start"
 done
 
-echo "VSOCK services configured: proxy:8001, config:9000, backup:9001, restore:9002, seed:9003, boot-trace:9007, seed-http:9080, cf-edge:7844, dot:8530, marlin-kms:9010"
+echo "VSOCK services configured: proxy:8001, config:9000, boot-trace:9007, seed-http:9080, cf-edge:7844, dot:8530, marlin-kms:9010, gvproxy:1024"
 
 # S3 deploy signal poller - polls S3 for export-request.json and copies locally.
 # Needed because SSM send-command from the deploy runner stays Pending.
@@ -514,7 +540,7 @@ cat > /opt/lightfriend/launch-enclave.sh <<'SCRIPT'
 set -e
 EIF_PATH="/opt/lightfriend/lightfriend.eif"
 VERIFY="/opt/lightfriend/verify-result.json"
-VSOCK_SVCS="vsock-proxy-bridge vsock-config-server vsock-marlin-kms-bridge vsock-boot-trace vsock-seed-http vsock-cloudflared-edge vsock-dot-bridge vsock-backup-upload"
+VSOCK_SVCS="vsock-proxy-bridge vsock-config-server vsock-marlin-kms-bridge vsock-boot-trace vsock-seed-http vsock-cloudflared-edge vsock-dot-bridge vsock-backup-upload gvproxy"
 
 echo "[launch] EIF: $(ls -la $EIF_PATH 2>&1)"
 echo "[launch] .env: $(ls -la /opt/lightfriend/.env 2>&1)"
@@ -568,7 +594,7 @@ nitro-cli describe-enclaves 2>&1 | head -20
 
 echo ""
 echo "--- 2. VSOCK Services ---"
-for svc in squid vsock-proxy-bridge vsock-config-server vsock-boot-trace vsock-marlin-kms-bridge vsock-cloudflared-edge vsock-dot-bridge vsock-seed-http vsock-backup-upload; do
+for svc in squid vsock-proxy-bridge vsock-config-server vsock-boot-trace vsock-marlin-kms-bridge vsock-cloudflared-edge vsock-dot-bridge vsock-seed-http vsock-backup-upload gvproxy; do
     STATUS=$(systemctl is-active "$svc" 2>/dev/null || echo "not-found")
     printf "  %-30s %s\n" "$svc" "$STATUS"
 done

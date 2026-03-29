@@ -151,6 +151,80 @@ else
     echo "  No VSOCK device - running in direct network mode"
 fi
 
+# ── 0c2. Start tap networking for IMAP/SMTP (gvisor-tap-vsock) ────────────────
+# This gives the enclave a real tap0 network interface over VSOCK for protocols
+# that can't go through the HTTP proxy (IMAP, SMTP, Telegram MTProto, etc.).
+# Requires gvproxy running on the host listening on VSOCK port 1024.
+# This is ADDITIVE - all existing socat bridges and the HTTP proxy continue working.
+if [ -e /dev/vsock ] && [ -x /usr/local/bin/gvforwarder ]; then
+    echo ""
+    echo "[STEP 0c2] Starting tap networking (gvisor-tap-vsock)..."
+
+    # Ensure TUN device node exists (needed for tap0 creation)
+    mkdir -p /dev/net
+    if [ ! -e /dev/net/tun ]; then
+        mknod /dev/net/tun c 10 200 2>/dev/null || echo "  WARNING: could not create /dev/net/tun"
+    fi
+    chmod 666 /dev/net/tun 2>/dev/null || true
+
+    # Create udhcpc default script (busybox udhcpc needs this to configure the interface)
+    mkdir -p /usr/share/udhcpc
+    cat > /usr/share/udhcpc/default.script << 'DHCPSCRIPT'
+#!/bin/sh
+# Minimal udhcpc script for gvforwarder DHCP
+case "$1" in
+    bound|renew)
+        ip addr flush dev "$interface" 2>/dev/null
+        ip addr add "$ip/$mask" dev "$interface"
+        if [ -n "$router" ]; then
+            ip route del default 2>/dev/null
+            ip route add default via "$router" dev "$interface"
+        fi
+        ;;
+esac
+DHCPSCRIPT
+    chmod +x /usr/share/udhcpc/default.script
+
+    # Start gvforwarder: creates tap0, connects to host gvproxy via VSOCK port 1024
+    # CID 3 = parent instance in Nitro Enclaves (CID 2 is Hyper-V default, wrong for us)
+    /usr/local/bin/gvforwarder -url "vsock://3:1024/connect" > /var/log/gvforwarder.log 2>&1 &
+    GVFORWARDER_PID=$!
+    echo "  gvforwarder started (PID $GVFORWARDER_PID)"
+
+    # Wait for tap0 to get IP via DHCP (up to 15 seconds)
+    TAP_OK=false
+    for i in $(seq 1 15); do
+        if ip addr show tap0 2>/dev/null | grep -q 'inet '; then
+            TAP_IP=$(ip addr show tap0 2>/dev/null | grep 'inet ' | awk '{print $2}')
+            echo "  tap0 is up: $TAP_IP (after ${i}s)"
+            TAP_OK=true
+            break
+        fi
+        sleep 1
+    done
+
+    if [ "$TAP_OK" = "true" ]; then
+        # Configure DNS to use gvproxy's built-in DNS server
+        # This forwards queries to the host's resolvers via the gvproxy gateway
+        echo "nameserver 192.168.127.1" > /etc/resolv.conf
+        echo "  DNS: 192.168.127.1 (gvproxy gateway)"
+
+        # Test internet connectivity through tap0 (without proxy)
+        if timeout 5 curl -sf --noproxy '*' --max-time 4 https://api.cloudflare.com/cdn-cgi/trace > /tmp/tap-test 2>&1; then
+            echo "  Internet via tap0: OK ($(head -1 /tmp/tap-test))"
+        else
+            echo "  WARNING: Internet via tap0 not working yet - IMAP may not work initially"
+        fi
+        rm -f /tmp/tap-test
+    else
+        echo "  WARNING: tap0 did not get IP in 15s"
+        echo "  gvforwarder alive: $(kill -0 $GVFORWARDER_PID 2>&1 && echo 'yes' || echo 'no')"
+        echo "  gvforwarder log:"
+        cat /var/log/gvforwarder.log 2>/dev/null | tail -10
+        echo "  IMAP/SMTP will not work, but all other services are unaffected"
+    fi
+fi
+
 # In local Docker mode there is no host-env bootstrap step, so preserve the
 # dev-only fallback key in memory before the runtime derivation step.
 if [ -n "${BACKUP_ENCRYPTION_KEY:-}" ] && [ "${ALLOW_INSECURE_BACKUP_KEY_FALLBACK:-false}" = "true" ] && [ -z "${INSECURE_BACKUP_ENCRYPTION_KEY_FALLBACK:-}" ]; then
