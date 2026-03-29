@@ -5,6 +5,25 @@
 echo "=== Enclave Diagnostics $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 echo ""
 
+# ── CRITICAL: Dump backend logs FIRST before any health checks ──
+# Health checks can hang if the backend is unresponsive, so we dump
+# the actual application logs upfront to always capture them.
+echo "--- backend stderr (last 80 lines) ---"
+tail -80 /var/log/supervisor/lightfriend-err.log 2>/dev/null || echo "  empty"
+echo ""
+
+echo "--- backend stdout (last 40 lines) ---"
+tail -40 /var/log/supervisor/lightfriend.log 2>/dev/null || echo "  empty"
+echo ""
+
+echo "--- cloudflared stderr (last 40 lines) ---"
+tail -40 /var/log/supervisor/cloudflared-err.log 2>/dev/null || echo "  empty"
+echo ""
+
+echo "--- cloudflared stdout (last 20 lines) ---"
+tail -20 /var/log/supervisor/cloudflared.log 2>/dev/null || echo "  empty"
+echo ""
+
 echo "--- supervisorctl status ---"
 supervisorctl status 2>&1
 echo ""
@@ -14,6 +33,7 @@ echo "PG_DATABASE_URL: ${PG_DATABASE_URL:+set (${#PG_DATABASE_URL} chars)}"
 echo "DATABASE_URL: ${DATABASE_URL:+set (${#DATABASE_URL} chars)}"
 echo "PORT: ${PORT:-not set}"
 echo "HTTP_PROXY: ${HTTP_PROXY:-not set}"
+echo "NO_PROXY: ${NO_PROXY:-not set}"
 echo "CLOUDFLARE_TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:+set (${#CLOUDFLARE_TUNNEL_TOKEN} chars)}"
 echo ""
 
