@@ -21,12 +21,28 @@ echo "--- postgres check ---"
 pg_isready -h localhost -U postgres 2>&1 || echo "pg_isready failed"
 echo ""
 
-echo "--- backend health ---"
-curl -sf --max-time 3 http://localhost:${PORT:-3100}/api/health 2>&1 || echo "backend not responding"
+echo "--- backend health (2s timeout) ---"
+timeout 2 curl -sf --max-time 1 --connect-timeout 1 http://localhost:${PORT:-3100}/api/health 2>&1 || echo "backend not responding (hung or crashed)"
 echo ""
 
-echo "--- tuwunel health ---"
-curl -sf --max-time 3 http://localhost:8008/_matrix/client/versions 2>&1 || echo "tuwunel not responding"
+echo "--- tuwunel health (2s timeout) ---"
+timeout 2 curl -sf --max-time 1 --connect-timeout 1 http://localhost:8008/_matrix/client/versions 2>&1 || echo "tuwunel not responding"
+echo ""
+
+echo "--- backend process details ---"
+BACKEND_PID=$(pgrep -f '/app/backend' 2>/dev/null | head -1)
+if [ -n "$BACKEND_PID" ]; then
+    echo "  PID: $BACKEND_PID"
+    echo "  RSS: $(ps -o rss= -p "$BACKEND_PID" 2>/dev/null | tr -d ' ')KB"
+    echo "  Threads: $(ls /proc/$BACKEND_PID/task 2>/dev/null | wc -l)"
+    echo "  FDs: $(ls /proc/$BACKEND_PID/fd 2>/dev/null | wc -l)"
+    echo "  Open files: $(ls -la /proc/$BACKEND_PID/fd 2>/dev/null | grep -c socket)"
+    echo "  TCP connections from backend:"
+    ss -tnp 2>/dev/null | grep "pid=$BACKEND_PID" | head -20
+    echo "  State: $(cat /proc/$BACKEND_PID/status 2>/dev/null | grep -E 'State|Threads|VmRSS|VmSize|FDSize')"
+else
+    echo "  Backend process NOT FOUND!"
+fi
 echo ""
 
 echo "--- network: all listeners ---"
