@@ -223,8 +223,8 @@ pub fn landing() -> Html {
 
             // Animation - immediately shows how it works
             <div class="filter-concept">
-                <h2>{"Always Working in the Background"}</h2>
-                <p class="filter-concept-subtitle">{"Gets smarter the longer you use it."}</p>
+                <h2>{"Stay in Your Life"}</h2>
+                <p class="filter-concept-subtitle">{"We'll pull you out only when it's urgent."}</p>
                 <div class="filter-content">
                     <AnimationComponent />
                 </div>
@@ -317,8 +317,7 @@ pub fn landing() -> Html {
             </div>
             <footer class="footer-cta scroll-animate">
                 <div class="footer-content">
-                    <h2>{"Stay in your life."}</h2>
-                    <p class="subtitle">{"We'll pull you out only when it matters."}</p>
+                    <h2>{"Ready for Digital Peace?"}</h2>
                     <Link<Route> to={Route::Pricing} classes="forward-link">
                         <button class="hero-cta">{"Start Today"}</button>
                     </Link<Route>>
