@@ -22,7 +22,7 @@ pg_isready -h localhost -U postgres 2>&1 || echo "pg_isready failed"
 echo ""
 
 echo "--- backend health ---"
-curl -sf --max-time 3 http://localhost:3000/api/health 2>&1 || echo "backend not responding"
+curl -sf --max-time 3 http://localhost:${PORT:-3100}/api/health 2>&1 || echo "backend not responding"
 echo ""
 
 echo "--- tuwunel health ---"
@@ -31,7 +31,7 @@ echo ""
 
 echo "--- network ---"
 echo "lo: $(ip addr show lo 2>/dev/null | grep 'inet ' | head -3)"
-echo "port 3000: $(ss -tlnp 2>/dev/null | grep ':3000' || echo 'not listening')"
+echo "port ${PORT:-3100}: $(ss -tlnp 2>/dev/null | grep ':${PORT:-3100}' || echo 'not listening')"
 echo "port 8008: $(ss -tlnp 2>/dev/null | grep ':8008' || echo 'not listening')"
 echo "port 7844: $(ss -tlnp 2>/dev/null | grep ':7844' || echo 'not listening')"
 echo ""

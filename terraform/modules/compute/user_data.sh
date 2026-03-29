@@ -188,105 +188,6 @@ RestartSec=3
 WantedBy=multi-user.target
 CFGEOF
 
-# VSOCK backup receiver (port 9001) - receives backup from enclave
-cat > /opt/lightfriend/backup-receiver.sh <<'SCRIPT'
-#!/bin/bash
-BACKUP_DIR="/opt/lightfriend/backups"
-mkdir -p "$BACKUP_DIR"
-while true; do
-    TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
-    socat -u VSOCK-LISTEN:9001,reuseaddr CREATE:"$${BACKUP_DIR}/backup-$${TIMESTAMP}.tar.gz.enc" 2>/dev/null
-    echo "Received backup: backup-$${TIMESTAMP}.tar.gz.enc"
-done
-SCRIPT
-chmod +x /opt/lightfriend/backup-receiver.sh
-
-cat > /etc/systemd/system/vsock-backup-receiver.service <<'BKPEOF'
-[Unit]
-Description=VSOCK backup receiver for Nitro Enclave (port 9001)
-
-[Service]
-ExecStart=/opt/lightfriend/backup-receiver.sh
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-BKPEOF
-
-# VSOCK restore server (port 9002) - serves an explicit restore artifact only
-cat > /opt/lightfriend/restore-server.sh <<'SCRIPT'
-#!/bin/bash
-while true; do
-    CURRENT=$(cat /opt/lightfriend/restore/current-path 2>/dev/null || echo "")
-    if [ -n "$CURRENT" ] && [ -f "$CURRENT" ]; then
-        socat -u VSOCK-LISTEN:9002,reuseaddr FILE:"$CURRENT" 2>/dev/null
-    else
-        socat VSOCK-LISTEN:9002,reuseaddr SYSTEM:"echo NO_BACKUP" 2>/dev/null
-    fi
-done
-SCRIPT
-chmod +x /opt/lightfriend/restore-server.sh
-
-cat > /etc/systemd/system/vsock-restore-server.service <<'SEEDEOF'
-[Unit]
-Description=VSOCK restore server for Nitro Enclave (port 9002)
-
-[Service]
-ExecStart=/opt/lightfriend/restore-server.sh
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-SEEDEOF
-
-# VSOCK seed server (port 9003) - serves a one-time plain SQL bootstrap dump
-cat > /opt/lightfriend/seed-server.sh <<'SCRIPT'
-#!/bin/bash
-SEED_DIR="/opt/lightfriend/seed"
-CURRENT="$${SEED_DIR}/lightfriend_db.sql"
-SERVED_DIR="$${SEED_DIR}/served"
-LOG="/opt/lightfriend/logs/seed-server.log"
-mkdir -p "$SEED_DIR" "$SERVED_DIR" /opt/lightfriend/logs
-
-log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) seed-server: $*" | tee -a "$LOG"; }
-
-log "Starting seed server on port 9003"
-
-while true; do
-    if [ -f "$CURRENT" ]; then
-        FSIZE=$(stat -c%s "$CURRENT" 2>/dev/null || echo "?")
-        log "Seed file present ($${FSIZE} bytes), waiting for connection..."
-        TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
-        socat -u VSOCK-LISTEN:9003,reuseaddr FILE:"$CURRENT" 2>&1 | while read -r line; do log "socat: $line"; done
-        log "Connection served"
-        if [ -f "$CURRENT" ]; then
-            mv "$CURRENT" "$${SERVED_DIR}/lightfriend_db-$${TIMESTAMP}.sql"
-            log "Seed moved to served/lightfriend_db-$${TIMESTAMP}.sql"
-        fi
-    else
-        log "No seed file at $CURRENT, serving NO_SEED response"
-        socat VSOCK-LISTEN:9003,reuseaddr SYSTEM:"echo NO_SEED" 2>/dev/null
-        log "NO_SEED response served"
-    fi
-done
-SCRIPT
-chmod +x /opt/lightfriend/seed-server.sh
-
-cat > /etc/systemd/system/vsock-seed-server.service <<'SEEDSVCEOF'
-[Unit]
-Description=VSOCK SQL seed server for Nitro Enclave (port 9003)
-
-[Service]
-ExecStart=/opt/lightfriend/seed-server.sh
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-SEEDSVCEOF
-
 # VSOCK boot trace receiver (port 9007) - receives enclave boot log
 cat > /opt/lightfriend/boot-trace-receiver.sh <<'SCRIPT'
 #!/bin/bash
@@ -464,7 +365,7 @@ DOTEOF
 
 # Enable and start all VSOCK services
 systemctl daemon-reload
-for svc in vsock-proxy-bridge vsock-config-server vsock-backup-receiver vsock-restore-server vsock-seed-server vsock-marlin-kms-bridge vsock-boot-trace seed-http-server vsock-seed-http vsock-cloudflared-edge vsock-dot-bridge backup-upload-server vsock-backup-upload; do
+for svc in vsock-proxy-bridge vsock-config-server vsock-marlin-kms-bridge vsock-boot-trace seed-http-server vsock-seed-http vsock-cloudflared-edge vsock-dot-bridge backup-upload-server vsock-backup-upload; do
     systemctl enable "$svc"
     systemctl start "$svc" || echo "WARNING: $svc failed to start"
 done
@@ -575,7 +476,7 @@ cat > /opt/lightfriend/launch-enclave.sh <<'SCRIPT'
 set -e
 EIF_PATH="/opt/lightfriend/lightfriend.eif"
 VERIFY="/opt/lightfriend/verify-result.json"
-VSOCK_SVCS="vsock-proxy-bridge vsock-config-server vsock-seed-server vsock-boot-trace vsock-backup-receiver vsock-restore-server vsock-marlin-kms-bridge vsock-seed-http vsock-cloudflared-edge vsock-dot-bridge vsock-backup-upload"
+VSOCK_SVCS="vsock-proxy-bridge vsock-config-server vsock-marlin-kms-bridge vsock-boot-trace vsock-seed-http vsock-cloudflared-edge vsock-dot-bridge vsock-backup-upload"
 
 [ -f /opt/lightfriend/.env ] || { echo "ERROR: /opt/lightfriend/.env not found"; exit 1; }
 [ -f "$EIF_PATH" ] || { echo "ERROR: CI-built EIF not found at $EIF_PATH"; exit 1; }
@@ -620,7 +521,7 @@ nitro-cli describe-enclaves 2>&1 | head -20
 
 echo ""
 echo "--- 2. VSOCK Services ---"
-for svc in squid vsock-proxy-bridge vsock-config-server vsock-seed-server vsock-boot-trace vsock-backup-receiver vsock-restore-server vsock-marlin-kms-bridge; do
+for svc in squid vsock-proxy-bridge vsock-config-server vsock-boot-trace vsock-marlin-kms-bridge; do
     STATUS=$(systemctl is-active "$svc" 2>/dev/null || echo "not-found")
     printf "  %-30s %s\n" "$svc" "$STATUS"
 done
@@ -847,21 +748,6 @@ SUCCESS=true
 SCRIPT
 chmod +x /opt/lightfriend/restore-enclave.sh
 
-# ── Pre-deploy script (run on OLD instance before blue-green) ────────────
-
-cat > /opt/lightfriend/trigger-export.sh <<'SCRIPT'
-#!/bin/bash
-set -e
-echo "Triggering export in enclave via VSOCK port 9003..."
-echo "This will block until export completes (5-10 minutes)..."
-# Connect to enclave CID 16, port 9003. The enclave runs export.sh,
-# sends backup via port 9001, then closes this connection.
-timeout 900 socat -T600 - VSOCK-CONNECT:16:9003 || { echo "Export trigger failed or timed out"; exit 1; }
-echo "Export complete."
-ls -la /opt/lightfriend/backups/ | tail -3
-SCRIPT
-chmod +x /opt/lightfriend/trigger-export.sh
-
 cat > /opt/lightfriend/upload-env.sh <<'SCRIPT'
 #!/bin/bash
 set -e
@@ -872,18 +758,6 @@ aws s3 cp /opt/lightfriend/.env "s3://$BUCKET/config/.env" --sse AES256
 echo "Uploaded .env to s3://$BUCKET/config/.env"
 SCRIPT
 chmod +x /opt/lightfriend/upload-env.sh
-
-cat > /opt/lightfriend/trigger-maintenance.sh <<'SCRIPT'
-#!/bin/bash
-set -euo pipefail
-ACTION="$${1:-status}"
-RESULT=$(echo "$ACTION" | timeout 30 socat - VSOCK-CONNECT:16:9005 2>&1) || {
-    echo "FATAL: Maintenance trigger via VSOCK failed"
-    exit 1
-}
-echo "$RESULT"
-SCRIPT
-chmod +x /opt/lightfriend/trigger-maintenance.sh
 
 cat > /opt/lightfriend/pre-deploy.sh <<'SCRIPT'
 #!/bin/bash

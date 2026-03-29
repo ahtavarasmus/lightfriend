@@ -111,7 +111,7 @@ export MATRIX_HOMESERVER_PERSISTENT_STORE_PATH="${MATRIX_HOMESERVER_PERSISTENT_S
 export WHATSAPP_BRIDGE_BOT="${WHATSAPP_BRIDGE_BOT:-@whatsappbot:localhost}"
 export SIGNAL_BRIDGE_BOT="${SIGNAL_BRIDGE_BOT:-@signalbot:localhost}"
 export TELEGRAM_BRIDGE_BOT="${TELEGRAM_BRIDGE_BOT:-@telegrambot:localhost}"
-export PORT="${PORT:-3000}"
+export PORT="${PORT:-3100}"
 export SKIP_BACKEND="${SKIP_BACKEND:-false}"
 export RESTORE_MODE="${RESTORE_MODE:-none}"
 
@@ -204,7 +204,7 @@ if [ "${RESTORE_MODE}" != "none" ]; then
         sleep 1
     fi
 
-    # Try HTTP first (reliable for large files), fall back to raw VSOCK
+    # Download backup via HTTP seed server (port 9080 VSOCK bridge)
     BACKUP_URL="http://127.0.0.1:9080/restore-backup.tar.gz.enc"
     echo "  Downloading backup via HTTP (port 9080)..."
     HTTP_OK=false
@@ -216,11 +216,6 @@ if [ "${RESTORE_MODE}" != "none" ]; then
         echo "  HTTP attempt ${attempt}/10 - waiting for seed server..."
         sleep 3
     done
-
-    if [ "$HTTP_OK" = "false" ] && [ -e /dev/vsock ]; then
-        echo "  HTTP failed, trying raw VSOCK port 9002..."
-        socat -T300 -u VSOCK-CONNECT:3:9002 CREATE:"$RECEIVED" 2>/dev/null || true
-    fi
 
     if [ -s "$RECEIVED" ] && ! grep -q "NO_BACKUP" "$RECEIVED" 2>/dev/null; then
         RECEIVED_SIZE=$(stat -c%s "$RECEIVED" 2>/dev/null || stat -f%z "$RECEIVED" 2>/dev/null || echo "unknown")
@@ -383,11 +378,8 @@ REOF
         local step="$2"
         echo "RESTORE FAILED: ${msg} (step: ${step})"
         write_restore_status "FAILED" "${msg}" "${step}"
-        # Send failure to host via VSOCK so CI gets the actual error, not just TIMEOUT
-        if [ -e /dev/vsock ]; then
-            echo "{\"status\": \"RESTORE_FAILED\", \"restore_type\": \"full_restore\", \"error\": \"${msg}\", \"step\": \"${step}\", \"user_count\": 0}" > /data/seed/verify-result.json
-            socat -u FILE:/data/seed/verify-result.json VSOCK-CONNECT:3:9004 2>/dev/null || true
-        fi
+        # Write failure to verify-result.json (post-boot-verify will upload it via HTTP)
+        echo "{\"status\": \"RESTORE_FAILED\", \"restore_type\": \"full_restore\", \"error\": \"${msg}\", \"step\": \"${step}\", \"user_count\": 0}" > /data/seed/verify-result.json
         echo "Old enclave is still running. Fix the issue and retry."
         su postgres -c "$PG_BIN/pg_ctl -D $PG_DATA stop -w" 2>/dev/null || true
         exit 1
@@ -974,7 +966,7 @@ if [ -e /dev/vsock ] && [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
 fi
 
 # Use a startup script that starts services in order
-cat > /tmp/start-services.sh << 'STARTUP'
+cat > /data/seed/start-services.sh << 'STARTUP'
 #!/bin/bash
 # Wait for PostgreSQL to be ready, then start dependent services
 exec > /data/seed/startup-services.log 2>&1
@@ -1049,11 +1041,11 @@ supervisorctl status 2>&1
 echo "=== All services started $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 beacon "all-done"
 STARTUP
-chmod +x /tmp/start-services.sh
+chmod +x /data/seed/start-services.sh
 
 # If a full restore was done, create a post-startup verification wrapper
 if [ "${FULL_RESTORE_DONE}" = "true" ]; then
-    cat > /tmp/start-and-verify.sh <<'VERIFYEOF'
+    cat > /data/seed/start-and-verify.sh <<'VERIFYEOF'
 #!/bin/bash
 set -x  # Trace all commands for debugging
 echo "=== start-and-verify.sh started at $(date -u) ==="
@@ -1110,22 +1102,22 @@ else
 fi
 echo "=== start-and-verify.sh finished at $(date -u) ==="
 VERIFYEOF
-    chmod +x /tmp/start-and-verify.sh
-    STARTUP_SCRIPT="/tmp/start-and-verify.sh"
+    chmod +x /data/seed/start-and-verify.sh
+    STARTUP_SCRIPT="/data/seed/start-and-verify.sh"
 else
     # Fresh start (no restore) - run full verification before signaling
-    cat > /tmp/start-and-signal.sh <<'SIGNALEOF'
+    cat > /data/seed/start-and-signal.sh <<'SIGNALEOF'
 #!/bin/bash
 exec >> /data/seed/startup-signal.log 2>&1
 echo "=== Signal script $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 
-/tmp/start-services.sh
+/data/seed/start-services.sh
 
 # Wait for backend to be ready before running verification
 echo "Waiting for backend to start..."
 BACKEND_READY=false
 for i in $(seq 1 60); do
-    if curl -sf http://localhost:3000/api/health > /dev/null 2>&1; then
+    if curl -sf http://localhost:${PORT:-3100}/api/health > /dev/null 2>&1; then
         echo "Backend ready after $((i * 5))s"
         BACKEND_READY=true
         break
@@ -1161,8 +1153,8 @@ echo "=== Sending startup logs to host ==="
 cat /data/seed/startup-services.log /data/seed/startup-signal.log 2>/dev/null \
     | socat -T10 -u STDIN VSOCK-CONNECT:3:9007 2>/dev/null || true
 SIGNALEOF
-    chmod +x /tmp/start-and-signal.sh
-    STARTUP_SCRIPT="/tmp/start-and-signal.sh"
+    chmod +x /data/seed/start-and-signal.sh
+    STARTUP_SCRIPT="/data/seed/start-and-signal.sh"
 fi
 
 # Enable PostgreSQL autostart and run the startup orchestrator in background
@@ -1180,7 +1172,7 @@ if [ -n "${SEED_BRIDGE_PID:-}" ]; then kill "$SEED_BRIDGE_PID" 2>/dev/null; fi |
 sleep 0.2
 
 # Startup script runs via supervisord's post-boot-verify program (see supervisord.conf).
-# It detects /tmp/start-and-verify.sh or /tmp/start-and-signal.sh created above.
+# It detects /data/seed/start-and-verify.sh or /data/seed/start-and-signal.sh created above.
 
 # Reset CWD to / before exec - restore process may have cd'd to /tmp dirs that get cleaned up,
 # leaving child processes with invalid CWD (PostgreSQL "could not locate my own executable path")

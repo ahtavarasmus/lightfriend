@@ -404,6 +404,18 @@ jobs:
             aws s3 rm "s3://$S3_BUCKET/deploy/deploy-state.json" 2>/dev/null || true
           fi
 
+      # ── Step 0: Ensure launch template is up to date ──
+      - name: Terraform apply
+        if: steps.infra.outputs.old_instance != ''
+        uses: hashicorp/tfc-workflows-run@v1.3.1
+        id: terraform
+        with:
+          workspace: lightfriend-prod
+          token: ${{ secrets.TF_API_TOKEN }}
+          message: "Deploy run ${{ github.run_id }} - auto-apply"
+        env:
+          TF_CLOUD_ORGANIZATION: lightfriend-ai
+
       # ── Step 1: Launch new EC2 and pre-warm ──
       - name: Launch new EC2 instance
         id: launch

@@ -3,18 +3,14 @@
 # Finds and executes the startup script created by entrypoint.sh.
 echo "=== post-boot-verify.sh started at $(date -u) ==="
 
-echo "Contents of /tmp/ before sleep:"
-ls -la /tmp/ 2>&1
-echo ""
-
 echo "Sleeping 30s for services to initialize..."
 sleep 30
 
-echo "Contents of /tmp/ after sleep:"
-ls -la /tmp/ 2>&1
+echo "Checking /data/seed/ for startup scripts:"
+ls -la /data/seed/start-*.sh 2>&1 || echo "  none found"
 echo ""
 
-for script in /tmp/start-and-verify.sh /tmp/start-and-signal.sh; do
+for script in /data/seed/start-and-verify.sh /data/seed/start-and-signal.sh; do
     echo "Checking $script: exists=$([ -f "$script" ] && echo yes || echo no) executable=$([ -x "$script" ] && echo yes || echo no)"
     if [ -x "$script" ]; then
         echo "Executing: $script"
