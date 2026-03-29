@@ -2132,7 +2132,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 </details>
                                 <details>
                                     <summary>{"What's the difference between Assistant and Autopilot?"}</summary>
-                                    <p>{"Assistant gives you manual control: reminders, contact profiles, daily digests. Autopilot adds automatic intelligence: Lightfriend reads your incoming messages, filters by urgency, creates items automatically, and monitors for updates."}</p>
+                                    <p>{"Assistant lets you text and call your AI assistant, set reminders, and ask questions. Autopilot adds background intelligence: Lightfriend monitors your messages, only alerts you when something is urgent, tracks deadlines automatically, and lets you build custom automation rules."}</p>
                                 </details>
                                 </>
                             }
@@ -2145,7 +2145,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 </details>
                                 <details>
                                     <summary>{"What's the difference between Assistant and Autopilot?"}</summary>
-                                    <p>{"Assistant gives you manual control: reminders, contact profiles, daily digests. Autopilot adds automatic intelligence: Lightfriend reads your incoming messages, filters by urgency, creates items automatically, and monitors for updates."}</p>
+                                    <p>{"Assistant lets you text and call your AI assistant, set reminders, and ask questions. Autopilot adds background intelligence: Lightfriend monitors your messages, only alerts you when something is urgent, tracks deadlines automatically, and lets you build custom automation rules."}</p>
                                 </details>
                                 <details>
                                     <summary>{"How do credits work?"}</summary>
@@ -2162,7 +2162,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 </details>
                                 <details>
                                     <summary>{"What's the difference between Assistant and Autopilot?"}</summary>
-                                    <p>{"Assistant gives you manual control: reminders, contact profiles, daily digests. Autopilot adds automatic intelligence: Lightfriend reads your incoming messages, filters by urgency, creates items automatically, and monitors for updates."}</p>
+                                    <p>{"Assistant lets you text and call your AI assistant, set reminders, and ask questions. Autopilot adds background intelligence: Lightfriend monitors your messages, only alerts you when something is urgent, tracks deadlines automatically, and lets you build custom automation rules."}</p>
                                 </details>
                                 <details>
                                     <summary>{"How do credits work?"}</summary>
