@@ -46,10 +46,17 @@ if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
     done
 fi
 
-echo "Running verify.sh..."
-/app/verify.sh
-VERIFY_RC=$?
-echo "verify.sh exited with rc=$VERIFY_RC"
+# Run verify, retry up to 3 times if it fails (backend may still be starting)
+VERIFY_RC=1
+for attempt in 1 2 3; do
+    echo "Running verify.sh (attempt $attempt/3)..."
+    /app/verify.sh
+    VERIFY_RC=$?
+    echo "verify.sh exited with rc=$VERIFY_RC"
+    [ $VERIFY_RC -eq 0 ] && break
+    echo "Verify failed, waiting 30s before retry..."
+    sleep 30
+done
 if [ -f /data/seed/verify-result.json ]; then
     echo "Uploading verify result..."
     cat /data/seed/verify-result.json
