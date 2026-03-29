@@ -65,6 +65,10 @@ echo "--- post-boot-verify-err log (last 10 lines) ---"
 tail -10 /var/log/supervisor/post-boot-verify-err.log 2>/dev/null || echo "  no log"
 echo ""
 
+echo "--- cloudflared-diag log ---"
+cat /var/log/supervisor/cloudflared-diag.log 2>/dev/null || echo "  no diag log"
+echo ""
+
 echo "--- export-watcher test ---"
 echo "  curl 9080: $(curl -sf --max-time 3 http://127.0.0.1:9080/ 2>&1 | head -1 || echo 'unreachable')"
 echo "  curl 9081: $(curl -sf --max-time 3 http://127.0.0.1:9081/ 2>&1 | head -1 || echo 'unreachable')"
