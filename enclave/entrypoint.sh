@@ -220,7 +220,7 @@ DHCPSCRIPT
         echo "  WARNING: tap0 did not get IP in 15s"
         echo "  gvforwarder alive: $(kill -0 $GVFORWARDER_PID 2>&1 && echo 'yes' || echo 'no')"
         echo "  gvforwarder log:"
-        cat /var/log/gvforwarder.log 2>/dev/null | tail -10
+        tail -10 /var/log/gvforwarder.log 2>/dev/null
         echo "  IMAP/SMTP will not work, but all other services are unaffected"
     fi
 fi
