@@ -148,9 +148,8 @@ RUN apt-get update && apt-get install -y \
 
 # ── Install cloudflared for Cloudflare tunnel (production only) ──────────────
 ARG TARGETARCH
-ARG CLOUDFLARED_VERSION=2025.2.1
 RUN if [ "$BUILD_MODE" = "production" ]; then \
-        curl -L "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-${TARGETARCH}" \
+        curl -L "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${TARGETARCH}" \
             -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared; \
     fi
 
