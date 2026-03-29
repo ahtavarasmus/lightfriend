@@ -1837,8 +1837,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
         <div class="pricing-panel">
             <style>{pricing_css}</style>
             <div class="pricing-header">
-                <h1>{"Invest in Your Peace of Mind"}</h1>
-                <p>{"Stay in your life. We'll pull you out only when it matters."}</p>
+                <h1>{"Pricing"}</h1>
                 {
                     if props.selected_country == "Other" {
                         html! {

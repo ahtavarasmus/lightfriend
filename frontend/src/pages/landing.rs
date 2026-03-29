@@ -317,7 +317,8 @@ pub fn landing() -> Html {
             </div>
             <footer class="footer-cta scroll-animate">
                 <div class="footer-content">
-                    <h2>{"Ready for Digital Peace?"}</h2>
+                    <h2>{"Stay in your life."}</h2>
+                    <p class="subtitle">{"We'll pull you out only when it matters."}</p>
                     <Link<Route> to={Route::Pricing} classes="forward-link">
                         <button class="hero-cta">{"Start Today"}</button>
                     </Link<Route>>
