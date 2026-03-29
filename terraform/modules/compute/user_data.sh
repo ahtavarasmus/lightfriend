@@ -49,7 +49,7 @@ usermod -aG docker ec2-user
 
 # Set up /opt/lightfriend application directory
 echo "Setting up /opt/lightfriend..."
-mkdir -p /opt/lightfriend/{backups,restore}
+mkdir -p /opt/lightfriend/{backups,restore,seed}
 
 chown -R ec2-user:ec2-user /opt/lightfriend
 
