@@ -1096,13 +1096,7 @@ pub fn rule_template_picker(props: &TemplatePickerProps) -> Html {
     };
 
     let mut templates: Vec<(RuleTemplate, String, String)> = Vec::new();
-    if !has_critical {
-        templates.push((
-            RuleTemplate::CriticalMessages,
-            RuleTemplate::CriticalMessages.label().to_string(),
-            RuleTemplate::CriticalMessages.description().to_string(),
-        ));
-    }
+    // CriticalMessages removed - importance notifications are now system-level
     if let Some(time) = digest_time {
         templates.push((
             RuleTemplate::DailyDigest {
@@ -2937,8 +2931,6 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                         <div class="rb-template-group">
                                             {for [
                                                 (PromptTemplate::Summarize, "Summarize"),
-                                                (PromptTemplate::FilterImportant, "Only if important"),
-                                                (PromptTemplate::TrackItemsUpdate, "AI tracks"),
                                                 (PromptTemplate::CheckCondition, "Check condition"),
                                                 (PromptTemplate::Custom, "Custom"),
                                             ].iter().map(|(tmpl, label)| {
@@ -4664,8 +4656,6 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
         let template_buttons = {
             let templates = [
                 (PromptTemplate::Summarize, "Summarize"),
-                (PromptTemplate::FilterImportant, "Only if important"),
-                (PromptTemplate::TrackItemsCreate, "Track new items"),
                 (PromptTemplate::CheckCondition, "Check condition"),
                 (PromptTemplate::Custom, "Custom"),
             ];
