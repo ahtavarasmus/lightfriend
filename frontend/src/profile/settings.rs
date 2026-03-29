@@ -259,7 +259,8 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let save_context = use_state(|| (*user_profile).save_context.unwrap_or(0));
     let feature_updates = use_state(|| (*user_profile).notify);
     let auto_create_items = use_state(|| (*user_profile).auto_create_items.unwrap_or(false));
-    let system_important_notify = use_state(|| (*user_profile).system_important_notify.unwrap_or(true));
+    let system_important_notify =
+        use_state(|| (*user_profile).system_important_notify.unwrap_or(true));
     // Sending number selector state (for notification-only countries)
     let show_sending_number_selector = use_state(|| false);
     let available_sending_numbers = use_state(|| Vec::<serde_json::Value>::new());

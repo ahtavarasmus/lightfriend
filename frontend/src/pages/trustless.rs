@@ -7,7 +7,8 @@ use yew_router::prelude::*;
 pub fn trustless_verification() -> Html {
     use_seo(SeoMeta {
         title: "Verifiably Private - Lightfriend",
-        description: "How Lightfriend keeps your data private - even from us - and how anyone can verify it.",
+        description:
+            "How Lightfriend keeps your data private - even from us - and how anyone can verify it.",
         canonical: "https://lightfriend.ai/trustless",
         og_type: "website",
     });

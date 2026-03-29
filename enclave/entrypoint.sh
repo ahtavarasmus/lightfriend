@@ -284,7 +284,7 @@ if [ "${RESTORE_MODE}" != "none" ]; then
     HTTP_OK=false
     for attempt in $(seq 1 10); do
         if curl -sf --max-time 300 -o "$RECEIVED" "$BACKUP_URL" 2>/dev/null && [ -s "$RECEIVED" ]; then
-            HTTP_OK=true
+            export HTTP_OK=true
             break
         fi
         echo "  HTTP attempt ${attempt}/10 - waiting for seed server..."
