@@ -1177,9 +1177,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                     <span class="amount">{price_text}</span>
                     <span class="period">{props.period.clone()}</span>
                 </div>
-                    <div class="learn-more-section">
-                        <a href="/how-to-switch-to-dumbphone" class="learn-more-link">{"How to switch to a dumbphone and what you'll need"}</a>
-                    </div>
                 <div class="includes">
                     <ul class="quota-list">
                         { for props.features.iter().flat_map(|feature| {
@@ -1841,7 +1838,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
             <style>{pricing_css}</style>
             <div class="pricing-header">
                 <h1>{"Invest in Your Peace of Mind"}</h1>
-                <p>{"Lightfriend makes it possible to seriously switch to a dumbphone, saving you 2-4 hours per day of mindless scrolling*"}</p>
+                <p>{"AI that watches your messages so you don't have to."}</p>
                 {
                     if props.selected_country == "Other" {
                         html! {
