@@ -64,10 +64,25 @@ for attempt in 1 2 3; do
     VERIFY_RC=$?
     echo "verify.sh exited with rc=$VERIFY_RC"
     [ $VERIFY_RC -eq 0 ] && break
-    echo "Verify failed, waiting 30s before retry..."
+    echo "Verify failed. Backend logs:"
+    tail -20 /var/log/supervisor/lightfriend-err.log 2>/dev/null
+    tail -10 /var/log/supervisor/lightfriend.log 2>/dev/null
+    echo "Waiting 30s before retry..."
     sleep 30
 done
 if [ -f /data/seed/verify-result.json ]; then
+    # If verify failed, inject backend error logs into the JSON for debugging
+    if [ $VERIFY_RC -ne 0 ]; then
+        BACKEND_ERR=$(tail -20 /var/log/supervisor/lightfriend-err.log 2>/dev/null | tr '\n' '|' | sed 's/"/\\"/g' | cut -c1-500)
+        python3 -c "
+import json
+with open('/data/seed/verify-result.json') as f:
+    data = json.load(f)
+data['backend_error'] = '''${BACKEND_ERR}'''
+with open('/data/seed/verify-result.json', 'w') as f:
+    json.dump(data, f)
+" 2>/dev/null || true
+    fi
     echo "Uploading verify result..."
     cat /data/seed/verify-result.json
     curl -v --max-time 30 -T /data/seed/verify-result.json \
