@@ -35,7 +35,17 @@ for i in $(seq 1 60); do
     [ $((i % 12)) -eq 0 ] && echo "  Waiting for backend ($((i * 5))s)..."
     sleep 5
 done
-[ "$BACKEND_READY" = "false" ] && echo "WARNING: Backend not ready after 300s"
+if [ "$BACKEND_READY" = "false" ]; then
+    echo "WARNING: Backend not ready after 300s"
+    echo "=== supervisorctl status ==="
+    supervisorctl status 2>&1
+    echo "=== lightfriend stderr (last 30 lines) ==="
+    tail -30 /var/log/supervisor/lightfriend-err.log 2>/dev/null
+    echo "=== lightfriend stdout (last 30 lines) ==="
+    tail -30 /var/log/supervisor/lightfriend.log 2>/dev/null
+    echo "=== postgresql stderr (last 10 lines) ==="
+    tail -10 /var/log/supervisor/postgresql-err.log 2>/dev/null
+fi
 
 # Ensure cloudflared is running
 if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
