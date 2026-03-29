@@ -28,6 +28,8 @@ STATUS_FILE="/data/seed/export-status.json"
 # Cleanup function - remove staging artifacts
 cleanup() {
     rm -rf /tmp/backup-staging /tmp/verify.tar.gz "${ARCHIVE}" 2>/dev/null || true
+    # Clean tuwunel/matrix snapshot dirs created during Phase A
+    rm -rf "${STAGING}/tuwunel-snapshot" "${STAGING}/matrix-store-snapshot" 2>/dev/null || true
 }
 trap cleanup EXIT
 

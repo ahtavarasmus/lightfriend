@@ -404,6 +404,10 @@ jobs:
             aws s3 rm "s3://$S3_BUCKET/deploy/deploy-state.json" 2>/dev/null || true
           fi
 
+      # ── Step 0: Ensure launch template is up to date ──
+      # Skipped until TF_API_TOKEN is configured. Run terraform apply manually
+      # when user_data.sh changes. See DEPLOY_CLEANUP.md for details.
+
       # ── Step 1: Launch new EC2 and pre-warm ──
       - name: Launch new EC2 instance
         id: launch

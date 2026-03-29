@@ -111,7 +111,7 @@ export MATRIX_HOMESERVER_PERSISTENT_STORE_PATH="${MATRIX_HOMESERVER_PERSISTENT_S
 export WHATSAPP_BRIDGE_BOT="${WHATSAPP_BRIDGE_BOT:-@whatsappbot:localhost}"
 export SIGNAL_BRIDGE_BOT="${SIGNAL_BRIDGE_BOT:-@signalbot:localhost}"
 export TELEGRAM_BRIDGE_BOT="${TELEGRAM_BRIDGE_BOT:-@telegrambot:localhost}"
-export PORT="${PORT:-3000}"
+export PORT="${PORT:-3100}"
 export SKIP_BACKEND="${SKIP_BACKEND:-false}"
 export RESTORE_MODE="${RESTORE_MODE:-none}"
 
@@ -149,6 +149,80 @@ if [ -e /dev/vsock ]; then
     rm -f /tmp/proxy-test
 else
     echo "  No VSOCK device - running in direct network mode"
+fi
+
+# ── 0c2. Start tap networking for IMAP/SMTP (gvisor-tap-vsock) ────────────────
+# This gives the enclave a real tap0 network interface over VSOCK for protocols
+# that can't go through the HTTP proxy (IMAP, SMTP, Telegram MTProto, etc.).
+# Requires gvproxy running on the host listening on VSOCK port 1024.
+# This is ADDITIVE - all existing socat bridges and the HTTP proxy continue working.
+if [ -e /dev/vsock ] && [ -x /usr/local/bin/gvforwarder ]; then
+    echo ""
+    echo "[STEP 0c2] Starting tap networking (gvisor-tap-vsock)..."
+
+    # Ensure TUN device node exists (needed for tap0 creation)
+    mkdir -p /dev/net
+    if [ ! -e /dev/net/tun ]; then
+        mknod /dev/net/tun c 10 200 2>/dev/null || echo "  WARNING: could not create /dev/net/tun"
+    fi
+    chmod 666 /dev/net/tun 2>/dev/null || true
+
+    # Create udhcpc default script (busybox udhcpc needs this to configure the interface)
+    mkdir -p /usr/share/udhcpc
+    cat > /usr/share/udhcpc/default.script << 'DHCPSCRIPT'
+#!/bin/sh
+# Minimal udhcpc script for gvforwarder DHCP
+case "$1" in
+    bound|renew)
+        ip addr flush dev "$interface" 2>/dev/null
+        ip addr add "$ip/$mask" dev "$interface"
+        if [ -n "$router" ]; then
+            ip route del default 2>/dev/null
+            ip route add default via "$router" dev "$interface"
+        fi
+        ;;
+esac
+DHCPSCRIPT
+    chmod +x /usr/share/udhcpc/default.script
+
+    # Start gvforwarder: creates tap0, connects to host gvproxy via VSOCK port 1024
+    # CID 3 = parent instance in Nitro Enclaves (CID 2 is Hyper-V default, wrong for us)
+    /usr/local/bin/gvforwarder -url "vsock://3:1024/connect" > /var/log/gvforwarder.log 2>&1 &
+    GVFORWARDER_PID=$!
+    echo "  gvforwarder started (PID $GVFORWARDER_PID)"
+
+    # Wait for tap0 to get IP via DHCP (up to 15 seconds)
+    TAP_OK=false
+    for i in $(seq 1 15); do
+        if ip addr show tap0 2>/dev/null | grep -q 'inet '; then
+            TAP_IP=$(ip addr show tap0 2>/dev/null | grep 'inet ' | awk '{print $2}')
+            echo "  tap0 is up: $TAP_IP (after ${i}s)"
+            TAP_OK=true
+            break
+        fi
+        sleep 1
+    done
+
+    if [ "$TAP_OK" = "true" ]; then
+        # Configure DNS to use gvproxy's built-in DNS server
+        # This forwards queries to the host's resolvers via the gvproxy gateway
+        echo "nameserver 192.168.127.1" > /etc/resolv.conf
+        echo "  DNS: 192.168.127.1 (gvproxy gateway)"
+
+        # Test internet connectivity through tap0 (without proxy)
+        if timeout 5 curl -sf --noproxy '*' --max-time 4 https://api.cloudflare.com/cdn-cgi/trace > /tmp/tap-test 2>&1; then
+            echo "  Internet via tap0: OK ($(head -1 /tmp/tap-test))"
+        else
+            echo "  WARNING: Internet via tap0 not working yet - IMAP may not work initially"
+        fi
+        rm -f /tmp/tap-test
+    else
+        echo "  WARNING: tap0 did not get IP in 15s"
+        echo "  gvforwarder alive: $(kill -0 $GVFORWARDER_PID 2>&1 && echo 'yes' || echo 'no')"
+        echo "  gvforwarder log:"
+        cat /var/log/gvforwarder.log 2>/dev/null | tail -10
+        echo "  IMAP/SMTP will not work, but all other services are unaffected"
+    fi
 fi
 
 # In local Docker mode there is no host-env bootstrap step, so preserve the
@@ -204,7 +278,7 @@ if [ "${RESTORE_MODE}" != "none" ]; then
         sleep 1
     fi
 
-    # Try HTTP first (reliable for large files), fall back to raw VSOCK
+    # Download backup via HTTP seed server (port 9080 VSOCK bridge)
     BACKUP_URL="http://127.0.0.1:9080/restore-backup.tar.gz.enc"
     echo "  Downloading backup via HTTP (port 9080)..."
     HTTP_OK=false
@@ -216,11 +290,6 @@ if [ "${RESTORE_MODE}" != "none" ]; then
         echo "  HTTP attempt ${attempt}/10 - waiting for seed server..."
         sleep 3
     done
-
-    if [ "$HTTP_OK" = "false" ] && [ -e /dev/vsock ]; then
-        echo "  HTTP failed, trying raw VSOCK port 9002..."
-        socat -T300 -u VSOCK-CONNECT:3:9002 CREATE:"$RECEIVED" 2>/dev/null || true
-    fi
 
     if [ -s "$RECEIVED" ] && ! grep -q "NO_BACKUP" "$RECEIVED" 2>/dev/null; then
         RECEIVED_SIZE=$(stat -c%s "$RECEIVED" 2>/dev/null || stat -f%z "$RECEIVED" 2>/dev/null || echo "unknown")
@@ -383,11 +452,8 @@ REOF
         local step="$2"
         echo "RESTORE FAILED: ${msg} (step: ${step})"
         write_restore_status "FAILED" "${msg}" "${step}"
-        # Send failure to host via VSOCK so CI gets the actual error, not just TIMEOUT
-        if [ -e /dev/vsock ]; then
-            echo "{\"status\": \"RESTORE_FAILED\", \"restore_type\": \"full_restore\", \"error\": \"${msg}\", \"step\": \"${step}\", \"user_count\": 0}" > /data/seed/verify-result.json
-            socat -u FILE:/data/seed/verify-result.json VSOCK-CONNECT:3:9004 2>/dev/null || true
-        fi
+        # Write failure to verify-result.json (post-boot-verify will upload it via HTTP)
+        echo "{\"status\": \"RESTORE_FAILED\", \"restore_type\": \"full_restore\", \"error\": \"${msg}\", \"step\": \"${step}\", \"user_count\": 0}" > /data/seed/verify-result.json
         echo "Old enclave is still running. Fix the issue and retry."
         su postgres -c "$PG_BIN/pg_ctl -D $PG_DATA stop -w" 2>/dev/null || true
         exit 1
@@ -948,33 +1014,36 @@ fi
 echo ""
 echo "=== Starting all services via supervisord ==="
 
-# ── Set up cloudflared edge routing ──────────────────────────────────────────
+# ── Set up cloudflared edge routing (network config only) ────────────────────
 # Cloudflared uses SRV DNS records to find edge IPs, then raw TCP to connect.
 # It does NOT use HTTPS_PROXY. In the enclave with no direct internet, we need:
 # 1. DNS-over-TLS (DoT) to 1.1.1.1:853 for SRV lookups (cloudflared's fallback)
 # 2. TCP to edge IPs on port 7844 for the actual tunnel
 # Both routed through VSOCK to the host.
+#
+# NOTE: The socat bridges for 7844 and 853 are now managed by supervisord
+# (vsock-bridge-7844 and vsock-bridge-dot programs). They were previously started
+# as background processes here, but those DIED when exec supervisord replaced the
+# shell. This was the root cause of cloudflared "context canceled" errors.
 if [ -e /dev/vsock ] && [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
     echo ""
     echo "[STEP CF] Setting up cloudflared edge routing..."
 
-    # Bridge DoT: 1.1.1.1:853 for DNS-over-TLS (SRV record lookup)
-    # Add 1.1.1.1 as a local address so socat can bind to it
+    # Add 1.1.1.1 as a local address so the DoT bridge (supervisord) can bind to it
     ip addr add 1.1.1.1/32 dev lo 2>/dev/null || true
-    socat TCP-LISTEN:853,bind=1.1.1.1,reuseaddr,fork VSOCK-CONNECT:3:8530 &
-    sleep 0.2
-    echo "  DoT bridge: 1.1.1.1:853 -> VSOCK:3:8530 -> host -> 1.1.1.1:853"
+    echo "  Added 1.1.1.1/32 to lo for DoT bridge"
 
-    # Bridge edge: Cloudflare edge IPs on port 7844
-    # Override DNS so resolved edge IPs point to local bridge
-    socat TCP-LISTEN:7844,reuseaddr,fork VSOCK-CONNECT:3:7844 &
-    sleep 0.2
+    # Override DNS so cloudflared's resolved edge hostnames point to local bridges
+    # These bridges are managed by supervisord (vsock-bridge-7844 and vsock-bridge-dot)
     echo "127.0.0.1 region1.v2.argotunnel.com region2.v2.argotunnel.com" >> /etc/hosts
-    echo "  /etc/hosts: edge hostnames -> 127.0.0.1:7844 -> VSOCK -> host -> edge"
+    echo "  /etc/hosts: edge hostnames -> 127.0.0.1"
+    echo "  Bridge chain: cloudflared -> TCP:7844 -> VSOCK -> host -> Cloudflare edge"
+    echo "  DoT chain: cloudflared -> TCP:1.1.1.1:853 -> VSOCK -> host -> 1.1.1.1:853"
+    echo "  NOTE: socat bridges now managed by supervisord (priority 2, start before cloudflared)"
 fi
 
 # Use a startup script that starts services in order
-cat > /tmp/start-services.sh << 'STARTUP'
+cat > /data/seed/start-services.sh << 'STARTUP'
 #!/bin/bash
 # Wait for PostgreSQL to be ready, then start dependent services
 exec > /data/seed/startup-services.log 2>&1
@@ -1030,17 +1099,32 @@ if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ] && [ "${DEFER_CLOUDFLARED:-}" != "true"
     echo "Starting Cloudflare tunnel..."
     echo "  Token length: ${#CLOUDFLARE_TUNNEL_TOKEN}"
     echo "  /etc/hosts edge entries:"
-    grep argotunnel /etc/hosts 2>/dev/null || echo "    MISSING"
+    grep argotunnel /etc/hosts 2>/dev/null || echo "    MISSING - cloudflared will try to connect to real IPs!"
+    echo "  VSOCK bridge 7844 (supervisor):"
+    supervisorctl status vsock-bridge-7844 2>&1 || echo "    NOT FOUND"
     echo "  Port 7844 listener:"
-    ss -tlnp 2>/dev/null | grep 7844 || echo "    NOT LISTENING"
+    ss -tlnp 2>/dev/null | grep 7844 || echo "    NOT LISTENING - bridge may not have started yet"
+    echo "  VSOCK bridge DoT (supervisor):"
+    supervisorctl status vsock-bridge-dot 2>&1 || echo "    NOT FOUND"
+    echo "  Port 853 listener:"
+    ss -tlnp 2>/dev/null | grep ':853' || echo "    NOT LISTENING"
+    echo "  1.1.1.1 on lo:"
+    ip addr show lo 2>/dev/null | grep '1.1.1.1' || echo "    NOT CONFIGURED"
+    echo "  DNS test: $(getent hosts region1.v2.argotunnel.com 2>&1 | head -1)"
     supervisorctl start cloudflared
     beacon "cf-started"
     sleep 10
     echo "  Cloudflared status: $(supervisorctl status cloudflared 2>&1)"
-    echo "  Cloudflared stderr:"
-    cat /var/log/supervisor/cloudflared-err.log 2>/dev/null || echo "    empty"
-    echo "  Cloudflared stdout:"
-    cat /var/log/supervisor/cloudflared.log 2>/dev/null || echo "    empty"
+    echo "  Cloudflared stderr (last 30 lines):"
+    tail -30 /var/log/supervisor/cloudflared-err.log 2>/dev/null || echo "    empty"
+    echo "  Cloudflared stdout (last 30 lines):"
+    tail -30 /var/log/supervisor/cloudflared.log 2>/dev/null || echo "    empty"
+    echo "  Cloudflared diag log:"
+    cat /var/log/supervisor/cloudflared-diag.log 2>/dev/null || echo "    empty"
+    echo "  Port 7844 connections after start:"
+    ss -tnp 2>/dev/null | grep 7844 || echo "    none"
+    echo "  Cloudflared monitor start:"
+    supervisorctl start cloudflared-monitor 2>&1 || echo "    already running"
     beacon "cf-checked"
 fi
 
@@ -1049,11 +1133,11 @@ supervisorctl status 2>&1
 echo "=== All services started $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 beacon "all-done"
 STARTUP
-chmod +x /tmp/start-services.sh
+chmod +x /data/seed/start-services.sh
 
 # If a full restore was done, create a post-startup verification wrapper
 if [ "${FULL_RESTORE_DONE}" = "true" ]; then
-    cat > /tmp/start-and-verify.sh <<'VERIFYEOF'
+    cat > /data/seed/start-and-verify.sh <<'VERIFYEOF'
 #!/bin/bash
 set -x  # Trace all commands for debugging
 echo "=== start-and-verify.sh started at $(date -u) ==="
@@ -1110,22 +1194,22 @@ else
 fi
 echo "=== start-and-verify.sh finished at $(date -u) ==="
 VERIFYEOF
-    chmod +x /tmp/start-and-verify.sh
-    STARTUP_SCRIPT="/tmp/start-and-verify.sh"
+    chmod +x /data/seed/start-and-verify.sh
+    STARTUP_SCRIPT="/data/seed/start-and-verify.sh"
 else
     # Fresh start (no restore) - run full verification before signaling
-    cat > /tmp/start-and-signal.sh <<'SIGNALEOF'
+    cat > /data/seed/start-and-signal.sh <<'SIGNALEOF'
 #!/bin/bash
 exec >> /data/seed/startup-signal.log 2>&1
 echo "=== Signal script $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 
-/tmp/start-services.sh
+/data/seed/start-services.sh
 
 # Wait for backend to be ready before running verification
 echo "Waiting for backend to start..."
 BACKEND_READY=false
 for i in $(seq 1 60); do
-    if curl -sf http://localhost:3000/api/health > /dev/null 2>&1; then
+    if curl -sf http://localhost:${PORT:-3100}/api/health > /dev/null 2>&1; then
         echo "Backend ready after $((i * 5))s"
         BACKEND_READY=true
         break
@@ -1161,8 +1245,8 @@ echo "=== Sending startup logs to host ==="
 cat /data/seed/startup-services.log /data/seed/startup-signal.log 2>/dev/null \
     | socat -T10 -u STDIN VSOCK-CONNECT:3:9007 2>/dev/null || true
 SIGNALEOF
-    chmod +x /tmp/start-and-signal.sh
-    STARTUP_SCRIPT="/tmp/start-and-signal.sh"
+    chmod +x /data/seed/start-and-signal.sh
+    STARTUP_SCRIPT="/data/seed/start-and-signal.sh"
 fi
 
 # Enable PostgreSQL autostart and run the startup orchestrator in background
@@ -1180,7 +1264,7 @@ if [ -n "${SEED_BRIDGE_PID:-}" ]; then kill "$SEED_BRIDGE_PID" 2>/dev/null; fi |
 sleep 0.2
 
 # Startup script runs via supervisord's post-boot-verify program (see supervisord.conf).
-# It detects /tmp/start-and-verify.sh or /tmp/start-and-signal.sh created above.
+# It detects /data/seed/start-and-verify.sh or /data/seed/start-and-signal.sh created above.
 
 # Reset CWD to / before exec - restore process may have cd'd to /tmp dirs that get cleaned up,
 # leaving child processes with invalid CWD (PostgreSQL "could not locate my own executable path")

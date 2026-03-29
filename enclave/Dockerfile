@@ -144,6 +144,8 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     iproute2 \
     jq \
+    busybox \
+    && ln -sf /bin/busybox /usr/sbin/udhcpc \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Install cloudflared for Cloudflare tunnel (production only) ──────────────
@@ -151,6 +153,14 @@ ARG TARGETARCH
 RUN if [ "$BUILD_MODE" = "production" ]; then \
         curl -L "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${TARGETARCH}" \
             -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared; \
+    fi
+
+# ── Install gvforwarder for tap networking (IMAP/SMTP outbound) ──────────────
+# gvforwarder creates a tap0 interface over VSOCK to the host's gvproxy,
+# giving the enclave real TCP/IP networking for protocols that can't use HTTP proxy.
+RUN if [ "$BUILD_MODE" = "production" ]; then \
+        curl -L "https://github.com/containers/gvisor-tap-vsock/releases/download/v0.8.8/gvforwarder" \
+            -o /usr/local/bin/gvforwarder && chmod +x /usr/local/bin/gvforwarder; \
     fi
 
 # ── Copy Tuwunel binary (path varies by arch: /usr/local/bin on amd64, /usr/bin on arm64)
@@ -222,6 +232,8 @@ COPY enclave/export.sh /app/export.sh
 COPY enclave/export-watcher.sh /app/export-watcher.sh
 COPY enclave/verify.sh /app/verify.sh
 COPY enclave/post-boot-verify.sh /app/post-boot-verify.sh
+COPY enclave/cloudflared-wrapper.sh /app/cloudflared-wrapper.sh
+COPY enclave/cloudflared-monitor.sh /app/cloudflared-monitor.sh
 COPY enclave/enter-maintenance.sh /app/enter-maintenance.sh
 COPY enclave/diagnose-enclave.sh /app/diagnose-enclave.sh
 COPY enclave/service-watchdog.sh /app/service-watchdog.sh
@@ -229,7 +241,7 @@ COPY enclave/service-watchdog.sh /app/service-watchdog.sh
 # so we can't modify it here. Store a template and copy at container start.
 RUN echo "nameserver 127.0.0.1" > /etc/resolv.conf.enclave
 
-RUN chmod +x /entrypoint.sh /usr/local/bin/derive-backup-key.sh /usr/local/bin/start-marlin-kms.sh /app/export.sh /app/export-watcher.sh /app/verify.sh /app/post-boot-verify.sh /app/enter-maintenance.sh /app/service-watchdog.sh /app/diagnose-enclave.sh
+RUN chmod +x /entrypoint.sh /usr/local/bin/derive-backup-key.sh /usr/local/bin/start-marlin-kms.sh /app/export.sh /app/export-watcher.sh /app/verify.sh /app/post-boot-verify.sh /app/cloudflared-wrapper.sh /app/cloudflared-monitor.sh /app/enter-maintenance.sh /app/service-watchdog.sh /app/diagnose-enclave.sh
 
 # Copy bridge bot registration script
 COPY enclave/register-bridge-bots.sh /app/register-bridge-bots.sh

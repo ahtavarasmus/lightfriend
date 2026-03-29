@@ -25,9 +25,12 @@ async fn initialize_matrix_clients(state: Arc<AppState>) {
             }
             matrix_clients.clear();
 
-            // Setup clients and sync tasks for active users
-            for user_id in users {
-                tracing::debug!("Setting up new Matrix client for user {}", user_id);
+            // Setup clients and sync tasks for active users.
+            // Stagger initialization to avoid overwhelming tuwunel with 229+ concurrent syncs
+            let user_count = users.len();
+            tracing::info!("Initializing Matrix clients for {} users (staggered)", user_count);
+            for (idx, user_id) in users.into_iter().enumerate() {
+                tracing::debug!("Setting up Matrix client {}/{} for user {}", idx + 1, user_count, user_id);
 
                 // Create and initialize client
                 match crate::utils::matrix_auth::get_client(user_id, &state).await {
@@ -93,6 +96,11 @@ async fn initialize_matrix_clients(state: Arc<AppState>) {
                         });
 
                         sync_tasks.insert(user_id, handle);
+
+                        // Stagger sync starts: 100ms between each to avoid thundering herd on tuwunel
+                        if idx < user_count - 1 {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                        }
                     }
                     Err(e) => {
                         error!("Failed to create Matrix client for user {}: {}", user_id, e);
