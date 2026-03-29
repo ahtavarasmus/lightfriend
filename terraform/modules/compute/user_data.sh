@@ -479,25 +479,34 @@ EIF_PATH="/opt/lightfriend/lightfriend.eif"
 VERIFY="/opt/lightfriend/verify-result.json"
 VSOCK_SVCS="vsock-proxy-bridge vsock-config-server vsock-marlin-kms-bridge vsock-boot-trace vsock-seed-http vsock-cloudflared-edge vsock-dot-bridge vsock-backup-upload"
 
-[ -f /opt/lightfriend/.env ] || { echo "ERROR: /opt/lightfriend/.env not found"; exit 1; }
-[ -f "$EIF_PATH" ] || { echo "ERROR: CI-built EIF not found at $EIF_PATH"; exit 1; }
-echo "Using pre-built EIF: $EIF_PATH"
+echo "[launch] EIF: $(ls -la $EIF_PATH 2>&1)"
+echo "[launch] .env: $(ls -la /opt/lightfriend/.env 2>&1)"
+echo "[launch] Hugepages: $(cat /proc/meminfo | grep Hugetlb)"
+echo "[launch] Allocator status: $(systemctl is-active nitro-enclaves-allocator 2>&1)"
+echo "[launch] Existing enclaves: $(nitro-cli describe-enclaves 2>&1)"
+
+[ -f /opt/lightfriend/.env ] || { echo "FATAL: /opt/lightfriend/.env not found"; exit 1; }
+[ -f "$EIF_PATH" ] || { echo "FATAL: EIF not found at $EIF_PATH"; exit 1; }
 
 EXISTING=$(nitro-cli describe-enclaves | jq -r '.[0].EnclaveID // empty' 2>/dev/null)
-[ -n "$EXISTING" ] && nitro-cli terminate-enclave --enclave-id "$EXISTING" && sleep 2
+[ -n "$EXISTING" ] && echo "[launch] Terminating $EXISTING" && nitro-cli terminate-enclave --enclave-id "$EXISTING" && sleep 2
 
-# Stop VSOCK services before launch (port conflict with Nitro heartbeat)
-echo "Stopping VSOCK services..."
-for svc in $VSOCK_SVCS; do systemctl stop "$svc" 2>/dev/null; done
+echo "[launch] Stopping VSOCK services..."
+for svc in $VSOCK_SVCS; do
+    systemctl stop "$svc" 2>/dev/null && echo "[launch] Stopped $svc" || echo "[launch] $svc not running"
+done
 pkill -f 'socat.*VSOCK' 2>/dev/null || true
+echo "[launch] Sleeping 5s..."
 sleep 5
 
-rm -f "$VERIFY"
-# Verify result now arrives via HTTP upload (backup-upload-server on port 9081)
-# No VSOCK listener needed - restore-enclave.sh polls the filesystem
+echo "[launch] Checking for remaining VSOCK listeners..."
+ss -tlnp 2>/dev/null | grep VSOCK || echo "[launch] No VSOCK listeners"
 
-echo "Launching enclave..."
+rm -f "$VERIFY"
+
+echo "[launch] Running: nitro-cli run-enclave --eif-path $EIF_PATH --memory 8192 --cpu-count 4 --enclave-cid 16"
 nitro-cli run-enclave --eif-path "$EIF_PATH" --memory 8192 --cpu-count 4 --enclave-cid 16
+echo "[launch] nitro-cli exit code: $?"
 
 # Restart VSOCK services after launch
 echo "Restarting VSOCK services..."
@@ -686,6 +695,14 @@ chmod +x /opt/lightfriend/clear-restore-state.sh
 
 cat > /opt/lightfriend/restore-enclave.sh <<'SCRIPT'
 #!/bin/bash
+# Every step logged to RLOG for diagnostics
+RLOG="/tmp/restore-enclave-debug.log"
+exec > >(tee -a "$RLOG") 2>&1
+echo "=== restore-enclave.sh started at $(date -u) ==="
+echo "Args: $*"
+echo "PWD: $(pwd)"
+echo "Uptime: $(uptime)"
+
 set -euo pipefail
 BACKUP_KEY="$${1:-}"
 DEPLOY_ID="$${2:-manual}"
@@ -694,10 +711,22 @@ VERIFY="/opt/lightfriend/verify-result.json"
 ARTIFACT=""
 SUCCESS=false
 
-[ -n "$BACKUP_KEY" ] || { echo "Usage: restore-enclave.sh <s3-key> [deploy-id] [restore-type]"; exit 1; }
-[ -f /opt/lightfriend/.env ] || { echo "ERROR: /opt/lightfriend/.env not found"; exit 1; }
+echo "[CHECK] BACKUP_KEY=$BACKUP_KEY"
+[ -n "$BACKUP_KEY" ] || { echo "FATAL: empty BACKUP_KEY"; exit 1; }
+
+echo "[CHECK] .env exists: $(ls -la /opt/lightfriend/.env 2>&1)"
+[ -f /opt/lightfriend/.env ] || { echo "FATAL: /opt/lightfriend/.env not found"; exit 1; }
+
+echo "[CHECK] S3_BACKUP_BUCKET=$(grep S3_BACKUP_BUCKET /opt/lightfriend/.env | cut -d= -f2)"
+echo "[CHECK] EIF exists: $(ls -la /opt/lightfriend/lightfriend.eif 2>&1)"
+echo "[CHECK] Hugepages: $(cat /proc/meminfo | grep Hugetlb)"
+echo "[CHECK] Allocator: $(systemctl is-active nitro-enclaves-allocator 2>&1)"
+echo "[CHECK] Enclave support: $(nitro-cli describe-enclaves 2>&1 | head -3)"
+echo "[CHECK] Free memory: $(free -h | head -2)"
+echo "[CHECK] Running services: $(systemctl list-units --type=service --state=running 2>&1 | grep -c 'running') services"
 
 cleanup() {
+    echo "[CLEANUP] Running cleanup (SUCCESS=$SUCCESS, ARTIFACT=$ARTIFACT)"
     /opt/lightfriend/clear-restore-state.sh
     if [ -n "$ARTIFACT" ] && [ -f "$ARTIFACT" ]; then
         if [ "$SUCCESS" = "true" ]; then
@@ -708,10 +737,14 @@ cleanup() {
             mv "$ARTIFACT" "$FAILED_DIR/$${DEPLOY_ID}-$(basename "$ARTIFACT")"
         fi
     fi
+    echo "[CLEANUP] Done"
 }
 trap cleanup EXIT
 
+echo "[STEP 1] Downloading backup..."
 ARTIFACT=$(/opt/lightfriend/download-backup.sh "$BACKUP_KEY" | tail -1)
+echo "[STEP 1] ARTIFACT=$ARTIFACT"
+echo "[STEP 1] File check: $(ls -la "$ARTIFACT" 2>&1)"
 [ -f "$ARTIFACT" ] || { echo "FATAL: Restore artifact not downloaded"; exit 1; }
 
 cat > /opt/lightfriend/restore.env <<EOF
@@ -721,31 +754,35 @@ RESTORE_DEPLOY_ID=$${DEPLOY_ID}
 EOF
 printf '%s\n' "$ARTIFACT" > /opt/lightfriend/restore/current-path
 
-# Copy backup to seed dir so enclave can download via HTTP (port 9080)
-# Raw VSOCK (port 9002) drops large payloads - HTTP framing works reliably
+echo "[STEP 2] Copying backup to seed dir..."
 SEED_BACKUP="/opt/lightfriend/seed/restore-backup.tar.gz.enc"
 cp "$ARTIFACT" "$SEED_BACKUP"
-echo "Backup available via HTTP seed server: restore-backup.tar.gz.enc ($(stat -c%s "$SEED_BACKUP") bytes)"
+echo "[STEP 2] Seed backup: $(ls -la "$SEED_BACKUP" 2>&1)"
 
 rm -f "$VERIFY"
 VERIFY_SRC="/opt/lightfriend/backups/verify-result.json"
 rm -f "$VERIFY_SRC"
-/opt/lightfriend/launch-enclave.sh
 
-# Poll for verify result uploaded via HTTP (backup-upload-server on port 9081)
-echo "Waiting for verify result via HTTP upload..."
+echo "[STEP 3] Launching enclave..."
+/opt/lightfriend/launch-enclave.sh
+echo "[STEP 3] Launch exit code: $?"
+echo "[STEP 3] Enclave state: $(nitro-cli describe-enclaves 2>&1 | jq -r '.[0].State // "none"')"
+
+echo "[STEP 4] Polling for verify result..."
 for i in $(seq 1 180); do
     if [ -s "$VERIFY_SRC" ]; then
         cp "$VERIFY_SRC" "$VERIFY"
         rm -f "$VERIFY_SRC"
-        echo "Verify result received after $((i * 5))s"
+        echo "[STEP 4] Verify result received after $((i * 5))s"
         break
     fi
     sleep 5
 done
 
-[ -s "$VERIFY" ] || exit 1
+echo "[STEP 5] Verify file check: $(ls -la "$VERIFY" 2>&1)"
+[ -s "$VERIFY" ] || { echo "FATAL: Verify result empty after polling"; exit 1; }
 SUCCESS=true
+echo "=== restore-enclave.sh completed successfully ==="
 SCRIPT
 chmod +x /opt/lightfriend/restore-enclave.sh
 
@@ -1016,11 +1053,10 @@ EOF
 
     # Restore enclave from the exact backup artifact in the manifest
     echo "Restoring from $BACKUP_KEY..."
-    # Use pipefail so pipe captures restore-enclave.sh exit code, not tee's
     set -o pipefail
     if ! /opt/lightfriend/restore-enclave.sh "$BACKUP_KEY" "$DEPLOY_ID" "$RESTORE_TYPE" 2>&1 | tee /tmp/launch.log; then
-        LAUNCH_ERR=$(tail -20 /tmp/launch.log | tr '\n' '|' | head -c 500)
-        echo "{\"status\": \"RESTORE_OR_LAUNCH_FAILED\", \"instance_id\": \"$INSTANCE_ID\", \"error\": \"$LAUNCH_ERR\"}" | \
+        RESTORE_LOG=$(cat /tmp/restore-enclave-debug.log 2>/dev/null | tail -50 | tr '\n' '|' | sed 's/"/\\"/g' | head -c 1500)
+        echo "{\"status\": \"RESTORE_FAILED\", \"instance_id\": \"$INSTANCE_ID\", \"log\": \"$RESTORE_LOG\"}" | \
             aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
         exit 1
     fi
@@ -1032,8 +1068,8 @@ EOF
         cat "$VERIFY"
     else
         ENCLAVE_STATUS=$(nitro-cli describe-enclaves 2>/dev/null | jq -r '.[0].State // "unknown"')
-        LAUNCH_LOG=$(tail -20 /tmp/launch.log 2>/dev/null | tr '\n' '|' | head -c 500)
-        echo "{\"status\": \"TIMEOUT\", \"instance_id\": \"$INSTANCE_ID\", \"enclave_state\": \"$ENCLAVE_STATUS\", \"launch_log\": \"$LAUNCH_LOG\"}" | \
+        RESTORE_LOG=$(cat /tmp/restore-enclave-debug.log 2>/dev/null | tail -50 | tr '\n' '|' | sed 's/"/\\"/g' | head -c 1500)
+        echo "{\"status\": \"TIMEOUT\", \"instance_id\": \"$INSTANCE_ID\", \"enclave_state\": \"$ENCLAVE_STATUS\", \"log\": \"$RESTORE_LOG\"}" | \
             aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
         echo "WARNING: No verify result received (enclave state: $ENCLAVE_STATUS)"
     fi
