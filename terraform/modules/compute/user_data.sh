@@ -331,7 +331,8 @@ cat > /opt/lightfriend/cloudflared-edge-bridge.sh <<'SCRIPT'
 LOG="/opt/lightfriend/logs/cloudflared-edge.log"
 mkdir -p /opt/lightfriend/logs
 echo "$(date -u): Starting cloudflared edge bridge on VSOCK:7844" >> "$LOG"
-socat -d -d VSOCK-LISTEN:7844,reuseaddr,fork TCP:region1.v2.argotunnel.com:7844 2>>"$LOG"
+# nodelay on both sides: disables Nagle's algorithm for HTTP/2 multiplexed frames
+socat -d -d VSOCK-LISTEN:7844,reuseaddr,fork TCP:region1.v2.argotunnel.com:7844,nodelay 2>>"$LOG"
 SCRIPT
 chmod +x /opt/lightfriend/cloudflared-edge-bridge.sh
 

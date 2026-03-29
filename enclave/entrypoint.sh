@@ -959,7 +959,8 @@ if [ -e /dev/vsock ] && [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
 
     # Bridge edge: Cloudflare edge IPs on port 7844
     # Override DNS so resolved edge IPs point to local bridge
-    socat TCP-LISTEN:7844,reuseaddr,fork VSOCK-CONNECT:3:7844 &
+    # nodelay disables Nagle's algorithm - critical for HTTP/2 multiplexed frames
+    socat TCP-LISTEN:7844,reuseaddr,fork,nodelay VSOCK-CONNECT:3:7844 &
     sleep 0.2
     echo "127.0.0.1 region1.v2.argotunnel.com region2.v2.argotunnel.com" >> /etc/hosts
     echo "  /etc/hosts: edge hostnames -> 127.0.0.1:7844 -> VSOCK -> host -> edge"
