@@ -552,8 +552,6 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
         text-decoration: none;
     }
     .iq-button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 20px rgba(255, 255, 255, 0.2);
         background: linear-gradient(135deg, #e0e0e0, #b8b8b8 30%, #f0f0f0 50%, #b8b8b8 70%, #d0d0d0);
     }
     .iq-button.disabled {
@@ -563,8 +561,6 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
         opacity: 0.6;
     }
     .iq-button.disabled:hover {
-        transform: none;
-        box-shadow: none;
         background: rgba(30, 30, 30, 0.5);
     }
     .iq-button.current-plan {
@@ -573,8 +569,6 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
         cursor: default;
     }
     .iq-button.current-plan:hover {
-        transform: none;
-        box-shadow: none;
         background: rgba(255, 255, 255, 0.2);
     }
     .iq-button.coming-soon {
@@ -583,8 +577,6 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
         cursor: default;
     }
     .iq-button.coming-soon:hover {
-        transform: none;
-        box-shadow: none;
     }
     "#;
     html! {
@@ -927,7 +919,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         border: 1px solid rgba(255, 255, 255, 0.12);
         border-radius: 12px;
         position: relative;
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        transition: border-color 0.3s ease;
         backdrop-filter: none;
         box-sizing: border-box;
         display: flex;
@@ -936,24 +928,21 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         width: 100%;
     }
     .pricing-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 8px 32px rgba(255, 255, 255, 0.15);
         border-color: rgba(255, 255, 255, 0.25);
     }
     .pricing-card.popular {
         background: rgba(30, 30, 30, 0.6);
         border: 2px solid rgba(255, 255, 255, 0.3);
-        box-shadow: 0 4px 16px rgba(255, 255, 255, 0.2);
     }
     .pricing-card.popular:hover {
-        box-shadow: 0 8px 32px rgba(255, 255, 255, 0.25);
+        border-color: rgba(255, 255, 255, 0.45);
     }
     .pricing-card.premium {
         background: rgba(40, 40, 40, 0.85);
         border: 2px solid rgba(255, 215, 0, 0.3);
     }
     .pricing-card.premium:hover {
-        box-shadow: 0 8px 32px rgba(255, 215, 0, 0.3);
+        border-color: rgba(255, 215, 0, 0.5);
     }
     .popular-tag {
         position: absolute;
@@ -1016,9 +1005,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         font-size: 2rem;
         color: #fff;
         font-weight: 800;
-        background: linear-gradient(135deg, #d4d4d4, #e8e8e8);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
         line-height: 1;
     }
     .price .period {
@@ -1084,8 +1070,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         text-decoration: none;
     }
     .iq-button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 20px rgba(255, 255, 255, 0.2);
         background: linear-gradient(135deg, #e0e0e0, #b8b8b8 30%, #f0f0f0 50%, #b8b8b8 70%, #d0d0d0);
     }
     .iq-button.disabled {
@@ -1094,8 +1078,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         border: 1px solid rgba(255, 255, 255, 0.1);
     }
     .iq-button.disabled:hover {
-        transform: none;
-        box-shadow: none;
     }
     .iq-button.current-plan {
         background: rgba(255, 255, 255, 0.2);
@@ -1103,8 +1085,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         cursor: default;
     }
     .iq-button.current-plan:hover {
-        transform: none;
-        box-shadow: none;
         background: rgba(255, 255, 255, 0.2);
     }
     .iq-button.coming-soon {
@@ -1113,8 +1093,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         cursor: default;
     }
     .iq-button.coming-soon:hover {
-        transform: none;
-        box-shadow: none;
     }
     .addons-section {
         margin-top: 1.5rem;
@@ -1509,6 +1487,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
         min-height: 100vh;
         padding: 6rem 2rem;
         color: #ffffff;
+        background: #0d0d0d;
         z-index: 1;
         overflow: hidden;
     }
@@ -1523,23 +1502,8 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
         background-size: cover;
         background-position: center;
         background-repeat: no-repeat;
-        opacity: 0.6;
+        opacity: 0.3;
         z-index: -2;
-        pointer-events: none;
-    }
-    .pricing-panel::after {
-        content: '';
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100vh;
-        background: linear-gradient(
-            to bottom,
-            rgba(26, 26, 26, 0.75) 0%,
-            rgba(26, 26, 26, 0.9) 100%
-        );
-        z-index: -1;
         pointer-events: none;
     }
     .pricing-header {
@@ -1549,9 +1513,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
     .pricing-header h1 {
         font-size: 3.5rem;
         margin-bottom: 1.5rem;
-        background: linear-gradient(45deg, #fff, rgba(255, 255, 255, 0.7));
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
         font-weight: 700;
     }
     .pricing-header p {
@@ -1744,11 +1706,9 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
         border-radius: 24px;
         padding: 2.5rem;
         backdrop-filter: none;
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        transition: border-color 0.3s ease;
     }
     .option-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 8px 32px rgba(255, 255, 255, 0.12);
         border-color: rgba(255, 255, 255, 0.2);
     }
     .option-card h3 {
@@ -1910,69 +1870,12 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
             </div>
 
             {
-                if !props.is_logged_in {
-                    if let Some(on_change) = props.on_country_change.clone() {
-                        html! {
-                            <div class="country-selector">
-                                <label for="country">{"Select your country: "}</label>
-                                <select id="country" onchange={on_change}>
-                                    <optgroup label="Full Service (local number)">
-                                        <option value="US" selected={props.selected_country == "US"}>{"United States"}</option>
-                                        <option value="CA" selected={props.selected_country == "CA"}>{"Canada"}</option>
-                                        <option value="FI" selected={props.selected_country == "FI"}>{"Finland"}</option>
-                                        <option value="NL" selected={props.selected_country == "NL"}>{"Netherlands"}</option>
-                                        <option value="GB" selected={props.selected_country == "GB"}>{"United Kingdom"}</option>
-                                        <option value="AU" selected={props.selected_country == "AU"}>{"Australia"}</option>
-                                    </optgroup>
-                                    <optgroup label="Europe">
-                                        <option value="DE" selected={props.selected_country == "DE"}>{"Germany"}</option>
-                                        <option value="FR" selected={props.selected_country == "FR"}>{"France"}</option>
-                                        <option value="ES" selected={props.selected_country == "ES"}>{"Spain"}</option>
-                                        <option value="IT" selected={props.selected_country == "IT"}>{"Italy"}</option>
-                                        <option value="PT" selected={props.selected_country == "PT"}>{"Portugal"}</option>
-                                        <option value="BE" selected={props.selected_country == "BE"}>{"Belgium"}</option>
-                                        <option value="AT" selected={props.selected_country == "AT"}>{"Austria"}</option>
-                                        <option value="CH" selected={props.selected_country == "CH"}>{"Switzerland"}</option>
-                                        <option value="PL" selected={props.selected_country == "PL"}>{"Poland"}</option>
-                                        <option value="CZ" selected={props.selected_country == "CZ"}>{"Czech Republic"}</option>
-                                        <option value="SE" selected={props.selected_country == "SE"}>{"Sweden"}</option>
-                                        <option value="DK" selected={props.selected_country == "DK"}>{"Denmark"}</option>
-                                        <option value="NO" selected={props.selected_country == "NO"}>{"Norway"}</option>
-                                        <option value="IE" selected={props.selected_country == "IE"}>{"Ireland"}</option>
-                                        <option value="GR" selected={props.selected_country == "GR"}>{"Greece"}</option>
-                                        <option value="HU" selected={props.selected_country == "HU"}>{"Hungary"}</option>
-                                        <option value="RO" selected={props.selected_country == "RO"}>{"Romania"}</option>
-                                        <option value="SK" selected={props.selected_country == "SK"}>{"Slovakia"}</option>
-                                        <option value="BG" selected={props.selected_country == "BG"}>{"Bulgaria"}</option>
-                                        <option value="HR" selected={props.selected_country == "HR"}>{"Croatia"}</option>
-                                        <option value="SI" selected={props.selected_country == "SI"}>{"Slovenia"}</option>
-                                        <option value="LT" selected={props.selected_country == "LT"}>{"Lithuania"}</option>
-                                        <option value="LV" selected={props.selected_country == "LV"}>{"Latvia"}</option>
-                                        <option value="EE" selected={props.selected_country == "EE"}>{"Estonia"}</option>
-                                        <option value="LU" selected={props.selected_country == "LU"}>{"Luxembourg"}</option>
-                                        <option value="MT" selected={props.selected_country == "MT"}>{"Malta"}</option>
-                                        <option value="CY" selected={props.selected_country == "CY"}>{"Cyprus"}</option>
-                                        <option value="IS" selected={props.selected_country == "IS"}>{"Iceland"}</option>
-                                    </optgroup>
-                                    <optgroup label="Asia-Pacific">
-                                        <option value="NZ" selected={props.selected_country == "NZ"}>{"New Zealand"}</option>
-                                        <option value="JP" selected={props.selected_country == "JP"}>{"Japan"}</option>
-                                        <option value="KR" selected={props.selected_country == "KR"}>{"South Korea"}</option>
-                                        <option value="SG" selected={props.selected_country == "SG"}>{"Singapore"}</option>
-                                        <option value="HK" selected={props.selected_country == "HK"}>{"Hong Kong"}</option>
-                                        <option value="TW" selected={props.selected_country == "TW"}>{"Taiwan"}</option>
-                                    </optgroup>
-                                    <optgroup label="Middle East">
-                                        <option value="IL" selected={props.selected_country == "IL"}>{"Israel"}</option>
-                                    </optgroup>
-                                    <optgroup label="Other">
-                                        <option value="Other" selected={props.selected_country == "Other"}>{"Other (bring your own number)"}</option>
-                                    </optgroup>
-                                </select>
-                            </div>
-                        }
-                    } else {
-                        html! {}
+                if !props.is_logged_in && !props.country_name.is_empty() {
+                    html! {
+                        <p class="detected-country" style="font-size: 0.85rem; color: #888; margin-bottom: 1.5rem;">
+                            {format!("Showing prices for {}. ", props.country_name.clone())}
+                            <a href="mailto:rasmus@lightfriend.ai" style="color: #7EB2FF; text-decoration: none;">{"Not your country?"}</a>
+                        </p>
                     }
                 } else {
                     html! {}

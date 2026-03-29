@@ -200,8 +200,8 @@ pub fn landing() -> Html {
                 </div>
                 <div class="hero-content">
                     <div class="hero-right-panel">
-                        <h1 class="hero-title hero-anim hero-anim-1">{"Private Proactive AI Assistant"}</h1>
-                        <p class="hero-subtitle hero-anim hero-anim-2">{"For Any Phone - No Setup Required"}</p>
+                        <h1 class="hero-title hero-anim hero-anim-1">{"Mute everything. Miss nothing."}</h1>
+                        <p class="hero-subtitle hero-anim hero-anim-2">{"AI watches your WhatsApp, email, and messages. If something matters, it calls or texts you."}</p>
                         <div class="hero-cta-group hero-anim hero-anim-3">
                             <Link<Route> to={Route::Pricing} classes="forward-link">
                                 <button class="hero-cta">{"See Plans"}</button>
@@ -221,173 +221,20 @@ pub fn landing() -> Html {
                 </div>
             </header>
 
-            <section class="demo-story-section scroll-animate">
-                <div class="demo-story-grid">
-                    <div class="demo-story-left scroll-animate">
-                        <div class="sms-demo-tabs">
-                        {
-                            scenarios.iter().enumerate().map(|(i, (label, icon, _))| {
-                                let is_active = i == *scenario_idx;
-                                let onclick = {
-                                    let scenario_idx = scenario_idx.clone();
-                                    Callback::from(move |_: MouseEvent| {
-                                        scenario_idx.set(i);
-                                    })
-                                };
-                                html! {
-                                    <button
-                                        class={classes!("sms-tab", is_active.then_some("active"))}
-                                        onclick={onclick}
-                                    >
-                                        <i class={icon.to_string()}></i>
-                                        <span>{*label}</span>
-                                    </button>
-                                }
-                            }).collect::<Html>()
-                        }
-                        </div>
-                        <div class="phone-frame">
-                            <div class="phone-earpiece"></div>
-                            <div class="sms-demo">
-                                <div class="sms-demo-header">
-                                    <span class="sms-demo-dot"></span>
-                                    <span class="sms-demo-name">{"Lightfriend"}</span>
-                                </div>
-                                <div class="sms-demo-messages" key={format!("scenario-{}", *scenario_idx)}>
-                                {
-                                    scenarios[*scenario_idx].2.iter().enumerate().map(|(i, (is_user, text))| {
-                                        let delay = 0.5 + (i as f64) * 1.5;
-                                        let bubble_class = if *is_user { "sms-bubble sms-user" } else { "sms-bubble sms-assistant" };
-                                        let style = format!("animation: smsAppear 0.4s ease {:.1}s forwards;", delay);
-                                        html! {
-                                            <div class={bubble_class} style={style}>{*text}</div>
-                                        }
-                                    }).collect::<Html>()
-                                }
-                                </div>
-                            </div>
-                            <div class="phone-chin">
-                                <div class="phone-button"></div>
-                            </div>
-                        </div>
-                        <p class="demo-customization-note">{"All proactive features can be customized or disabled to your preference."}</p>
-                    </div>
-                    <div class="demo-story-right scroll-animate">
-                        <h2>{"Built for the ADHD Brain"}</h2>
-                        <p class="adhd-subtitle">{"Smartphones hijack your attention. Lightfriend gives it back."}</p>
-                        <div class="adhd-grid-inline">
-                            <div class="adhd-card">
-                                <div class="adhd-card-icon"><i class="fa-solid fa-calendar-check"></i></div>
-                                <h3>{"Never Forget Again"}</h3>
-                                <p>{"Lightfriend has saved me so many times. I\u{2019}ll forget a deadline or miss an important email \u{2014} but then Lightfriend pings me about it before it\u{2019}s too late. It watches my inbox so I don\u{2019}t have to. Honestly, I\u{2019}d be lost without it. \u{2014} Kasperi"}</p>
-                            </div>
-                            <div class="adhd-card">
-                                <div class="adhd-card-icon"><i class="fa-solid fa-filter"></i></div>
-                                <h3>{"Smart Filtering"}</h3>
-                                <p>{"AI reads your WhatsApp, email, and Telegram so you don't have to. Only genuinely important messages reach you \u{2014} the rest waits until you ask."}</p>
-                            </div>
-                            <div class="adhd-card">
-                                <div class="adhd-card-icon"><i class="fa-solid fa-ban"></i></div>
-                                <h3>{"No Scroll Traps"}</h3>
-                                <p>{"SMS and voice calls mean zero infinite scroll, no app switching, no \"just one more video\". Your phone becomes a tool, not a trap."}</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            // Section: Your Data, Connected
-            <section class="connected-section scroll-animate">
-                <h2>{"Your Data, Connected"}</h2>
-                <div class="connected-grid">
-                    <div class="connected-group">
-                        <h3 class="connected-group-label">{"Messaging"}</h3>
-                        <div class="connected-items">
-                            <div class="connected-item"><i class="fab fa-whatsapp"></i><span>{"WhatsApp"}</span></div>
-                            <div class="connected-item"><i class="fab fa-telegram"></i><span>{"Telegram"}</span></div>
-                            <div class="connected-item"><i class="fab fa-signal-messenger"></i><span>{"Signal"}</span></div>
-                            <div class="connected-item"><i class="fas fa-envelope"></i><span>{"Email"}</span></div>
-                        </div>
-                    </div>
-                    <div class="connected-group">
-                        <h3 class="connected-group-label">{"Smart Devices"}</h3>
-                        <div class="connected-items">
-                            <div class="connected-item"><i class="fas fa-car"></i><span>{"Tesla"}</span></div>
-                        </div>
-                    </div>
-                    <div class="connected-group">
-                        <h3 class="connected-group-label">{"Extensible"}</h3>
-                        <div class="connected-items">
-                            <div class="connected-item"><i class="fas fa-plug"></i><span>{"MCP (Bring Your Own Service)"}</span></div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            // Section: Automate Anything with Rules
-            <section class="rules-section scroll-animate">
-                <h2>{"Automate Anything with Rules"}</h2>
-                <div class="rules-grid">
-                    <div class="rule-block">
-                        <div class="rule-block-label">{"WHEN"}</div>
-                        <h3>{"Trigger"}</h3>
-                        <p class="rule-block-desc">{"Defines when the rule runs"}</p>
-                        <ul class="rule-block-list">
-                            <li>{"Time-based: daily, hourly, specific times"}</li>
-                            <li>{"Event-driven: when a message arrives"}</li>
-                        </ul>
-                    </div>
-                    <div class="rule-block">
-                        <div class="rule-block-label">{"IF"}</div>
-                        <h3>{"Condition"}</h3>
-                        <p class="rule-block-desc">{"Decides whether to act"}</p>
-                        <ul class="rule-block-list">
-                            <li>{"Fetch data from your connected services"}</li>
-                            <li>{"Match keywords in messages"}</li>
-                            <li>{"Let AI evaluate conditions with predefined instructions"}</li>
-                            <li>{"Summarize or decide on actions"}</li>
-                        </ul>
-                    </div>
-                    <div class="rule-block">
-                        <div class="rule-block-label">{"THEN"}</div>
-                        <h3>{"Action"}</h3>
-                        <p class="rule-block-desc">{"Executes the result"}</p>
-                        <ul class="rule-block-list">
-                            <li>{"Send SMS/email notification"}</li>
-                            <li>{"Call any Lightfriend tool"}</li>
-                            <li>{"Track messages on your dashboard"}</li>
-                            <li>{"Call your own MCP server"}</li>
-                        </ul>
-                    </div>
-                </div>
-                <p class="rules-note">{"IF and THEN blocks can be chained up to 3 times for complex logic. Popular rules have ready-made templates so you don't start from scratch."}</p>
-            </section>
-
-            // Section: Talk to Lightfriend Your Way
-            <section class="interaction-section scroll-animate">
-                <h2>{"Talk to Lightfriend Your Way"}</h2>
-                <div class="interaction-grid">
-                    <div class="interaction-card">
-                        <div class="interaction-icon"><i class="fas fa-comment-sms"></i></div>
-                        <h3>{"SMS"}</h3>
-                        <p>{"Text your assistant from any phone"}</p>
-                    </div>
-                    <div class="interaction-card">
-                        <div class="interaction-icon"><i class="fas fa-phone"></i></div>
-                        <h3>{"Voice Call"}</h3>
-                        <p>{"Call and talk naturally"}</p>
-                    </div>
-                    <div class="interaction-card">
-                        <div class="interaction-icon"><i class="fas fa-desktop"></i></div>
-                        <h3>{"Web Dashboard"}</h3>
-                        <p>{"Full control from your browser"}</p>
-                    </div>
-                </div>
-            </section>
-
+            // Animation - immediately shows how it works
             <div class="filter-concept">
+                <h2>{"Always Working in the Background"}</h2>
+                <p class="filter-concept-subtitle">{"Gets smarter the longer you use it."}</p>
                 <div class="filter-content">
                     <AnimationComponent />
+                </div>
+                <div class="integrations-row">
+                    <i class="fab fa-whatsapp"></i>
+                    <i class="fab fa-telegram"></i>
+                    <i class="fab fa-signal-messenger"></i>
+                    <i class="fas fa-envelope"></i>
+                    <i class="fas fa-car"></i>
+                    <i class="fas fa-plug"></i>
                 </div>
             </div>
 
@@ -405,17 +252,11 @@ pub fn landing() -> Html {
                             <p>{"Your messages, emails, contacts, or any private data."}</p>
                         </div>
                     </div>
-                    <div class="privacy-how">
-                        <h3>{"How it works"}</h3>
-                        <ol class="privacy-steps">
-                            <li>{"Lightfriend is fully open source on GitHub"}</li>
-                            <li>{"Runs on Amazon Nitro Enclaves - a special processor that can prove it's running the exact code from GitHub"}</li>
-                            <li>{"Your data is encrypted inside the enclave with a key only available inside the verified processor"}</li>
-                            <li>{"On software updates: data is exported encrypted, a blockchain smart contract verifies the new code matches GitHub, then releases the encryption key to the new verified processor"}</li>
-                            <li>{"AI processing uses Tinfoil - a verifiably private AI provider using the same enclave technology"}</li>
-                        </ol>
+                    <div class="privacy-bold-statement">
+                        <h3>{"We Can\u{2019}t See Your Data. Even If We Wanted To."}</h3>
+                        <p>{"Open source. Verified on-chain. AI processed through Tinfoil\u{2019}s verified enclaves. Not a promise - cryptographic proof."}</p>
+                        <a href="/trustless" class="privacy-link">{"See exactly how it works \u{2192}"}</a>
                     </div>
-                    <p class="privacy-closing">{"End-to-end verifiably private. Not just a promise - cryptographic proof."}</p>
                 </div>
             </section>
 
@@ -423,7 +264,7 @@ pub fn landing() -> Html {
                 <div class="section-intro">
                     <h2>{"The Story"}</h2>
                     <img src="/assets/rasmus-pfp.png" alt="Rasmus, founder of Lightfriend" loading="lazy" style="max-width: 200px; border-radius: 50%; margin: 0 auto 1.5rem; display: block;"/>
-                    <p>{"I\u{2019}m Rasmus. I built Lightfriend because I switched to a dumbphone and needed a way to keep WhatsApp and email without a smartphone."}</p>
+                    <p>{"I\u{2019}m "}<a href="https://rasmus.ahtava.com" target="_blank" rel="noopener noreferrer">{"Rasmus"}</a>{". I built Lightfriend because I switched to a dumbphone and needed a way to keep WhatsApp and email without a smartphone."}</p>
                 </div>
             </section>
 
@@ -451,6 +292,12 @@ pub fn landing() -> Html {
                             {"I have ADHD so smartphones were basically impossible for me. I'd check one notification and suddenly an hour was gone. Now I just get a text with the important stuff. No apps, nothing to get lost in. Honestly it's changed everything for how I get through my day."}
                         </blockquote>
                     </div>
+                    <div class="testimonial">
+                        <blockquote>
+                            {"Lightfriend has saved me so many times. I\u{2019}ll forget a deadline or miss an important email \u{2014} but then Lightfriend pings me about it before it\u{2019}s too late. It watches my inbox so I don\u{2019}t have to. Honestly, I\u{2019}d be lost without it."}
+                        </blockquote>
+                        <p class="testimonial-author">{"- Kasperi"}</p>
+                    </div>
                 </div>
             </section>
             <div class="filter-concept">
@@ -471,7 +318,6 @@ pub fn landing() -> Html {
             <footer class="footer-cta scroll-animate">
                 <div class="footer-content">
                     <h2>{"Ready for Digital Peace?"}</h2>
-                    <p class="subtitle">{"Join the other 100+ early adopters! You will have more impact on the direction of the service and permanently cheaper prices."}</p>
                     <Link<Route> to={Route::Pricing} classes="forward-link">
                         <button class="hero-cta">{"Start Today"}</button>
                     </Link<Route>>
@@ -577,12 +423,12 @@ pub fn landing() -> Html {
             <style>
                 {r#"
     .hero-overlay {
-        position: fixed;
+        position: absolute;
         top: 0;
         left: 0;
         width: 100%;
-        height: 100vh;
-        background: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.5) 100%);
+        height: 100%;
+        background: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.5) 80%, #0d0d0d 100%);
         z-index: -1;
         pointer-events: none;
     }
@@ -602,6 +448,36 @@ pub fn landing() -> Html {
         max-width: 1200px;
         position: relative;
         z-index: 2;
+        background: #0d0d0d;
+        text-align: center;
+    }
+    .filter-concept h2 {
+        font-size: 2.5rem;
+        margin-bottom: 1rem;
+        color: #fff;
+    }
+    .filter-concept-subtitle {
+        font-size: 1.2rem;
+        color: #bbb;
+        line-height: 1.6;
+        max-width: 700px;
+        margin: 0 auto 2rem;
+    }
+    .integrations-row {
+        display: flex;
+        justify-content: center;
+        gap: 2.5rem;
+        margin-top: 3rem;
+        padding-top: 2rem;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .integrations-row i {
+        font-size: 1.8rem;
+        color: rgba(255, 255, 255, 0.35);
+        transition: color 0.3s ease;
+    }
+    .integrations-row i:hover {
+        color: rgba(255, 255, 255, 0.6);
     }
     .filter-content {
         display: flex;
@@ -613,9 +489,7 @@ pub fn landing() -> Html {
     .filter-text h2 {
         font-size: 2.5rem;
         margin-bottom: 1.5rem;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
     }
     .filter-image {
         flex: 1;
@@ -637,9 +511,7 @@ pub fn landing() -> Html {
     .faq-in-filter h2 {
         font-size: 2.5rem;
         margin-bottom: 1.5rem;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
         text-align: center;
     }
     .trust-proof {
@@ -651,21 +523,13 @@ pub fn landing() -> Html {
         z-index: 2;
     }
     .trust-proof::before {
-        content: '';
-        display: block;
-        height: 2px;
-        width: 60%;
-        margin: 0 auto 2rem;
-        background: linear-gradient(to right, transparent, rgba(126, 178, 255, 0.4), transparent);
+        content: none;
     }
     .trust-proof h2 {
         font-size: 2.5rem;
         margin-bottom: 1.5rem;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
         font-weight: 700;
-        text-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
     }
     .trust-proof p {
         font-size: 1.3rem;
@@ -684,17 +548,14 @@ pub fn landing() -> Html {
     }
     .faq-item {
         margin-bottom: 1.5rem;
-        background: rgba(126, 178, 255, 0.03);
-        backdrop-filter: blur(8px);
+        background: rgba(255, 255, 255, 0.03);
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 12px;
         padding: 1.5rem;
-        box-shadow: 0 0 15px rgba(126, 178, 255, 0.05);
         transition: all 0.3s ease;
     }
     .faq-item:hover {
         border-color: rgba(255, 255, 255, 0.25);
-        box-shadow: 0 0 25px rgba(255, 255, 255, 0.1);
     }
     .faq-item h3 {
         font-size: 1.4rem;
@@ -709,6 +570,12 @@ pub fn landing() -> Html {
     @media (max-width: 768px) {
         .filter-concept {
             padding: 2rem;
+        }
+        .filter-concept h2 {
+            font-size: 2rem;
+        }
+        .filter-concept-subtitle {
+            font-size: 1.05rem;
         }
         .filter-content {
             flex-direction: column;
@@ -745,7 +612,6 @@ pub fn landing() -> Html {
     }
     .dual-section-card {
         background: rgba(0, 0, 0, 0.3);
-        backdrop-filter: blur(10px);
         border: 1px solid rgba(255, 255, 255, 0.15);
         border-radius: 20px;
         padding: 2.5rem;
@@ -753,9 +619,7 @@ pub fn landing() -> Html {
     .dual-section-card h2 {
         font-size: 1.8rem;
         margin-bottom: 1rem;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
     }
     .dual-section-card p {
         font-size: 1rem;
@@ -825,7 +689,7 @@ pub fn landing() -> Html {
         transition: transform 0.3s ease, box-shadow 0.3s ease;
     }
     .difference-content:hover {
-        transform: translateY(-5px);
+        border-color: rgba(255, 255, 255, 0.1);
     }
     .difference-text {
         flex: 1;
@@ -833,9 +697,7 @@ pub fn landing() -> Html {
     .difference-text h2 {
         font-size: 2.5rem;
         margin-bottom: 1.5rem;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
     }
     .difference-text p {
         font-size: 1.4rem;
@@ -850,9 +712,7 @@ pub fn landing() -> Html {
     .comparison-table h3 {
         font-size: 1.8rem;
         text-align: center;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
     }
     .comparison-table p {
         text-align: center;
@@ -888,10 +748,7 @@ pub fn landing() -> Html {
     }
     .highlight {
         font-weight: 700;
-        background: linear-gradient(45deg, #7EB2FF, #4169E1);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        text-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+        color: #7EB2FF;
     }
     .difference-image {
         flex: 1;
@@ -903,12 +760,11 @@ pub fn landing() -> Html {
         max-width: 100%;
         height: auto;
         border-radius: 12px;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 25px rgba(255, 255, 255, 0.12);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
         border: 1px solid rgba(255, 255, 255, 0.1);
         transition: all 0.3s ease;
     }
     .difference-image img:hover {
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 35px rgba(255, 255, 255, 0.2);
         border-color: rgba(255, 255, 255, 0.25);
     }
     @media (max-width: 768px) {
@@ -931,7 +787,7 @@ pub fn landing() -> Html {
     .landing-page {
         position: relative;
         min-height: 100vh;
-        background-color: transparent;
+        background: #0d0d0d;
         color: #ffffff;
         font-family: system-ui, -apple-system, sans-serif;
         margin: 0 auto;
@@ -942,7 +798,6 @@ pub fn landing() -> Html {
     }
     .landing-page > section,
     .landing-page > footer {
-        min-height: 70vh;
         display: flex;
         flex-direction: column;
         justify-content: center;
@@ -950,6 +805,11 @@ pub fn landing() -> Html {
         padding-top: 3rem;
         padding-bottom: 3rem;
         box-sizing: border-box;
+        background: #0d0d0d;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .landing-page > section:first-of-type {
+        border-top: none;
     }
     .main-features {
         max-width: 1200px;
@@ -980,8 +840,7 @@ pub fn landing() -> Html {
         margin-bottom: 180vh;
     }
     .feature-block:hover {
-        transform: translateY(-5px) scale(1.02);
-        box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
+        border-color: rgba(255, 255, 255, 0.15);
     }
     .feature-image {
         flex: 1;
@@ -1074,20 +933,7 @@ pub fn landing() -> Html {
         margin-top: 0;
     }
     .how-it-works::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: linear-gradient(
-            to bottom,
-            rgba(26, 26, 26, 0),
-            rgba(26, 26, 26, 0.7),
-            rgba(26, 26, 26, 0.9)
-        );
-        z-index: -1;
-        pointer-events: none;
+        content: none;
     }
     .how-it-works * {
         pointer-events: auto;
@@ -1095,7 +941,6 @@ pub fn landing() -> Html {
     .how-it-works h2 {
         font-size: 3rem;
         margin-bottom: 1rem;
-        text-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
     }
     .how-it-works > p {
         color: #7EB2FF;
@@ -1133,8 +978,7 @@ pub fn landing() -> Html {
         );
     }
     .step:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 4px 20px rgba(30, 144, 255, 0.15);
+        border-color: rgba(255, 255, 255, 0.2);
     }
     .step h3 {
         color: #1E90FF;
@@ -1194,9 +1038,7 @@ pub fn landing() -> Html {
     .footer-cta h2 {
         font-size: 3.5rem;
         margin-bottom: 1.5rem;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
         font-weight: 700;
     }
     .footer-cta .subtitle {
@@ -1232,9 +1074,7 @@ pub fn landing() -> Html {
     .hero-notification-card h2 {
         font-size: 1.6rem;
         margin-bottom: 0.5rem;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
     }
     .hero-notification-card p {
         font-size: 1rem;
@@ -1248,11 +1088,11 @@ pub fn landing() -> Html {
         border-radius: 12px;
     }
     .hero-background {
-        position: fixed;
+        position: absolute;
         top: 0;
         left: 0;
         width: 100%;
-        height: 100vh;
+        height: 100%;
         background-image: url('/assets/aurora-bg.jpg');
         background-size: cover;
         background-position: center;
@@ -1269,13 +1109,12 @@ pub fn landing() -> Html {
         width: 100%;
         height: 50%;
         background: linear-gradient(to bottom,
-            rgba(26, 26, 26, 0) 0%,
-            rgba(26, 26, 26, 1) 100%
+            rgba(13, 13, 13, 0) 0%,
+            rgba(13, 13, 13, 1) 100%
         );
     }
     @media (max-width: 768px) {
         .hero-background {
-            position: absolute;
             background-position: 70% center;
         }
     }
@@ -1307,17 +1146,12 @@ pub fn landing() -> Html {
         margin: 0 auto 1rem;
         line-height: 1.6;
         text-align: center;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
     }
     .highlight-icon {
         font-size: 1.2rem;
         margin: 0 0.2rem;
-        background: linear-gradient(45deg, #7EB2FF, #4169E1);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        text-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+        color: #7EB2FF;
         vertical-align: middle;
     }
     @media (max-width: 768px) {
@@ -1366,7 +1200,6 @@ pub fn landing() -> Html {
         overflow: hidden;
         margin: 2rem 0 3rem 0;
         border: 1px solid rgba(255, 255, 255, 0.4);
-        backdrop-filter: blur(5px);
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.5);
     }
     @media (min-width: 769px) {
@@ -1397,8 +1230,7 @@ pub fn landing() -> Html {
         transform: translateX(100%);
     }
     .hero-cta:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 20px rgba(255, 255, 255, 0.2), 0 0 30px rgba(200, 200, 200, 0.15);
+        transform: translateY(-1px);
         background: linear-gradient(
             135deg,
             #e0e0e0,
@@ -1432,9 +1264,7 @@ pub fn landing() -> Html {
     .hero-metric-number {
         font-size: 1.3rem;
         font-weight: 700;
-        background: linear-gradient(45deg, #7EB2FF, #fff);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #7EB2FF;
     }
     .hero-metric-label {
         font-size: 0.85rem;
@@ -1481,7 +1311,7 @@ pub fn landing() -> Html {
         .hero-right-panel {
             max-width: 100%;
             padding: 0 1rem;
-            padding-top: 18vh;
+            padding-top: 28vh;
         }
     }
 
@@ -1494,7 +1324,7 @@ pub fn landing() -> Html {
         padding: 1.4rem;
         width: 100%;
         max-width: 420px;
-        box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4), 0 0 30px rgba(126, 178, 255, 0.08);
+        box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
     }
     .sms-demo-header {
         display: flex;
@@ -1509,7 +1339,6 @@ pub fn landing() -> Html {
         height: 10px;
         border-radius: 50%;
         background: #4CAF50;
-        box-shadow: 0 0 8px rgba(76, 175, 80, 0.5);
     }
     .sms-demo-name {
         font-size: 1rem;
@@ -1556,11 +1385,11 @@ pub fn landing() -> Html {
 
     /* ========== Hero Particles ========== */
     .hero-particles {
-        position: fixed;
+        position: absolute;
         top: 0;
         left: 0;
         width: 100%;
-        height: 100vh;
+        height: 100%;
         z-index: -1;
         pointer-events: none;
         overflow: hidden;
@@ -1569,8 +1398,7 @@ pub fn landing() -> Html {
         position: absolute;
         bottom: -10px;
         border-radius: 50%;
-        background: rgba(255, 255, 255, 0.6);
-        box-shadow: 0 0 6px 2px rgba(255, 255, 255, 0.3);
+        background: rgba(255, 255, 255, 0.4);
         animation: particleRise linear infinite;
     }
     @keyframes particleRise {
@@ -1608,8 +1436,7 @@ pub fn landing() -> Html {
         width: 100%;
         max-width: 460px;
         box-shadow:
-            0 20px 60px rgba(0, 0, 0, 0.5),
-            0 0 30px rgba(126, 178, 255, 0.06),
+            0 20px 60px rgba(0, 0, 0, 0.4),
             inset 0 1px 0 rgba(255, 255, 255, 0.08);
         border: 1px solid rgba(255, 255, 255, 0.08);
     }
@@ -1658,6 +1485,7 @@ pub fn landing() -> Html {
         max-width: 1200px;
         margin-left: auto;
         margin-right: auto;
+        background: #0d0d0d;
     }
     .demo-story-grid {
         display: grid;
@@ -1676,9 +1504,7 @@ pub fn landing() -> Html {
     .demo-story-right h2 {
         font-size: 2rem;
         margin-bottom: 1rem;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
     }
     .demo-story-right .rasmus-pfp {
         max-width: 100px;
@@ -1812,7 +1638,6 @@ pub fn landing() -> Html {
     }
     .faq-link:hover {
         color: #90c2ff;
-        text-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
     }
     .faq-link:hover::after {
         transform: scaleX(1);
@@ -1852,11 +1677,8 @@ pub fn landing() -> Html {
     .before-after h2 {
         font-size: 2.5rem;
         margin-bottom: 1.5rem;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
         font-weight: 700;
-        text-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
     }
     .before-after p {
         font-size: 1.3rem;
@@ -1922,7 +1744,6 @@ pub fn landing() -> Html {
     .waitlist-input:focus {
         outline: none;
         border-color: #1E90FF;
-        box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
     }
     .waitlist-input::placeholder {
         color: #666;
@@ -1941,8 +1762,7 @@ pub fn landing() -> Html {
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.5);
     }
     .waitlist-button:hover:not(:disabled) {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 20px rgba(255, 255, 255, 0.2), 0 0 30px rgba(200, 200, 200, 0.15);
+        transform: translateY(-1px);
     }
     .waitlist-button:disabled {
         opacity: 0.7;
@@ -2000,7 +1820,6 @@ pub fn landing() -> Html {
     }
     .development-links a:hover {
         color: #7EB2FF;
-        text-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
     }
     .development-links a:hover::after {
         transform: scaleX(1);
@@ -2026,16 +1845,12 @@ pub fn landing() -> Html {
         align-items: center;
         padding: 0.5rem 1rem;
         border-radius: 20px;
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        box-shadow: 0 0 20px rgba(255, 255, 255, 0.15), inset 0 0 20px rgba(126, 178, 255, 0.05);
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
         transition: all 0.3s ease;
     }
     .trust-link:hover {
-        background: rgba(255, 255, 255, 0.15);
-        box-shadow: 0 0 30px rgba(255, 255, 255, 0.25), inset 0 0 20px rgba(255, 255, 255, 0.1);
-        border-color: rgba(126, 178, 255, 0.4);
+        border-color: rgba(255, 255, 255, 0.3);
     }
     .trust-logo {
         height: 22px;
@@ -2046,65 +1861,29 @@ pub fn landing() -> Html {
     /* ========== Scroll Animations ========== */
     .scroll-animate {
         opacity: 0;
-        transform: translateY(60px) scale(0.97);
-        filter: blur(8px);
-        transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
-                    transform 0.9s cubic-bezier(0.16, 1, 0.3, 1),
-                    filter 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+        transform: translateY(30px);
+        transition: opacity 0.7s ease, transform 0.7s ease;
     }
     .scroll-animate.visible {
         opacity: 1;
-        transform: translateY(0) scale(1);
-        filter: blur(0);
+        transform: translateY(0);
     }
     /* Demo-story section staggered entrance */
     .demo-story-left.scroll-animate {
-        transform: translateX(-60px) scale(0.97);
-        filter: blur(8px);
-        transition: opacity 1s cubic-bezier(0.16, 1, 0.3, 1),
-                    transform 1s cubic-bezier(0.16, 1, 0.3, 1),
-                    filter 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+        transform: translateX(-30px);
+        transition: opacity 0.7s ease, transform 0.7s ease;
     }
     .demo-story-right.scroll-animate {
-        transform: translateX(60px) scale(0.97);
-        filter: blur(8px);
-        transition: opacity 1s cubic-bezier(0.16, 1, 0.3, 1) 0.5s,
-                    transform 1s cubic-bezier(0.16, 1, 0.3, 1) 0.5s,
-                    filter 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.5s;
+        transform: translateX(30px);
+        transition: opacity 0.7s ease 0.2s, transform 0.7s ease 0.2s;
     }
     .demo-story-left.scroll-animate.visible {
         opacity: 1;
-        transform: translateX(0) scale(1);
-        filter: blur(0);
+        transform: translateX(0);
     }
     .demo-story-right.scroll-animate.visible {
         opacity: 1;
-        transform: translateX(0) scale(1);
-        filter: blur(0);
-    }
-    /* SMS demo section special entrance */
-    .sms-demo-section.scroll-animate {
-        transform: translateY(80px) scale(0.9);
-        filter: blur(12px);
-        transition: opacity 1.2s cubic-bezier(0.16, 1, 0.3, 1),
-                    transform 1.2s cubic-bezier(0.16, 1, 0.3, 1),
-                    filter 1s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-    .sms-demo-section.scroll-animate.visible {
-        transform: translateY(0) scale(1);
-        filter: blur(0);
-    }
-    /* Section headings glow in */
-    .trust-proof.scroll-animate {
-        transform: translateY(50px) scale(0.98);
-        filter: blur(6px);
-        transition: opacity 1s cubic-bezier(0.16, 1, 0.3, 1),
-                    transform 1s cubic-bezier(0.16, 1, 0.3, 1),
-                    filter 0.8s ease;
-    }
-    .trust-proof.scroll-animate.visible {
-        transform: translateY(0) scale(1);
-        filter: blur(0);
+        transform: translateX(0);
     }
 
     /* ========== Your Data, Connected ========== */
@@ -2119,9 +1898,7 @@ pub fn landing() -> Html {
     .connected-section h2 {
         font-size: 2.5rem;
         margin-bottom: 2.5rem;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
     }
     .connected-grid {
         display: grid;
@@ -2150,15 +1927,13 @@ pub fn landing() -> Html {
         justify-content: center;
         gap: 0.6rem;
         padding: 0.75rem 1rem;
-        background: rgba(126, 178, 255, 0.03);
+        background: rgba(255, 255, 255, 0.03);
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 12px;
         transition: all 0.3s ease;
     }
     .connected-item:hover {
         border-color: rgba(255, 255, 255, 0.25);
-        background: rgba(126, 178, 255, 0.08);
-        transform: translateY(-2px);
     }
     .connected-item i {
         font-size: 1.2rem;
@@ -2191,9 +1966,7 @@ pub fn landing() -> Html {
     .rules-section h2 {
         font-size: 2.5rem;
         margin-bottom: 2.5rem;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
     }
     .rules-grid {
         display: grid;
@@ -2202,8 +1975,7 @@ pub fn landing() -> Html {
         text-align: left;
     }
     .rule-block {
-        background: rgba(126, 178, 255, 0.03);
-        backdrop-filter: blur(8px);
+        background: rgba(255, 255, 255, 0.03);
         border: 1px solid rgba(255, 255, 255, 0.12);
         border-radius: 16px;
         padding: 2rem;
@@ -2211,8 +1983,6 @@ pub fn landing() -> Html {
     }
     .rule-block:hover {
         border-color: rgba(255, 255, 255, 0.25);
-        box-shadow: 0 0 25px rgba(255, 255, 255, 0.1);
-        transform: translateY(-3px);
     }
     .rule-block-label {
         display: inline-block;
@@ -2291,9 +2061,7 @@ pub fn landing() -> Html {
     .interaction-section h2 {
         font-size: 2.5rem;
         margin-bottom: 2.5rem;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
     }
     .interaction-grid {
         display: grid;
@@ -2301,8 +2069,7 @@ pub fn landing() -> Html {
         gap: 1.5rem;
     }
     .interaction-card {
-        background: rgba(126, 178, 255, 0.03);
-        backdrop-filter: blur(8px);
+        background: rgba(255, 255, 255, 0.03);
         border: 1px solid rgba(255, 255, 255, 0.12);
         border-radius: 16px;
         padding: 2rem 1.5rem;
@@ -2311,8 +2078,6 @@ pub fn landing() -> Html {
     }
     .interaction-card:hover {
         border-color: rgba(255, 255, 255, 0.25);
-        box-shadow: 0 0 25px rgba(255, 255, 255, 0.1);
-        transform: translateY(-3px);
     }
     .interaction-icon {
         margin-bottom: 1rem;
@@ -2355,9 +2120,7 @@ pub fn landing() -> Html {
     .privacy-section h2 {
         font-size: 2.5rem;
         margin-bottom: 2rem;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
     }
     .privacy-content {
         text-align: left;
@@ -2369,8 +2132,7 @@ pub fn landing() -> Html {
         margin-bottom: 2rem;
     }
     .privacy-vis-card {
-        background: rgba(126, 178, 255, 0.03);
-        backdrop-filter: blur(8px);
+        background: rgba(255, 255, 255, 0.03);
         border: 1px solid rgba(255, 255, 255, 0.12);
         border-radius: 16px;
         padding: 1.5rem;
@@ -2391,40 +2153,31 @@ pub fn landing() -> Html {
         line-height: 1.6;
         margin: 0;
     }
-    .privacy-how {
-        background: rgba(126, 178, 255, 0.03);
-        backdrop-filter: blur(8px);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 16px;
-        padding: 2rem;
-        margin-bottom: 1.5rem;
+    .privacy-bold-statement {
+        text-align: center;
+        margin-top: 2rem;
     }
-    .privacy-how h3 {
-        font-size: 1.2rem;
+    .privacy-bold-statement h3 {
+        font-size: 1.6rem;
         color: #fff;
+        font-weight: 700;
         margin-bottom: 1rem;
-        font-weight: 600;
     }
-    .privacy-steps {
-        padding-left: 1.5rem;
-        margin: 0;
-    }
-    .privacy-steps li {
-        font-size: 0.95rem;
+    .privacy-bold-statement p {
+        font-size: 1.05rem;
         color: #bbb;
         line-height: 1.7;
-        padding: 0.35rem 0;
+        margin-bottom: 1.5rem;
     }
-    .privacy-steps li::marker {
+    .privacy-link {
         color: #7EB2FF;
+        font-size: 1.05rem;
         font-weight: 600;
+        text-decoration: none;
+        transition: opacity 0.2s;
     }
-    .privacy-closing {
-        text-align: center;
-        font-size: 1.15rem;
-        color: rgba(255, 255, 255, 0.8);
-        font-weight: 500;
-        font-style: italic;
+    .privacy-link:hover {
+        opacity: 0.8;
     }
     @media (max-width: 768px) {
         .privacy-visibility {
@@ -2452,25 +2205,19 @@ pub fn landing() -> Html {
     .testimonials-section h2 {
         font-size: 2.5rem;
         margin-bottom: 1.5rem;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
         font-weight: 700;
-        text-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
     }
     .testimonial {
-        background: rgba(126, 178, 255, 0.05);
-        backdrop-filter: blur(10px);
+        background: rgba(255, 255, 255, 0.03);
         border-radius: 12px;
         padding: 2rem;
         margin: 1rem 0;
         border: 1px solid rgba(255, 255, 255, 0.15);
-        box-shadow: 0 0 20px rgba(255, 255, 255, 0.1);
         transition: all 0.3s ease;
     }
     .testimonial:hover {
         border-color: rgba(255, 255, 255, 0.3);
-        box-shadow: 0 0 30px rgba(255, 255, 255, 0.15);
     }
     .testimonial blockquote {
         font-size: 1.2rem;
@@ -2506,9 +2253,7 @@ pub fn landing() -> Html {
     .adhd-section h2 {
         font-size: 2.5rem;
         margin-bottom: 0.75rem;
-        background: linear-gradient(135deg, #e0e0e0, #a8a8a8 30%, #f0f0f0 50%, #a8a8a8 70%, #c0c0c0);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
     }
     .adhd-subtitle {
         color: #999;
@@ -2524,25 +2269,19 @@ pub fn landing() -> Html {
         gap: 1.5rem;
     }
     .adhd-card {
-        background: linear-gradient(145deg, rgba(200, 200, 200, 0.08), rgba(160, 160, 160, 0.04));
-        backdrop-filter: blur(8px);
+        background: rgba(255, 255, 255, 0.03);
         border: 1px solid rgba(200, 200, 200, 0.15);
         border-radius: 16px;
         padding: 2rem 1.5rem;
         text-align: center;
         transition: all 0.3s ease;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.08);
     }
     .adhd-card:hover {
         border-color: rgba(220, 220, 220, 0.3);
-        box-shadow: 0 4px 20px rgba(200, 200, 200, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.12);
-        transform: translateY(-2px);
     }
     .adhd-card-icon {
         font-size: 2rem;
-        background: linear-gradient(135deg, #d4d4d4, #a8a8a8 30%, #e8e8e8 50%, #a8a8a8 70%, #c0c0c0);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: rgba(255, 255, 255, 0.7);
         margin-bottom: 1rem;
     }
     .adhd-card h3 {

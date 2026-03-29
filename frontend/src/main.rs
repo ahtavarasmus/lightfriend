@@ -551,11 +551,7 @@ pub fn nav(props: &NavProps) -> Html {
                                         </div>
                                         <div class="nav-trust-badge">
                                             <i class="fa-solid fa-shield-halved"></i>
-                                            <span>{"EU Hosted"}</span>
-                                        </div>
-                                        <div class="nav-trust-badge">
-                                            <i class="fa-solid fa-lock"></i>
-                                            <span>{"Encrypted"}</span>
+                                            <span>{"Verifiably Private"}</span>
                                         </div>
                                     </div>
                                     if !is_pricing {
@@ -563,7 +559,7 @@ pub fn nav(props: &NavProps) -> Html {
                                             {"Pricing"}
                                         </Link<Route>>
                                     }
-                                    <a href="mailto:support@lightfriend.ai" class="nav-link">
+                                    <a href="mailto:support@lightfriend.ai" class="nav-link nav-support-link">
                                         {"Support"}
                                     </a>
                                     <Link<Route> to={Route::Login} classes="nav-login-button">
