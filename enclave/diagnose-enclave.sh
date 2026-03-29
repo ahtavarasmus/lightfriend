@@ -21,12 +21,15 @@ echo "--- postgres check ---"
 pg_isready -h localhost -U postgres 2>&1 || echo "pg_isready failed"
 echo ""
 
-echo "--- backend health (2s timeout) ---"
-timeout 2 curl -sf --max-time 1 --connect-timeout 1 http://localhost:${PORT:-3100}/api/health 2>&1 || echo "backend not responding (hung or crashed)"
+echo "--- backend health ---"
+echo "  port ${PORT:-3100}: $(ss -tlnp 2>/dev/null | grep ":${PORT:-3100}" || echo 'NOT LISTENING')"
+# Use subshell with kill to ensure we never hang
+(curl -sf --max-time 1 --connect-timeout 1 http://localhost:${PORT:-3100}/api/health 2>&1 & CPID=$!; sleep 2; kill $CPID 2>/dev/null; wait $CPID 2>/dev/null) || echo "backend not responding (hung or crashed)"
 echo ""
 
-echo "--- tuwunel health (2s timeout) ---"
-timeout 2 curl -sf --max-time 1 --connect-timeout 1 http://localhost:8008/_matrix/client/versions 2>&1 || echo "tuwunel not responding"
+echo "--- tuwunel health ---"
+echo "  port 8008: $(ss -tlnp 2>/dev/null | grep ':8008' || echo 'NOT LISTENING')"
+(curl -sf --max-time 1 --connect-timeout 1 http://localhost:8008/_matrix/client/versions 2>&1 & CPID=$!; sleep 2; kill $CPID 2>/dev/null; wait $CPID 2>/dev/null) || echo "tuwunel not responding"
 echo ""
 
 echo "--- backend process details ---"
