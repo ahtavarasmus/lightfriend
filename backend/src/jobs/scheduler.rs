@@ -28,9 +28,17 @@ async fn initialize_matrix_clients(state: Arc<AppState>) {
             // Setup clients and sync tasks for active users.
             // Stagger initialization to avoid overwhelming tuwunel with 229+ concurrent syncs
             let user_count = users.len();
-            tracing::info!("Initializing Matrix clients for {} users (staggered)", user_count);
+            tracing::info!(
+                "Initializing Matrix clients for {} users (staggered)",
+                user_count
+            );
             for (idx, user_id) in users.into_iter().enumerate() {
-                tracing::debug!("Setting up Matrix client {}/{} for user {}", idx + 1, user_count, user_id);
+                tracing::debug!(
+                    "Setting up Matrix client {}/{} for user {}",
+                    idx + 1,
+                    user_count,
+                    user_id
+                );
 
                 // Create and initialize client
                 match crate::utils::matrix_auth::get_client(user_id, &state).await {

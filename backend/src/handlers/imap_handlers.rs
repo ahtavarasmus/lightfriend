@@ -233,7 +233,10 @@ pub async fn respond_to_email(
             ))
         }
     };
-    let server = imap_server.as_deref().unwrap_or("imap.gmail.com").to_string();
+    let server = imap_server
+        .as_deref()
+        .unwrap_or("imap.gmail.com")
+        .to_string();
     let port = imap_port.unwrap_or(993);
     // Connect to IMAP server using spawn_blocking to prevent blocking the Tokio runtime.
     // In the enclave, outbound TCP is unavailable so imap::connect would hang forever
@@ -551,7 +554,10 @@ pub async fn fetch_emails_imap(
     let tls = TlsConnector::builder().build().map_err(|e| {
         ImapError::ConnectionError(format!("Failed to create TLS connector: {}", e))
     })?;
-    let server = imap_server.as_deref().unwrap_or("imap.gmail.com").to_string();
+    let server = imap_server
+        .as_deref()
+        .unwrap_or("imap.gmail.com")
+        .to_string();
     let port = imap_port.unwrap_or(993);
     // Connect to IMAP server using spawn_blocking with timeout to prevent blocking Tokio runtime
     let server_clone = server.clone();
@@ -561,7 +567,9 @@ pub async fn fetch_emails_imap(
         std::time::Duration::from_secs(15),
         tokio::task::spawn_blocking(move || -> Result<_, ImapError> {
             let client = imap::connect((&*server_clone, port as u16), &server_clone, &tls)
-                .map_err(|e| ImapError::ConnectionError(format!("Failed to connect to IMAP server: {}", e)))?;
+                .map_err(|e| {
+                    ImapError::ConnectionError(format!("Failed to connect to IMAP server: {}", e))
+                })?;
             let session = client
                 .login(&email_clone, &password_clone)
                 .map_err(|(e, _)| ImapError::CredentialsError(format!("Failed to login: {}", e)))?;
@@ -570,8 +578,7 @@ pub async fn fetch_emails_imap(
     )
     .await
     .map_err(|_| ImapError::ConnectionError("IMAP connection timed out (15s)".to_string()))?
-    .map_err(|e| ImapError::ConnectionError(format!("IMAP task failed: {}", e)))?
-    ?;
+    .map_err(|e| ImapError::ConnectionError(format!("IMAP task failed: {}", e)))??;
     // Select INBOX
     let mailbox = imap_session
         .select("INBOX")
@@ -770,7 +777,10 @@ pub async fn fetch_single_email_imap(
     let tls = TlsConnector::builder().build().map_err(|e| {
         ImapError::ConnectionError(format!("Failed to create TLS connector: {}", e))
     })?;
-    let server = imap_server.as_deref().unwrap_or("imap.gmail.com").to_string();
+    let server = imap_server
+        .as_deref()
+        .unwrap_or("imap.gmail.com")
+        .to_string();
     let port = imap_port.unwrap_or(993);
     // Connect to IMAP server using spawn_blocking with timeout
     let server_clone = server.clone();
@@ -780,7 +790,9 @@ pub async fn fetch_single_email_imap(
         std::time::Duration::from_secs(15),
         tokio::task::spawn_blocking(move || -> Result<_, ImapError> {
             let client = imap::connect((&*server_clone, port as u16), &server_clone, &tls)
-                .map_err(|e| ImapError::ConnectionError(format!("Failed to connect to IMAP server: {}", e)))?;
+                .map_err(|e| {
+                    ImapError::ConnectionError(format!("Failed to connect to IMAP server: {}", e))
+                })?;
             let mut session = client
                 .login(&email_clone, &password_clone)
                 .map_err(|(e, _)| ImapError::CredentialsError(format!("Failed to login: {}", e)))?;
@@ -792,8 +804,7 @@ pub async fn fetch_single_email_imap(
     )
     .await
     .map_err(|_| ImapError::ConnectionError("IMAP connection timed out (15s)".to_string()))?
-    .map_err(|e| ImapError::ConnectionError(format!("IMAP task failed: {}", e)))?
-    ?;
+    .map_err(|e| ImapError::ConnectionError(format!("IMAP task failed: {}", e)))??;
     // Fetch specific message with body structure for attachments
     // Using BODY.PEEK[] to avoid marking the email as read
     let messages =

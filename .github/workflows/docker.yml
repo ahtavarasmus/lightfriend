@@ -852,3 +852,25 @@ jobs:
           aws s3 rm "s3://$S3_BUCKET/deploy/restore-$NEW_INSTANCE.json" 2>/dev/null || true
 
           echo "## ROLLBACK - old instance $OLD_INSTANCE restored" >> $GITHUB_STEP_SUMMARY
+
+  notify:
+    needs: [deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send email notification
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: mail.privateemail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          to: ${{ secrets.SMTP_USERNAME }}
+          from: Lightfriend CI <${{ secrets.SMTP_USERNAME }}>
+          subject: "${{ needs.deploy.result == 'success' && 'Deploy SUCCESS' || 'Deploy FAILED' }} - ${{ github.sha }}"
+          body: |
+            Deploy ${{ needs.deploy.result }} for commit ${{ github.sha }}
+
+            Branch: ${{ github.ref_name }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
