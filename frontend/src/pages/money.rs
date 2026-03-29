@@ -1393,6 +1393,7 @@ pub fn credit_pricing(props: &FeatureListProps) -> Html {
 }
 #[function_component(UnifiedPricing)]
 pub fn unified_pricing(props: &PricingProps) -> Html {
+    let show_country_selector = use_state(|| false);
     // Assistant plan prices (lower tier)
     let hosted_prices: HashMap<String, f64> = HashMap::from([
         ("US".to_string(), 19.00),
@@ -1867,11 +1868,54 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
 
             {
                 if !props.is_logged_in && !props.country_name.is_empty() {
-                    html! {
-                        <p class="detected-country" style="font-size: 0.85rem; color: #888; margin-bottom: 1.5rem;">
-                            {format!("Showing prices for {}. ", props.country_name.clone())}
-                            <a href="mailto:rasmus@lightfriend.ai" style="color: #7EB2FF; text-decoration: none;">{"Not your country?"}</a>
-                        </p>
+                    if let Some(on_change) = props.on_country_change.clone() {
+                        let show_selector = show_country_selector.clone();
+                        let toggle = Callback::from(move |e: MouseEvent| {
+                            e.prevent_default();
+                            show_selector.set(!*show_selector);
+                        });
+                        html! {
+                            <div style="margin-bottom: 1.5rem;">
+                                <p class="detected-country" style="font-size: 0.85rem; color: #888;">
+                                    {format!("Showing prices for {}. ", props.country_name.clone())}
+                                    <a href="#" onclick={toggle} style="color: #7EB2FF; text-decoration: none;">{"Not your country?"}</a>
+                                </p>
+                                if *show_country_selector {
+                                    <div class="country-selector" style="margin-top: 0.5rem; max-width: 300px;">
+                                        <select onchange={on_change} style="width: 100%; padding: 0.5rem; background: rgba(30, 30, 30, 0.9); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 6px; color: #e0e0e0; font-size: 0.85rem;">
+                                            <optgroup label="Full Service (local number)">
+                                                <option value="US" selected={props.selected_country == "US"}>{"United States"}</option>
+                                                <option value="CA" selected={props.selected_country == "CA"}>{"Canada"}</option>
+                                                <option value="FI" selected={props.selected_country == "FI"}>{"Finland"}</option>
+                                                <option value="NL" selected={props.selected_country == "NL"}>{"Netherlands"}</option>
+                                                <option value="GB" selected={props.selected_country == "GB"}>{"United Kingdom"}</option>
+                                                <option value="AU" selected={props.selected_country == "AU"}>{"Australia"}</option>
+                                            </optgroup>
+                                            <optgroup label="Europe">
+                                                <option value="DE" selected={props.selected_country == "DE"}>{"Germany"}</option>
+                                                <option value="FR" selected={props.selected_country == "FR"}>{"France"}</option>
+                                                <option value="ES" selected={props.selected_country == "ES"}>{"Spain"}</option>
+                                                <option value="IT" selected={props.selected_country == "IT"}>{"Italy"}</option>
+                                                <option value="SE" selected={props.selected_country == "SE"}>{"Sweden"}</option>
+                                                <option value="NO" selected={props.selected_country == "NO"}>{"Norway"}</option>
+                                                <option value="DK" selected={props.selected_country == "DK"}>{"Denmark"}</option>
+                                                <option value="CH" selected={props.selected_country == "CH"}>{"Switzerland"}</option>
+                                                <option value="AT" selected={props.selected_country == "AT"}>{"Austria"}</option>
+                                                <option value="PL" selected={props.selected_country == "PL"}>{"Poland"}</option>
+                                                <option value="PT" selected={props.selected_country == "PT"}>{"Portugal"}</option>
+                                                <option value="BE" selected={props.selected_country == "BE"}>{"Belgium"}</option>
+                                                <option value="IE" selected={props.selected_country == "IE"}>{"Ireland"}</option>
+                                            </optgroup>
+                                            <optgroup label="Other">
+                                                <option value="Other" selected={props.selected_country == "Other"}>{"Other"}</option>
+                                            </optgroup>
+                                        </select>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    } else {
+                        html! {}
                     }
                 } else {
                     html! {}
