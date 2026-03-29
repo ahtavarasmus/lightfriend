@@ -325,14 +325,40 @@ WantedBy=multi-user.target
 UPLOADVSOCKEOF
 
 # VSOCK bridge for cloudflared edge connections (port 7844)
-# Enclave's cloudflared connects to Cloudflare edge via this bridge
+# Enclave's cloudflared connects to Cloudflare edge via this bridge.
+# Flow: enclave cloudflared -> VSOCK:7844 -> this bridge -> TCP to Cloudflare edge
+# Uses keepalive to detect dead connections, nodelay for HTTP/2 frame latency.
 cat > /opt/lightfriend/cloudflared-edge-bridge.sh <<'SCRIPT'
 #!/bin/bash
 LOG="/opt/lightfriend/logs/cloudflared-edge.log"
 mkdir -p /opt/lightfriend/logs
-echo "$(date -u): Starting cloudflared edge bridge on VSOCK:7844" >> "$LOG"
-# nodelay on both sides: disables Nagle's algorithm for HTTP/2 multiplexed frames
-socat -d -d VSOCK-LISTEN:7844,reuseaddr,fork TCP:region1.v2.argotunnel.com:7844,nodelay 2>>"$LOG"
+
+log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ): $*" >> "$LOG"; }
+
+log "=== Starting cloudflared edge bridge on VSOCK:7844 ==="
+log "PID: $$"
+log "Resolving region1.v2.argotunnel.com..."
+EDGE_IPS=$(getent hosts region1.v2.argotunnel.com 2>&1 || echo "DNS FAILED")
+log "  region1 IPs: $EDGE_IPS"
+EDGE_IPS2=$(getent hosts region2.v2.argotunnel.com 2>&1 || echo "DNS FAILED")
+log "  region2 IPs: $EDGE_IPS2"
+
+# socat options:
+#   -d -d -d: maximum debug verbosity (logs connection lifecycle)
+#   VSOCK-LISTEN: accept connections from enclave
+#   reuseaddr: allow rebind after restart
+#   fork: handle multiple connections (cloudflared opens 4)
+#   TCP: connect to Cloudflare edge
+#   nodelay: disable Nagle for HTTP/2 frame latency
+#   keepalive: enable TCP keepalive to detect dead connections
+#   keepidle=10: send first keepalive after 10s idle
+#   keepintvl=5: retry every 5s
+#   keepcnt=3: give up after 3 failed probes (25s total to detect dead conn)
+log "Starting socat bridge..."
+exec socat -d -d -d \
+    VSOCK-LISTEN:7844,reuseaddr,fork \
+    TCP:region1.v2.argotunnel.com:7844,nodelay,keepalive,keepidle=10,keepintvl=5,keepcnt=3 \
+    2>>"$LOG"
 SCRIPT
 chmod +x /opt/lightfriend/cloudflared-edge-bridge.sh
 
@@ -344,19 +370,30 @@ Description=VSOCK bridge for cloudflared edge connections (port 7844)
 ExecStart=/opt/lightfriend/cloudflared-edge-bridge.sh
 Restart=always
 RestartSec=3
+StandardOutput=append:/opt/lightfriend/logs/cloudflared-edge-stdout.log
+StandardError=append:/opt/lightfriend/logs/cloudflared-edge-stderr.log
 
 [Install]
 WantedBy=multi-user.target
 CFEDGEEOF
 
 # VSOCK bridge for DNS-over-TLS (port 8530 -> 1.1.1.1:853)
-# Cloudflared uses DoT for SRV record lookups
+# Cloudflared uses DoT for SRV record lookups to discover edge servers
+cat > /opt/lightfriend/dot-bridge.sh <<'SCRIPT'
+#!/bin/bash
+LOG="/opt/lightfriend/logs/dot-bridge.log"
+mkdir -p /opt/lightfriend/logs
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ): Starting DoT bridge VSOCK:8530 -> 1.1.1.1:853 (PID $$)" >> "$LOG"
+exec socat -d -d VSOCK-LISTEN:8530,reuseaddr,fork TCP:1.1.1.1:853,keepalive 2>>"$LOG"
+SCRIPT
+chmod +x /opt/lightfriend/dot-bridge.sh
+
 cat > /etc/systemd/system/vsock-dot-bridge.service <<'DOTEOF'
 [Unit]
 Description=VSOCK bridge for DNS-over-TLS to 1.1.1.1:853
 
 [Service]
-ExecStart=/usr/bin/socat VSOCK-LISTEN:8530,reuseaddr,fork TCP:1.1.1.1:853
+ExecStart=/opt/lightfriend/dot-bridge.sh
 Restart=always
 RestartSec=3
 
@@ -531,10 +568,31 @@ nitro-cli describe-enclaves 2>&1 | head -20
 
 echo ""
 echo "--- 2. VSOCK Services ---"
-for svc in squid vsock-proxy-bridge vsock-config-server vsock-boot-trace vsock-marlin-kms-bridge; do
+for svc in squid vsock-proxy-bridge vsock-config-server vsock-boot-trace vsock-marlin-kms-bridge vsock-cloudflared-edge vsock-dot-bridge vsock-seed-http vsock-backup-upload; do
     STATUS=$(systemctl is-active "$svc" 2>/dev/null || echo "not-found")
     printf "  %-30s %s\n" "$svc" "$STATUS"
 done
+
+echo ""
+echo "--- 2b. Cloudflared Edge Bridge ---"
+echo "  Service: $(systemctl is-active vsock-cloudflared-edge 2>&1)"
+echo "  VSOCK listeners on 7844:"
+ss -tlnp 2>/dev/null | grep 7844 || echo "    NONE - bridge not listening!"
+echo "  Active connections through bridge:"
+ss -tnp 2>/dev/null | grep 7844 || echo "    none"
+echo "  socat processes:"
+ps aux 2>/dev/null | grep '[s]ocat.*7844' || echo "    none"
+if [ -f /opt/lightfriend/logs/cloudflared-edge.log ]; then
+    echo "  Bridge log (last 20 lines):"
+    tail -20 /opt/lightfriend/logs/cloudflared-edge.log
+fi
+echo ""
+echo "--- 2c. DoT Bridge ---"
+echo "  Service: $(systemctl is-active vsock-dot-bridge 2>&1)"
+if [ -f /opt/lightfriend/logs/dot-bridge.log ]; then
+    echo "  DoT log (last 10 lines):"
+    tail -10 /opt/lightfriend/logs/dot-bridge.log
+fi
 
 echo ""
 echo "--- 3. Key Files ---"
@@ -590,6 +648,10 @@ echo ""
 echo "--- 8. Public Endpoint ---"
 HTTP_CODE=$(curl -sf --max-time 10 -o /dev/null -w '%%{http_code}' https://enclave.lightfriend.ai 2>/dev/null || echo "timeout")
 echo "  https://enclave.lightfriend.ai -> HTTP $HTTP_CODE"
+
+echo ""
+echo "--- 9. Enclave Internal Diagnostics (VSOCK 9008) ---"
+timeout 15 socat -T10 - VSOCK-CONNECT:16:9008 2>/dev/null || echo "  Could not connect to enclave diagnostic port"
 
 echo ""
 echo "========================================"

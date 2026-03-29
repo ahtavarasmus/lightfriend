@@ -940,30 +940,32 @@ fi
 echo ""
 echo "=== Starting all services via supervisord ==="
 
-# ── Set up cloudflared edge routing ──────────────────────────────────────────
+# ── Set up cloudflared edge routing (network config only) ────────────────────
 # Cloudflared uses SRV DNS records to find edge IPs, then raw TCP to connect.
 # It does NOT use HTTPS_PROXY. In the enclave with no direct internet, we need:
 # 1. DNS-over-TLS (DoT) to 1.1.1.1:853 for SRV lookups (cloudflared's fallback)
 # 2. TCP to edge IPs on port 7844 for the actual tunnel
 # Both routed through VSOCK to the host.
+#
+# NOTE: The socat bridges for 7844 and 853 are now managed by supervisord
+# (vsock-bridge-7844 and vsock-bridge-dot programs). They were previously started
+# as background processes here, but those DIED when exec supervisord replaced the
+# shell. This was the root cause of cloudflared "context canceled" errors.
 if [ -e /dev/vsock ] && [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
     echo ""
     echo "[STEP CF] Setting up cloudflared edge routing..."
 
-    # Bridge DoT: 1.1.1.1:853 for DNS-over-TLS (SRV record lookup)
-    # Add 1.1.1.1 as a local address so socat can bind to it
+    # Add 1.1.1.1 as a local address so the DoT bridge (supervisord) can bind to it
     ip addr add 1.1.1.1/32 dev lo 2>/dev/null || true
-    socat TCP-LISTEN:853,bind=1.1.1.1,reuseaddr,fork VSOCK-CONNECT:3:8530 &
-    sleep 0.2
-    echo "  DoT bridge: 1.1.1.1:853 -> VSOCK:3:8530 -> host -> 1.1.1.1:853"
+    echo "  Added 1.1.1.1/32 to lo for DoT bridge"
 
-    # Bridge edge: Cloudflare edge IPs on port 7844
-    # Override DNS so resolved edge IPs point to local bridge
-    # nodelay disables Nagle's algorithm - critical for HTTP/2 multiplexed frames
-    socat TCP-LISTEN:7844,reuseaddr,fork,nodelay VSOCK-CONNECT:3:7844 &
-    sleep 0.2
+    # Override DNS so cloudflared's resolved edge hostnames point to local bridges
+    # These bridges are managed by supervisord (vsock-bridge-7844 and vsock-bridge-dot)
     echo "127.0.0.1 region1.v2.argotunnel.com region2.v2.argotunnel.com" >> /etc/hosts
-    echo "  /etc/hosts: edge hostnames -> 127.0.0.1:7844 -> VSOCK -> host -> edge"
+    echo "  /etc/hosts: edge hostnames -> 127.0.0.1"
+    echo "  Bridge chain: cloudflared -> TCP:7844 -> VSOCK -> host -> Cloudflare edge"
+    echo "  DoT chain: cloudflared -> TCP:1.1.1.1:853 -> VSOCK -> host -> 1.1.1.1:853"
+    echo "  NOTE: socat bridges now managed by supervisord (priority 2, start before cloudflared)"
 fi
 
 # Use a startup script that starts services in order
@@ -1023,17 +1025,32 @@ if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ] && [ "${DEFER_CLOUDFLARED:-}" != "true"
     echo "Starting Cloudflare tunnel..."
     echo "  Token length: ${#CLOUDFLARE_TUNNEL_TOKEN}"
     echo "  /etc/hosts edge entries:"
-    grep argotunnel /etc/hosts 2>/dev/null || echo "    MISSING"
+    grep argotunnel /etc/hosts 2>/dev/null || echo "    MISSING - cloudflared will try to connect to real IPs!"
+    echo "  VSOCK bridge 7844 (supervisor):"
+    supervisorctl status vsock-bridge-7844 2>&1 || echo "    NOT FOUND"
     echo "  Port 7844 listener:"
-    ss -tlnp 2>/dev/null | grep 7844 || echo "    NOT LISTENING"
+    ss -tlnp 2>/dev/null | grep 7844 || echo "    NOT LISTENING - bridge may not have started yet"
+    echo "  VSOCK bridge DoT (supervisor):"
+    supervisorctl status vsock-bridge-dot 2>&1 || echo "    NOT FOUND"
+    echo "  Port 853 listener:"
+    ss -tlnp 2>/dev/null | grep ':853' || echo "    NOT LISTENING"
+    echo "  1.1.1.1 on lo:"
+    ip addr show lo 2>/dev/null | grep '1.1.1.1' || echo "    NOT CONFIGURED"
+    echo "  DNS test: $(getent hosts region1.v2.argotunnel.com 2>&1 | head -1)"
     supervisorctl start cloudflared
     beacon "cf-started"
     sleep 10
     echo "  Cloudflared status: $(supervisorctl status cloudflared 2>&1)"
-    echo "  Cloudflared stderr:"
-    cat /var/log/supervisor/cloudflared-err.log 2>/dev/null || echo "    empty"
-    echo "  Cloudflared stdout:"
-    cat /var/log/supervisor/cloudflared.log 2>/dev/null || echo "    empty"
+    echo "  Cloudflared stderr (last 30 lines):"
+    tail -30 /var/log/supervisor/cloudflared-err.log 2>/dev/null || echo "    empty"
+    echo "  Cloudflared stdout (last 30 lines):"
+    tail -30 /var/log/supervisor/cloudflared.log 2>/dev/null || echo "    empty"
+    echo "  Cloudflared diag log:"
+    cat /var/log/supervisor/cloudflared-diag.log 2>/dev/null || echo "    empty"
+    echo "  Port 7844 connections after start:"
+    ss -tnp 2>/dev/null | grep 7844 || echo "    none"
+    echo "  Cloudflared monitor start:"
+    supervisorctl start cloudflared-monitor 2>&1 || echo "    already running"
     beacon "cf-checked"
 fi
 
