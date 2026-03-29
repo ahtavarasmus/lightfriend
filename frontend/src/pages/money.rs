@@ -2160,12 +2160,6 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                     </details>
                 </div>
             </div>
-            <div class="footnotes">
-                <p class="footnote">{"* Gen Z spends 4-7 hours daily on phones, often regretting 60% of social media time. "}<a href="https://explodingtopics.com/blog/smartphone-usage-stats" target="_blank" rel="noopener noreferrer">{"Read the study"}</a><grok-card data-id="badfd9" data-type="citation_card"></grok-card></p>
-                <p class="footnote">{"The dumbphone is sold separately and is not included in the Hosted Plan."}</p>
-                <p class="footnote">{"For developers: Check out the open-source repo on GitHub if you'd like to self-host from source (requires technical setup)."}</p>
-                <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer" class="github-link">{"View GitHub Repo"}</a>
-            </div>
             <div class="legal-links">
                 <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
                 {" | "}
