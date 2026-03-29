@@ -634,6 +634,28 @@ pub async fn patch_profile_field(
                 })?;
         }
         "system_important_notify" => {
+            // Requires autopilot or byot plan
+            let user = state
+                .user_core
+                .find_by_id(user_id)
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "Failed to fetch user"})),
+                    )
+                })?
+                .ok_or_else(|| {
+                    (
+                        StatusCode::NOT_FOUND,
+                        Json(json!({"error": "User not found"})),
+                    )
+                })?;
+            if !crate::utils::plan_features::has_auto_features(user.plan_type.as_deref()) {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(json!({"error": "Important notifications require Autopilot plan"})),
+                ));
+            }
             let value = request.value.as_bool().ok_or_else(|| {
                 (
                     StatusCode::BAD_REQUEST,

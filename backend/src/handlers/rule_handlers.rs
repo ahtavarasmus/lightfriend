@@ -57,6 +57,29 @@ pub async fn create_rule(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let user_id = auth_user.user_id;
 
+    // Rules require autopilot or byot plan
+    let user = state
+        .user_core
+        .find_by_id(user_id)
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to fetch user" })),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "User not found" })),
+            )
+        })?;
+    if !crate::utils::plan_features::has_auto_features(user.plan_type.as_deref()) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Rules require Autopilot plan" })),
+        ));
+    }
+
     // Validate trigger_config
     let trigger: TriggerConfig = serde_json::from_str(&req.trigger_config).map_err(|e| {
         (
@@ -180,6 +203,29 @@ pub async fn update_rule(
     Json(req): Json<CreateRuleRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let user_id = auth_user.user_id;
+
+    // Rules require autopilot or byot plan
+    let user = state
+        .user_core
+        .find_by_id(user_id)
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to fetch user" })),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "User not found" })),
+            )
+        })?;
+    if !crate::utils::plan_features::has_auto_features(user.plan_type.as_deref()) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Rules require Autopilot plan" })),
+        ));
+    }
 
     // Verify ownership
     state

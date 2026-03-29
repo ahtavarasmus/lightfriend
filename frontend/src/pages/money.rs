@@ -1887,26 +1887,25 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                     if props.selected_country == "US" || props.selected_country == "CA" {
                         // US/CA: Show Assistant and Autopilot plans
                         let assistant_features = vec![
-                            Feature { text: "$25/month in messaging credits - more than enough for most users".to_string(), sub_items: vec![] },
-                            Feature { text: "Reminders and scheduled items".to_string(), sub_items: vec![] },
-                            Feature { text: "Contact profiles with all/digest modes".to_string(), sub_items: vec![] },
-                            Feature { text: "Daily digests".to_string(), sub_items: vec![] },
-                            Feature { text: "Manual item tracking".to_string(), sub_items: vec![] },
-                            Feature { text: "Need more? Buy overage credits anytime".to_string(), sub_items: vec![] },
+                            Feature { text: "SMS and voice access to your AI assistant".to_string(), sub_items: vec![] },
+                            Feature { text: "Connect WhatsApp, email, Telegram, Signal".to_string(), sub_items: vec![] },
+                            Feature { text: "Set reminders and scheduled alerts".to_string(), sub_items: vec![] },
+                            Feature { text: "Daily digests of your messages".to_string(), sub_items: vec![] },
+                            Feature { text: "$25/month in messaging credits included".to_string(), sub_items: vec![] },
                         ];
                         let autopilot_features = vec![
-                            Feature { text: "$25/month in messaging credits - more than enough for most users".to_string(), sub_items: vec![] },
                             Feature { text: "Everything in Assistant, plus:".to_string(), sub_items: vec![] },
-                            Feature { text: "Automatic message analysis".to_string(), sub_items: vec![] },
-                            Feature { text: "Background monitoring".to_string(), sub_items: vec![] },
-                            Feature { text: "Critical alerts filtering".to_string(), sub_items: vec![] },
-                            Feature { text: "Auto item creation from messages".to_string(), sub_items: vec![] },
+                            Feature { text: "AI monitors your messages in the background".to_string(), sub_items: vec![] },
+                            Feature { text: "Only important messages reach you".to_string(), sub_items: vec![] },
+                            Feature { text: "Automatic tracking of deadlines and commitments".to_string(), sub_items: vec![] },
+                            Feature { text: "Custom automation rules".to_string(), sub_items: vec![] },
+                            Feature { text: "$25/month in messaging credits included".to_string(), sub_items: vec![] },
                         ];
                         html! {
                             <>
                                 <PricingCard
                                     plan_name={"Assistant Plan"}
-                                    best_for={"Manual control. Set reminders, track items, get daily digests."}
+                                    best_for={"Text and call your AI assistant. Set reminders, get digests."}
                                     price={19.0}
                                     currency={"$"}
                                     period={"/month"}
@@ -1926,7 +1925,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 />
                                 <PricingCard
                                     plan_name={"Autopilot Plan"}
-                                    best_for={"Automatic intelligence. Lightfriend processes your messages for you."}
+                                    best_for={"Lightfriend watches your messages and only alerts you when it matters."}
                                     price={29.0}
                                     currency={"$"}
                                     period={"/month"}
@@ -1956,7 +1955,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                         html! {
                             <PricingCard
                                 plan_name={"BYOT Plan"}
-                                best_for={"Bring Your Own Twilio. Full service, you handle messaging costs."}
+                                best_for={"All Autopilot features. Bring your own Twilio number, pay messaging directly."}
                                 price={19.0}
                                 currency={"€"}
                                 period={"/month"}
@@ -1983,25 +1982,24 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                         let is_notification_only = is_notification_only_country(&props.selected_country);
 
                         let assistant_features = vec![
-                            Feature { text: "$25/month in messaging credits - more than enough for most users".to_string(), sub_items: vec![] },
-                            Feature { text: "Reminders and scheduled items".to_string(), sub_items: vec![] },
-                            Feature { text: "Contact profiles with all/digest modes".to_string(), sub_items: vec![] },
-                            Feature { text: "Daily digests".to_string(), sub_items: vec![] },
-                            Feature { text: "Manual item tracking".to_string(), sub_items: vec![] },
-                            Feature { text: "Need more? Buy overage credits anytime".to_string(), sub_items: vec![] },
+                            Feature { text: "SMS and voice access to your AI assistant".to_string(), sub_items: vec![] },
+                            Feature { text: "Connect WhatsApp, email, Telegram, Signal".to_string(), sub_items: vec![] },
+                            Feature { text: "Set reminders and scheduled alerts".to_string(), sub_items: vec![] },
+                            Feature { text: "Daily digests of your messages".to_string(), sub_items: vec![] },
+                            Feature { text: "$25/month in messaging credits included".to_string(), sub_items: vec![] },
                         ];
                         let autopilot_features = vec![
-                            Feature { text: "$25/month in messaging credits - more than enough for most users".to_string(), sub_items: vec![] },
                             Feature { text: "Everything in Assistant, plus:".to_string(), sub_items: vec![] },
-                            Feature { text: "Automatic message analysis".to_string(), sub_items: vec![] },
-                            Feature { text: "Background monitoring".to_string(), sub_items: vec![] },
-                            Feature { text: "Critical alerts filtering".to_string(), sub_items: vec![] },
-                            Feature { text: "Auto item creation from messages".to_string(), sub_items: vec![] },
+                            Feature { text: "AI monitors your messages in the background".to_string(), sub_items: vec![] },
+                            Feature { text: "Only important messages reach you".to_string(), sub_items: vec![] },
+                            Feature { text: "Automatic tracking of deadlines and commitments".to_string(), sub_items: vec![] },
+                            Feature { text: "Custom automation rules".to_string(), sub_items: vec![] },
+                            Feature { text: "$25/month in messaging credits included".to_string(), sub_items: vec![] },
                         ];
 
                         let byot_features = vec![
-                            Feature { text: "Bring your own Twilio number".to_string(), sub_items: vec![] },
                             Feature { text: "All Autopilot features included".to_string(), sub_items: vec![] },
+                            Feature { text: "Bring your own Twilio number".to_string(), sub_items: vec![] },
                             Feature { text: "No message limits - pay Twilio directly".to_string(), sub_items: vec![] },
                         ];
 
@@ -2009,7 +2007,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             <>
                                 <PricingCard
                                     plan_name={"Assistant Plan"}
-                                    best_for={"Manual control. Set reminders, track items, get daily digests."}
+                                    best_for={"Text and call your AI assistant. Set reminders, get digests."}
                                     price={29.0}
                                     currency={"€"}
                                     period={"/month"}
@@ -2030,7 +2028,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 />
                                 <PricingCard
                                     plan_name={"Autopilot Plan"}
-                                    best_for={"Automatic intelligence. Lightfriend processes your messages for you."}
+                                    best_for={"Lightfriend watches your messages and only alerts you when it matters."}
                                     price={49.0}
                                     currency={"€"}
                                     period={"/month"}
@@ -2053,7 +2051,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 if is_notification_only {
                                     <PricingCard
                                         plan_name={"BYOT Plan"}
-                                        best_for={"Want a local number? Verify Twilio availability for your country first."}
+                                        best_for={"All Autopilot features. Bring your own Twilio number, pay messaging directly."}
                                         price={19.0}
                                         currency={"€"}
                                         period={"/month"}
