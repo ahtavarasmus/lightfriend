@@ -1016,12 +1016,15 @@ EOF
 
     # Restore enclave from the exact backup artifact in the manifest
     echo "Restoring from $BACKUP_KEY..."
+    # Use pipefail so pipe captures restore-enclave.sh exit code, not tee's
+    set -o pipefail
     if ! /opt/lightfriend/restore-enclave.sh "$BACKUP_KEY" "$DEPLOY_ID" "$RESTORE_TYPE" 2>&1 | tee /tmp/launch.log; then
-        LAUNCH_ERR=$(tail -5 /tmp/launch.log | tr '\n' ' ' | head -c 500)
+        LAUNCH_ERR=$(tail -20 /tmp/launch.log | tr '\n' '|' | head -c 500)
         echo "{\"status\": \"RESTORE_OR_LAUNCH_FAILED\", \"instance_id\": \"$INSTANCE_ID\", \"error\": \"$LAUNCH_ERR\"}" | \
             aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
         exit 1
     fi
+    set +o pipefail
 
     if [ -s "$VERIFY" ]; then
         aws s3 cp "$VERIFY" "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
@@ -1029,7 +1032,8 @@ EOF
         cat "$VERIFY"
     else
         ENCLAVE_STATUS=$(nitro-cli describe-enclaves 2>/dev/null | jq -r '.[0].State // "unknown"')
-        echo "{\"status\": \"TIMEOUT\", \"instance_id\": \"$INSTANCE_ID\", \"enclave_state\": \"$ENCLAVE_STATUS\"}" | \
+        LAUNCH_LOG=$(tail -20 /tmp/launch.log 2>/dev/null | tr '\n' '|' | head -c 500)
+        echo "{\"status\": \"TIMEOUT\", \"instance_id\": \"$INSTANCE_ID\", \"enclave_state\": \"$ENCLAVE_STATUS\", \"launch_log\": \"$LAUNCH_LOG\"}" | \
             aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
         echo "WARNING: No verify result received (enclave state: $ENCLAVE_STATUS)"
     fi
