@@ -327,6 +327,11 @@ body {
     color: #fff;
 }
 
+@media (max-width: 1024px) {
+    .nav-trust-badges {
+        display: none;
+    }
+}
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
@@ -343,8 +348,12 @@ body {
         display: none;
     }
 
-    .nav-landing .nav-right .nav-link {
+    .nav-landing .nav-right .nav-support-link {
         display: none;
+    }
+
+    .nav-landing .nav-logo {
+        font-size: 1.8rem;
     }
 
     .nav-login-button,

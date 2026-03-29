@@ -13,7 +13,7 @@ if [ -f /etc/lightfriend/env ]; then
     while IFS= read -r line || [[ -n "$line" ]]; do
         [[ -z "$line" || "$line" == \#* ]] && continue
         if [[ "$line" =~ ^[A-Za-z_][A-Za-z_0-9]*= ]]; then
-            export "$line"
+            export "${line?}"
         fi
     done < /etc/lightfriend/env
 fi

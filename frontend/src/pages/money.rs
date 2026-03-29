@@ -552,8 +552,6 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
         text-decoration: none;
     }
     .iq-button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 20px rgba(255, 255, 255, 0.2);
         background: linear-gradient(135deg, #e0e0e0, #b8b8b8 30%, #f0f0f0 50%, #b8b8b8 70%, #d0d0d0);
     }
     .iq-button.disabled {
@@ -563,8 +561,6 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
         opacity: 0.6;
     }
     .iq-button.disabled:hover {
-        transform: none;
-        box-shadow: none;
         background: rgba(30, 30, 30, 0.5);
     }
     .iq-button.current-plan {
@@ -573,8 +569,6 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
         cursor: default;
     }
     .iq-button.current-plan:hover {
-        transform: none;
-        box-shadow: none;
         background: rgba(255, 255, 255, 0.2);
     }
     .iq-button.coming-soon {
@@ -583,8 +577,6 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
         cursor: default;
     }
     .iq-button.coming-soon:hover {
-        transform: none;
-        box-shadow: none;
     }
     "#;
     html! {
@@ -927,7 +919,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         border: 1px solid rgba(255, 255, 255, 0.12);
         border-radius: 12px;
         position: relative;
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        transition: border-color 0.3s ease;
         backdrop-filter: none;
         box-sizing: border-box;
         display: flex;
@@ -936,24 +928,21 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         width: 100%;
     }
     .pricing-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 8px 32px rgba(255, 255, 255, 0.15);
         border-color: rgba(255, 255, 255, 0.25);
     }
     .pricing-card.popular {
         background: rgba(30, 30, 30, 0.6);
         border: 2px solid rgba(255, 255, 255, 0.3);
-        box-shadow: 0 4px 16px rgba(255, 255, 255, 0.2);
     }
     .pricing-card.popular:hover {
-        box-shadow: 0 8px 32px rgba(255, 255, 255, 0.25);
+        border-color: rgba(255, 255, 255, 0.45);
     }
     .pricing-card.premium {
         background: rgba(40, 40, 40, 0.85);
         border: 2px solid rgba(255, 215, 0, 0.3);
     }
     .pricing-card.premium:hover {
-        box-shadow: 0 8px 32px rgba(255, 215, 0, 0.3);
+        border-color: rgba(255, 215, 0, 0.5);
     }
     .popular-tag {
         position: absolute;
@@ -1016,9 +1005,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         font-size: 2rem;
         color: #fff;
         font-weight: 800;
-        background: linear-gradient(135deg, #d4d4d4, #e8e8e8);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
         line-height: 1;
     }
     .price .period {
@@ -1084,8 +1070,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         text-decoration: none;
     }
     .iq-button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 20px rgba(255, 255, 255, 0.2);
         background: linear-gradient(135deg, #e0e0e0, #b8b8b8 30%, #f0f0f0 50%, #b8b8b8 70%, #d0d0d0);
     }
     .iq-button.disabled {
@@ -1094,8 +1078,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         border: 1px solid rgba(255, 255, 255, 0.1);
     }
     .iq-button.disabled:hover {
-        transform: none;
-        box-shadow: none;
     }
     .iq-button.current-plan {
         background: rgba(255, 255, 255, 0.2);
@@ -1103,8 +1085,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         cursor: default;
     }
     .iq-button.current-plan:hover {
-        transform: none;
-        box-shadow: none;
         background: rgba(255, 255, 255, 0.2);
     }
     .iq-button.coming-soon {
@@ -1113,8 +1093,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         cursor: default;
     }
     .iq-button.coming-soon:hover {
-        transform: none;
-        box-shadow: none;
     }
     .addons-section {
         margin-top: 1.5rem;
@@ -1199,9 +1177,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                     <span class="amount">{price_text}</span>
                     <span class="period">{props.period.clone()}</span>
                 </div>
-                    <div class="learn-more-section">
-                        <a href="/how-to-switch-to-dumbphone" class="learn-more-link">{"How to switch to a dumbphone and what you'll need"}</a>
-                    </div>
                 <div class="includes">
                     <ul class="quota-list">
                         { for props.features.iter().flat_map(|feature| {
@@ -1418,6 +1393,7 @@ pub fn credit_pricing(props: &FeatureListProps) -> Html {
 }
 #[function_component(UnifiedPricing)]
 pub fn unified_pricing(props: &PricingProps) -> Html {
+    let show_country_selector = use_state(|| false);
     // Assistant plan prices (lower tier)
     let hosted_prices: HashMap<String, f64> = HashMap::from([
         ("US".to_string(), 19.00),
@@ -1509,6 +1485,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
         min-height: 100vh;
         padding: 6rem 2rem;
         color: #ffffff;
+        background: #0d0d0d;
         z-index: 1;
         overflow: hidden;
     }
@@ -1523,23 +1500,8 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
         background-size: cover;
         background-position: center;
         background-repeat: no-repeat;
-        opacity: 0.6;
+        opacity: 0.3;
         z-index: -2;
-        pointer-events: none;
-    }
-    .pricing-panel::after {
-        content: '';
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100vh;
-        background: linear-gradient(
-            to bottom,
-            rgba(26, 26, 26, 0.75) 0%,
-            rgba(26, 26, 26, 0.9) 100%
-        );
-        z-index: -1;
         pointer-events: none;
     }
     .pricing-header {
@@ -1549,9 +1511,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
     .pricing-header h1 {
         font-size: 3.5rem;
         margin-bottom: 1.5rem;
-        background: linear-gradient(45deg, #fff, rgba(255, 255, 255, 0.7));
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
         font-weight: 700;
     }
     .pricing-header p {
@@ -1744,11 +1704,9 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
         border-radius: 24px;
         padding: 2.5rem;
         backdrop-filter: none;
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        transition: border-color 0.3s ease;
     }
     .option-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 8px 32px rgba(255, 255, 255, 0.12);
         border-color: rgba(255, 255, 255, 0.2);
     }
     .option-card h3 {
@@ -1880,8 +1838,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
         <div class="pricing-panel">
             <style>{pricing_css}</style>
             <div class="pricing-header">
-                <h1>{"Invest in Your Peace of Mind"}</h1>
-                <p>{"Lightfriend makes it possible to seriously switch to a dumbphone, saving you 2-4 hours per day of mindless scrolling*"}</p>
+                <h1>{"Pricing"}</h1>
                 {
                     if props.selected_country == "Other" {
                         html! {
@@ -1910,65 +1867,51 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
             </div>
 
             {
-                if !props.is_logged_in {
+                if !props.is_logged_in && !props.country_name.is_empty() {
                     if let Some(on_change) = props.on_country_change.clone() {
+                        let show_selector = show_country_selector.clone();
+                        let toggle = Callback::from(move |e: MouseEvent| {
+                            e.prevent_default();
+                            show_selector.set(!*show_selector);
+                        });
                         html! {
-                            <div class="country-selector">
-                                <label for="country">{"Select your country: "}</label>
-                                <select id="country" onchange={on_change}>
-                                    <optgroup label="Full Service (local number)">
-                                        <option value="US" selected={props.selected_country == "US"}>{"United States"}</option>
-                                        <option value="CA" selected={props.selected_country == "CA"}>{"Canada"}</option>
-                                        <option value="FI" selected={props.selected_country == "FI"}>{"Finland"}</option>
-                                        <option value="NL" selected={props.selected_country == "NL"}>{"Netherlands"}</option>
-                                        <option value="GB" selected={props.selected_country == "GB"}>{"United Kingdom"}</option>
-                                        <option value="AU" selected={props.selected_country == "AU"}>{"Australia"}</option>
-                                    </optgroup>
-                                    <optgroup label="Europe">
-                                        <option value="DE" selected={props.selected_country == "DE"}>{"Germany"}</option>
-                                        <option value="FR" selected={props.selected_country == "FR"}>{"France"}</option>
-                                        <option value="ES" selected={props.selected_country == "ES"}>{"Spain"}</option>
-                                        <option value="IT" selected={props.selected_country == "IT"}>{"Italy"}</option>
-                                        <option value="PT" selected={props.selected_country == "PT"}>{"Portugal"}</option>
-                                        <option value="BE" selected={props.selected_country == "BE"}>{"Belgium"}</option>
-                                        <option value="AT" selected={props.selected_country == "AT"}>{"Austria"}</option>
-                                        <option value="CH" selected={props.selected_country == "CH"}>{"Switzerland"}</option>
-                                        <option value="PL" selected={props.selected_country == "PL"}>{"Poland"}</option>
-                                        <option value="CZ" selected={props.selected_country == "CZ"}>{"Czech Republic"}</option>
-                                        <option value="SE" selected={props.selected_country == "SE"}>{"Sweden"}</option>
-                                        <option value="DK" selected={props.selected_country == "DK"}>{"Denmark"}</option>
-                                        <option value="NO" selected={props.selected_country == "NO"}>{"Norway"}</option>
-                                        <option value="IE" selected={props.selected_country == "IE"}>{"Ireland"}</option>
-                                        <option value="GR" selected={props.selected_country == "GR"}>{"Greece"}</option>
-                                        <option value="HU" selected={props.selected_country == "HU"}>{"Hungary"}</option>
-                                        <option value="RO" selected={props.selected_country == "RO"}>{"Romania"}</option>
-                                        <option value="SK" selected={props.selected_country == "SK"}>{"Slovakia"}</option>
-                                        <option value="BG" selected={props.selected_country == "BG"}>{"Bulgaria"}</option>
-                                        <option value="HR" selected={props.selected_country == "HR"}>{"Croatia"}</option>
-                                        <option value="SI" selected={props.selected_country == "SI"}>{"Slovenia"}</option>
-                                        <option value="LT" selected={props.selected_country == "LT"}>{"Lithuania"}</option>
-                                        <option value="LV" selected={props.selected_country == "LV"}>{"Latvia"}</option>
-                                        <option value="EE" selected={props.selected_country == "EE"}>{"Estonia"}</option>
-                                        <option value="LU" selected={props.selected_country == "LU"}>{"Luxembourg"}</option>
-                                        <option value="MT" selected={props.selected_country == "MT"}>{"Malta"}</option>
-                                        <option value="CY" selected={props.selected_country == "CY"}>{"Cyprus"}</option>
-                                        <option value="IS" selected={props.selected_country == "IS"}>{"Iceland"}</option>
-                                    </optgroup>
-                                    <optgroup label="Asia-Pacific">
-                                        <option value="NZ" selected={props.selected_country == "NZ"}>{"New Zealand"}</option>
-                                        <option value="JP" selected={props.selected_country == "JP"}>{"Japan"}</option>
-                                        <option value="KR" selected={props.selected_country == "KR"}>{"South Korea"}</option>
-                                        <option value="SG" selected={props.selected_country == "SG"}>{"Singapore"}</option>
-                                        <option value="HK" selected={props.selected_country == "HK"}>{"Hong Kong"}</option>
-                                        <option value="TW" selected={props.selected_country == "TW"}>{"Taiwan"}</option>
-                                    </optgroup>
-                                    <optgroup label="Middle East">
-                                        <option value="IL" selected={props.selected_country == "IL"}>{"Israel"}</option>
-                                    </optgroup>
-                                    <optgroup label="Other">
-                                        <option value="Other" selected={props.selected_country == "Other"}>{"Other (bring your own number)"}</option>
-                                    </optgroup>
-                                </select>
+                            <div style="margin-bottom: 1.5rem;">
+                                <p class="detected-country" style="font-size: 0.85rem; color: #888;">
+                                    {format!("Showing prices for {}. ", props.country_name.clone())}
+                                    <a href="#" onclick={toggle} style="color: #7EB2FF; text-decoration: none;">{"Not your country?"}</a>
+                                </p>
+                                if *show_country_selector {
+                                    <div class="country-selector" style="margin-top: 0.5rem; max-width: 300px;">
+                                        <select onchange={on_change} style="width: 100%; padding: 0.5rem; background: rgba(30, 30, 30, 0.9); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 6px; color: #e0e0e0; font-size: 0.85rem;">
+                                            <optgroup label="Full Service (local number)">
+                                                <option value="US" selected={props.selected_country == "US"}>{"United States"}</option>
+                                                <option value="CA" selected={props.selected_country == "CA"}>{"Canada"}</option>
+                                                <option value="FI" selected={props.selected_country == "FI"}>{"Finland"}</option>
+                                                <option value="NL" selected={props.selected_country == "NL"}>{"Netherlands"}</option>
+                                                <option value="GB" selected={props.selected_country == "GB"}>{"United Kingdom"}</option>
+                                                <option value="AU" selected={props.selected_country == "AU"}>{"Australia"}</option>
+                                            </optgroup>
+                                            <optgroup label="Europe">
+                                                <option value="DE" selected={props.selected_country == "DE"}>{"Germany"}</option>
+                                                <option value="FR" selected={props.selected_country == "FR"}>{"France"}</option>
+                                                <option value="ES" selected={props.selected_country == "ES"}>{"Spain"}</option>
+                                                <option value="IT" selected={props.selected_country == "IT"}>{"Italy"}</option>
+                                                <option value="SE" selected={props.selected_country == "SE"}>{"Sweden"}</option>
+                                                <option value="NO" selected={props.selected_country == "NO"}>{"Norway"}</option>
+                                                <option value="DK" selected={props.selected_country == "DK"}>{"Denmark"}</option>
+                                                <option value="CH" selected={props.selected_country == "CH"}>{"Switzerland"}</option>
+                                                <option value="AT" selected={props.selected_country == "AT"}>{"Austria"}</option>
+                                                <option value="PL" selected={props.selected_country == "PL"}>{"Poland"}</option>
+                                                <option value="PT" selected={props.selected_country == "PT"}>{"Portugal"}</option>
+                                                <option value="BE" selected={props.selected_country == "BE"}>{"Belgium"}</option>
+                                                <option value="IE" selected={props.selected_country == "IE"}>{"Ireland"}</option>
+                                            </optgroup>
+                                            <optgroup label="Other">
+                                                <option value="Other" selected={props.selected_country == "Other"}>{"Other"}</option>
+                                            </optgroup>
+                                        </select>
+                                    </div>
+                                }
                             </div>
                         }
                     } else {
@@ -1984,26 +1927,25 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                     if props.selected_country == "US" || props.selected_country == "CA" {
                         // US/CA: Show Assistant and Autopilot plans
                         let assistant_features = vec![
-                            Feature { text: "$25/month in messaging credits - more than enough for most users".to_string(), sub_items: vec![] },
-                            Feature { text: "Reminders and scheduled items".to_string(), sub_items: vec![] },
-                            Feature { text: "Contact profiles with all/digest modes".to_string(), sub_items: vec![] },
-                            Feature { text: "Daily digests".to_string(), sub_items: vec![] },
-                            Feature { text: "Manual item tracking".to_string(), sub_items: vec![] },
-                            Feature { text: "Need more? Buy overage credits anytime".to_string(), sub_items: vec![] },
+                            Feature { text: "SMS and voice access to your AI assistant".to_string(), sub_items: vec![] },
+                            Feature { text: "Connect WhatsApp, email, Telegram, Signal".to_string(), sub_items: vec![] },
+                            Feature { text: "Set reminders and scheduled alerts".to_string(), sub_items: vec![] },
+                            Feature { text: "Web search, ask questions, get answers".to_string(), sub_items: vec![] },
+                            Feature { text: "$25/month in messaging credits included".to_string(), sub_items: vec![] },
                         ];
                         let autopilot_features = vec![
-                            Feature { text: "$25/month in messaging credits - more than enough for most users".to_string(), sub_items: vec![] },
                             Feature { text: "Everything in Assistant, plus:".to_string(), sub_items: vec![] },
-                            Feature { text: "Automatic message analysis".to_string(), sub_items: vec![] },
-                            Feature { text: "Background monitoring".to_string(), sub_items: vec![] },
-                            Feature { text: "Critical alerts filtering".to_string(), sub_items: vec![] },
-                            Feature { text: "Auto item creation from messages".to_string(), sub_items: vec![] },
+                            Feature { text: "AI monitors your messages in the background".to_string(), sub_items: vec![] },
+                            Feature { text: "Only important messages reach you".to_string(), sub_items: vec![] },
+                            Feature { text: "Automatic tracking of deadlines and commitments".to_string(), sub_items: vec![] },
+                            Feature { text: "Daily digests and custom automation rules".to_string(), sub_items: vec![] },
+                            Feature { text: "$25/month in messaging credits included".to_string(), sub_items: vec![] },
                         ];
                         html! {
                             <>
                                 <PricingCard
                                     plan_name={"Assistant Plan"}
-                                    best_for={"Manual control. Set reminders, track items, get daily digests."}
+                                    best_for={"Text and call your AI assistant. Set reminders, ask questions."}
                                     price={19.0}
                                     currency={"$"}
                                     period={"/month"}
@@ -2023,7 +1965,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 />
                                 <PricingCard
                                     plan_name={"Autopilot Plan"}
-                                    best_for={"Automatic intelligence. Lightfriend processes your messages for you."}
+                                    best_for={"Lightfriend watches your messages and only alerts you when it matters."}
                                     price={29.0}
                                     currency={"$"}
                                     period={"/month"}
@@ -2053,7 +1995,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                         html! {
                             <PricingCard
                                 plan_name={"BYOT Plan"}
-                                best_for={"Bring Your Own Twilio. Full service, you handle messaging costs."}
+                                best_for={"All Autopilot features. Bring your own Twilio number, pay messaging directly."}
                                 price={19.0}
                                 currency={"€"}
                                 period={"/month"}
@@ -2080,25 +2022,24 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                         let is_notification_only = is_notification_only_country(&props.selected_country);
 
                         let assistant_features = vec![
-                            Feature { text: "$25/month in messaging credits - more than enough for most users".to_string(), sub_items: vec![] },
-                            Feature { text: "Reminders and scheduled items".to_string(), sub_items: vec![] },
-                            Feature { text: "Contact profiles with all/digest modes".to_string(), sub_items: vec![] },
-                            Feature { text: "Daily digests".to_string(), sub_items: vec![] },
-                            Feature { text: "Manual item tracking".to_string(), sub_items: vec![] },
-                            Feature { text: "Need more? Buy overage credits anytime".to_string(), sub_items: vec![] },
+                            Feature { text: "SMS and voice access to your AI assistant".to_string(), sub_items: vec![] },
+                            Feature { text: "Connect WhatsApp, email, Telegram, Signal".to_string(), sub_items: vec![] },
+                            Feature { text: "Set reminders and scheduled alerts".to_string(), sub_items: vec![] },
+                            Feature { text: "Web search, ask questions, get answers".to_string(), sub_items: vec![] },
+                            Feature { text: "$25/month in messaging credits included".to_string(), sub_items: vec![] },
                         ];
                         let autopilot_features = vec![
-                            Feature { text: "$25/month in messaging credits - more than enough for most users".to_string(), sub_items: vec![] },
                             Feature { text: "Everything in Assistant, plus:".to_string(), sub_items: vec![] },
-                            Feature { text: "Automatic message analysis".to_string(), sub_items: vec![] },
-                            Feature { text: "Background monitoring".to_string(), sub_items: vec![] },
-                            Feature { text: "Critical alerts filtering".to_string(), sub_items: vec![] },
-                            Feature { text: "Auto item creation from messages".to_string(), sub_items: vec![] },
+                            Feature { text: "AI monitors your messages in the background".to_string(), sub_items: vec![] },
+                            Feature { text: "Only important messages reach you".to_string(), sub_items: vec![] },
+                            Feature { text: "Automatic tracking of deadlines and commitments".to_string(), sub_items: vec![] },
+                            Feature { text: "Daily digests and custom automation rules".to_string(), sub_items: vec![] },
+                            Feature { text: "$25/month in messaging credits included".to_string(), sub_items: vec![] },
                         ];
 
                         let byot_features = vec![
-                            Feature { text: "Bring your own Twilio number".to_string(), sub_items: vec![] },
                             Feature { text: "All Autopilot features included".to_string(), sub_items: vec![] },
+                            Feature { text: "Bring your own Twilio number".to_string(), sub_items: vec![] },
                             Feature { text: "No message limits - pay Twilio directly".to_string(), sub_items: vec![] },
                         ];
 
@@ -2106,7 +2047,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             <>
                                 <PricingCard
                                     plan_name={"Assistant Plan"}
-                                    best_for={"Manual control. Set reminders, track items, get daily digests."}
+                                    best_for={"Text and call your AI assistant. Set reminders, ask questions."}
                                     price={29.0}
                                     currency={"€"}
                                     period={"/month"}
@@ -2127,7 +2068,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 />
                                 <PricingCard
                                     plan_name={"Autopilot Plan"}
-                                    best_for={"Automatic intelligence. Lightfriend processes your messages for you."}
+                                    best_for={"Lightfriend watches your messages and only alerts you when it matters."}
                                     price={49.0}
                                     currency={"€"}
                                     period={"/month"}
@@ -2150,7 +2091,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 if is_notification_only {
                                     <PricingCard
                                         plan_name={"BYOT Plan"}
-                                        best_for={"Want a local number? Verify Twilio availability for your country first."}
+                                        best_for={"All Autopilot features. Bring your own Twilio number, pay messaging directly."}
                                         price={19.0}
                                         currency={"€"}
                                         period={"/month"}
@@ -2191,7 +2132,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 </details>
                                 <details>
                                     <summary>{"What's the difference between Assistant and Autopilot?"}</summary>
-                                    <p>{"Assistant gives you manual control: reminders, contact profiles, daily digests. Autopilot adds automatic intelligence: Lightfriend reads your incoming messages, filters by urgency, creates items automatically, and monitors for updates."}</p>
+                                    <p>{"Assistant lets you text and call your AI assistant, set reminders, and ask questions. Autopilot adds background intelligence: Lightfriend monitors your messages, only alerts you when something is urgent, tracks deadlines automatically, and lets you build custom automation rules."}</p>
                                 </details>
                                 </>
                             }
@@ -2204,7 +2145,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 </details>
                                 <details>
                                     <summary>{"What's the difference between Assistant and Autopilot?"}</summary>
-                                    <p>{"Assistant gives you manual control: reminders, contact profiles, daily digests. Autopilot adds automatic intelligence: Lightfriend reads your incoming messages, filters by urgency, creates items automatically, and monitors for updates."}</p>
+                                    <p>{"Assistant lets you text and call your AI assistant, set reminders, and ask questions. Autopilot adds background intelligence: Lightfriend monitors your messages, only alerts you when something is urgent, tracks deadlines automatically, and lets you build custom automation rules."}</p>
                                 </details>
                                 <details>
                                     <summary>{"How do credits work?"}</summary>
@@ -2221,7 +2162,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 </details>
                                 <details>
                                     <summary>{"What's the difference between Assistant and Autopilot?"}</summary>
-                                    <p>{"Assistant gives you manual control: reminders, contact profiles, daily digests. Autopilot adds automatic intelligence: Lightfriend reads your incoming messages, filters by urgency, creates items automatically, and monitors for updates."}</p>
+                                    <p>{"Assistant lets you text and call your AI assistant, set reminders, and ask questions. Autopilot adds background intelligence: Lightfriend monitors your messages, only alerts you when something is urgent, tracks deadlines automatically, and lets you build custom automation rules."}</p>
                                 </details>
                                 <details>
                                     <summary>{"How do credits work?"}</summary>
@@ -2261,12 +2202,6 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                         <p>{"SMS costs vary dramatically by country - US/Canada is about 10x cheaper than Europe. We structure plans to keep pricing fair: US/CA gets messages included, while other countries get credits that account for local SMS rates."}</p>
                     </details>
                 </div>
-            </div>
-            <div class="footnotes">
-                <p class="footnote">{"* Gen Z spends 4-7 hours daily on phones, often regretting 60% of social media time. "}<a href="https://explodingtopics.com/blog/smartphone-usage-stats" target="_blank" rel="noopener noreferrer">{"Read the study"}</a><grok-card data-id="badfd9" data-type="citation_card"></grok-card></p>
-                <p class="footnote">{"The dumbphone is sold separately and is not included in the Hosted Plan."}</p>
-                <p class="footnote">{"For developers: Check out the open-source repo on GitHub if you'd like to self-host from source (requires technical setup)."}</p>
-                <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer" class="github-link">{"View GitHub Repo"}</a>
             </div>
             <div class="legal-links">
                 <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
