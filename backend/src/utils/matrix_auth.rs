@@ -432,6 +432,17 @@ async fn try_bootstrap_cross_signing(
 pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixClient> {
     tracing::info!("🔄 Starting get_client for user_id: {}", user_id);
 
+    // Reuse existing client if one is already initialized for this user.
+    // Creating multiple clients for the same user causes SQLite store file contention
+    // (file-level lock) which blocks Tokio worker threads and freezes the server.
+    {
+        let clients = state.matrix_clients.lock().await;
+        if let Some(existing_client) = clients.get(&user_id) {
+            tracing::info!("Reusing existing Matrix client for user {}", user_id);
+            return Ok((**existing_client).clone());
+        }
+    }
+
     // Get user profile from database (needed for user.id)
     let user = state.user_core.find_by_id(user_id).unwrap().unwrap();
     tracing::debug!("Found user: id={}", user.id);
@@ -656,6 +667,14 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixCli
     }
 
     tracing::info!("✅ Matrix client fully initialized for user {}", user_id);
+
+    // Store in the shared client map so future calls reuse this client
+    // instead of creating a new one (which causes SQLite store contention)
+    {
+        let mut clients = state.matrix_clients.lock().await;
+        clients.insert(user_id, Arc::new(client.clone()));
+    }
+
     Ok(client)
 }
 
