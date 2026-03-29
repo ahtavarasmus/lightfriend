@@ -1905,7 +1905,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             <>
                                 <PricingCard
                                     plan_name={"Assistant Plan"}
-                                    best_for={"Text and call your AI assistant. Set reminders, get digests."}
+                                    best_for={"Text and call your AI assistant. Set reminders, ask questions."}
                                     price={19.0}
                                     currency={"$"}
                                     period={"/month"}
@@ -2007,7 +2007,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             <>
                                 <PricingCard
                                     plan_name={"Assistant Plan"}
-                                    best_for={"Text and call your AI assistant. Set reminders, get digests."}
+                                    best_for={"Text and call your AI assistant. Set reminders, ask questions."}
                                     price={29.0}
                                     currency={"€"}
                                     period={"/month"}
