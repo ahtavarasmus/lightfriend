@@ -55,12 +55,34 @@ pub async fn run_system_behaviors(
         }
     }
 
-    // Compute sender signals from message history
-    let signals =
-        state
-            .ontology_repository
-            .compute_sender_signals(user_id, room_id, sender_name, now);
+    // Build context early so we have the user's timezone for sender signals
+    let ctx = ContextBuilder::for_user(state, user_id)
+        .with_user_context()
+        .build()
+        .await?;
+
+    let tz_offset = ctx
+        .timezone
+        .as_ref()
+        .map(|t| t.fixed_offset)
+        .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).unwrap());
+    let tz_offset_secs = tz_offset.local_minus_utc();
+
+    // Compute sender signals from message history (includes temporal anomaly detection)
+    let signals = state.ontology_repository.compute_sender_signals(
+        user_id,
+        room_id,
+        sender_name,
+        now,
+        tz_offset_secs,
+    );
     let sender_context = signals.format_for_prompt(sender_name);
+
+    // Detect if user is likely sleeping based on their activity patterns
+    let sleep_context = state
+        .ontology_repository
+        .compute_user_sleep_context(user_id, now, tz_offset_secs)
+        .unwrap_or_default();
 
     // Cross-platform escalation: check if this person also messaged on other platforms recently
     let cross_platform_ctx = if let Some(pid) = person_id {
@@ -90,12 +112,6 @@ pub async fn run_system_behaviors(
         String::new()
     };
 
-    // Build context
-    let ctx = ContextBuilder::for_user(state, user_id)
-        .with_user_context()
-        .build()
-        .await?;
-
     // Fetch recent conversation history for this room (last 10 messages)
     let recent_messages = state
         .ontology_repository
@@ -104,13 +120,6 @@ pub async fn run_system_behaviors(
 
     // Get room seen timestamp for marking messages as seen/unseen
     let seen_ts = get_room_seen_ts(state, user_id, room_id, platform).await;
-
-    // Format conversation with timestamps in user's timezone
-    let tz_offset = ctx
-        .timezone
-        .as_ref()
-        .map(|t| t.fixed_offset)
-        .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).unwrap());
 
     let fmt_ts = |unix: i32| -> String {
         Utc.timestamp_opt(unix as i64, 0)
@@ -180,11 +189,14 @@ pub async fn run_system_behaviors(
     };
 
     // Build full sender context with cross-platform signal
-    let full_sender_ctx = if cross_platform_ctx.is_empty() {
-        sender_context
-    } else {
-        format!("{}\n{}", sender_context, cross_platform_ctx)
-    };
+    let mut context_parts = vec![sender_context];
+    if !cross_platform_ctx.is_empty() {
+        context_parts.push(cross_platform_ctx);
+    }
+    if !sleep_context.is_empty() {
+        context_parts.push(sleep_context);
+    }
+    let full_context = context_parts.join("\n");
 
     let system_prompt = format!(
         "You are evaluating whether an incoming message requires the user's immediate attention.\n\
@@ -193,7 +205,7 @@ pub async fn run_system_behaviors(
         \n\
         Current time: {}\n\
         \n\
-        Sender context:\n\
+        Context:\n\
         {}\n\
         \n\
         The last message in the conversation is being evaluated. Each message is marked [seen] or \
@@ -206,7 +218,7 @@ pub async fn run_system_behaviors(
         \n\
         If should_notify=false, set notification_message to empty string.\n\
         If should_notify=true, write a concise notification (max 480 chars, second person).",
-        now_formatted, full_sender_ctx
+        now_formatted, full_context
     );
 
     let user_msg = conversation;

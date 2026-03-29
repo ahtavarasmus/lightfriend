@@ -249,6 +249,7 @@ pub struct SenderSignals {
     pub last_contact_ago_secs: Option<i64>,
     pub user_reply_rate: f32,
     pub avg_response_secs: Option<i64>,
+    pub temporal_anomaly: Option<String>,
 }
 
 impl SenderSignals {
@@ -258,6 +259,7 @@ impl SenderSignals {
             last_contact_ago_secs: None,
             user_reply_rate: 0.0,
             avg_response_secs: None,
+            temporal_anomaly: None,
         }
     }
 
@@ -320,6 +322,11 @@ impl SenderSignals {
                 };
                 parts.push(format!("You typically respond {}.", resp_desc));
             }
+        }
+
+        // Temporal anomaly
+        if let Some(ref anomaly) = self.temporal_anomaly {
+            parts.push(anomaly.clone());
         }
 
         parts.join(" ")
