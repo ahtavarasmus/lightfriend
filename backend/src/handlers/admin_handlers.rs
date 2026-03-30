@@ -1169,6 +1169,240 @@ pub async fn enable_alert_type(
     })))
 }
 
+/// Nuclear disaster recovery: rebuild user accounts from Resend contacts + Stripe.
+/// SAFETY: Refuses to run if the database already has users. Only works on an empty database.
+/// After creating accounts, sends each user a password reset link so they can log in.
+/// User ID 1 is always rasmus@ahtava.com (admin).
+pub async fn recover_users_from_external(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // HARD GUARD: refuse to run if database has any users
+    let existing_users = state.user_core.get_all_users().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("Database error: {}", e) })),
+        )
+    })?;
+    if !existing_users.is_empty() {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "REFUSED: database has existing users. Recovery only works on an empty database.",
+                "user_count": existing_users.len()
+            })),
+        ));
+    }
+
+    // Step 1: Fetch emails from Resend contacts
+    let contacts = crate::utils::resend_contacts::list_all_contacts()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("Failed to fetch Resend contacts: {}", e) })),
+            )
+        })?;
+
+    if contacts.is_empty() {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "No contacts found in Resend" })),
+        ));
+    }
+
+    // Step 2: Fetch customers from Stripe
+    let stripe_key = std::env::var("STRIPE_SECRET_KEY").map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "STRIPE_SECRET_KEY not set" })),
+        )
+    })?;
+
+    let http_client = reqwest::Client::new();
+    let mut stripe_customers: std::collections::HashMap<String, (Option<String>, Option<String>)> =
+        std::collections::HashMap::new();
+
+    // Paginate through all Stripe customers
+    let mut starting_after: Option<String> = None;
+    loop {
+        let mut url = "https://api.stripe.com/v1/customers?limit=100".to_string();
+        if let Some(ref cursor) = starting_after {
+            url.push_str(&format!("&starting_after={}", cursor));
+        }
+
+        let resp = http_client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", stripe_key))
+            .send()
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": format!("Stripe API error: {}", e) })),
+                )
+            })?;
+
+        let body: serde_json::Value = resp.json().await.map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("Failed to parse Stripe response: {}", e) })),
+            )
+        })?;
+
+        let empty = vec![];
+        let data = body["data"].as_array().unwrap_or(&empty);
+        if data.is_empty() {
+            break;
+        }
+
+        for customer in data {
+            let email = customer["email"].as_str().unwrap_or("").to_lowercase();
+            let phone = customer["phone"].as_str().map(|s| s.to_string());
+            let customer_id = customer["id"].as_str().map(|s| s.to_string());
+            if !email.is_empty() {
+                stripe_customers.insert(email, (phone, customer_id));
+            }
+            starting_after = customer["id"].as_str().map(|s| s.to_string());
+        }
+
+        if !body["has_more"].as_bool().unwrap_or(false) {
+            break;
+        }
+    }
+
+    tracing::info!(
+        "Recovery: found {} Resend contacts, {} Stripe customers",
+        contacts.len(),
+        stripe_customers.len()
+    );
+
+    // Step 3: Create users - admin first, then everyone else
+    let admin_email = "rasmus@ahtava.com";
+    let mut created = 0;
+    let mut skipped = 0;
+    let mut errors = Vec::new();
+
+    // Collect all emails: Resend contacts + Stripe customers (union)
+    let mut all_emails: Vec<String> = contacts.iter().map(|c| c.email.to_lowercase()).collect();
+    for email in stripe_customers.keys() {
+        if !all_emails.contains(email) {
+            all_emails.push(email.clone());
+        }
+    }
+
+    // Sort so admin email comes first
+    all_emails.sort_by(|a, b| {
+        if a == admin_email {
+            std::cmp::Ordering::Less
+        } else if b == admin_email {
+            std::cmp::Ordering::Greater
+        } else {
+            a.cmp(b)
+        }
+    });
+
+    for email in &all_emails {
+        let phone = stripe_customers
+            .get(email)
+            .and_then(|(p, _)| p.clone())
+            .unwrap_or_default();
+
+        // Generate a random temporary password (user will reset via link)
+        let temp_password: String = rand::thread_rng()
+            .sample_iter(&rand::distributions::Alphanumeric)
+            .take(32)
+            .map(char::from)
+            .collect();
+        let password_hash = match bcrypt::hash(&temp_password, bcrypt::DEFAULT_COST) {
+            Ok(h) => h,
+            Err(e) => {
+                errors.push(format!("{}: hash failed: {}", email, e));
+                continue;
+            }
+        };
+
+        let new_user = crate::handlers::auth_dtos::NewUser {
+            email: email.clone(),
+            password_hash,
+            phone_number: phone,
+            time_to_live: 0, // No TTL - permanent user
+            credits: 0.0,
+            credits_left: 0.0,
+            charge_when_under: false,
+            sub_tier: None,
+        };
+
+        match state.user_core.create_user(new_user) {
+            Ok(_) => {
+                created += 1;
+                tracing::info!("Recovery: created user {}", email);
+            }
+            Err(e) => {
+                errors.push(format!("{}: {}", email, e));
+                skipped += 1;
+            }
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    }
+
+    // Step 4: Send password reset links to all created users
+    let all_users = state.user_core.get_all_users().unwrap_or_default();
+    let mut reset_sent = 0;
+    let frontend_url =
+        std::env::var("FRONTEND_URL").unwrap_or_else(|_| "https://enclave.lightfriend.ai".to_string());
+
+    for user in &all_users {
+        let token: String = rand::thread_rng()
+            .sample_iter(&rand::distributions::Alphanumeric)
+            .take(32)
+            .map(char::from)
+            .collect();
+
+        let expiry = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + (7 * 24 * 60 * 60); // 7 days for recovery
+
+        state
+            .pending_password_resets
+            .insert(token.clone(), (user.id, expiry));
+
+        let reset_link = format!("{}/password-reset/{}", frontend_url, token);
+        let email = user.email.clone();
+        tokio::spawn(async move {
+            if let Err(e) =
+                crate::utils::email::send_password_reset_email(&email, &reset_link).await
+            {
+                tracing::error!("Failed to send recovery email to {}: {}", email, e);
+            }
+        });
+        reset_sent += 1;
+
+        // Rate limit emails
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+    }
+
+    tracing::info!(
+        "Recovery complete: {} created, {} skipped, {} reset emails sent",
+        created,
+        skipped,
+        reset_sent
+    );
+
+    Ok(Json(json!({
+        "message": "User recovery complete",
+        "contacts_found": contacts.len(),
+        "stripe_customers_found": stripe_customers.len(),
+        "users_created": created,
+        "users_skipped": skipped,
+        "reset_emails_sent": reset_sent,
+        "errors": errors,
+        "admin_user": admin_email
+    })))
+}
+
 /// Sync all existing user emails to Resend contacts for disaster recovery.
 /// This is a one-time operation to backfill existing users. New signups are
 /// automatically synced.
