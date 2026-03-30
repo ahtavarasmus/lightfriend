@@ -570,93 +570,128 @@ jobs:
         run: |
           OLD_INSTANCE="${{ steps.infra.outputs.old_instance }}"
           S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
+          LIVE_EXPORT_OK=false
 
           # Check old instance is running
           STATE=$(aws ec2 describe-instances --instance-ids "$OLD_INSTANCE" \
             --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo "unknown")
           if [ "$STATE" != "running" ]; then
-            echo "FATAL: Old instance $OLD_INSTANCE is not running (state: $STATE)"
-            exit 1
-          fi
+            echo "WARNING: Old instance $OLD_INSTANCE is not running (state: $STATE)"
+            echo "Will fall back to latest hourly backup from S3"
+          else
+            # ── Try live export from old instance ──
+            echo "Triggering export via signal file on $OLD_INSTANCE..."
+            echo '{"github_run_id":"${{ github.run_id }}","old_instance":"'$OLD_INSTANCE'","state":"backup_started","started_at":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' | \
+              aws s3 cp - "s3://$S3_BUCKET/deploy/deploy-state.json"
 
-          echo "Triggering export via signal file on $OLD_INSTANCE..."
-          echo '{"github_run_id":"${{ github.run_id }}","old_instance":"'$OLD_INSTANCE'","state":"backup_started","started_at":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' | \
-            aws s3 cp - "s3://$S3_BUCKET/deploy/deploy-state.json"
-
-          # Restart the s3-signal-poller on the old instance to ensure it's not stuck.
-          # The poller's aws s3 cp can hang indefinitely, blocking the loop.
-          echo "Restarting s3-signal-poller on old instance..."
-          RESTART_CMD=$(aws ssm send-command --instance-ids "$OLD_INSTANCE" \
-            --document-name "AWS-RunShellScript" \
-            --parameters '{"commands":["systemctl restart s3-signal-poller && rm -f /opt/lightfriend/backups/export-complete.json"]}' \
-            --timeout-seconds 30 \
-            --query 'Command.CommandId' --output text 2>/dev/null || echo "")
-          [ -n "$RESTART_CMD" ] && echo "Poller restart command: $RESTART_CMD" || echo "WARNING: Poller restart via SSM failed (non-fatal)"
-          sleep 5
-
-          # Write trigger to S3 (primary path - poller picks it up)
-          TRIGGER='{"action":"export","deploy_id":"${{ github.run_id }}"}'
-          echo "Writing export trigger to S3..."
-          echo "$TRIGGER" | aws s3 cp - "s3://$S3_BUCKET/deploy/export-request.json"
-          echo "Trigger written to S3"
-
-          # Also write trigger directly to host via SSM (backup path)
-          # SSM send-command from deploy runner sometimes stays Pending, but
-          # combined with the S3 path above, at least one should work.
-          echo "Also writing trigger directly to host via SSM..."
-          aws ssm send-command --instance-ids "$OLD_INSTANCE" \
-            --document-name "AWS-RunShellScript" \
-            --parameters '{"commands":["echo '"'"''"$TRIGGER"''"'"' > /opt/lightfriend/seed/export-request.json"]}' \
-            --timeout-seconds 30 2>/dev/null || echo "WARNING: Direct SSM trigger failed (non-fatal, S3 path active)"
-
-          # Poll S3 for completion. The host's s3-signal-poller handles:
-          # 1. Copy trigger from S3 to local seed dir
-          # 2. Enclave detects trigger, runs export, uploads to host
-          # 3. Host detects completion, uploads backup to S3, writes completion to S3
-          # No SSM needed - everything goes through S3.
-          echo "Polling S3 for export completion (timeout: 15 min)..."
-          COMPLETE_STATUS=""
-          for i in $(seq 1 180); do
-            COMPLETE_JSON=$(aws s3 cp "s3://$S3_BUCKET/deploy/export-complete.json" - 2>/dev/null || echo "")
-            if [ -n "$COMPLETE_JSON" ]; then
-              COMPLETE_STATUS=$(echo "$COMPLETE_JSON" | jq -r '.status // "UNKNOWN"' 2>/dev/null || echo "UNKNOWN")
-              if [ "$COMPLETE_STATUS" = "SUCCESS" ]; then
-                echo "Export completed successfully!"
-                echo "$COMPLETE_JSON" | jq . 2>/dev/null || echo "$COMPLETE_JSON"
-                break
-              elif [ "$COMPLETE_STATUS" = "FAILED" ]; then
-                echo "FATAL: Export failed inside enclave"
-                echo "$COMPLETE_JSON" | jq . 2>/dev/null || echo "$COMPLETE_JSON"
-                exit 1
-              fi
-            fi
-            [ $((i % 6)) -eq 0 ] && echo "Waiting for export ($i/180, status: ${COMPLETE_STATUS:-pending})..."
+            echo "Restarting s3-signal-poller on old instance..."
+            RESTART_CMD=$(aws ssm send-command --instance-ids "$OLD_INSTANCE" \
+              --document-name "AWS-RunShellScript" \
+              --parameters '{"commands":["systemctl restart s3-signal-poller && rm -f /opt/lightfriend/backups/export-complete.json"]}' \
+              --timeout-seconds 30 \
+              --query 'Command.CommandId' --output text 2>/dev/null || echo "")
+            [ -n "$RESTART_CMD" ] && echo "Poller restart command: $RESTART_CMD" || echo "WARNING: Poller restart via SSM failed"
             sleep 5
-          done
 
-          if [ "$COMPLETE_STATUS" != "SUCCESS" ]; then
-            echo "FATAL: Export timed out (last status: $COMPLETE_STATUS)"
-            exit 1
+            TRIGGER='{"action":"export","deploy_id":"${{ github.run_id }}"}'
+            echo "Writing export trigger to S3..."
+            echo "$TRIGGER" | aws s3 cp - "s3://$S3_BUCKET/deploy/export-request.json"
+
+            echo "Also writing trigger directly to host via SSM..."
+            aws ssm send-command --instance-ids "$OLD_INSTANCE" \
+              --document-name "AWS-RunShellScript" \
+              --parameters '{"commands":["echo '"'"''"$TRIGGER"''"'"' > /opt/lightfriend/seed/export-request.json"]}' \
+              --timeout-seconds 30 2>/dev/null || echo "WARNING: Direct SSM trigger failed (non-fatal)"
+
+            echo "Polling S3 for export completion (timeout: 10 min)..."
+            COMPLETE_STATUS=""
+            for i in $(seq 1 120); do
+              COMPLETE_JSON=$(aws s3 cp "s3://$S3_BUCKET/deploy/export-complete.json" - 2>/dev/null || echo "")
+              if [ -n "$COMPLETE_JSON" ]; then
+                COMPLETE_STATUS=$(echo "$COMPLETE_JSON" | jq -r '.status // "UNKNOWN"' 2>/dev/null || echo "UNKNOWN")
+                if [ "$COMPLETE_STATUS" = "SUCCESS" ]; then
+                  echo "Live export completed successfully!"
+                  echo "$COMPLETE_JSON" | jq . 2>/dev/null || echo "$COMPLETE_JSON"
+                  LIVE_EXPORT_OK=true
+                  break
+                elif [ "$COMPLETE_STATUS" = "FAILED" ]; then
+                  echo "WARNING: Live export failed inside enclave, will fall back to S3 backup"
+                  break
+                fi
+              fi
+              [ $((i % 6)) -eq 0 ] && echo "Waiting for export ($i/120, status: ${COMPLETE_STATUS:-pending})..."
+              sleep 5
+            done
+
+            if [ "$LIVE_EXPORT_OK" = "false" ]; then
+              echo "WARNING: Live export from old instance failed or timed out"
+            fi
+
+            # Clean up S3 signals regardless
+            aws s3 rm "s3://$S3_BUCKET/deploy/export-complete.json" 2>/dev/null || true
+            aws s3 rm "s3://$S3_BUCKET/deploy/export-request.json" 2>/dev/null || true
           fi
 
-          # Read backup details from completion JSON (s3-signal-poller adds these)
-          BACKUP_KEY=$(echo "$COMPLETE_JSON" | jq -r '.backup_key // empty')
-          BACKUP_SHA=$(echo "$COMPLETE_JSON" | jq -r '.backup_sha256 // empty')
-          BACKUP_SIZE=$(echo "$COMPLETE_JSON" | jq -r '.backup_size // 0')
+          if [ "$LIVE_EXPORT_OK" = "true" ]; then
+            # Use live export result
+            BACKUP_KEY=$(echo "$COMPLETE_JSON" | jq -r '.backup_key // empty')
+            BACKUP_SHA=$(echo "$COMPLETE_JSON" | jq -r '.backup_sha256 // empty')
+            BACKUP_SIZE=$(echo "$COMPLETE_JSON" | jq -r '.backup_size // 0')
+            BACKUP_SOURCE="live_export"
+          else
+            # ── Fallback: find latest backup in S3 ──
+            echo ""
+            echo "=== Falling back to latest S3 backup ==="
+
+            # Check deploy backups first (most recent), then hourly
+            LATEST_BACKUP=""
+            for PREFIX in "backups/deploy/" "backups/hourly/"; do
+              LATEST_BACKUP=$(aws s3 ls "s3://$S3_BUCKET/$PREFIX" --recursive 2>/dev/null | \
+                grep '\.tar\.gz\.enc$' | sort -k1,2 | tail -1 | awk '{print $4}')
+              if [ -n "$LATEST_BACKUP" ]; then
+                echo "Found backup in $PREFIX: $LATEST_BACKUP"
+                break
+              fi
+            done
+
+            if [ -z "$LATEST_BACKUP" ]; then
+              echo "FATAL: No backups found in S3 - cannot deploy without data"
+              exit 1
+            fi
+
+            # Get backup metadata
+            BACKUP_KEY="$LATEST_BACKUP"
+            BACKUP_SIZE=$(aws s3api head-object --bucket "$S3_BUCKET" --key "$BACKUP_KEY" \
+              --query 'ContentLength' --output text 2>/dev/null || echo "0")
+            BACKUP_MODIFIED=$(aws s3api head-object --bucket "$S3_BUCKET" --key "$BACKUP_KEY" \
+              --query 'LastModified' --output text 2>/dev/null || echo "unknown")
+
+            # Calculate SHA of the S3 backup
+            TMP_SHA=$(mktemp /tmp/backup-sha.XXXXXX.enc)
+            aws s3 cp "s3://$S3_BUCKET/$BACKUP_KEY" "$TMP_SHA"
+            BACKUP_SHA=$(sha256sum "$TMP_SHA" | awk '{print $1}')
+            rm -f "$TMP_SHA"
+
+            BACKUP_SOURCE="s3_fallback"
+
+            echo "Using S3 fallback backup:"
+            echo "  Key: $BACKUP_KEY"
+            echo "  Size: $BACKUP_SIZE bytes"
+            echo "  Modified: $BACKUP_MODIFIED"
+            echo "  SHA256: $BACKUP_SHA"
+            echo "  :warning: This may be up to 1 hour behind live data" >> $GITHUB_STEP_SUMMARY
+          fi
+
           if [ -z "$BACKUP_KEY" ] || [ -z "$BACKUP_SHA" ]; then
-            echo "FATAL: Completion JSON missing backup_key or backup_sha256"
-            echo "$COMPLETE_JSON"
+            echo "FATAL: Missing backup_key or backup_sha256"
             exit 1
           fi
-
-          # Clean up S3 signals
-          aws s3 rm "s3://$S3_BUCKET/deploy/export-complete.json" 2>/dev/null || true
-          aws s3 rm "s3://$S3_BUCKET/deploy/export-request.json" 2>/dev/null || true
 
           echo "backup_key=$BACKUP_KEY" >> $GITHUB_OUTPUT
           echo "backup_sha=$BACKUP_SHA" >> $GITHUB_OUTPUT
           echo "backup_size=$BACKUP_SIZE" >> $GITHUB_OUTPUT
-          echo "## Backup: $BACKUP_KEY" >> $GITHUB_STEP_SUMMARY
+          echo "backup_source=$BACKUP_SOURCE" >> $GITHUB_OUTPUT
+          echo "## Backup ($BACKUP_SOURCE): $BACKUP_KEY" >> $GITHUB_STEP_SUMMARY
 
       # ── Step 5: Re-download and validate the exact encrypted artifact ──
       - name: Validate uploaded backup artifact
