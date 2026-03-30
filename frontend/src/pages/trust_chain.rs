@@ -438,18 +438,48 @@ fn render_key_chain(d: &TrustChainData) -> Html {
                 {" How the Encryption Key Is Protected"}
             </h2>
             <p class="tc-section-desc">
-                {"The same fingerprint from above is also used to protect your encryption key. "}
-                {"An independent third party (Marlin) holds the key and only releases it to verified code."}
+                {"The same fingerprint protects your encryption key. An independent third party (Marlin) holds the key and only releases it to verified code."}
             </p>
 
             <div class="chain">
-                // Step A: Blockchain approval
+                // Step A: GitHub Actions registers the build
                 <div class="chain-card">
                     <div class="card-num-key">{"A"}</div>
                     <div class="card-body">
-                        <h3>{"Blockchain Records Approved Builds"}</h3>
+                        <h3>{"Build Registered On-Chain"}</h3>
                         <p class="card-explain">
-                            {"A smart contract on Arbitrum records which builds are approved. This is a public ledger nobody can secretly change."}
+                            {"During the same GitHub Actions build from step 2, the workflow registers the fingerprint on a public blockchain (Arbitrum) by calling the smart contract."}
+                        </p>
+                        <div class="card-values">
+                            <div class="val-row">
+                                <span class="val-label">{"Image ID"}</span>
+                                <code class="val-data">{&image_id_short}</code>
+                                <span class="val-match"><i class="fa-solid fa-circle-check"></i>{" computed from PCR values"}</span>
+                            </div>
+                        </div>
+                        <div class="card-links">
+                            if let Some(ref url) = d.workflow_run_id.as_ref().map(|id| format!("https://github.com/ahtavarasmus/lightfriend/actions/runs/{}", id)) {
+                                <a href={url.clone()} target="_blank" rel="noopener noreferrer">
+                                    {"View build + approval workflow "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                                </a>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chain-arrow">
+                    <div class="arrow-line"></div>
+                    <div class="arrow-label">{"Recorded on public blockchain"}</div>
+                    <div class="arrow-head"><i class="fa-solid fa-arrow-down"></i></div>
+                </div>
+
+                // Step B: Blockchain state
+                <div class="chain-card">
+                    <div class="card-num-key">{"B"}</div>
+                    <div class="card-body">
+                        <h3>{"Blockchain Approval"}</h3>
+                        <p class="card-explain">
+                            {"A public smart contract on Arbitrum. Anyone can check which builds are approved."}
                         </p>
                         <div class="card-values">
                             <div class="val-row">
@@ -506,18 +536,17 @@ fn render_key_chain(d: &TrustChainData) -> Html {
 
                 <div class="chain-arrow">
                     <div class="arrow-line"></div>
-                    <div class="arrow-label">{"Marlin checks: is this enclave running approved code?"}</div>
+                    <div class="arrow-label">{"Marlin independently checks this contract"}</div>
                     <div class="arrow-head"><i class="fa-solid fa-arrow-down"></i></div>
                 </div>
 
-                // Step B: Marlin verification
+                // Step C: Marlin verification
                 <div class="chain-card chain-card-marlin">
-                    <div class="card-num-key">{"B"}</div>
+                    <div class="card-num-key">{"C"}</div>
                     <div class="card-body">
-                        <h3>{"Independent Verification by Marlin"}</h3>
+                        <h3>{"Marlin Verifies Independently"}</h3>
                         <p class="card-explain">
-                            {"Marlin is an independent third party that holds the encryption key. It does not trust us. "}
-                            {"Before releasing the key, it independently verifies:"}
+                            {"Marlin holds the key and does not trust us. Before releasing it:"}
                         </p>
 
                         <div class="substep-flow">
@@ -525,7 +554,7 @@ fn render_key_chain(d: &TrustChainData) -> Html {
                                 <div class="substep-icon"><i class="fa-solid fa-signature"></i></div>
                                 <div class="substep-body">
                                     <div class="substep-title">{"1. Check Amazon's signature"}</div>
-                                    <div class="substep-desc">{"Marlin asks the enclave for a proof signed by Amazon's hardware. This confirms the proof came from a real sealed computer - not from us pretending."}</div>
+                                    <div class="substep-desc">{"Asks the enclave for a proof signed by Amazon's hardware. Confirms it's a real sealed computer."}</div>
                                 </div>
                             </div>
                             <div class="substep-connector"><i class="fa-solid fa-arrow-down"></i></div>
@@ -533,11 +562,10 @@ fn render_key_chain(d: &TrustChainData) -> Html {
                                 <div class="substep-icon"><i class="fa-solid fa-fingerprint"></i></div>
                                 <div class="substep-body">
                                     <div class="substep-title">{"2. Read the fingerprint"}</div>
-                                    <div class="substep-desc">{"Extracts the code fingerprint from Amazon's signed proof. Computes the Image ID:"}</div>
-                                    <code class="substep-formula">{"Image ID = SHA256(PCR0 + PCR1 + PCR2)"}</code>
+                                    <div class="substep-desc">{"Extracts PCR values from the proof, computes Image ID."}</div>
                                     if d.image_id.is_some() {
                                         <div class="substep-value">
-                                            <span class="val-label">{"Computed"}</span>
+                                            <span class="val-label">{"Image ID"}</span>
                                             <code class="val-data">{&image_id_short}</code>
                                         </div>
                                     }
@@ -549,23 +577,13 @@ fn render_key_chain(d: &TrustChainData) -> Html {
                                 <div class="substep-body">
                                     <div class="substep-title">{"3. Ask the blockchain"}</div>
                                     <div class="substep-desc">
-                                        {"Calls "}<code>{"oysterKMSVerify(imageId)"}</code>{" on the public Arbitrum contract. "}
-                                        {"If the blockchain says "}
+                                        {"Calls "}<code>{"oysterKMSVerify(imageId)"}</code>{". "}
                                         if approved {
-                                            <code class="substep-true">{"true"}</code>
-                                        } else {
-                                            <code>{"true"}</code>
-                                        }
-                                        {", this build was approved."}
-                                    </div>
-                                    <div class="substep-value">
-                                        <span class="val-label">{"Result"}</span>
-                                        if approved {
-                                            <span class="val-approved"><i class="fa-solid fa-circle-check"></i>{" true - approved"}</span>
+                                            {"Result: "}<code class="substep-true">{"true"}</code>
                                         } else if bc.is_some() {
-                                            <span class="val-pending">{"false - not approved"}</span>
+                                            {"Result: "}<code>{"false"}</code>
                                         } else {
-                                            <span class="val-unknown">{"could not check"}</span>
+                                            {"Could not check."}
                                         }
                                     </div>
                                 </div>
@@ -574,33 +592,29 @@ fn render_key_chain(d: &TrustChainData) -> Html {
 
                         <div class="card-links">
                             <a href="https://github.com/marlinprotocol/oyster-monorepo" target="_blank" rel="noopener noreferrer">
-                                {"Marlin key guardian source code "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                                {"Marlin source code (open source) "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
                             </a>
                         </div>
                         <p class="card-note">
-                            {"Marlin itself runs inside its own Nitro Enclave with its own attestation, and its code is open source. "}
-                            {"It never sees your data - it only decides whether to release the encryption key. We cannot influence its decision."}
+                            {"Marlin runs in its own Nitro Enclave. We cannot influence its decision."}
                         </p>
                     </div>
                 </div>
 
                 <div class="chain-arrow">
                     <div class="arrow-line"></div>
-                    <div class="arrow-label">{"All checks passed - key released directly into the sealed room"}</div>
+                    <div class="arrow-label">{"Approved - key released directly into the sealed room"}</div>
                     <div class="arrow-head"><i class="fa-solid fa-arrow-down"></i></div>
                 </div>
 
-                // Step C: Key in enclave
+                // Step D: Key in enclave
                 <div class="chain-card chain-card-final">
-                    <div class="card-num-key">{"C"}</div>
+                    <div class="card-num-key">{"D"}</div>
                     <div class="card-body">
                         <h3>{"Key Inside the Sealed Room"}</h3>
                         <p class="card-explain">
-                            {"Marlin releases the encryption key directly into the sealed room - it never passes through our hands or any system we control. "}
-                            {"The key only ever exists inside sealed rooms."}
-                        </p>
-                        <p class="card-explain">
-                            {"This is how your data moves securely between software versions: from one sealed room to the next, without ever trusting us."}
+                            {"The key goes directly into the sealed room - never through our hands. "}
+                            {"It only ever exists inside sealed rooms, even across software updates."}
                         </p>
                     </div>
                 </div>
