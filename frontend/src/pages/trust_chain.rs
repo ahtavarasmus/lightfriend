@@ -375,7 +375,7 @@ fn render_code_chain(d: &TrustChainData) -> Html {
                             <strong>{"Verify it yourself: "}</strong>
                             {"Run the open-source verification tool to independently check Amazon's signature and PCR values:"}
                         </p>
-                        <pre class="code-block">{format!("git clone https://github.com/ahtavarasmus/lightfriend\ncd lightfriend\ncargo run -p attestation-verifier -- https://lightfriend.ai")}</pre>
+                        <pre class="code-block">{format!("git clone https://github.com/ahtavarasmus/lightfriend\ncd lightfriend/tools/attestation-verifier\ncargo run -- https://lightfriend.ai")}</pre>
                         <div class="card-links">
                             <a href="/.well-known/lightfriend/attestation" target="_blank" rel="noopener noreferrer">
                                 {"Open live attestation"}<span class="link-hint">{" - compare the pcr0 value yourself"}</span>
