@@ -161,6 +161,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         pending_rule_tests: Arc::new(dashmap::DashMap::new()),
         maintenance_mode: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         system_notify_cooldowns: dashmap::DashMap::new(),
+        digest_cooldowns: dashmap::DashMap::new(),
     })
 }
 

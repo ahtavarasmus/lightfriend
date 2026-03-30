@@ -865,6 +865,19 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
             continue;
         }
 
+        // Cooldown: don't send more than one digest per 3 hours (auto mode)
+        // Manual digest_time users get exact delivery at their times (1h cooldown to prevent double-fire)
+        let cooldown_secs = if settings.digest_time.is_some() {
+            3600 // 1h for manual - just prevents double-fire within same window
+        } else {
+            10800 // 3h for auto
+        };
+        if let Some(last_sent) = state.digest_cooldowns.get(&user_id) {
+            if now - *last_sent < cooldown_secs {
+                continue;
+            }
+        }
+
         // Build the digest message
         let mut lines = Vec::new();
         let mut message_ids = Vec::new();
@@ -907,7 +920,8 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
         )
         .await;
 
-        // Mark as delivered
+        // Record cooldown and mark as delivered
+        state.digest_cooldowns.insert(user_id, now);
         if let Err(e) = state
             .ontology_repository
             .mark_digest_delivered(&message_ids, now)

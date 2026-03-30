@@ -231,6 +231,8 @@ pub struct AppState {
     pub maintenance_mode: Arc<AtomicBool>,
     // (user_id, room_id) -> unix timestamp of last system_important notification
     pub system_notify_cooldowns: DashMap<(i32, String), i32>,
+    // user_id -> unix timestamp of last digest delivery
+    pub digest_cooldowns: DashMap<i32, i32>,
 }
 
 /// Build the tool registry with all static tool handlers.
