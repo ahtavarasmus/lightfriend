@@ -76,6 +76,10 @@ const FEED_STYLES: &str = r#"
     color: #a78bfa;
     background: rgba(167, 139, 250, 0.1);
 }
+.feed-icon.type-screened {
+    color: #6b7280;
+    background: rgba(107, 114, 128, 0.1);
+}
 .feed-body {
     flex: 1;
     min-width: 0;
@@ -383,6 +387,7 @@ fn render_entry(
     let type_label = match entry.entry_type.as_str() {
         "changelog" => "System change",
         "notification" => "Notification",
+        "screened" => "Screened",
         "message" => "Message",
         _ => "Event",
     };
