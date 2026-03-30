@@ -2926,7 +2926,6 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                     if *logic_mode == LogicMode::Llm {
                                         <div class="rb-template-group">
                                             {for [
-                                                (PromptTemplate::FilterImportant, "Only if important"),
                                                 (PromptTemplate::TrackItemsUpdate, "AI tracks"),
                                                 (PromptTemplate::CheckCondition, "Check condition"),
                                             ].iter().map(|(tmpl, label)| {
