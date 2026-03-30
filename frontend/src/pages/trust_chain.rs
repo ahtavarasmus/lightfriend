@@ -320,6 +320,12 @@ fn render_code_chain(d: &TrustChainData) -> Html {
                                     {" "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
                                 </a>
                             }
+                            if let Some(ref url) = d.build_metadata_url {
+                                <a href={url.clone()} target="_blank" rel="noopener noreferrer">
+                                    {"View published fingerprint (GitHub Pages)"}<span class="link-hint">{" - same PCR0 value stored permanently"}</span>
+                                    {" "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                                </a>
+                            }
                         </div>
                     </div>
                 </div>
@@ -365,9 +371,18 @@ fn render_code_chain(d: &TrustChainData) -> Html {
                             <i class="fa-solid fa-circle-check"></i>
                             {" This matches the build (step 2) and the published record (step 3). The code on GitHub is what's running."}
                         </p>
+                        <p class="card-explain card-explain-howto">
+                            <strong>{"Verify it yourself: "}</strong>
+                            {"Run the open-source verification tool to independently check Amazon's signature and PCR values:"}
+                        </p>
+                        <pre class="code-block">{format!("git clone https://github.com/ahtavarasmus/lightfriend\ncd lightfriend\ncargo run -p attestation-verifier -- https://lightfriend.ai")}</pre>
                         <div class="card-links">
                             <a href="/.well-known/lightfriend/attestation" target="_blank" rel="noopener noreferrer">
                                 {"Open live attestation"}<span class="link-hint">{" - compare the pcr0 value yourself"}</span>
+                                {" "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                            </a>
+                            <a href={format!("https://github.com/ahtavarasmus/lightfriend/tree/{}/tools/attestation-verifier", commit)} target="_blank" rel="noopener noreferrer">
+                                {"Read the verification tool source code"}<span class="link-hint">{" - see exactly what it checks"}</span>
                                 {" "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
                             </a>
                         </div>
@@ -407,12 +422,31 @@ fn render_key_chain(d: &TrustChainData) -> Html {
                         <p class="card-explain">
                             {"During the GitHub Actions build (step 2 above), the workflow computes an Image ID from the fingerprint and registers it on a public blockchain (Arbitrum):"}
                         </p>
-                        <pre class="code-block">{format!("Image ID: {}", image_id)}</pre>
-                        <p class="card-explain">{"This is a hash of the PCR values. It uniquely identifies this build."}</p>
+                        <div class="image-id-calc">
+                            <div class="calc-row">
+                                <span class="calc-label">{"PCR0"}</span>
+                                <code class="calc-val">{short_hex(pcr0, 12)}</code>
+                            </div>
+                            <div class="calc-op">{"+"}</div>
+                            <div class="calc-row">
+                                <span class="calc-label">{"PCR1"}</span>
+                                <code class="calc-val">{short_hex(d.pcr1.as_deref().unwrap_or("?"), 12)}</code>
+                            </div>
+                            <div class="calc-op">{"+"}</div>
+                            <div class="calc-row">
+                                <span class="calc-label">{"PCR2"}</span>
+                                <code class="calc-val">{short_hex(d.pcr2.as_deref().unwrap_or("?"), 12)}</code>
+                            </div>
+                            <div class="calc-op calc-eq">{"= SHA256 ="}</div>
+                            <div class="calc-row calc-result">
+                                <span class="calc-label">{"Image ID"}</span>
+                                <code class="calc-val">{short_hex(image_id, 16)}</code>
+                            </div>
+                        </div>
                         <div class="card-links">
                             if let Some(ref url) = actions_url {
                                 <a href={url.clone()} target="_blank" rel="noopener noreferrer">
-                                    {"Open the build workflow"}<span class="link-hint">{" - search for \"proposeImage\" to see the registration"}</span>
+                                    {"Open the build workflow"}<span class="link-hint">{" - search for \"Approve image for Marlin KMS\" to see this step"}</span>
                                     {" "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
                                 </a>
                             }
@@ -537,8 +571,11 @@ fn render_key_chain(d: &TrustChainData) -> Html {
                     <div class="card-body">
                         <h3>{"The key never leaves the sealed room"}</h3>
                         <p class="card-explain">
-                            {"The key goes directly into the sealed room - never through our hands. "}
-                            {"When we release a new version, the same process repeats: the new sealed room proves itself, and the key moves from one sealed room to the next. We never touch it."}
+                            {"The key goes directly into the sealed room. We don't just choose not to see it - we literally cannot. "}
+                            {"There is no mechanism for the key to exist outside of a sealed room."}
+                        </p>
+                        <p class="card-explain">
+                            {"When we release a new version, the same process repeats: the new sealed room proves itself, and the key moves from one sealed room to the next. It is never exposed."}
                         </p>
                     </div>
                 </div>
@@ -755,6 +792,20 @@ const STYLES: &str = r#"
 
 /* Link hints */
 .link-hint { color: rgba(255,255,255,0.35); font-size: 0.78rem; }
+
+/* Image ID calculation visual */
+.image-id-calc {
+    background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px; padding: 0.75rem; margin: 0.5rem 0;
+    display: flex; flex-direction: column; align-items: center; gap: 0.2rem;
+}
+.calc-row { display: flex; align-items: center; gap: 0.5rem; width: 100%; }
+.calc-label { font-size: 0.72rem; color: rgba(255,255,255,0.4); min-width: 40px; text-align: right; }
+.calc-val { font-family: monospace; font-size: 0.78rem; color: rgba(255,255,255,0.7); }
+.calc-op { color: rgba(255,255,255,0.3); font-size: 0.8rem; font-weight: 600; }
+.calc-eq { color: rgba(30,144,255,0.6); font-size: 0.72rem; margin: 0.15rem 0; }
+.calc-result .calc-val { color: #4CAF50; font-weight: 500; }
+.calc-result .calc-label { color: rgba(76,175,80,0.7); }
 
 /* Marlin card */
 .chain-card-marlin {
