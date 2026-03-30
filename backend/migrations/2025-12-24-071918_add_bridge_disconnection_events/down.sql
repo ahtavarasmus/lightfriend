@@ -1,1 +1,0 @@
-DROP TABLE bridge_disconnection_events;

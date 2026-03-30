@@ -18,8 +18,8 @@ struct CreateContactRequest {
 }
 
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 struct ContactResponse {
-    #[allow(dead_code)]
     id: Option<String>,
 }
 

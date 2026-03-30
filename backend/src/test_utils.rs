@@ -161,6 +161,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         pending_rule_tests: Arc::new(dashmap::DashMap::new()),
         maintenance_mode: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         system_notify_cooldowns: dashmap::DashMap::new(),
+        digest_cooldowns: dashmap::DashMap::new(),
     })
 }
 
@@ -977,6 +978,26 @@ pub mod mock_user_core {
 
         fn get_system_important_notify(&self, _user_id: i32) -> Result<bool, DieselError> {
             Ok(true)
+        }
+
+        fn update_digest_enabled(&self, _user_id: i32, _value: bool) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_digest_time(
+            &self,
+            _user_id: i32,
+            _value: Option<&str>,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_auto_track_items_system(
+            &self,
+            _user_id: i32,
+            _value: bool,
+        ) -> Result<(), DieselError> {
+            Ok(())
         }
 
         fn get_default_notification_mode(&self, _user_id: i32) -> Result<String, DieselError> {

@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::UserCoreOps;
 
+use chrono::Offset;
 use std::sync::Arc;
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{debug, error};
@@ -739,10 +740,201 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .await
         .expect("Failed to add rule schedule job to scheduler");
 
+    // Every 15 minutes: deliver smart digests to users at their predicted wake time
+    let state_clone = Arc::clone(&state);
+    let digest_job = Job::new_async("0 */15 * * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            deliver_smart_digests(&state).await;
+        })
+    })
+    .expect("Failed to create digest delivery job");
+
+    sched
+        .add(digest_job)
+        .await
+        .expect("Failed to add digest delivery job to scheduler");
+
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");
 
     // TODO we should add another scheduled call that just checks if there are items that are 'done' or not found in the elevenlabs
     // but are still 'ongoing' in our db. we don't want to be accidentally charging users.
     // and if that happens make error visible
+}
+
+/// Deliver smart digests: check which users have pending medium-urgency messages
+/// and deliver them at the user's predicted active window.
+async fn deliver_smart_digests(state: &Arc<AppState>) {
+    let users = match state.ontology_repository.get_users_with_pending_digests() {
+        Ok(u) => u,
+        Err(e) => {
+            error!("Failed to get users with pending digests: {}", e);
+            return;
+        }
+    };
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i32;
+
+    for user_id in users {
+        // Check if user has digests enabled
+        let settings = match state.user_core.get_user_settings(user_id) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        if !settings.digest_enabled {
+            continue;
+        }
+
+        // Get user timezone
+        let tz_offset_secs: i32 = match state.user_core.get_user_info(user_id) {
+            Ok(info) => {
+                let tz_name = info.timezone.as_deref().unwrap_or("UTC");
+                tz_name
+                    .parse::<chrono_tz::Tz>()
+                    .ok()
+                    .map(|tz| {
+                        chrono::Utc::now()
+                            .with_timezone(&tz)
+                            .offset()
+                            .fix()
+                            .local_minus_utc()
+                    })
+                    .unwrap_or(0)
+            }
+            Err(_) => 0,
+        };
+
+        let current_hour = {
+            let local_ts = now as i64 + tz_offset_secs as i64;
+            ((local_ts % 86400 + 86400) % 86400 / 3600) as usize
+        };
+
+        // Determine target hours: user override(s) or predicted active windows
+        let target_hours: Vec<usize> = if let Some(ref time_str) = settings.digest_time {
+            // Parse comma-separated "HH:MM" or "HH" values, e.g. "07:00,12:00,18:00"
+            time_str
+                .split(',')
+                .filter_map(|t| {
+                    t.trim()
+                        .split(':')
+                        .next()
+                        .and_then(|h| h.parse::<usize>().ok())
+                        .filter(|&h| h < 24)
+                })
+                .collect()
+        } else {
+            // Predict from activity patterns
+            state
+                .ontology_repository
+                .compute_user_wake_hour(user_id, tz_offset_secs)
+                .into_iter()
+                .collect()
+        };
+        let target_hours = if target_hours.is_empty() {
+            vec![8] // default 8 AM
+        } else {
+            target_hours
+        };
+
+        // Deliver if current hour matches any target window
+        // or if items have been queued for more than 6 hours (staleness cap)
+        let in_target_window = target_hours
+            .iter()
+            .any(|&h| current_hour == h || current_hour == (h + 1) % 24);
+
+        let pending = match state
+            .ontology_repository
+            .get_pending_digest_messages(user_id)
+        {
+            Ok(msgs) => msgs,
+            Err(_) => continue,
+        };
+
+        if pending.is_empty() {
+            continue;
+        }
+
+        let oldest_queued = pending.last().map(|m| m.created_at).unwrap_or(now);
+        let stale = (now - oldest_queued) > 6 * 3600;
+
+        if !in_target_window && !stale {
+            continue;
+        }
+
+        // Cooldown: don't send more than one digest per 3 hours (auto mode)
+        // Manual digest_time users get exact delivery at their times (1h cooldown to prevent double-fire)
+        let cooldown_secs = if settings.digest_time.is_some() {
+            3600 // 1h for manual - just prevents double-fire within same window
+        } else {
+            10800 // 3h for auto
+        };
+        if let Some(last_sent) = state.digest_cooldowns.get(&user_id) {
+            if now - *last_sent < cooldown_secs {
+                continue;
+            }
+        }
+
+        // Build the digest message
+        let mut lines = Vec::new();
+        let mut message_ids = Vec::new();
+
+        for (i, msg) in pending.iter().enumerate() {
+            if i >= 10 {
+                break; // cap at 10 items
+            }
+            let summary = msg.summary.as_deref().unwrap_or(&msg.content);
+            // Truncate summary to 100 chars
+            let short: String = summary.chars().take(100).collect();
+            lines.push(format!(
+                "{}. {} ({}): {}",
+                i + 1,
+                msg.sender_name,
+                msg.platform,
+                short
+            ));
+            message_ids.push(msg.id);
+        }
+
+        if lines.is_empty() {
+            continue;
+        }
+
+        let count = lines.len();
+        let digest_text = format!(
+            "{} thing{} while you were away:\n{}",
+            count,
+            if count == 1 { "" } else { "s" },
+            lines.join("\n")
+        );
+
+        crate::proactive::utils::send_notification(
+            state,
+            user_id,
+            &digest_text,
+            "digest".to_string(),
+            None,
+        )
+        .await;
+
+        // Record cooldown and mark as delivered
+        state.digest_cooldowns.insert(user_id, now);
+        if let Err(e) = state
+            .ontology_repository
+            .mark_digest_delivered(&message_ids, now)
+        {
+            error!(
+                "Failed to mark digest messages as delivered for user {}: {}",
+                user_id, e
+            );
+        }
+
+        debug!(
+            "Delivered digest with {} items to user {} (target_hours={:?}, current_hour={})",
+            count, user_id, target_hours, current_hour
+        );
+    }
 }

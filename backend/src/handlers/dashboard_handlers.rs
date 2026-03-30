@@ -1125,3 +1125,94 @@ pub async fn get_event_detail(
         linked_messages,
     }))
 }
+
+// -- Digest endpoints --
+
+#[derive(Serialize)]
+pub struct DigestMessageResponse {
+    pub id: i64,
+    pub sender_name: String,
+    pub platform: String,
+    pub content: String,
+    pub urgency: Option<String>,
+    pub category: Option<String>,
+    pub summary: Option<String>,
+    pub created_at: i32,
+}
+
+pub async fn get_pending_digest(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<Vec<DigestMessageResponse>>, (StatusCode, Json<serde_json::Value>)> {
+    let messages = state
+        .ontology_repository
+        .get_pending_digest_messages(auth_user.user_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
+
+    let items: Vec<DigestMessageResponse> = messages
+        .into_iter()
+        .map(|m| DigestMessageResponse {
+            id: m.id,
+            sender_name: m.sender_name,
+            platform: m.platform,
+            content: m.content,
+            urgency: m.urgency,
+            category: m.category,
+            summary: m.summary,
+            created_at: m.created_at,
+        })
+        .collect();
+
+    Ok(Json(items))
+}
+
+#[derive(Deserialize)]
+pub struct MarkDigestReadRequest {
+    pub message_ids: Option<Vec<i64>>,
+}
+
+pub async fn mark_digest_read(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<MarkDigestReadRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i32;
+
+    let ids = if let Some(ids) = request.message_ids {
+        ids
+    } else {
+        // Mark all pending digest messages as read
+        let pending = state
+            .ontology_repository
+            .get_pending_digest_messages(auth_user.user_id)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+                )
+            })?;
+        pending.into_iter().map(|m| m.id).collect()
+    };
+
+    if !ids.is_empty() {
+        state
+            .ontology_repository
+            .mark_digest_delivered(&ids, now)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+                )
+            })?;
+    }
+
+    Ok(Json(serde_json::json!({"marked": ids.len()})))
+}
