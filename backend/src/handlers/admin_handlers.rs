@@ -1219,13 +1219,20 @@ pub async fn recover_users_from_external(
     })?;
 
     let http_client = reqwest::Client::new();
-    let mut stripe_customers: std::collections::HashMap<String, (Option<String>, Option<String>)> =
+    // Stripe customer data: email -> (phone, customer_id, has_active_sub, price_id)
+    struct StripeInfo {
+        phone: Option<String>,
+        customer_id: String,
+        has_active_sub: bool,
+        price_id: Option<String>,
+    }
+    let mut stripe_customers: std::collections::HashMap<String, StripeInfo> =
         std::collections::HashMap::new();
 
     // Paginate through all Stripe customers
     let mut starting_after: Option<String> = None;
     loop {
-        let mut url = "https://api.stripe.com/v1/customers?limit=100".to_string();
+        let mut url = "https://api.stripe.com/v1/customers?limit=100&expand[]=data.subscriptions".to_string();
         if let Some(ref cursor) = starting_after {
             url.push_str(&format!("&starting_after={}", cursor));
         }
@@ -1258,9 +1265,34 @@ pub async fn recover_users_from_external(
         for customer in data {
             let email = customer["email"].as_str().unwrap_or("").to_lowercase();
             let phone = customer["phone"].as_str().map(|s| s.to_string());
-            let customer_id = customer["id"].as_str().map(|s| s.to_string());
+            let customer_id = customer["id"].as_str().unwrap_or("").to_string();
+
+            // Check for active subscription and get price ID
+            let mut has_active_sub = false;
+            let mut price_id = None;
+            if let Some(subs) = customer["subscriptions"]["data"].as_array() {
+                for sub in subs {
+                    let status = sub["status"].as_str().unwrap_or("");
+                    if status == "active" || status == "trialing" {
+                        has_active_sub = true;
+                        // Get the price ID from the first subscription item
+                        if let Some(items) = sub["items"]["data"].as_array() {
+                            if let Some(item) = items.first() {
+                                price_id = item["price"]["id"].as_str().map(|s| s.to_string());
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+
             if !email.is_empty() {
-                stripe_customers.insert(email, (phone, customer_id));
+                stripe_customers.insert(email, StripeInfo {
+                    phone,
+                    customer_id,
+                    has_active_sub,
+                    price_id,
+                });
             }
             starting_after = customer["id"].as_str().map(|s| s.to_string());
         }
@@ -1302,10 +1334,11 @@ pub async fn recover_users_from_external(
     });
 
     for email in &all_emails {
-        let phone = stripe_customers
-            .get(email)
-            .and_then(|(p, _)| p.clone())
+        let stripe_info = stripe_customers.get(email);
+        let phone = stripe_info
+            .and_then(|s| s.phone.clone())
             .unwrap_or_default();
+        let has_active_sub = stripe_info.map(|s| s.has_active_sub).unwrap_or(false);
 
         // Generate a random temporary password (user will reset via link)
         let temp_password: String = rand::thread_rng()
@@ -1321,6 +1354,13 @@ pub async fn recover_users_from_external(
             }
         };
 
+        // Set sub_tier based on Stripe subscription status
+        let sub_tier = if has_active_sub {
+            Some("tier 2".to_string())
+        } else {
+            None
+        };
+
         let new_user = crate::handlers::auth_dtos::NewUser {
             email: email.clone(),
             password_hash,
@@ -1329,13 +1369,49 @@ pub async fn recover_users_from_external(
             credits: 0.0,
             credits_left: 0.0,
             charge_when_under: false,
-            sub_tier: None,
+            sub_tier,
         };
 
         match state.user_core.create_user(new_user) {
             Ok(_) => {
                 created += 1;
                 tracing::info!("Recovery: created user {}", email);
+
+                // Set plan_type and stripe_customer_id on the newly created user
+                if let Some(info) = stripe_info {
+                    if let Ok(Some(user)) = state.user_core.find_by_email(email) {
+                        // Set stripe_customer_id so Stripe webhooks reconnect
+                        let _ = state.user_repository.set_stripe_customer_id(
+                            user.id,
+                            &info.customer_id,
+                        );
+
+                        // Determine plan_type from price ID
+                        if let Some(ref price_id) = info.price_id {
+                            use crate::utils::country::{is_assistant_plan_price, is_byot_plan_price};
+                            let plan_type = if is_assistant_plan_price(price_id) {
+                                "assistant"
+                            } else if is_byot_plan_price(price_id) {
+                                "byot"
+                            } else {
+                                "autopilot"
+                            };
+                            let _ = state.user_repository.update_plan_type(user.id, Some(plan_type));
+                        }
+
+                        // Set credits for active subscribers
+                        if info.has_active_sub {
+                            use crate::utils::plan_features::MONTHLY_CREDIT_BUDGET;
+                            use crate::utils::country::is_byot_plan_price;
+                            let is_byot = info.price_id.as_deref()
+                                .map(|p| is_byot_plan_price(p))
+                                .unwrap_or(false);
+                            let credits = if is_byot { 0.0 } else { MONTHLY_CREDIT_BUDGET };
+                            let _ = state.user_repository.update_user_credits(user.id, credits);
+                            let _ = state.user_repository.update_user_credits_left(user.id, credits);
+                        }
+                    }
+                }
             }
             Err(e) => {
                 errors.push(format!("{}: {}", email, e));
