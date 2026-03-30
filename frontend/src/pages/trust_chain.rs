@@ -453,7 +453,7 @@ fn render_chain(d: &TrustChainData) -> Html {
             // Arrow 4→5
             <div class="chain-arrow">
                 <div class="arrow-line"></div>
-                <div class="arrow-label">{"The enclave boots and asks AWS to sign a proof of what code is running"}</div>
+                <div class="arrow-label">{"The enclave boots and Amazon's hardware signs a proof of what code is inside"}</div>
                 <div class="arrow-head"><i class="fa-solid fa-arrow-down"></i></div>
             </div>
 
@@ -461,10 +461,10 @@ fn render_chain(d: &TrustChainData) -> Html {
             <div class="chain-card">
                 <div class="card-num">{"5"}</div>
                 <div class="card-body">
-                    <h3>{"Enclave Attestation"}</h3>
+                    <h3>{"Amazon Signs a Proof"}</h3>
                     <p class="card-explain">
-                        {"The sealed computer (Nitro Enclave) boots and asks AWS to sign a document proving exactly what code is inside. "}
-                        {"This is like a notarized certificate - AWS signs it, and we cannot fake it."}
+                        {"When the sealed computer (Nitro Enclave) boots, Amazon's hardware automatically measures exactly what code is inside and signs a proof. "}
+                        {"This is like a notarized certificate from Amazon itself - we cannot forge or alter it."}
                     </p>
                     <div class="card-values">
                         if let Some(ref att) = d.attestation {
@@ -522,7 +522,7 @@ fn render_chain(d: &TrustChainData) -> Html {
             // Arrow 5→6
             <div class="chain-arrow">
                 <div class="arrow-line"></div>
-                <div class="arrow-label">{"Enclave sends attestation to Marlin key guardian"}</div>
+                <div class="arrow-label">{"The enclave presents this proof to Marlin, an independent key guardian"}</div>
                 <div class="arrow-head"><i class="fa-solid fa-arrow-down"></i></div>
             </div>
 
@@ -530,9 +530,10 @@ fn render_chain(d: &TrustChainData) -> Html {
             <div class="chain-card chain-card-marlin">
                 <div class="card-num">{"6"}</div>
                 <div class="card-body">
-                    <h3>{"Key Guardian Verification"}</h3>
+                    <h3>{"Independent Verification by Marlin"}</h3>
                     <p class="card-explain">
-                        {"Marlin (an independent key guardian) receives the attestation and performs three checks before releasing the encryption key:"}
+                        {"Marlin is an independent third party that holds the encryption key. It does not trust us. "}
+                        {"Before releasing the key, it independently verifies the proof from Amazon:"}
                     </p>
 
                     // Sub-steps visualization
@@ -540,16 +541,16 @@ fn render_chain(d: &TrustChainData) -> Html {
                         <div class="substep">
                             <div class="substep-icon"><i class="fa-solid fa-signature"></i></div>
                             <div class="substep-body">
-                                <div class="substep-title">{"1. Verify AWS signature"}</div>
-                                <div class="substep-desc">{"Confirms the attestation document was really signed by Amazon's Nitro hardware - not forged."}</div>
+                                <div class="substep-title">{"1. Check Amazon's signature"}</div>
+                                <div class="substep-desc">{"Marlin verifies that the proof was genuinely signed by Amazon's Nitro hardware. This confirms it came from a real sealed computer - not from us pretending."}</div>
                             </div>
                         </div>
                         <div class="substep-connector"><i class="fa-solid fa-arrow-down"></i></div>
                         <div class="substep">
                             <div class="substep-icon"><i class="fa-solid fa-fingerprint"></i></div>
                             <div class="substep-body">
-                                <div class="substep-title">{"2. Extract PCR values"}</div>
-                                <div class="substep-desc">{"Reads the code fingerprint from the signed attestation. Computes the Image ID:"}</div>
+                                <div class="substep-title">{"2. Read the fingerprint"}</div>
+                                <div class="substep-desc">{"Extracts the code fingerprint (PCR values) from Amazon's signed proof. Computes the Image ID:"}</div>
                                 <code class="substep-formula">{"Image ID = SHA256(PCR0 + PCR1 + PCR2)"}</code>
                                 if d.image_id.is_some() {
                                     <div class="substep-value">
@@ -563,16 +564,16 @@ fn render_chain(d: &TrustChainData) -> Html {
                         <div class="substep">
                             <div class="substep-icon"><i class="fa-solid fa-link"></i></div>
                             <div class="substep-body">
-                                <div class="substep-title">{"3. Check smart contract"}</div>
+                                <div class="substep-title">{"3. Ask the blockchain"}</div>
                                 <div class="substep-desc">
-                                    {"Calls "}<code>{"oysterKMSVerify(imageId)"}</code>{" on the blockchain. "}
-                                    {"If it returns "}
+                                    {"Marlin calls "}<code>{"oysterKMSVerify(imageId)"}</code>{" on the public Arbitrum contract. "}
+                                    {"If the blockchain says "}
                                     if approved {
                                         <code class="substep-true">{"true"}</code>
                                     } else {
                                         <code>{"true"}</code>
                                     }
-                                    {", this is an approved build."}
+                                    {", this build was approved."}
                                 </div>
                                 <div class="substep-value">
                                     <span class="val-label">{"Result"}</span>
@@ -599,7 +600,8 @@ fn render_chain(d: &TrustChainData) -> Html {
                         }
                     </div>
                     <p class="card-note">
-                        {"Marlin itself runs in a Nitro Enclave with its own attestation. Its code is open source. It never sees your data - it only decides whether to release the encryption key."}
+                        {"Marlin itself runs inside its own Nitro Enclave with its own attestation, and its code is open source. "}
+                        {"It never sees your data - it only decides whether to release the encryption key. We cannot influence its decision."}
                     </p>
                 </div>
             </div>
@@ -607,7 +609,7 @@ fn render_chain(d: &TrustChainData) -> Html {
             // Arrow 6→7
             <div class="chain-arrow">
                 <div class="arrow-line"></div>
-                <div class="arrow-label">{"All checks passed - encryption key released to the enclave"}</div>
+                <div class="arrow-label">{"All checks passed independently - Marlin releases the encryption key"}</div>
                 <div class="arrow-head"><i class="fa-solid fa-arrow-down"></i></div>
             </div>
 
