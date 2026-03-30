@@ -95,6 +95,12 @@ pub fn trustless_verification() -> Html {
                 </ul>
             </section>
 
+            <section class="trustless-live-link">
+                <h2>{"See the Live Trust Chain"}</h2>
+                <p>{"Want to see the actual verification data for the deployment running right now? Our Trust Chain page shows live timestamps, links, and status for every step."}</p>
+                <p><Link<Route> to={Route::TrustChain}>{"View Live Trust Chain"}</Link<Route>></p>
+            </section>
+
             <section>
                 <h2>{"Verify It Yourself"}</h2>
                 <p>{"You don't have to take our word for any of this. We provide a verification tool that anyone can run:"}</p>
@@ -134,6 +140,8 @@ pub fn trustless_verification() -> Html {
                 <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
                 {" | "}
                 <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
+                {" | "}
+                <Link<Route> to={Route::TrustChain}>{"Trust Chain"}</Link<Route>>
             </div>
         </div>
     }
