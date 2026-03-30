@@ -1393,6 +1393,107 @@ impl OntologyRepository {
             .execute(&mut conn)
     }
 
+    /// Update a message's classification (urgency, category, summary) after LLM evaluation.
+    pub fn update_message_classification(
+        &self,
+        message_id: i64,
+        urgency: &str,
+        category: &str,
+        summary: Option<&str>,
+    ) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(ont_messages::table.filter(ont_messages::id.eq(message_id)))
+            .set((
+                ont_messages::urgency.eq(urgency),
+                ont_messages::category.eq(category),
+                ont_messages::summary.eq(summary),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    /// Get pending digest items: medium-urgency messages not yet delivered, for a user.
+    pub fn get_pending_digest_messages(
+        &self,
+        user_id: i32,
+    ) -> Result<Vec<OntMessage>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::urgency.eq("medium"))
+            .filter(ont_messages::digest_delivered_at.is_null())
+            .filter(ont_messages::sender_name.ne("You"))
+            .order(ont_messages::created_at.desc())
+            .limit(20)
+            .load::<OntMessage>(&mut conn)
+    }
+
+    /// Mark digest messages as delivered.
+    pub fn mark_digest_delivered(&self, message_ids: &[i64], now: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(ont_messages::table.filter(ont_messages::id.eq_any(message_ids)))
+            .set(ont_messages::digest_delivered_at.eq(now))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    /// Get all user IDs that have pending digest messages.
+    pub fn get_users_with_pending_digests(&self) -> Result<Vec<i32>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_messages::table
+            .filter(ont_messages::urgency.eq("medium"))
+            .filter(ont_messages::digest_delivered_at.is_null())
+            .filter(ont_messages::sender_name.ne("You"))
+            .select(ont_messages::user_id)
+            .distinct()
+            .load::<i32>(&mut conn)
+    }
+
+    /// Compute the user's typical wake-up hour from their activity patterns.
+    /// Returns the local hour (0-23) when the user typically starts being active.
+    pub fn compute_user_wake_hour(&self, user_id: i32, tz_offset_secs: i32) -> Option<usize> {
+        use crate::pg_schema::ont_messages;
+
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let thirty_days_ago = Self::now() - 30 * 86400;
+
+        let user_messages: Vec<OntMessage> = ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::sender_name.eq("You"))
+            .filter(ont_messages::created_at.ge(thirty_days_ago))
+            .select(OntMessage::as_select())
+            .load(&mut conn)
+            .unwrap_or_default();
+
+        if user_messages.len() < 10 {
+            return None; // not enough data
+        }
+
+        let timestamps: Vec<i32> = user_messages.iter().map(|m| m.created_at).collect();
+        let hour_buckets = bucket_by_hour(&timestamps, tz_offset_secs);
+
+        // Find the first hour of activity: scan from hour 4 (earliest reasonable wake)
+        // through the day, find the first hour with meaningful activity
+        let total: u32 = hour_buckets.iter().sum();
+        if total == 0 {
+            return None;
+        }
+        let threshold = total as f64 * 0.02; // at least 2% of messages in this hour
+
+        for h in 4..24 {
+            if hour_buckets[h] as f64 >= threshold {
+                return Some(h);
+            }
+        }
+        // Wrap around: check hours 0-3
+        for h in 0..4 {
+            if hour_buckets[h] as f64 >= threshold {
+                return Some(h);
+            }
+        }
+        None
+    }
+
     // -----------------------------------------------------------------------
     // Events (tracked items with lifecycle)
     // -----------------------------------------------------------------------

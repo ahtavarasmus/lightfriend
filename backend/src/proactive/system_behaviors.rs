@@ -43,6 +43,7 @@ pub async fn run_system_behaviors(
         .get("person_id")
         .and_then(|v| v.as_i64())
         .map(|v| v as i32);
+    let message_id = entity_snapshot.get("message_id").and_then(|v| v.as_i64());
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -314,6 +315,17 @@ pub async fn run_system_behaviors(
             ..Default::default()
         }),
     );
+    properties.insert(
+        "summary".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some(
+                "One-line summary of the message for digest delivery (max 100 chars). Always fill this."
+                    .to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
 
     let tool = chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
@@ -331,6 +343,7 @@ pub async fn run_system_behaviors(
                     "category".to_string(),
                     "should_notify".to_string(),
                     "notification_message".to_string(),
+                    "summary".to_string(),
                 ]),
             },
         },
@@ -382,13 +395,28 @@ pub async fn run_system_behaviors(
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
 
+                let summary = parsed.get("summary").and_then(|v| v.as_str()).unwrap_or("");
+
                 info!(
                     "System behavior classification for user {}: urgency={}, category={}, notify={}",
-                    user_id,
-                    urgency,
-                    category,
-                    should_notify
+                    user_id, urgency, category, should_notify
                 );
+
+                // Store classification on the message
+                if let Some(mid) = message_id {
+                    if let Err(e) = state.ontology_repository.update_message_classification(
+                        mid,
+                        urgency,
+                        category,
+                        if summary.is_empty() {
+                            None
+                        } else {
+                            Some(summary)
+                        },
+                    ) {
+                        tracing::warn!("Failed to store classification for message {}: {}", mid, e);
+                    }
+                }
 
                 if should_notify {
                     let notification_message = parsed

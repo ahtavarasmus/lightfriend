@@ -155,6 +155,10 @@ pub struct OntMessage {
     pub content: String,
     pub person_id: Option<i32>,
     pub created_at: i32,
+    pub urgency: Option<String>,
+    pub category: Option<String>,
+    pub summary: Option<String>,
+    pub digest_delivered_at: Option<i32>,
 }
 
 #[derive(Insertable, Debug)]
