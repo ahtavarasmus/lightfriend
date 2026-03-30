@@ -103,6 +103,7 @@ pub struct ProfileResponse {
     has_any_connection: bool, // whether user has connected any service (email, bridges)
     digest_enabled: bool,    // whether digests are enabled
     digest_time: Option<String>, // user-set digest times or null for auto
+    auto_track_items_system: bool, // system-level auto commitment tracking
 }
 use crate::handlers::auth_middleware::AuthUser;
 
@@ -243,6 +244,7 @@ pub async fn get_profile(
                 has_any_connection,
                 digest_enabled: user_settings.digest_enabled,
                 digest_time: user_settings.digest_time,
+                auto_track_items_system: user_settings.auto_track_items_system,
             }))
         }
         None => Err((
@@ -714,6 +716,44 @@ pub async fn patch_profile_field(
             state
                 .user_core
                 .update_digest_time(user_id, value.as_deref())
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
+        }
+        "auto_track_items_system" => {
+            let user = state
+                .user_core
+                .find_by_id(user_id)
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "Failed to fetch user"})),
+                    )
+                })?
+                .ok_or_else(|| {
+                    (
+                        StatusCode::NOT_FOUND,
+                        Json(json!({"error": "User not found"})),
+                    )
+                })?;
+            if !crate::utils::plan_features::has_auto_features(user.plan_type.as_deref()) {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(json!({"error": "Auto tracking requires Autopilot plan"})),
+                ));
+            }
+            let value = request.value.as_bool().ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "auto_track_items_system must be a boolean"})),
+                )
+            })?;
+            state
+                .user_core
+                .update_auto_track_items_system(user_id, value)
                 .map_err(|e| {
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,

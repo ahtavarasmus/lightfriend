@@ -62,6 +62,7 @@ pub struct UserSettings {
     pub system_important_notify: bool,
     pub digest_enabled: bool,
     pub digest_time: Option<String>,
+    pub auto_track_items_system: bool,
 }
 
 #[derive(Insertable)]

@@ -263,6 +263,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         use_state(|| (*user_profile).system_important_notify.unwrap_or(true));
     let digest_enabled = use_state(|| (*user_profile).digest_enabled.unwrap_or(true));
     let digest_time = use_state(|| (*user_profile).digest_time.clone().unwrap_or_default());
+    let auto_track_system = use_state(|| (*user_profile).auto_track_items_system.unwrap_or(false));
     // Sending number selector state (for notification-only countries)
     let show_sending_number_selector = use_state(|| false);
     let available_sending_numbers = use_state(|| Vec::<serde_json::Value>::new());
@@ -289,6 +290,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let auto_create_items_save_state = use_state(|| FieldSaveState::Idle);
     let system_important_notify_save_state = use_state(|| FieldSaveState::Idle);
     let digest_save_state = use_state(|| FieldSaveState::Idle);
+    let auto_track_system_save_state = use_state(|| FieldSaveState::Idle);
     let sending_number_save_state = use_state(|| FieldSaveState::Idle);
 
     // Confirmation dialog states for sensitive fields
@@ -322,6 +324,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let system_important_notify = system_important_notify.clone();
         let digest_enabled = digest_enabled.clone();
         let digest_time = digest_time.clone();
+        let auto_track_system = auto_track_system.clone();
         let user_profile_state = user_profile.clone();
         let agent_language = agent_language.clone();
         let notification_type = notification_type.clone();
@@ -352,6 +355,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 system_important_notify.set(props_profile.system_important_notify.unwrap_or(true));
                 digest_enabled.set(props_profile.digest_enabled.unwrap_or(true));
                 digest_time.set(props_profile.digest_time.clone().unwrap_or_default());
+                auto_track_system.set(props_profile.auto_track_items_system.unwrap_or(false));
                 agent_language.set(props_profile.agent_language.clone());
                 notification_type.set(props_profile.notification_type.clone());
                 location.set(props_profile.location.clone().unwrap_or_default());
@@ -1393,6 +1397,53 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         Callback::from(move |e: InputEvent| {
             let input: HtmlInputElement = e.target_unchecked_into();
             digest_time.set(input.value());
+        })
+    };
+
+    // Auto track items system toggle handler
+    let on_auto_track_system_toggle = {
+        let auto_track_system = auto_track_system.clone();
+        let save_state = auto_track_system_save_state.clone();
+        let user_profile = user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |e: Event| {
+            let input: HtmlInputElement = e.target_unchecked_into();
+            let new_val = input.checked();
+            auto_track_system.set(new_val);
+            let save_state = save_state.clone();
+            let user_profile = user_profile.clone();
+            let on_profile_update = on_profile_update.clone();
+            save_state.set(FieldSaveState::Saving);
+            spawn_local(async move {
+                let request = PatchFieldRequest {
+                    field: "auto_track_items_system".to_string(),
+                    value: serde_json::Value::Bool(new_val),
+                };
+                match Api::patch("/api/profile/field")
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    Ok(response) if response.ok() => {
+                        let mut profile = (*user_profile).clone();
+                        profile.auto_track_items_system = Some(new_val);
+                        on_profile_update.emit(profile);
+                        save_state.set(FieldSaveState::Success);
+                        let s = save_state.clone();
+                        spawn_local(async move {
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
+                            s.set(FieldSaveState::Idle);
+                        });
+                    }
+                    Ok(_) => {
+                        save_state.set(FieldSaveState::Error("Failed to save".to_string()));
+                    }
+                    Err(_) => {
+                        save_state.set(FieldSaveState::Error("Network error".to_string()));
+                    }
+                }
+            });
         })
     };
 
@@ -2584,6 +2635,31 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     </div>
                 </div>
             }
+
+            // Auto Track Items (system-level) field
+            <div class="profile-field">
+                <div class="field-label-group">
+                    <span class="field-label">{"Auto-track Commitments"}</span>
+                    <div class="tooltip">
+                        <span class="tooltip-icon">{"?"}</span>
+                        <span class="tooltip-text">
+                            {"Automatically detect and track commitments from your messages (e.g. \"I'll pay the bill by Friday\"). You'll be notified when deadlines change."}
+                        </span>
+                    </div>
+                </div>
+                <div class="field-input-container">
+                    <label class="custom-checkbox">
+                        <input
+                            type="checkbox"
+                            checked={*auto_track_system}
+                            onchange={on_auto_track_system_toggle.clone()}
+                        />
+                        <span class="checkmark"></span>
+                        {if *auto_track_system { "Enabled" } else { "Disabled" }}
+                    </label>
+                    {render_save_indicator(&*auto_track_system_save_state)}
+                </div>
+            </div>
 
             // Feature Updates field
             <div class="profile-field">
