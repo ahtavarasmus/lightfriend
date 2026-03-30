@@ -1103,15 +1103,7 @@ pub fn rule_template_picker(props: &TemplatePickerProps) -> Html {
             RuleTemplate::CriticalMessages.description().to_string(),
         ));
     }
-    if let Some(time) = digest_time {
-        templates.push((
-            RuleTemplate::DailyDigest {
-                time: time.to_string(),
-            },
-            digest_label.to_string(),
-            digest_desc.to_string(),
-        ));
-    }
+    // Digest templates removed - digests are now handled by the system automatically
     templates.push((
         RuleTemplate::Custom,
         RuleTemplate::Custom.label().to_string(),
@@ -2936,11 +2928,9 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                     if *logic_mode == LogicMode::Llm {
                                         <div class="rb-template-group">
                                             {for [
-                                                (PromptTemplate::Summarize, "Summarize"),
                                                 (PromptTemplate::FilterImportant, "Only if important"),
                                                 (PromptTemplate::TrackItemsUpdate, "AI tracks"),
                                                 (PromptTemplate::CheckCondition, "Check condition"),
-                                                (PromptTemplate::Custom, "Custom"),
                                             ].iter().map(|(tmpl, label)| {
                                                 let is_active = *selected_template == *tmpl;
                                                 let tmpl_clone = tmpl.clone();
