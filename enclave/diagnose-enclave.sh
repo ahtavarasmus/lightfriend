@@ -71,6 +71,14 @@ echo "--- tuwunel stderr (last 40 lines) ---"
 tail -40 /var/log/supervisor/tuwunel-err.log 2>/dev/null || echo "  empty"
 echo ""
 
+echo "--- startup-services.log (last 100 lines) ---"
+tail -100 /data/seed/startup-services.log 2>/dev/null || echo "  not found"
+echo ""
+
+echo "--- boot-trace.log (last 80 lines) ---"
+tail -80 /data/seed/boot-trace.log 2>/dev/null || echo "  not found"
+echo ""
+
 echo "--- supervisorctl status ---"
 supervisorctl status 2>&1
 echo ""
