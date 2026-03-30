@@ -609,7 +609,7 @@ fn render_chain(d: &TrustChainData) -> Html {
             // Arrow 6→7
             <div class="chain-arrow">
                 <div class="arrow-line"></div>
-                <div class="arrow-label">{"All checks passed independently - Marlin releases the encryption key"}</div>
+                <div class="arrow-label">{"All checks passed - Marlin releases the key directly into the sealed room"}</div>
                 <div class="arrow-head"><i class="fa-solid fa-arrow-down"></i></div>
             </div>
 
@@ -619,7 +619,12 @@ fn render_chain(d: &TrustChainData) -> Html {
                 <div class="card-body">
                     <h3>{"Running and Verified"}</h3>
                     <p class="card-explain">
-                        {"The enclave received the encryption key and is serving your data. The same fingerprint appears at every step of this chain:"}
+                        {"Marlin releases the encryption key directly into the sealed room - it never passes through our hands or any system we control. "}
+                        {"The key only ever exists inside the sealed room. This is how your data moves securely between software versions: "}
+                        {"from one sealed room to the next, without ever trusting us."}
+                    </p>
+                    <p class="card-explain">
+                        {"The same fingerprint appears at every step of this chain:"}
                     </p>
                     <div class="card-values">
                         <div class="val-row">
