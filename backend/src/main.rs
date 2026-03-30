@@ -1126,6 +1126,14 @@ async fn main() {
             "/api/events/{id}",
             get(dashboard_handlers::get_event_detail),
         )
+        .route(
+            "/api/digest/pending",
+            get(dashboard_handlers::get_pending_digest),
+        )
+        .route(
+            "/api/digest/mark-read",
+            post(dashboard_handlers::mark_digest_read),
+        )
         // Person + Channel (ontology) routes
         .route(
             "/api/persons",

@@ -101,6 +101,8 @@ pub struct ProfileResponse {
     auto_create_items: bool, // whether to auto-detect and create trackable items from emails/messages
     system_important_notify: bool, // whether system auto-notifies for important messages
     has_any_connection: bool, // whether user has connected any service (email, bridges)
+    digest_enabled: bool,    // whether digests are enabled
+    digest_time: Option<String>, // user-set digest times or null for auto
 }
 use crate::handlers::auth_middleware::AuthUser;
 
@@ -239,6 +241,8 @@ pub async fn get_profile(
                 auto_create_items: user_settings.auto_create_items,
                 system_important_notify: user_settings.system_important_notify,
                 has_any_connection,
+                digest_enabled: user_settings.digest_enabled,
+                digest_time: user_settings.digest_time,
             }))
         }
         None => Err((
@@ -665,6 +669,51 @@ pub async fn patch_profile_field(
             state
                 .user_core
                 .update_system_important_notify(user_id, value)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
+        }
+        "digest_enabled" => {
+            let value = request.value.as_bool().ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "digest_enabled must be a boolean"})),
+                )
+            })?;
+            state
+                .user_core
+                .update_digest_enabled(user_id, value)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
+        }
+        "digest_time" => {
+            // Accept null (auto mode) or a string like "07:00" or "07:00,18:00"
+            let value = if request.value.is_null() {
+                None
+            } else {
+                Some(
+                    request
+                        .value
+                        .as_str()
+                        .ok_or_else(|| {
+                            (
+                                StatusCode::BAD_REQUEST,
+                                Json(json!({"error": "digest_time must be a string or null"})),
+                            )
+                        })?
+                        .to_string(),
+                )
+            };
+            state
+                .user_core
+                .update_digest_time(user_id, value.as_deref())
                 .map_err(|e| {
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,

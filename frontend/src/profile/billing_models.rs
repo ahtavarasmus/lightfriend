@@ -57,6 +57,8 @@ pub struct UserProfile {
     pub auto_create_items: Option<bool>, // whether to auto-detect and create trackable items from emails/messages
     pub system_important_notify: Option<bool>, // whether system auto-notifies for important messages
     pub has_any_connection: bool, // whether user has connected any service (for onboarding modal)
+    pub digest_enabled: Option<bool>,
+    pub digest_time: Option<String>,
 }
 
 pub const MIN_TOPUP_AMOUNT_CREDITS: f32 = 3.00;

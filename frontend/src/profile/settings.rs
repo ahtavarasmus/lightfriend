@@ -260,6 +260,8 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let feature_updates = use_state(|| (*user_profile).notify);
     let auto_create_items = use_state(|| (*user_profile).auto_create_items.unwrap_or(false));
     let system_important_notify = use_state(|| (*user_profile).system_important_notify.unwrap_or(true));
+    let digest_enabled = use_state(|| (*user_profile).digest_enabled.unwrap_or(true));
+    let digest_time = use_state(|| (*user_profile).digest_time.clone().unwrap_or_default());
     // Sending number selector state (for notification-only countries)
     let show_sending_number_selector = use_state(|| false);
     let available_sending_numbers = use_state(|| Vec::<serde_json::Value>::new());
@@ -285,6 +287,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let feature_updates_save_state = use_state(|| FieldSaveState::Idle);
     let auto_create_items_save_state = use_state(|| FieldSaveState::Idle);
     let system_important_notify_save_state = use_state(|| FieldSaveState::Idle);
+    let digest_save_state = use_state(|| FieldSaveState::Idle);
     let sending_number_save_state = use_state(|| FieldSaveState::Idle);
 
     // Confirmation dialog states for sensitive fields
@@ -316,6 +319,8 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let phone_service_active = phone_service_active.clone();
         let auto_create_items = auto_create_items.clone();
         let system_important_notify = system_important_notify.clone();
+        let digest_enabled = digest_enabled.clone();
+        let digest_time = digest_time.clone();
         let user_profile_state = user_profile.clone();
         let agent_language = agent_language.clone();
         let notification_type = notification_type.clone();
@@ -344,6 +349,8 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 phone_service_active.set(props_profile.phone_service_active.unwrap_or(true));
                 auto_create_items.set(props_profile.auto_create_items.unwrap_or(false));
                 system_important_notify.set(props_profile.system_important_notify.unwrap_or(true));
+                digest_enabled.set(props_profile.digest_enabled.unwrap_or(true));
+                digest_time.set(props_profile.digest_time.clone().unwrap_or_default());
                 agent_language.set(props_profile.agent_language.clone());
                 notification_type.set(props_profile.notification_type.clone());
                 location.set(props_profile.location.clone().unwrap_or_default());
@@ -1226,6 +1233,165 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     }
                 }
             });
+        })
+    };
+
+    // Digest mode handler - three-way: off / auto / custom
+    let digest_enabled_for_template = digest_enabled.clone();
+    let digest_time_for_template = digest_time.clone();
+    let on_digest_mode_change = {
+        let digest_enabled = digest_enabled.clone();
+        let digest_time = digest_time.clone();
+        let save_state = digest_save_state.clone();
+        let user_profile = user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |e: Event| {
+            let select: HtmlInputElement = e.target_unchecked_into();
+            let mode = select.value();
+            let save_state = save_state.clone();
+            let user_profile = user_profile.clone();
+            let on_profile_update = on_profile_update.clone();
+            let digest_enabled = digest_enabled.clone();
+            let digest_time = digest_time.clone();
+
+            match mode.as_str() {
+                "off" => {
+                    digest_enabled.set(false);
+                    save_state.set(FieldSaveState::Saving);
+                    spawn_local(async move {
+                        let request = PatchFieldRequest {
+                            field: "digest_enabled".to_string(),
+                            value: serde_json::Value::Bool(false),
+                        };
+                        match Api::patch("/api/profile/field")
+                            .json(&request)
+                            .unwrap()
+                            .send()
+                            .await
+                        {
+                            Ok(response) if response.ok() => {
+                                let mut profile = (*user_profile).clone();
+                                profile.digest_enabled = Some(false);
+                                on_profile_update.emit(profile);
+                                save_state.set(FieldSaveState::Success);
+                                let s = save_state.clone();
+                                spawn_local(async move {
+                                    gloo_timers::future::TimeoutFuture::new(3_000).await;
+                                    s.set(FieldSaveState::Idle);
+                                });
+                            }
+                            _ => save_state.set(FieldSaveState::Error("Failed".to_string())),
+                        }
+                    });
+                }
+                "auto" => {
+                    digest_enabled.set(true);
+                    digest_time.set(String::new());
+                    save_state.set(FieldSaveState::Saving);
+                    spawn_local(async move {
+                        // Enable + clear custom time
+                        let req1 = PatchFieldRequest {
+                            field: "digest_enabled".to_string(),
+                            value: serde_json::Value::Bool(true),
+                        };
+                        let _ = Api::patch("/api/profile/field")
+                            .json(&req1)
+                            .unwrap()
+                            .send()
+                            .await;
+                        let req2 = PatchFieldRequest {
+                            field: "digest_time".to_string(),
+                            value: serde_json::Value::Null,
+                        };
+                        match Api::patch("/api/profile/field")
+                            .json(&req2)
+                            .unwrap()
+                            .send()
+                            .await
+                        {
+                            Ok(response) if response.ok() => {
+                                let mut profile = (*user_profile).clone();
+                                profile.digest_enabled = Some(true);
+                                profile.digest_time = None;
+                                on_profile_update.emit(profile);
+                                save_state.set(FieldSaveState::Success);
+                                let s = save_state.clone();
+                                spawn_local(async move {
+                                    gloo_timers::future::TimeoutFuture::new(3_000).await;
+                                    s.set(FieldSaveState::Idle);
+                                });
+                            }
+                            _ => save_state.set(FieldSaveState::Error("Failed".to_string())),
+                        }
+                    });
+                }
+                _ => {} // "custom" - just show the input, don't save until they type
+            }
+        })
+    };
+
+    // Digest custom time save handler
+    let on_digest_time_blur = {
+        let digest_time = digest_time.clone();
+        let digest_enabled = digest_enabled.clone();
+        let save_state = digest_save_state.clone();
+        let user_profile = user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |_: FocusEvent| {
+            let time_val = (*digest_time).clone();
+            if time_val.is_empty() {
+                return;
+            }
+            let save_state = save_state.clone();
+            let user_profile = user_profile.clone();
+            let on_profile_update = on_profile_update.clone();
+            let digest_enabled = digest_enabled.clone();
+            save_state.set(FieldSaveState::Saving);
+            digest_enabled.set(true);
+            spawn_local(async move {
+                // Enable + set custom time
+                let req1 = PatchFieldRequest {
+                    field: "digest_enabled".to_string(),
+                    value: serde_json::Value::Bool(true),
+                };
+                let _ = Api::patch("/api/profile/field")
+                    .json(&req1)
+                    .unwrap()
+                    .send()
+                    .await;
+                let req2 = PatchFieldRequest {
+                    field: "digest_time".to_string(),
+                    value: serde_json::Value::String(time_val.clone()),
+                };
+                match Api::patch("/api/profile/field")
+                    .json(&req2)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    Ok(response) if response.ok() => {
+                        let mut profile = (*user_profile).clone();
+                        profile.digest_enabled = Some(true);
+                        profile.digest_time = Some(time_val);
+                        on_profile_update.emit(profile);
+                        save_state.set(FieldSaveState::Success);
+                        let s = save_state.clone();
+                        spawn_local(async move {
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
+                            s.set(FieldSaveState::Idle);
+                        });
+                    }
+                    _ => save_state.set(FieldSaveState::Error("Failed".to_string())),
+                }
+            });
+        })
+    };
+
+    let on_digest_time_input = {
+        let digest_time = digest_time.clone();
+        Callback::from(move |e: InputEvent| {
+            let input: HtmlInputElement = e.target_unchecked_into();
+            digest_time.set(input.value());
         })
     };
 
@@ -2359,6 +2525,64 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     {render_save_indicator(&*system_important_notify_save_state)}
                 </div>
             </div>
+
+            // Digest mode field
+            <div class="profile-field">
+                <div class="field-label-group">
+                    <span class="field-label">{"Message Digests"}</span>
+                    <div class="tooltip">
+                        <span class="tooltip-icon">{"?"}</span>
+                        <span class="tooltip-text">
+                            {"Medium-priority messages are collected and delivered as a digest. Auto mode learns your schedule. Custom lets you set specific times."}
+                        </span>
+                    </div>
+                </div>
+                <div class="field-input-container">
+                    <select
+                        class="profile-input"
+                        value={
+                            if !*digest_enabled_for_template {
+                                "off".to_string()
+                            } else if (*digest_time_for_template).is_empty() {
+                                "auto".to_string()
+                            } else {
+                                "custom".to_string()
+                            }
+                        }
+                        onchange={on_digest_mode_change.clone()}
+                    >
+                        <option value="off" selected={!*digest_enabled_for_template}>{"Off"}</option>
+                        <option value="auto" selected={*digest_enabled_for_template && (*digest_time_for_template).is_empty()}>{"Auto (learn my schedule)"}</option>
+                        <option value="custom" selected={*digest_enabled_for_template && !(*digest_time_for_template).is_empty()}>{"Custom times"}</option>
+                    </select>
+                    {render_save_indicator(&*digest_save_state)}
+                </div>
+            </div>
+
+            // Digest custom time input (shown when custom mode is selected or has value)
+            if *digest_enabled_for_template && !(*digest_time_for_template).is_empty() {
+                <div class="profile-field">
+                    <div class="field-label-group">
+                        <span class="field-label">{"Digest Times"}</span>
+                        <div class="tooltip">
+                            <span class="tooltip-icon">{"?"}</span>
+                            <span class="tooltip-text">
+                                {"Comma-separated times in 24h format, e.g. \"07:00, 18:00\" for morning and evening digests."}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="field-input-container">
+                        <input
+                            type="text"
+                            class="profile-input"
+                            placeholder="07:00, 18:00"
+                            value={(*digest_time).clone()}
+                            oninput={on_digest_time_input.clone()}
+                            onblur={on_digest_time_blur.clone()}
+                        />
+                    </div>
+                </div>
+            }
 
             // Feature Updates field
             <div class="profile-field">

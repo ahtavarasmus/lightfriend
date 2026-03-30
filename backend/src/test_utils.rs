@@ -980,6 +980,18 @@ pub mod mock_user_core {
             Ok(true)
         }
 
+        fn update_digest_enabled(&self, _user_id: i32, _value: bool) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_digest_time(
+            &self,
+            _user_id: i32,
+            _value: Option<&str>,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
         fn get_default_notification_mode(&self, _user_id: i32) -> Result<String, DieselError> {
             Ok("critical".to_string())
         }

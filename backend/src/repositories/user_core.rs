@@ -108,6 +108,10 @@ pub trait UserCoreOps: Send + Sync {
     fn update_system_important_notify(&self, user_id: i32, value: bool) -> Result<(), DieselError>;
     fn get_system_important_notify(&self, user_id: i32) -> Result<bool, DieselError>;
 
+    // Digest settings
+    fn update_digest_enabled(&self, user_id: i32, value: bool) -> Result<(), DieselError>;
+    fn update_digest_time(&self, user_id: i32, value: Option<&str>) -> Result<(), DieselError>;
+
     // Notification settings
     fn get_default_notification_mode(&self, user_id: i32) -> Result<String, DieselError>;
     fn set_default_notification_mode(&self, user_id: i32, mode: &str) -> Result<(), DieselError>;
@@ -824,6 +828,24 @@ impl UserCoreOps for UserCore {
             .select(user_settings::system_important_notify)
             .first::<bool>(&mut pg_conn)?;
         Ok(result)
+    }
+
+    fn update_digest_enabled(&self, user_id: i32, value: bool) -> Result<(), DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        self.ensure_user_settings_exist(user_id)?;
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set(user_settings::digest_enabled.eq(value))
+            .execute(&mut pg_conn)?;
+        Ok(())
+    }
+
+    fn update_digest_time(&self, user_id: i32, value: Option<&str>) -> Result<(), DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        self.ensure_user_settings_exist(user_id)?;
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set(user_settings::digest_time.eq(value))
+            .execute(&mut pg_conn)?;
+        Ok(())
     }
 
     fn update_llm_provider(&self, user_id: i32, provider: &str) -> Result<(), DieselError> {
