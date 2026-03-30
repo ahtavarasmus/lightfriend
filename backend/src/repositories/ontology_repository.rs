@@ -1102,6 +1102,7 @@ impl OntologyRepository {
         sender_name: &str,
         now: i32,
         tz_offset_secs: i32,
+        person_id: Option<i32>,
     ) -> crate::models::ontology_models::SenderSignals {
         use crate::models::ontology_models::SenderSignals;
 
@@ -1129,6 +1130,8 @@ impl OntologyRepository {
         if message_count_30d == 0 {
             return SenderSignals::empty();
         }
+
+        let user_message_count_30d = user_msgs.len() as i64;
 
         // Last contact: second-most-recent sender message (since newest is the current one)
         // Messages are DESC so index 1 is second-most-recent
@@ -1160,9 +1163,51 @@ impl OntologyRepository {
             None
         };
 
+        // Bidirectional ratio: how much does the user engage vs receive
+        let bidirectional_ratio = if message_count_30d > 0 {
+            user_message_count_30d as f32 / message_count_30d as f32
+        } else {
+            0.0
+        };
+
+        // Recency trend: compare last 7 days to 30-day average
+        let seven_days_ago = now - 7 * 86400;
+        let msgs_7d = sender_msgs
+            .iter()
+            .filter(|m| m.created_at >= seven_days_ago)
+            .count() as f32;
+        let expected_7d = (message_count_30d as f32 / 30.0) * 7.0;
+        let recency_trend = if message_count_30d >= 5 && expected_7d > 0.5 {
+            let ratio = msgs_7d / expected_7d;
+            if ratio >= 2.0 {
+                Some("Contact frequency from this person has increased significantly in the last week.".to_string())
+            } else if ratio <= 0.3 && msgs_7d < 1.0 {
+                Some("This person has been unusually quiet in the last week compared to their normal pattern.".to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Multi-platform count: how many platforms does this person use to reach the user
+        let platform_count = if let Some(pid) = person_id {
+            self.get_person_platform_count(user_id, pid).unwrap_or(1)
+        } else {
+            1
+        };
+
+        // First contact detection
+        let is_first_contact = message_count_30d <= 1 && last_contact_ago_secs.is_none();
+
+        // Check if user has custom notification settings for this person
+        let has_custom_settings = if let Some(pid) = person_id {
+            self.person_has_custom_settings(user_id, pid)
+        } else {
+            false
+        };
+
         // Temporal anomaly: Laplace-smoothed surprisal with confidence gating.
-        // Scales naturally with message volume - low-volume senders don't produce
-        // false anomalies, high-volume senders with zero activity at an hour do.
         let temporal_anomaly = {
             let timestamps: Vec<i32> = sender_msgs.iter().map(|m| m.created_at).collect();
             let hour_buckets = bucket_by_hour(&timestamps, tz_offset_secs);
@@ -1208,7 +1253,49 @@ impl OntologyRepository {
             user_reply_rate,
             avg_response_secs,
             temporal_anomaly,
+            user_message_count_30d,
+            bidirectional_ratio,
+            platform_count,
+            recency_trend,
+            is_first_contact,
+            has_custom_settings,
         }
+    }
+
+    /// Count distinct platforms a person contacts the user on.
+    fn get_person_platform_count(&self, user_id: i32, person_id: i32) -> Result<i32, DieselError> {
+        use crate::pg_schema::ont_channels;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let channels: Vec<OntChannel> = ont_channels::table
+            .filter(ont_channels::user_id.eq(user_id))
+            .filter(ont_channels::person_id.eq(person_id))
+            .load(&mut conn)?;
+        let platforms: std::collections::HashSet<&str> =
+            channels.iter().map(|c| c.platform.as_str()).collect();
+        Ok(platforms.len() as i32)
+    }
+
+    /// Check if user has custom notification settings for a person.
+    fn person_has_custom_settings(&self, user_id: i32, person_id: i32) -> bool {
+        use crate::pg_schema::ont_person_edits;
+        let mut conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        let count: i64 = ont_person_edits::table
+            .filter(ont_person_edits::user_id.eq(user_id))
+            .filter(ont_person_edits::person_id.eq(person_id))
+            .filter(
+                ont_person_edits::property_name
+                    .eq("notification_mode")
+                    .or(ont_person_edits::property_name.eq("notification_type"))
+                    .or(ont_person_edits::property_name.eq("importance"))
+                    .or(ont_person_edits::property_name.eq("nickname")),
+            )
+            .count()
+            .get_result(&mut conn)
+            .unwrap_or(0);
+        count > 0
     }
 
     /// Detect if user is likely sleeping based on their sent-message activity patterns.

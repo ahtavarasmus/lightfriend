@@ -50,6 +50,7 @@ pub mod utils {
 }
 pub mod proactive {
     pub mod rules;
+    pub mod signal_extraction;
     pub mod system_behaviors;
     pub mod utils;
 }

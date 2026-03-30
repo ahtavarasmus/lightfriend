@@ -250,6 +250,13 @@ pub struct SenderSignals {
     pub user_reply_rate: f32,
     pub avg_response_secs: Option<i64>,
     pub temporal_anomaly: Option<String>,
+    // Relationship depth signals
+    pub user_message_count_30d: i64,
+    pub bidirectional_ratio: f32, // user_msgs / sender_msgs, >1 means user engages more
+    pub platform_count: i32,      // how many platforms this person contacts user on
+    pub recency_trend: Option<String>, // "increasing", "decreasing", or None
+    pub is_first_contact: bool,
+    pub has_custom_settings: bool, // user configured notification preferences for this person
 }
 
 impl SenderSignals {
@@ -260,6 +267,12 @@ impl SenderSignals {
             user_reply_rate: 0.0,
             avg_response_secs: None,
             temporal_anomaly: None,
+            user_message_count_30d: 0,
+            bidirectional_ratio: 0.0,
+            platform_count: 0,
+            recency_trend: None,
+            is_first_contact: true,
+            has_custom_settings: false,
         }
     }
 
@@ -322,6 +335,45 @@ impl SenderSignals {
                 };
                 parts.push(format!("You typically respond {}.", resp_desc));
             }
+        }
+
+        // Bidirectional engagement
+        if self.message_count_30d >= 3 && self.user_message_count_30d > 0 {
+            if self.bidirectional_ratio >= 1.5 {
+                parts.push("You engage with this person more than they message you.".to_string());
+            } else if self.bidirectional_ratio < 0.2 && self.message_count_30d >= 5 {
+                parts.push("You rarely engage with this person's messages.".to_string());
+            }
+        }
+
+        // Multi-platform presence
+        if self.platform_count >= 3 {
+            parts.push(format!(
+                "This person contacts you on {} different platforms.",
+                self.platform_count
+            ));
+        } else if self.platform_count == 2 {
+            parts.push("This person contacts you on 2 platforms.".to_string());
+        }
+
+        // Recency trend
+        if let Some(ref trend) = self.recency_trend {
+            parts.push(trend.clone());
+        }
+
+        // First contact
+        if self.is_first_contact {
+            parts.push(
+                "This is a first-time or very rare sender - could be spam or genuinely urgent."
+                    .to_string(),
+            );
+        }
+
+        // Custom settings
+        if self.has_custom_settings {
+            parts.push(
+                "You have configured custom notification settings for this person.".to_string(),
+            );
         }
 
         // Temporal anomaly
