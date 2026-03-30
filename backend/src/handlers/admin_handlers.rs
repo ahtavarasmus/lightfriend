@@ -1168,3 +1168,40 @@ pub async fn enable_alert_type(
         "alert_type": alert_type
     })))
 }
+
+/// Sync all existing user emails to Resend contacts for disaster recovery.
+/// This is a one-time operation to backfill existing users. New signups are
+/// automatically synced.
+pub async fn sync_all_users_to_resend(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let users = state.user_core.get_all_users().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("Failed to get users: {}", e) })),
+        )
+    })?;
+
+    let total = users.len();
+    let mut synced = 0;
+    let mut failed = 0;
+
+    for user in &users {
+        crate::utils::resend_contacts::sync_contact(&user.email).await;
+        synced += 1;
+        // Small delay to avoid rate limiting
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    }
+
+    tracing::info!(
+        "Resend sync complete: {}/{} synced, {} failed",
+        synced, total, failed
+    );
+
+    Ok(Json(json!({
+        "message": "Resend sync complete",
+        "total": total,
+        "synced": synced,
+        "failed": failed
+    })))
+}
