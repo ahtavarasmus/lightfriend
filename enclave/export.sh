@@ -98,13 +98,25 @@ done
 
 # Create Tuwunel checkpoint (RocksDB-consistent snapshot)
 echo "  Creating Tuwunel checkpoint..."
+echo "  [DEBUG] /var/lib/tuwunel source: $(find /var/lib/tuwunel -type f 2>/dev/null | wc -l) files, $(du -sh /var/lib/tuwunel 2>/dev/null | awk '{print $1}' || echo '0')"
+echo "  [DEBUG] source CURRENT: $(cat /var/lib/tuwunel/CURRENT 2>/dev/null || echo 'NOT FOUND')"
+echo "  [DEBUG] source IDENTITY: $(cat /var/lib/tuwunel/IDENTITY 2>/dev/null || echo 'NOT FOUND')"
+echo "  [DEBUG] source top-level:"
+ls -la /var/lib/tuwunel/ 2>/dev/null | head -15
 mkdir -p "${STAGING}/tuwunel"
 TUWUNEL_SNAPSHOT_ROOT="${STAGING}/tuwunel-snapshot"
 mkdir -p "${TUWUNEL_SNAPSHOT_ROOT}/var/lib"
+echo "  [DEBUG] Running tuwunel_checkpoint..."
 /usr/local/bin/tuwunel_checkpoint /var/lib/tuwunel "${TUWUNEL_SNAPSHOT_ROOT}/var/lib/tuwunel" \
     || abort "RocksDB checkpoint for /var/lib/tuwunel failed" "dump-tuwunel"
+echo "  [DEBUG] checkpoint output: $(find ${TUWUNEL_SNAPSHOT_ROOT}/var/lib/tuwunel -type f 2>/dev/null | wc -l) files, $(du -sh ${TUWUNEL_SNAPSHOT_ROOT}/var/lib/tuwunel 2>/dev/null | awk '{print $1}' || echo '0')"
+echo "  [DEBUG] checkpoint CURRENT: $(cat ${TUWUNEL_SNAPSHOT_ROOT}/var/lib/tuwunel/CURRENT 2>/dev/null || echo 'NOT FOUND')"
+echo "  [DEBUG] checkpoint top-level:"
+ls -la "${TUWUNEL_SNAPSHOT_ROOT}/var/lib/tuwunel/" 2>/dev/null | head -15
 tar cf "${STAGING}/tuwunel/tuwunel_data.tar" -C "${TUWUNEL_SNAPSHOT_ROOT}" var/lib/tuwunel 2>/dev/null \
     || abort "tar of /var/lib/tuwunel failed" "dump-tuwunel"
+echo "  [DEBUG] tuwunel tar size: $(stat -c%s ${STAGING}/tuwunel/tuwunel_data.tar 2>/dev/null || echo unknown) bytes"
+echo "  [DEBUG] tuwunel tar file count: $(tar tf ${STAGING}/tuwunel/tuwunel_data.tar 2>/dev/null | wc -l)"
 
 # Create SQLite backups for matrix store files
 echo "  Backing up /app/matrix_store (SQLite online backup)..."

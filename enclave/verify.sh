@@ -199,6 +199,18 @@ fi
 
 echo "Check 9: Tuwunel data..."
 TUWUNEL_FILES=$(find /var/lib/tuwunel -type f 2>/dev/null | wc -l)
+TUWUNEL_SIZE=$(du -sh /var/lib/tuwunel 2>/dev/null | awk '{print $1}' || echo '0')
+TUWUNEL_CURRENT=$(cat /var/lib/tuwunel/CURRENT 2>/dev/null || echo 'NOT FOUND')
+echo "  [DEBUG] files: ${TUWUNEL_FILES}, size: ${TUWUNEL_SIZE}, CURRENT: ${TUWUNEL_CURRENT}"
+echo "  [DEBUG] tuwunel log (last 5 lines):"
+tail -5 /var/log/supervisor/tuwunel.log 2>/dev/null || echo "    empty"
+echo "  [DEBUG] tuwunel process: $(supervisorctl status tuwunel 2>&1)"
+echo "  [DEBUG] tuwunel _matrix/client/versions: $(curl -sf --max-time 2 http://localhost:8008/_matrix/client/versions 2>&1 | head -1 || echo 'unreachable')"
+# Check if tuwunel created a NEW db vs using restored one
+if grep -q "Created new RocksDB database" /var/log/supervisor/tuwunel.log 2>/dev/null; then
+    echo "  WARNING: Tuwunel created a NEW database (did NOT use restored data!)"
+    echo "  [DEBUG] This means bridge connections will be lost."
+fi
 if [ "${TUWUNEL_FILES}" -gt 0 ]; then
     echo "  OK: /var/lib/tuwunel has ${TUWUNEL_FILES} files"
     record_check "tuwunel_data" "true"

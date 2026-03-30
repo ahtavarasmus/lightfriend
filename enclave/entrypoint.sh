@@ -589,9 +589,30 @@ REOF
     # Tuwunel (RocksDB)
     if [ -f tuwunel/tuwunel_data.tar ]; then
         echo "  Restoring /var/lib/tuwunel..."
+        echo "  [DEBUG] tuwunel tar size: $(stat -c%s tuwunel/tuwunel_data.tar 2>/dev/null || echo unknown) bytes"
+        echo "  [DEBUG] tuwunel tar contents (first 20):"
+        tar tf tuwunel/tuwunel_data.tar 2>/dev/null | head -20 || echo "    (tar list failed)"
+        echo "  [DEBUG] tuwunel tar total files: $(tar tf tuwunel/tuwunel_data.tar 2>/dev/null | wc -l)"
+        echo "  [DEBUG] /var/lib/tuwunel BEFORE rm: $(find /var/lib/tuwunel -type f 2>/dev/null | wc -l) files, $(du -sh /var/lib/tuwunel 2>/dev/null | awk '{print $1}' || echo '0')"
         rm -rf /var/lib/tuwunel/*
+        echo "  [DEBUG] /var/lib/tuwunel AFTER rm: $(find /var/lib/tuwunel -type f 2>/dev/null | wc -l) files"
         tar xf tuwunel/tuwunel_data.tar -C / \
             || restore_abort "Failed to restore tuwunel data" "restore-tuwunel"
+        echo "  [DEBUG] /var/lib/tuwunel AFTER extract: $(find /var/lib/tuwunel -type f 2>/dev/null | wc -l) files, $(du -sh /var/lib/tuwunel 2>/dev/null | awk '{print $1}' || echo '0')"
+        echo "  [DEBUG] /var/lib/tuwunel owner: $(ls -la /var/lib/tuwunel/ 2>/dev/null | head -5)"
+        echo "  [DEBUG] /var/lib/tuwunel top-level:"
+        ls -la /var/lib/tuwunel/ 2>/dev/null || echo "    (ls failed)"
+        echo "  [DEBUG] RocksDB files:"
+        find /var/lib/tuwunel -maxdepth 2 -type f 2>/dev/null | head -30
+        echo "  [DEBUG] RocksDB CURRENT file contents: $(cat /var/lib/tuwunel/CURRENT 2>/dev/null || echo 'NOT FOUND')"
+        echo "  [DEBUG] RocksDB IDENTITY file contents: $(cat /var/lib/tuwunel/IDENTITY 2>/dev/null || echo 'NOT FOUND')"
+        echo "  [DEBUG] Checking if tuwunel binary can open the restored db..."
+        # Quick test: just check if the path looks like a valid RocksDB
+        if [ -f /var/lib/tuwunel/CURRENT ]; then
+            echo "  [DEBUG] CURRENT file exists - RocksDB looks valid"
+        else
+            echo "  [DEBUG] WARNING: no CURRENT file - this is NOT a valid RocksDB!"
+        fi
         RESTORED_COMPONENTS="${RESTORED_COMPONENTS}\"tuwunel\", "
     else
         restore_abort "Missing tuwunel/tuwunel_data.tar" "restore-tuwunel"
@@ -600,9 +621,14 @@ REOF
     # Matrix store (per-user SQLite)
     if [ -f matrix_store/matrix_store.tar ]; then
         echo "  Restoring /app/matrix_store..."
+        echo "  [DEBUG] matrix_store tar size: $(stat -c%s matrix_store/matrix_store.tar 2>/dev/null || echo unknown) bytes"
+        echo "  [DEBUG] matrix_store tar total files: $(tar tf matrix_store/matrix_store.tar 2>/dev/null | wc -l)"
         rm -rf /app/matrix_store/*
         tar xf matrix_store/matrix_store.tar -C /app \
             || restore_abort "Failed to restore matrix_store" "restore-matrix_store"
+        echo "  [DEBUG] /app/matrix_store AFTER extract: $(find /app/matrix_store -type f 2>/dev/null | wc -l) files, $(du -sh /app/matrix_store 2>/dev/null | awk '{print $1}' || echo '0')"
+        echo "  [DEBUG] matrix_store sqlite files:"
+        find /app/matrix_store -name '*.sqlite3' 2>/dev/null | head -10
         RESTORED_COMPONENTS="${RESTORED_COMPONENTS}\"matrix_store\", "
     else
         restore_abort "Missing matrix_store/matrix_store.tar" "restore-matrix_store"
@@ -611,9 +637,15 @@ REOF
     # Bridges (registrations + device state)
     if [ -f bridges/bridge_data.tar ]; then
         echo "  Restoring /data/bridges..."
+        echo "  [DEBUG] bridges tar size: $(stat -c%s bridges/bridge_data.tar 2>/dev/null || echo unknown) bytes"
+        echo "  [DEBUG] bridges tar contents:"
+        tar tf bridges/bridge_data.tar 2>/dev/null | head -20
         rm -rf /data/bridges/*
         tar xf bridges/bridge_data.tar -C /data \
             || restore_abort "Failed to restore bridge data" "restore-bridges"
+        echo "  [DEBUG] /data/bridges AFTER extract: $(find /data/bridges -type f 2>/dev/null | wc -l) files"
+        echo "  [DEBUG] bridge config files:"
+        find /data/bridges -name '*.yaml' -o -name '*.db' 2>/dev/null | head -10
         RESTORED_COMPONENTS="${RESTORED_COMPONENTS}\"bridges\", "
     else
         restore_abort "Missing bridges/bridge_data.tar" "restore-bridges"
@@ -1105,10 +1137,22 @@ done
 beacon "pg-ready"
 
 echo "Starting Tuwunel..."
+echo "[DEBUG] /var/lib/tuwunel BEFORE tuwunel start:"
+echo "  file count: $(find /var/lib/tuwunel -type f 2>/dev/null | wc -l)"
+echo "  total size: $(du -sh /var/lib/tuwunel 2>/dev/null | awk '{print $1}' || echo '0')"
+echo "  CURRENT: $(cat /var/lib/tuwunel/CURRENT 2>/dev/null || echo 'NOT FOUND')"
+echo "  IDENTITY: $(cat /var/lib/tuwunel/IDENTITY 2>/dev/null || echo 'NOT FOUND')"
+echo "  top-level files:"
+ls -la /var/lib/tuwunel/ 2>/dev/null | head -20
+echo "  permissions: $(stat -c '%U:%G %a' /var/lib/tuwunel 2>/dev/null || echo 'stat failed')"
+echo "  any .sst files: $(find /var/lib/tuwunel -name '*.sst' 2>/dev/null | wc -l)"
+echo "  any .log files: $(find /var/lib/tuwunel -name '*.log' -o -name 'LOG' 2>/dev/null | wc -l)"
+echo "  MANIFEST files: $(find /var/lib/tuwunel -name 'MANIFEST-*' 2>/dev/null)"
+
 supervisorctl start tuwunel
 for i in $(seq 1 30); do
     if curl -sf http://localhost:8008/_matrix/client/versions > /dev/null 2>&1; then
-        echo "Tuwunel is ready."
+        echo "Tuwunel is ready after ${i}s."
         break
     fi
     [ "$i" -eq 30 ] && echo "WARNING: Tuwunel not responding after 30s"
@@ -1116,14 +1160,38 @@ for i in $(seq 1 30); do
 done
 beacon "tuwunel-ready"
 
+echo "[DEBUG] Tuwunel post-start diagnostics:"
+echo "  tuwunel stderr (first 30 lines):"
+head -30 /var/log/supervisor/tuwunel-err.log 2>/dev/null || echo "    empty"
+echo "  tuwunel stdout (first 30 lines):"
+head -30 /var/log/supervisor/tuwunel.log 2>/dev/null || echo "    empty"
+echo "  /var/lib/tuwunel AFTER tuwunel start:"
+echo "  file count: $(find /var/lib/tuwunel -type f 2>/dev/null | wc -l)"
+echo "  total size: $(du -sh /var/lib/tuwunel 2>/dev/null | awk '{print $1}' || echo '0')"
+echo "  CURRENT now: $(cat /var/lib/tuwunel/CURRENT 2>/dev/null || echo 'NOT FOUND')"
+
 echo "Registering bridge bots..."
 cd /app && bash register-bridge-bots.sh http://localhost:8008 2>&1 || true
 
 echo "Starting bridges..."
+echo "[DEBUG] whatsapp_db user_logins count: $(psql -h localhost -U whatsapp_user -d whatsapp_db -t -A -c "SELECT count(*) FROM user_logins" 2>/dev/null || echo 'query failed')"
+echo "[DEBUG] whatsapp_db whatsmeow_device count: $(psql -h localhost -U whatsapp_user -d whatsapp_db -t -A -c "SELECT count(*) FROM whatsmeow_device" 2>/dev/null || echo 'query failed or table missing')"
+echo "[DEBUG] lightfriend_db bridges count: $(psql -h localhost -U postgres -d lightfriend_db -t -A -c "SELECT count(*) FROM bridges" 2>/dev/null || echo 'query failed')"
+echo "[DEBUG] lightfriend_db bridges rows: $(psql -h localhost -U postgres -d lightfriend_db -t -A -c "SELECT id, user_id, bridge_type, status FROM bridges" 2>/dev/null || echo 'query failed')"
+echo "[DEBUG] lightfriend_db user_secrets matrix data (user 1): $(psql -h localhost -U postgres -d lightfriend_db -t -A -c "SELECT matrix_username IS NOT NULL as has_mx_user, matrix_device_id IS NOT NULL as has_device, encrypted_matrix_access_token IS NOT NULL as has_token FROM user_secrets WHERE user_id = 1" 2>/dev/null || echo 'query failed')"
+
 supervisorctl start mautrix-whatsapp
 supervisorctl start mautrix-signal
 supervisorctl start mautrix-telegram
 beacon "bridges-started"
+
+sleep 5
+echo "[DEBUG] Bridge post-start (5s):"
+echo "  whatsapp status: $(supervisorctl status mautrix-whatsapp 2>&1)"
+echo "  whatsapp stdout (first 20 lines):"
+head -20 /var/log/supervisor/whatsapp.log 2>/dev/null || echo "    empty"
+echo "  whatsapp stderr (first 10 lines):"
+head -10 /var/log/supervisor/whatsapp-err.log 2>/dev/null || echo "    empty"
 
 if [ "${SKIP_BACKEND}" != "true" ]; then
     sleep 2
