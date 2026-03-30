@@ -1232,7 +1232,8 @@ pub async fn recover_users_from_external(
     // Paginate through all Stripe customers
     let mut starting_after: Option<String> = None;
     loop {
-        let mut url = "https://api.stripe.com/v1/customers?limit=100&expand[]=data.subscriptions".to_string();
+        let mut url =
+            "https://api.stripe.com/v1/customers?limit=100&expand[]=data.subscriptions".to_string();
         if let Some(ref cursor) = starting_after {
             url.push_str(&format!("&starting_after={}", cursor));
         }
@@ -1287,12 +1288,15 @@ pub async fn recover_users_from_external(
             }
 
             if !email.is_empty() {
-                stripe_customers.insert(email, StripeInfo {
-                    phone,
-                    customer_id,
-                    has_active_sub,
-                    price_id,
-                });
+                stripe_customers.insert(
+                    email,
+                    StripeInfo {
+                        phone,
+                        customer_id,
+                        has_active_sub,
+                        price_id,
+                    },
+                );
             }
             starting_after = customer["id"].as_str().map(|s| s.to_string());
         }
@@ -1381,14 +1385,15 @@ pub async fn recover_users_from_external(
                 if let Some(info) = stripe_info {
                     if let Ok(Some(user)) = state.user_core.find_by_email(email) {
                         // Set stripe_customer_id so Stripe webhooks reconnect
-                        let _ = state.user_repository.set_stripe_customer_id(
-                            user.id,
-                            &info.customer_id,
-                        );
+                        let _ = state
+                            .user_repository
+                            .set_stripe_customer_id(user.id, &info.customer_id);
 
                         // Determine plan_type from price ID
                         if let Some(ref price_id) = info.price_id {
-                            use crate::utils::country::{is_assistant_plan_price, is_byot_plan_price};
+                            use crate::utils::country::{
+                                is_assistant_plan_price, is_byot_plan_price,
+                            };
                             let plan_type = if is_assistant_plan_price(price_id) {
                                 "assistant"
                             } else if is_byot_plan_price(price_id) {
@@ -1396,19 +1401,25 @@ pub async fn recover_users_from_external(
                             } else {
                                 "autopilot"
                             };
-                            let _ = state.user_repository.update_plan_type(user.id, Some(plan_type));
+                            let _ = state
+                                .user_repository
+                                .update_plan_type(user.id, Some(plan_type));
                         }
 
                         // Set credits for active subscribers
                         if info.has_active_sub {
-                            use crate::utils::plan_features::MONTHLY_CREDIT_BUDGET;
                             use crate::utils::country::is_byot_plan_price;
-                            let is_byot = info.price_id.as_deref()
-                                .map(|p| is_byot_plan_price(p))
+                            use crate::utils::plan_features::MONTHLY_CREDIT_BUDGET;
+                            let is_byot = info
+                                .price_id
+                                .as_deref()
+                                .map(is_byot_plan_price)
                                 .unwrap_or(false);
                             let credits = if is_byot { 0.0 } else { MONTHLY_CREDIT_BUDGET };
                             let _ = state.user_repository.update_user_credits(user.id, credits);
-                            let _ = state.user_repository.update_user_credits_left(user.id, credits);
+                            let _ = state
+                                .user_repository
+                                .update_user_credits_left(user.id, credits);
                         }
                     }
                 }
@@ -1425,8 +1436,8 @@ pub async fn recover_users_from_external(
     // Step 4: Send password reset links to all created users
     let all_users = state.user_core.get_all_users().unwrap_or_default();
     let mut reset_sent = 0;
-    let frontend_url =
-        std::env::var("FRONTEND_URL").unwrap_or_else(|_| "https://enclave.lightfriend.ai".to_string());
+    let frontend_url = std::env::var("FRONTEND_URL")
+        .unwrap_or_else(|_| "https://enclave.lightfriend.ai".to_string());
 
     for user in &all_users {
         let token: String = rand::thread_rng()
@@ -1494,7 +1505,7 @@ pub async fn sync_all_users_to_resend(
 
     let total = users.len();
     let mut synced = 0;
-    let mut failed = 0;
+    let failed = 0;
 
     for user in &users {
         crate::utils::resend_contacts::sync_contact(&user.email).await;
@@ -1505,7 +1516,9 @@ pub async fn sync_all_users_to_resend(
 
     tracing::info!(
         "Resend sync complete: {}/{} synced, {} failed",
-        synced, total, failed
+        synced,
+        total,
+        failed
     );
 
     Ok(Json(json!({
