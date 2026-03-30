@@ -1,0 +1,106 @@
+name: EC2 Orphan Watchdog
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'  # Every 30 minutes
+  workflow_dispatch: {}      # Manual trigger for testing
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  check-orphans:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Check for orphaned EC2 instances
+        env:
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          # Get all running instances with our tag
+          INSTANCES=$(aws ec2 describe-instances \
+            --filters "Name=instance-state-name,Values=running" \
+                      "Name=tag:Name,Values=lightfriend-prod-enclave*" \
+            --query 'Reservations[*].Instances[*].[InstanceId,LaunchTime]' \
+            --output json)
+
+          COUNT=$(echo "$INSTANCES" | jq 'flatten(1) | length')
+          echo "Running instances: $COUNT"
+
+          if [ "$COUNT" -le 1 ]; then
+            echo "OK: $COUNT instance(s) running"
+            exit 0
+          fi
+
+          # Check if ALL instances have been running for > 1 hour
+          NOW=$(date +%s)
+          OLD_COUNT=0
+          INSTANCE_DETAILS=""
+
+          for row in $(echo "$INSTANCES" | jq -r 'flatten(1) | .[] | @base64'); do
+            ID=$(echo "$row" | base64 --decode | jq -r '.[0]')
+            LAUNCH=$(echo "$row" | base64 --decode | jq -r '.[1]')
+            LAUNCH_EPOCH=$(date -d "$LAUNCH" +%s)
+            AGE_HOURS=$(( (NOW - LAUNCH_EPOCH) / 3600 ))
+            AGE_MIN=$(( (NOW - LAUNCH_EPOCH) / 60 ))
+
+            INSTANCE_DETAILS="${INSTANCE_DETAILS}\n  - ${ID} launched ${LAUNCH} (${AGE_HOURS}h ${AGE_MIN}m ago)"
+
+            if [ $AGE_MIN -gt 60 ]; then
+              OLD_COUNT=$((OLD_COUNT + 1))
+            fi
+          done
+
+          echo -e "Instance details:${INSTANCE_DETAILS}"
+
+          if [ "$OLD_COUNT" -lt 2 ]; then
+            echo "OK: Only $OLD_COUNT instance(s) older than 1 hour (deploy probably in progress)"
+            exit 0
+          fi
+
+          # Get the active instance from SSM
+          ACTIVE=$(aws ssm get-parameter --name /lightfriend/instance-id \
+            --query 'Parameter.Value' --output text 2>/dev/null || echo "unknown")
+
+          echo "ALERT: $COUNT instances running, $OLD_COUNT older than 1 hour"
+          echo "Active instance (SSM): $ACTIVE"
+
+          # Send alert email via SMTP (Resend)
+          SUBJECT="ALERT: $COUNT EC2 instances running - possible orphan"
+          BODY="Lightfriend EC2 Orphan Watchdog\n\n"
+          BODY="${BODY}$COUNT instances have been running simultaneously, $OLD_COUNT for over 1 hour.\n\n"
+          BODY="${BODY}Active instance (SSM): ${ACTIVE}\n\n"
+          BODY="${BODY}Running instances:${INSTANCE_DETAILS}\n\n"
+          BODY="${BODY}Action: terminate the orphaned instance(s) that are NOT ${ACTIVE}\n\n"
+          BODY="${BODY}Run: aws ec2 terminate-instances --instance-ids <orphan-id>"
+
+          # Use curl to send via Resend SMTP (port 587 with STARTTLS)
+          cat > /tmp/email.txt <<EOF
+          From: Lightfriend Watchdog <notifications@lightfriend.ai>
+          To: rasmus@lightfriend.ai
+          Subject: ${SUBJECT}
+          Content-Type: text/plain; charset=utf-8
+
+          $(echo -e "$BODY")
+          EOF
+
+          # Strip leading whitespace from heredoc
+          sed -i 's/^          //' /tmp/email.txt
+
+          curl -s --url "smtps://smtp.resend.com:465" \
+            --mail-from "notifications@lightfriend.ai" \
+            --mail-rcpt "rasmus@lightfriend.ai" \
+            --upload-file /tmp/email.txt \
+            --user "${SMTP_USERNAME}:${SMTP_PASSWORD}" \
+            --ssl-reqd
+
+          echo "Alert email sent to rasmus@lightfriend.ai"
