@@ -882,6 +882,18 @@ BUCKET=$(grep S3_BACKUP_BUCKET /opt/lightfriend/.env | cut -d= -f2)
 [ -z "$BUCKET" ] && { echo "S3_BACKUP_BUCKET not set in .env"; exit 1; }
 aws s3 cp /opt/lightfriend/.env "s3://$BUCKET/config/.env" --sse AES256
 echo "Uploaded .env to s3://$BUCKET/config/.env"
+
+# Also replicate .env to Cloudflare R2 (off-AWS disaster recovery)
+R2_BUCKET=$(grep R2_BACKUP_BUCKET /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
+R2_ENDPOINT=$(grep R2_ENDPOINT_URL /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
+R2_ACCESS=$(grep R2_ACCESS_KEY_ID /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
+R2_SECRET=$(grep R2_SECRET_ACCESS_KEY /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
+if [ -n "$R2_BUCKET" ] && [ -n "$R2_ENDPOINT" ] && [ -n "$R2_ACCESS" ]; then
+    AWS_ACCESS_KEY_ID="$R2_ACCESS" AWS_SECRET_ACCESS_KEY="$R2_SECRET" \
+        aws s3 cp /opt/lightfriend/.env "s3://$R2_BUCKET/config/.env" \
+        --endpoint-url "$R2_ENDPOINT" 2>/dev/null && \
+        echo "Replicated .env to R2" || echo "WARNING: R2 .env replication failed"
+fi
 SCRIPT
 chmod +x /opt/lightfriend/upload-env.sh
 
