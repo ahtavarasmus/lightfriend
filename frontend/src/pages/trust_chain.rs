@@ -465,6 +465,10 @@ fn render_key_chain(d: &TrustChainData) -> Html {
                                     {"Read the verified source code"}<span class="link-hint">{" - Arbiscan confirms it matches the deployed bytecode"}</span>
                                     {" "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
                                 </a>
+                                <a href={format!("https://arbiscan.io/address/{}#events", contract_addr)} target="_blank" rel="noopener noreferrer">
+                                    {"View all approved builds (Events)"}<span class="link-hint">{" - every ImageProposed and ImageActivated event"}</span>
+                                    {" "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                                </a>
                             }
                         </div>
                     </div>
