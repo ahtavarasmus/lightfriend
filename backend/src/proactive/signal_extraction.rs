@@ -1,6 +1,5 @@
 /// Message-level signal extraction for importance classification.
 /// Computes cheap, no-LLM signals from message content and conversation context.
-
 pub struct MessageSignals {
     pub length: usize,
     pub has_question: bool,
@@ -177,10 +176,13 @@ fn has_clock_time(s: &str) -> bool {
     let len = bytes.len();
     for i in 0..len {
         // Check for digit:digit pattern (3:30, 15:00)
-        if bytes[i] == b':' && i > 0 && i + 1 < len {
-            if bytes[i - 1].is_ascii_digit() && bytes[i + 1].is_ascii_digit() {
-                return true;
-            }
+        if bytes[i] == b':'
+            && i > 0
+            && i + 1 < len
+            && bytes[i - 1].is_ascii_digit()
+            && bytes[i + 1].is_ascii_digit()
+        {
+            return true;
         }
         // Check for digit followed by "am" or "pm"
         if bytes[i].is_ascii_digit() && i + 2 <= len {

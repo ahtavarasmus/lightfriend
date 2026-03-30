@@ -208,16 +208,16 @@ pub async fn run_system_behaviors(
     let tracking_enabled = settings.auto_track_items_system;
 
     // Step 3: Build structured signal report
-    let signal_report = build_signal_report(
+    let signal_report = build_signal_report(&SignalReportInput {
         sender_name,
-        &sender_context,
-        &cross_platform_ctx,
-        &sleep_context,
-        &content_signals_ctx,
-        &user_waiting,
-        &active_events,
-        &fmt_ts,
-    );
+        sender_context: &sender_context,
+        cross_platform_ctx: &cross_platform_ctx,
+        sleep_context: &sleep_context,
+        content_signals: &content_signals_ctx,
+        user_waiting: &user_waiting,
+        active_events: &active_events,
+        fmt_ts: &fmt_ts,
+    });
 
     // Step 4: Multi-dimensional classification prompt
     let system_prompt = format!(
@@ -685,40 +685,41 @@ pub async fn run_system_behaviors(
     Ok(())
 }
 
+struct SignalReportInput<'a> {
+    sender_name: &'a str,
+    sender_context: &'a str,
+    cross_platform_ctx: &'a str,
+    sleep_context: &'a str,
+    content_signals: &'a str,
+    user_waiting: &'a str,
+    active_events: &'a [crate::models::ontology_models::OntEvent],
+    fmt_ts: &'a dyn Fn(i32) -> String,
+}
+
 /// Build a structured signal report combining all intelligence sources.
-fn build_signal_report(
-    sender_name: &str,
-    sender_context: &str,
-    cross_platform_ctx: &str,
-    sleep_context: &str,
-    content_signals: &str,
-    user_waiting: &str,
-    active_events: &[crate::models::ontology_models::OntEvent],
-    fmt_ts: &dyn Fn(i32) -> String,
-) -> String {
+fn build_signal_report(input: &SignalReportInput) -> String {
     let mut sections = Vec::new();
 
-    sections.push(format!("SIGNAL REPORT\n\nSender: {}", sender_name));
-    sections.push(format!("Relationship: {}", sender_context));
+    sections.push(format!("SIGNAL REPORT\n\nSender: {}", input.sender_name));
+    sections.push(format!("Relationship: {}", input.sender_context));
 
-    if !cross_platform_ctx.is_empty() {
-        sections.push(format!("Cross-platform: {}", cross_platform_ctx));
+    if !input.cross_platform_ctx.is_empty() {
+        sections.push(format!("Cross-platform: {}", input.cross_platform_ctx));
     }
 
-    if !sleep_context.is_empty() {
-        sections.push(format!("User state: {}", sleep_context));
+    if !input.sleep_context.is_empty() {
+        sections.push(format!("User state: {}", input.sleep_context));
     }
 
-    sections.push(format!("Content signals: {}", content_signals));
+    sections.push(format!("Content signals: {}", input.content_signals));
 
-    if !user_waiting.is_empty() {
-        sections.push(format!("Thread context: {}", user_waiting));
+    if !input.user_waiting.is_empty() {
+        sections.push(format!("Thread context: {}", input.user_waiting));
     }
 
-    // Include active tracked items so the LLM can deduplicate and update
-    if !active_events.is_empty() {
+    if !input.active_events.is_empty() {
         let mut items = Vec::new();
-        for (i, event) in active_events.iter().take(10).enumerate() {
+        for (i, event) in input.active_events.iter().take(10).enumerate() {
             let mut parts = vec![format!(
                 "{}. [id={}] {}",
                 i + 1,
@@ -726,10 +727,10 @@ fn build_signal_report(
                 event.description
             )];
             if let Some(remind) = event.remind_at {
-                parts.push(format!("remind: {}", fmt_ts(remind)));
+                parts.push(format!("remind: {}", (input.fmt_ts)(remind)));
             }
             if let Some(due) = event.due_at {
-                parts.push(format!("due: {}", fmt_ts(due)));
+                parts.push(format!("due: {}", (input.fmt_ts)(due)));
             }
             items.push(parts.join(", "));
         }

@@ -1480,16 +1480,12 @@ impl OntologyRepository {
         }
         let threshold = total as f64 * 0.02; // at least 2% of messages in this hour
 
-        for h in 4..24 {
-            if hour_buckets[h] as f64 >= threshold {
-                return Some(h);
-            }
+        if let Some(h) = (4..24).find(|&h| hour_buckets[h] as f64 >= threshold) {
+            return Some(h);
         }
         // Wrap around: check hours 0-3
-        for h in 0..4 {
-            if hour_buckets[h] as f64 >= threshold {
-                return Some(h);
-            }
+        if let Some(h) = (0..4).find(|&h| hour_buckets[h] as f64 >= threshold) {
+            return Some(h);
         }
         None
     }

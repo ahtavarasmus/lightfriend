@@ -1,3 +1,0 @@
--- This migration is not reversible since we don't know which users originally had
--- ask_sender vs ask_sender_exclude_family after the migration.
--- If you need to revert, restore from a backup before the migration.
