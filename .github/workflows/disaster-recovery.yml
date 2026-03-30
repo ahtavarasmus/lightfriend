@@ -1,0 +1,377 @@
+name: Disaster Recovery
+
+# Manual trigger only - go to Actions tab, select this workflow, click "Run workflow"
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: 'What happened?'
+        required: true
+        type: choice
+        options:
+          - 'Old instance is dead - restore from latest S3 backup'
+          - 'Old instance is dead - restore from Cloudflare R2 backup'
+          - 'Fresh start - no backup restore (empty database)'
+      backup_key:
+        description: 'Specific backup S3/R2 key (optional - leave empty for latest)'
+        required: false
+        type: string
+      skip_approval:
+        description: 'Skip production approval gate (emergency only)'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-disaster-recovery
+  cancel-in-progress: false
+
+env:
+  REGISTRY: docker.io
+  IMAGE_REPO: docker.io/ahtavarasmus/lightfriend-enclave
+
+jobs:
+  # ── Build Docker image (same as normal deploy) ──
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      image_digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          sudo apt-get clean
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ env.IMAGE_REPO }}
+
+      - uses: docker/build-push-action@v5
+        id: build
+        with:
+          context: .
+          file: enclave/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.IMAGE_REPO }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_REPO }}:buildcache,mode=max
+          build-args: BUILD_MODE=production
+
+      - run: |
+          DIGEST="${{ steps.build.outputs.digest }}"
+          IMAGE_REF="${{ env.IMAGE_REPO }}@$DIGEST"
+          echo "image_ref=$IMAGE_REF" >> $GITHUB_OUTPUT
+          echo "{\"image_repo\":\"${{ env.IMAGE_REPO }}\",\"image_digest\":\"$DIGEST\",\"image_ref\":\"$IMAGE_REF\",\"commit_sha\":\"${{ github.sha }}\"}" > image-build.json
+        id: output
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-build-${{ github.sha }}
+          path: image-build.json
+
+  # ── Build EIF (same as normal deploy) ──
+  build-eif:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    outputs:
+      eif_key: ${{ steps.publish.outputs.eif_key }}
+      eif_sha256: ${{ steps.publish.outputs.eif_sha256 }}
+      pcr0: ${{ steps.publish.outputs.pcr0 }}
+      pcr1: ${{ steps.publish.outputs.pcr1 }}
+      pcr2: ${{ steps.publish.outputs.pcr2 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: image-build-${{ github.sha }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Read infrastructure parameters
+        id: infra
+        run: |
+          S3_BUCKET=$(aws ssm get-parameter --name /lightfriend/s3-bucket --query Parameter.Value --output text)
+          echo "s3_bucket=$S3_BUCKET" >> $GITHUB_OUTPUT
+
+      - name: Install Nitro CLI build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake libssl-dev
+
+      - name: Build Nitro CLI
+        run: |
+          git clone --depth 1 https://github.com/aws/aws-nitro-enclaves-cli.git /tmp/nitro-cli
+          cd /tmp/nitro-cli && cargo build --release -p aws-nitro-enclaves-cli
+          sudo cp target/release/nitro-cli /usr/local/bin/
+
+      - name: Prepare Nitro CLI filesystem layout
+        run: |
+          sudo mkdir -p /usr/share/nitro_enclaves/blobs
+          sudo touch /usr/share/nitro_enclaves/blobs/bzImage
+          sudo touch /usr/share/nitro_enclaves/blobs/init
+          sudo touch /usr/share/nitro_enclaves/blobs/linuxkit
+          sudo touch /usr/share/nitro_enclaves/blobs/cmdline
+
+      - name: Install Nitro CLI build blobs
+        run: |
+          BLOBS_URL="https://github.com/aws/aws-nitro-enclaves-cli/releases/latest/download"
+          for blob in bzImage init linuxkit cmdline; do
+            curl -sL "$BLOBS_URL/$blob" -o "/usr/share/nitro_enclaves/blobs/$blob" || \
+            curl -sL "$BLOBS_URL/${blob}_x86_64" -o "/usr/share/nitro_enclaves/blobs/$blob" || true
+          done
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build EIF from immutable image digest
+        id: eif
+        run: |
+          BUILD_META=$(cat image-build.json)
+          IMAGE_REF=$(echo "$BUILD_META" | jq -r '.image_ref')
+          docker pull "$IMAGE_REF"
+          nitro-cli build-enclave --docker-uri "$IMAGE_REF" --output-file lightfriend.eif | tee eif-output.json
+          echo "eif_sha256=$(jq -r '.Measurements.HashAlgorithm' eif-output.json | head -1)" >> $GITHUB_OUTPUT
+          echo "pcr0=$(jq -r '.Measurements.PCR0' eif-output.json)" >> $GITHUB_OUTPUT
+          echo "pcr1=$(jq -r '.Measurements.PCR1' eif-output.json)" >> $GITHUB_OUTPUT
+          echo "pcr2=$(jq -r '.Measurements.PCR2' eif-output.json)" >> $GITHUB_OUTPUT
+
+      - name: Publish EIF metadata
+        id: publish
+        run: |
+          S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
+          EIF_KEY="eif/${{ github.sha }}/lightfriend.eif"
+          aws s3 cp lightfriend.eif "s3://$S3_BUCKET/$EIF_KEY"
+          echo "eif_key=$EIF_KEY" >> $GITHUB_OUTPUT
+          echo "eif_sha256=${{ steps.eif.outputs.eif_sha256 }}" >> $GITHUB_OUTPUT
+          echo "pcr0=${{ steps.eif.outputs.pcr0 }}" >> $GITHUB_OUTPUT
+          echo "pcr1=${{ steps.eif.outputs.pcr1 }}" >> $GITHUB_OUTPUT
+          echo "pcr2=${{ steps.eif.outputs.pcr2 }}" >> $GITHUB_OUTPUT
+
+          cat <<EOF | aws s3 cp - "s3://$S3_BUCKET/eif/${{ github.sha }}/metadata.json"
+          {"commit_sha":"${{ github.sha }}","pcr0":"${{ steps.eif.outputs.pcr0 }}","pcr1":"${{ steps.eif.outputs.pcr1 }}","pcr2":"${{ steps.eif.outputs.pcr2 }}","eif_key":"$EIF_KEY"}
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eif-metadata-${{ github.sha }}
+          path: eif-output.json
+
+  # ── Deploy with recovery ──
+  recover:
+    needs: [build-and-push, build-eif]
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.skip_approval && 'none' || 'production' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Read infrastructure parameters
+        id: infra
+        run: |
+          S3_BUCKET=$(aws ssm get-parameter --name /lightfriend/s3-bucket --query Parameter.Value --output text)
+          LT_ID=$(aws ssm get-parameter --name /lightfriend/launch-template-id --query Parameter.Value --output text)
+          echo "s3_bucket=$S3_BUCKET" >> $GITHUB_OUTPUT
+          echo "lt_id=$LT_ID" >> $GITHUB_OUTPUT
+
+      - name: Find backup to restore
+        id: backup
+        run: |
+          S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
+          SCENARIO="${{ inputs.scenario }}"
+          SPECIFIC_KEY="${{ inputs.backup_key }}"
+
+          echo "## Recovery: $SCENARIO" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$SCENARIO" = "Fresh start - no backup restore (empty database)" ]; then
+            echo "backup_key=" >> $GITHUB_OUTPUT
+            echo "backup_source=fresh_start" >> $GITHUB_OUTPUT
+            echo "No backup - fresh start" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          if [ -n "$SPECIFIC_KEY" ]; then
+            BACKUP_KEY="$SPECIFIC_KEY"
+            echo "Using specified backup: $BACKUP_KEY"
+          elif echo "$SCENARIO" | grep -q "R2"; then
+            # Fetch from Cloudflare R2
+            R2_BUCKET=$(grep R2_BACKUP_BUCKET <(aws s3 cp "s3://$S3_BUCKET/config/.env" - 2>/dev/null) | cut -d= -f2)
+            R2_ENDPOINT=$(grep R2_ENDPOINT_URL <(aws s3 cp "s3://$S3_BUCKET/config/.env" - 2>/dev/null) | cut -d= -f2)
+            R2_ACCESS=$(grep R2_ACCESS_KEY_ID <(aws s3 cp "s3://$S3_BUCKET/config/.env" - 2>/dev/null) | cut -d= -f2)
+            R2_SECRET=$(grep R2_SECRET_ACCESS_KEY <(aws s3 cp "s3://$S3_BUCKET/config/.env" - 2>/dev/null) | cut -d= -f2)
+
+            if [ -z "$R2_BUCKET" ] || [ -z "$R2_ENDPOINT" ]; then
+              echo "FATAL: R2 credentials not found in .env"
+              exit 1
+            fi
+
+            echo "Searching Cloudflare R2 for latest backup..."
+            BACKUP_KEY=$(AWS_ACCESS_KEY_ID="$R2_ACCESS" AWS_SECRET_ACCESS_KEY="$R2_SECRET" \
+              aws s3 ls "s3://$R2_BUCKET/" --recursive --endpoint-url "$R2_ENDPOINT" 2>/dev/null | \
+              grep '\.tar\.gz\.enc$' | sort -k1,2 | tail -1 | awk '{print $4}')
+
+            if [ -z "$BACKUP_KEY" ]; then
+              echo "FATAL: No backups found in R2"
+              exit 1
+            fi
+
+            # Download from R2 to S3 so the restore flow can find it
+            echo "Downloading from R2: $BACKUP_KEY"
+            TMP=$(mktemp /tmp/r2-backup.XXXXXX.enc)
+            AWS_ACCESS_KEY_ID="$R2_ACCESS" AWS_SECRET_ACCESS_KEY="$R2_SECRET" \
+              aws s3 cp "s3://$R2_BUCKET/$BACKUP_KEY" "$TMP" --endpoint-url "$R2_ENDPOINT"
+
+            # Upload to S3 deploy path
+            S3_KEY="backups/recovery/$(basename $BACKUP_KEY)"
+            aws s3 cp "$TMP" "s3://$S3_BUCKET/$S3_KEY"
+            rm -f "$TMP"
+            BACKUP_KEY="$S3_KEY"
+            echo "Copied R2 backup to S3: $BACKUP_KEY"
+          else
+            # Find latest in S3
+            echo "Searching S3 for latest backup..."
+            BACKUP_KEY=""
+            for PREFIX in "backups/deploy/" "backups/hourly/" "backups/daily/"; do
+              BACKUP_KEY=$(aws s3 ls "s3://$S3_BUCKET/$PREFIX" --recursive 2>/dev/null | \
+                grep '\.tar\.gz\.enc$' | sort -k1,2 | tail -1 | awk '{print $4}')
+              [ -n "$BACKUP_KEY" ] && break
+            done
+
+            if [ -z "$BACKUP_KEY" ]; then
+              echo "FATAL: No backups found in S3"
+              exit 1
+            fi
+          fi
+
+          BACKUP_SIZE=$(aws s3api head-object --bucket "$S3_BUCKET" --key "$BACKUP_KEY" \
+            --query 'ContentLength' --output text 2>/dev/null || echo "0")
+          TMP_SHA=$(mktemp /tmp/backup-sha.XXXXXX.enc)
+          aws s3 cp "s3://$S3_BUCKET/$BACKUP_KEY" "$TMP_SHA"
+          BACKUP_SHA=$(sha256sum "$TMP_SHA" | awk '{print $1}')
+          rm -f "$TMP_SHA"
+
+          echo "backup_key=$BACKUP_KEY" >> $GITHUB_OUTPUT
+          echo "backup_sha=$BACKUP_SHA" >> $GITHUB_OUTPUT
+          echo "backup_size=$BACKUP_SIZE" >> $GITHUB_OUTPUT
+          echo "backup_source=recovery" >> $GITHUB_OUTPUT
+          echo "Backup: $BACKUP_KEY ($BACKUP_SIZE bytes, SHA: $BACKUP_SHA)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Launch new EC2 instance
+        id: launch
+        run: |
+          S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
+          LT_ID="${{ steps.infra.outputs.lt_id }}"
+          EIF_KEY="${{ needs.build-eif.outputs.eif_key }}"
+
+          INSTANCE_ID=$(aws ec2 run-instances \
+            --launch-template LaunchTemplateId=$LT_ID \
+            --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=lightfriend-recovery-$(date +%s)},{Key=deploy,Value=recovery-${{ github.run_id }}}]" \
+            --query 'Instances[0].InstanceId' --output text)
+
+          echo "new_instance=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          echo "Launched: $INSTANCE_ID"
+
+          # Wait for instance to be running
+          aws ec2 wait instance-status-ok --instance-ids "$INSTANCE_ID" --cli-read-timeout 300 || true
+          sleep 30
+
+          # Publish EIF manifest
+          cat <<EOF | aws s3 cp - "s3://$S3_BUCKET/deploy/eif-$INSTANCE_ID.json"
+          {"eif_key":"$EIF_KEY","commit_sha":"${{ github.sha }}","pcr0":"${{ needs.build-eif.outputs.pcr0 }}","pcr1":"${{ needs.build-eif.outputs.pcr1 }}","pcr2":"${{ needs.build-eif.outputs.pcr2 }}"}
+          EOF
+
+      - name: Approve image for Marlin KMS
+        run: |
+          PCR0="${{ needs.build-eif.outputs.pcr0 }}"
+          echo "PCR0 for Marlin approval: $PCR0"
+          # Marlin KMS approval would go here
+          # For now this is manual or handled by the contract
+
+      - name: Publish restore manifest
+        if: inputs.scenario != 'Fresh start - no backup restore (empty database)'
+        run: |
+          NEW_INSTANCE="${{ steps.launch.outputs.new_instance }}"
+          S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
+          BACKUP_KEY="${{ steps.backup.outputs.backup_key }}"
+
+          cat <<EOF | aws s3 cp - "s3://$S3_BUCKET/deploy/restore-$NEW_INSTANCE.json"
+          {"deploy_id":"recovery-${{ github.run_id }}","backup_key":"$BACKUP_KEY","restore_type":"full","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+          EOF
+          echo "Restore manifest published for $NEW_INSTANCE"
+
+      - name: Wait for enclave health
+        id: health
+        run: |
+          NEW_INSTANCE="${{ steps.launch.outputs.new_instance }}"
+          S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
+
+          echo "Waiting for enclave health on $NEW_INSTANCE..."
+          for i in $(seq 1 120); do
+            VERIFY=$(aws s3 cp "s3://$S3_BUCKET/deploy/verify-$NEW_INSTANCE.json" - 2>/dev/null || echo "")
+            if [ -n "$VERIFY" ]; then
+              echo "$VERIFY" | jq .
+              STATUS=$(echo "$VERIFY" | jq -r '.status // "UNKNOWN"')
+              if [ "$STATUS" = "HEALTHY" ]; then
+                echo "healthy=true" >> $GITHUB_OUTPUT
+                echo "## HEALTHY" >> $GITHUB_STEP_SUMMARY
+                exit 0
+              else
+                echo "FATAL: Enclave not healthy: $STATUS"
+                exit 1
+              fi
+            fi
+            echo "Waiting ($i/120)..."
+            sleep 10
+          done
+          echo "FATAL: Health check timed out"; exit 1
+
+      - name: Switch traffic to recovered instance
+        if: steps.health.outputs.healthy == 'true'
+        run: |
+          NEW_INSTANCE="${{ steps.launch.outputs.new_instance }}"
+          S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
+
+          # Try to terminate any existing instance
+          OLD_INSTANCE=$(aws ssm get-parameter --name /lightfriend/instance-id \
+            --query Parameter.Value --output text 2>/dev/null || echo "")
+          if [ -n "$OLD_INSTANCE" ] && [ "$OLD_INSTANCE" != "$NEW_INSTANCE" ]; then
+            aws ec2 terminate-instances --instance-ids "$OLD_INSTANCE" 2>/dev/null || true
+            echo "Terminated old: $OLD_INSTANCE"
+          fi
+
+          aws ssm put-parameter --name /lightfriend/instance-id \
+            --value "$NEW_INSTANCE" --type String --overwrite
+          echo "SSM updated to $NEW_INSTANCE"
+
+          # Clean up
+          aws s3 rm "s3://$S3_BUCKET/deploy/verify-$NEW_INSTANCE.json" 2>/dev/null || true
+          aws s3 rm "s3://$S3_BUCKET/deploy/eif-$NEW_INSTANCE.json" 2>/dev/null || true
+          aws s3 rm "s3://$S3_BUCKET/deploy/restore-$NEW_INSTANCE.json" 2>/dev/null || true
+
+          echo "## Recovery Complete: $NEW_INSTANCE" >> $GITHUB_STEP_SUMMARY
+
+      - name: Rollback on failure
+        if: (failure() || cancelled()) && steps.launch.outputs.new_instance != ''
+        run: |
+          aws ec2 terminate-instances --instance-ids "${{ steps.launch.outputs.new_instance }}" 2>/dev/null || true
+          echo "Terminated failed recovery instance"

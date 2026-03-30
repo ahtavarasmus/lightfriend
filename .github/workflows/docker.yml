@@ -852,8 +852,9 @@ jobs:
           echo "## Deploy Complete" >> $GITHUB_STEP_SUMMARY
 
       # ── Rollback: terminate new instance, old stays live ──
+      # Triggers on failure AND cancellation to prevent orphaned EC2 instances
       - name: Rollback on failure
-        if: failure() && steps.launch.outputs.new_instance != ''
+        if: (failure() || cancelled()) && steps.launch.outputs.new_instance != ''
         env:
           AWS_DEFAULT_REGION: us-east-1
           CONTRACT_ADDRESS: ${{ secrets.MARLIN_KMS_CONTRACT_ADDRESS }}
