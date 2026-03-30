@@ -633,6 +633,11 @@ pub async fn get_activity_feed(
         };
 
         let (title, icon, detail) = match log.activity_type.as_str() {
+            "system_screened" => (
+                "Screened message".to_string(),
+                "fa-shield-halved",
+                log.reason.clone(),
+            ),
             "noti_msg" => (
                 "Sent you an SMS notification".to_string(),
                 "fa-comment-sms",
@@ -728,9 +733,15 @@ pub async fn get_activity_feed(
             ),
         };
 
+        let entry_type = if log.activity_type == "system_screened" {
+            "screened"
+        } else {
+            "notification"
+        };
+
         entries.push(ActivityFeedEntry {
             id: format!("usage-{}", log.id),
-            entry_type: "notification".to_string(),
+            entry_type: entry_type.to_string(),
             timestamp: log.created_at,
             title,
             detail,

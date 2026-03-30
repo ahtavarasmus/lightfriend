@@ -520,9 +520,7 @@ pub fn admin_dashboard() -> Html {
                 }
 
                 // Fetch LLM usage stats
-                if let Ok(response) =
-                    Api::get("/api/admin/stats/llm?days=14").send().await
-                {
+                if let Ok(response) = Api::get("/api/admin/stats/llm?days=14").send().await {
                     if response.ok() {
                         if let Ok(data) = response.json::<LlmUsageStatsResponse>().await {
                             llm_stats.set(Some(data));

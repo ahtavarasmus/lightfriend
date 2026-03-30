@@ -32,8 +32,8 @@ use handlers::{
     admin_handlers, attestation_handlers, auth_handlers, billing_handlers, bridge_auth_common,
     dashboard_handlers, imap_auth, imap_handlers, person_handlers, profile_handlers, rule_handlers,
     self_host_handlers, signal_auth, signal_handlers, stripe_handlers, telegram_auth,
-    telegram_handlers, tesla_auth, twilio_handlers, whatsapp_auth, whatsapp_handlers, youtube,
-    youtube_auth,
+    telegram_handlers, tesla_auth, trust_chain_handlers, twilio_handlers, whatsapp_auth,
+    whatsapp_handlers, youtube, youtube_auth,
 };
 
 async fn health_check() -> &'static str {
@@ -242,7 +242,11 @@ async fn bootstrap_admin_if_needed(
     }
 }
 
-#[tokio::main]
+// Use more worker threads than the default (CPU count = 4). Blocking calls
+// from libraries (matrix-sdk SQLite, IMAP, etc.) can temporarily consume a
+// worker thread. With only 4 threads, a few blocking calls freeze the entire
+// server. With 16, the server stays responsive even under pressure.
+#[tokio::main(worker_threads = 16)]
 async fn main() {
     // Check for CLI commands first
     match backend::cli::run_cli().await {
@@ -541,6 +545,10 @@ async fn main() {
         .route(
             "/.well-known/lightfriend/attestation/hex",
             get(attestation_handlers::attestation_hex),
+        )
+        .route(
+            "/api/trust-chain",
+            get(trust_chain_handlers::get_trust_chain),
         )
         .route("/api/unsubscribe", get(admin_handlers::unsubscribe))
         .route("/api/login", post(auth_handlers::login))

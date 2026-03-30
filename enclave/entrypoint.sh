@@ -167,23 +167,36 @@ if [ -e /dev/vsock ] && [ -x /usr/local/bin/gvforwarder ]; then
     fi
     chmod 666 /dev/net/tun 2>/dev/null || true
 
-    # Create udhcpc default script (busybox udhcpc needs this to configure the interface)
-    mkdir -p /usr/share/udhcpc
+    # Create udhcpc script that configures the interface when DHCP lease is obtained.
+    # Place at BOTH common paths since Debian's busybox may use either one.
+    mkdir -p /usr/share/udhcpc /etc/udhcpc
     cat > /usr/share/udhcpc/default.script << 'DHCPSCRIPT'
 #!/bin/sh
-# Minimal udhcpc script for gvforwarder DHCP
+# udhcpc script for gvforwarder DHCP - configures tap0 when lease obtained
+# Variables from udhcpc: $ip, $mask (CIDR prefix), $subnet (dotted), $router, $interface
+echo "udhcpc-script: action=$1 ip=$ip mask=$mask subnet=$subnet router=$router iface=$interface" >&2
 case "$1" in
     bound|renew)
         ip addr flush dev "$interface" 2>/dev/null
         ip addr add "$ip/$mask" dev "$interface"
         if [ -n "$router" ]; then
             ip route del default 2>/dev/null
-            ip route add default via "$router" dev "$interface"
+            ip route add default via "$router" dev "$interface" metric 100
         fi
+        echo "udhcpc-script: configured $interface with $ip/$mask gw=$router" >&2
         ;;
 esac
 DHCPSCRIPT
     chmod +x /usr/share/udhcpc/default.script
+    cp /usr/share/udhcpc/default.script /etc/udhcpc/default.script
+
+    # Create udhcpc wrapper that forces the script path (Debian's busybox may have
+    # a different compiled-in default than /usr/share/udhcpc/default.script)
+    cat > /usr/local/bin/udhcpc << 'UDHCPC_WRAPPER'
+#!/bin/sh
+exec /bin/busybox udhcpc -s /usr/share/udhcpc/default.script "$@"
+UDHCPC_WRAPPER
+    chmod +x /usr/local/bin/udhcpc
 
     # Start gvforwarder: creates tap0, connects to host gvproxy via VSOCK port 1024
     # CID 3 = parent instance in Nitro Enclaves (CID 2 is Hyper-V default, wrong for us)
@@ -191,36 +204,60 @@ DHCPSCRIPT
     GVFORWARDER_PID=$!
     echo "  gvforwarder started (PID $GVFORWARDER_PID)"
 
-    # Wait for tap0 to get IP via DHCP (up to 15 seconds)
+    # Wait for tap0 to get IP via DHCP (up to 10 seconds)
     TAP_OK=false
-    for i in $(seq 1 15); do
+    for i in $(seq 1 10); do
         if ip addr show tap0 2>/dev/null | grep -q 'inet '; then
             TAP_IP=$(ip addr show tap0 2>/dev/null | grep 'inet ' | awk '{print $2}')
-            echo "  tap0 is up: $TAP_IP (after ${i}s)"
+            echo "  tap0 got IP via DHCP: $TAP_IP (after ${i}s)"
             TAP_OK=true
             break
         fi
         sleep 1
     done
 
+    # If DHCP failed but tap0 exists, configure manually with known gvproxy defaults
+    if [ "$TAP_OK" = "false" ] && ip link show tap0 >/dev/null 2>&1; then
+        echo "  DHCP failed after 10s, configuring tap0 manually..."
+        echo "  gvforwarder log:"
+        tail -20 /var/log/gvforwarder.log 2>/dev/null
+        echo "  udhcpc path: $(which udhcpc 2>&1 || echo 'NOT FOUND')"
+        echo "  busybox udhcpc: $(busybox udhcpc --help 2>&1 | head -1 || echo 'NOT AVAILABLE')"
+
+        # Manual IP config with gvproxy well-known defaults
+        ip addr add 192.168.127.2/24 dev tap0 2>/dev/null || true
+        ip link set dev tap0 up 2>/dev/null || true
+        ip route add default via 192.168.127.1 dev tap0 metric 100 2>/dev/null || true
+
+        if ip addr show tap0 2>/dev/null | grep -q 'inet '; then
+            TAP_IP=$(ip addr show tap0 2>/dev/null | grep 'inet ' | awk '{print $2}')
+            echo "  tap0 manually configured: $TAP_IP"
+            TAP_OK=true
+        else
+            echo "  Manual config also failed"
+        fi
+    elif [ "$TAP_OK" = "false" ]; then
+        echo "  WARNING: tap0 interface does not exist"
+        echo "  gvforwarder alive: $(kill -0 $GVFORWARDER_PID 2>&1 && echo 'yes' || echo 'no')"
+        echo "  gvforwarder log:"
+        tail -20 /var/log/gvforwarder.log 2>/dev/null
+    fi
+
     if [ "$TAP_OK" = "true" ]; then
         # Configure DNS to use gvproxy's built-in DNS server
-        # This forwards queries to the host's resolvers via the gvproxy gateway
         echo "nameserver 192.168.127.1" > /etc/resolv.conf
         echo "  DNS: 192.168.127.1 (gvproxy gateway)"
 
-        # Test internet connectivity through tap0 (without proxy)
+        # Test internet connectivity through tap0
         if timeout 5 curl -sf --noproxy '*' --max-time 4 https://api.cloudflare.com/cdn-cgi/trace > /tmp/tap-test 2>&1; then
             echo "  Internet via tap0: OK ($(head -1 /tmp/tap-test))"
         else
-            echo "  WARNING: Internet via tap0 not working yet - IMAP may not work initially"
+            echo "  WARNING: Internet via tap0 failed"
+            echo "  Route: $(ip route show default 2>/dev/null)"
+            echo "  Ping gw: $(ping -c1 -W2 192.168.127.1 2>&1 | tail -1)"
         fi
         rm -f /tmp/tap-test
     else
-        echo "  WARNING: tap0 did not get IP in 15s"
-        echo "  gvforwarder alive: $(kill -0 $GVFORWARDER_PID 2>&1 && echo 'yes' || echo 'no')"
-        echo "  gvforwarder log:"
-        cat /var/log/gvforwarder.log 2>/dev/null | tail -10
         echo "  IMAP/SMTP will not work, but all other services are unaffected"
     fi
 fi
@@ -284,7 +321,7 @@ if [ "${RESTORE_MODE}" != "none" ]; then
     HTTP_OK=false
     for attempt in $(seq 1 10); do
         if curl -sf --max-time 300 -o "$RECEIVED" "$BACKUP_URL" 2>/dev/null && [ -s "$RECEIVED" ]; then
-            HTTP_OK=true
+            export HTTP_OK=true
             break
         fi
         echo "  HTTP attempt ${attempt}/10 - waiting for seed server..."

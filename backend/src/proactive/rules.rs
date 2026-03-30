@@ -1113,33 +1113,37 @@ async fn check_email_seen(state: &Arc<AppState>, user_id: i32, email_uid: &str) 
         _ => return false,
     };
 
-    // Run in spawn_blocking since imap is synchronous
+    // Run in spawn_blocking with timeout since imap is synchronous
     let uid = email_uid.to_string();
-    tokio::task::spawn_blocking(move || {
-        let tls = match native_tls::TlsConnector::new() {
-            Ok(t) => t,
-            Err(_) => return false,
-        };
-        let client = match imap::connect((server.as_str(), port), &server, &tls) {
-            Ok(c) => c,
-            Err(_) => return false,
-        };
-        let mut session = match client.login(&email, &password) {
-            Ok(s) => s,
-            Err(_) => return false,
-        };
-        let _ = session.select("INBOX");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        tokio::task::spawn_blocking(move || {
+            let tls = match native_tls::TlsConnector::new() {
+                Ok(t) => t,
+                Err(_) => return false,
+            };
+            let client = match imap::connect((server.as_str(), port), &server, &tls) {
+                Ok(c) => c,
+                Err(_) => return false,
+            };
+            let mut session = match client.login(&email, &password) {
+                Ok(s) => s,
+                Err(_) => return false,
+            };
+            let _ = session.select("INBOX");
 
-        let is_seen = match session.uid_fetch(&uid, "FLAGS") {
-            Ok(messages) => messages
-                .iter()
-                .any(|msg| msg.flags().iter().any(|flag| flag.to_string() == "\\Seen")),
-            Err(_) => false,
-        };
-        let _ = session.logout();
-        is_seen
-    })
+            let is_seen = match session.uid_fetch(&uid, "FLAGS") {
+                Ok(messages) => messages
+                    .iter()
+                    .any(|msg| msg.flags().iter().any(|flag| flag.to_string() == "\\Seen")),
+                Err(_) => false,
+            };
+            let _ = session.logout();
+            is_seen
+        }),
+    )
     .await
+    .unwrap_or(Ok(false))
     .unwrap_or(false)
 }
 

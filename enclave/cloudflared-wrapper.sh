@@ -45,7 +45,7 @@ else
     log "  Port 7844: NOT LISTENING - BRIDGE IS DEAD!"
     log "  supervisorctl status: $(supervisorctl status vsock-bridge-7844 2>&1)"
     log "  Attempting restart..."
-    supervisorctl restart vsock-bridge-7844 2>&1 >> "$LOG" || true
+    supervisorctl restart vsock-bridge-7844 >> "$LOG" 2>&1 || true
     sleep 1
     if ss -tlnp 2>/dev/null | grep -q ':7844'; then
         log "  Port 7844: NOW LISTENING after restart"
@@ -62,7 +62,7 @@ else
     log "  Port 853: NOT LISTENING - DoT BRIDGE IS DEAD!"
     log "  supervisorctl status: $(supervisorctl status vsock-bridge-dot 2>&1)"
     log "  Attempting restart..."
-    supervisorctl restart vsock-bridge-dot 2>&1 >> "$LOG" || true
+    supervisorctl restart vsock-bridge-dot >> "$LOG" 2>&1 || true
     sleep 1
 fi
 
@@ -77,7 +77,7 @@ else
     RC=$?
     log "  TCP connect FAILED (rc=$RC) - bridge chain may be broken"
     log "  Checking VSOCK device..."
-    ls -la /dev/vsock 2>&1 >> "$LOG" || log "  /dev/vsock not found!"
+    ls -la /dev/vsock >> "$LOG" 2>&1 || log "  /dev/vsock not found!"
 fi
 
 # ── Test DoT connectivity ──
@@ -90,7 +90,7 @@ fi
 
 # ── Process tree ──
 log "--- Process tree (socat and cloudflared) ---"
-ps aux 2>/dev/null | grep -E 'socat|cloudflared|supervisor' >> "$LOG" || true
+pgrep -a 'socat|cloudflared|supervisor' >> "$LOG" || true
 
 # ── Environment ──
 log "--- Environment (relevant vars) ---"

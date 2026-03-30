@@ -16,14 +16,14 @@ while true; do
 
     # ── Bridge 7844 status ──
     BRIDGE_7844_LISTEN=$(ss -tlnp 2>/dev/null | grep ':7844' | head -1)
-    BRIDGE_7844_CONNS=$(ss -tnp 2>/dev/null | grep ':7844' | wc -l)
+    BRIDGE_7844_CONNS=$(ss -tnp 2>/dev/null | grep -c ':7844')
     if [ -n "$BRIDGE_7844_LISTEN" ]; then
         log "bridge-7844: LISTENING, active_conns=$BRIDGE_7844_CONNS"
     else
         log "bridge-7844: NOT LISTENING! Connections will fail!"
         log "  supervisorctl: $(supervisorctl status vsock-bridge-7844 2>&1)"
         # Try to restart it
-        supervisorctl restart vsock-bridge-7844 2>&1 >> "$LOG" || true
+        supervisorctl restart vsock-bridge-7844 >> "$LOG" 2>&1 || true
     fi
 
     # ── Bridge 853 (DoT) status ──
@@ -32,7 +32,7 @@ while true; do
         log "bridge-dot: LISTENING"
     else
         log "bridge-dot: NOT LISTENING!"
-        supervisorctl restart vsock-bridge-dot 2>&1 >> "$LOG" || true
+        supervisorctl restart vsock-bridge-dot >> "$LOG" 2>&1 || true
     fi
 
     # ── TCP connection states for port 7844 ──
@@ -97,7 +97,7 @@ while true; do
 
         # All socat processes with details
         log "  all-socat-processes:"
-        ps aux 2>/dev/null | grep '[s]ocat' >> "$LOG" || log "    none"
+        pgrep -a socat >> "$LOG" || log "    none"
 
         log "--- end deep check ---"
     fi

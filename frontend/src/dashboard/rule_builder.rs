@@ -1096,13 +1096,7 @@ pub fn rule_template_picker(props: &TemplatePickerProps) -> Html {
     };
 
     let mut templates: Vec<(RuleTemplate, String, String)> = Vec::new();
-    if !has_critical {
-        templates.push((
-            RuleTemplate::CriticalMessages,
-            RuleTemplate::CriticalMessages.label().to_string(),
-            RuleTemplate::CriticalMessages.description().to_string(),
-        ));
-    }
+    // CriticalMessages removed - importance notifications are now system-level
     // Digest templates removed - digests are now handled by the system automatically
     templates.push((
         RuleTemplate::Custom,
@@ -2233,8 +2227,12 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                     PromptTemplate::FilterImportant => {
                         Some("template:filter_important".to_string())
                     }
-                    PromptTemplate::TrackItemsUpdate => Some("template:track_items_update".to_string()),
-                    PromptTemplate::TrackItemsCreate => Some("template:track_items_create".to_string()),
+                    PromptTemplate::TrackItemsUpdate => {
+                        Some("template:track_items_update".to_string())
+                    }
+                    PromptTemplate::TrackItemsCreate => {
+                        Some("template:track_items_create".to_string())
+                    }
                 },
                 _ => None,
             };
@@ -4509,7 +4507,10 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
     } else if prompt == "template:track_items_create" {
         (PromptTemplate::TrackItemsCreate, String::new())
     } else if prompt.starts_with("template:check_condition:") {
-        let cond = prompt.strip_prefix("template:check_condition:").unwrap_or("").to_string();
+        let cond = prompt
+            .strip_prefix("template:check_condition:")
+            .unwrap_or("")
+            .to_string();
         (PromptTemplate::CheckCondition, cond)
     } else {
         (PromptTemplate::Custom, String::new())
@@ -4654,8 +4655,6 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
         let template_buttons = {
             let templates = [
                 (PromptTemplate::Summarize, "Summarize"),
-                (PromptTemplate::FilterImportant, "Only if important"),
-                (PromptTemplate::TrackItemsCreate, "Track new items"),
                 (PromptTemplate::CheckCondition, "Check condition"),
                 (PromptTemplate::Custom, "Custom"),
             ];
@@ -6056,9 +6055,9 @@ fn capitalize_first(s: &str) -> String {
 /// Render a human-readable hint about what extra info the AI will figure out for a tool.
 fn render_llm_params_hint(tool: &str) -> Html {
     let hint = match tool {
-        "update_event" => {
-            Some("AI will pick which tracked obligation to update and append the new concrete change")
-        }
+        "update_event" => Some(
+            "AI will pick which tracked obligation to update and append the new concrete change",
+        ),
         _ => None,
     };
     match hint {
