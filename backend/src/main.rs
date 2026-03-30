@@ -242,7 +242,11 @@ async fn bootstrap_admin_if_needed(
     }
 }
 
-#[tokio::main]
+// Use more worker threads than the default (CPU count = 4). Blocking calls
+// from libraries (matrix-sdk SQLite, IMAP, etc.) can temporarily consume a
+// worker thread. With only 4 threads, a few blocking calls freeze the entire
+// server. With 16, the server stays responsive even under pressure.
+#[tokio::main(worker_threads = 16)]
 async fn main() {
     // Check for CLI commands first
     match backend::cli::run_cli().await {
