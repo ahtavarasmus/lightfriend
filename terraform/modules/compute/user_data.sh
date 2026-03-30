@@ -1021,8 +1021,36 @@ echo "=== Full snapshot backup verified and complete: $${TIMESTAMP} ===" >> "$LO
 SCRIPT
 chmod +x /opt/lightfriend/scheduled-backup.sh
 
-echo "0 * * * * root /opt/lightfriend/scheduled-backup.sh" > /etc/cron.d/lightfriend-backup
-chmod 644 /etc/cron.d/lightfriend-backup
+# Use systemd timer instead of cron (cron not installed on Amazon Linux 2023)
+cat > /etc/systemd/system/scheduled-backup.service <<'BACKUPSVCEOF'
+[Unit]
+Description=Lightfriend scheduled backup
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/lightfriend/scheduled-backup.sh
+StandardOutput=append:/opt/lightfriend/logs/scheduled-backup.log
+StandardError=append:/opt/lightfriend/logs/scheduled-backup.log
+BACKUPSVCEOF
+
+cat > /etc/systemd/system/scheduled-backup.timer <<'BACKUPTIMEREOF'
+[Unit]
+Description=Run Lightfriend backup every hour
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
+BACKUPTIMEREOF
+
+systemctl daemon-reload
+systemctl enable scheduled-backup.timer
+systemctl start scheduled-backup.timer
+echo "Hourly backup timer enabled: $(systemctl is-active scheduled-backup.timer)"
 
 chown -R ec2-user:ec2-user /opt/lightfriend
 
