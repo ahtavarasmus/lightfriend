@@ -624,7 +624,10 @@ jobs:
             done
 
             if [ "$LIVE_EXPORT_OK" = "false" ]; then
-              echo "WARNING: Live export from old instance failed or timed out"
+              echo "FATAL: Live export from old instance failed or timed out"
+              echo "Old instance is running but export failed - something is wrong."
+              echo "Fix the issue and retry. NOT falling back to S3 backup (data could be stale)."
+              exit 1
             fi
 
             # Clean up S3 signals regardless
@@ -639,9 +642,9 @@ jobs:
             BACKUP_SIZE=$(echo "$COMPLETE_JSON" | jq -r '.backup_size // 0')
             BACKUP_SOURCE="live_export"
           else
-            # ── Fallback: find latest backup in S3 ──
+            # ── Old instance is dead - fall back to latest S3 backup ──
             echo ""
-            echo "=== Falling back to latest S3 backup ==="
+            echo "=== Old instance not running - falling back to latest S3 backup ==="
 
             # Check deploy backups first (most recent), then hourly
             LATEST_BACKUP=""
