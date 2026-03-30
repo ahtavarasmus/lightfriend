@@ -1009,12 +1009,28 @@ fi
     exit 1
 }
 
-# Step 5: Clean up old local backups (keep last 3)
+# Step 5: Replicate to Cloudflare R2 (off-AWS disaster recovery)
+R2_BUCKET=$(grep R2_BACKUP_BUCKET /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
+R2_ENDPOINT=$(grep R2_ENDPOINT_URL /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
+R2_ACCESS_KEY=$(grep R2_ACCESS_KEY_ID /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
+R2_SECRET_KEY=$(grep R2_SECRET_ACCESS_KEY /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
+if [ -n "$${R2_BUCKET}" ] && [ -n "$${R2_ENDPOINT}" ] && [ -n "$${R2_ACCESS_KEY}" ]; then
+    echo "Replicating backup to Cloudflare R2..." >> "$LOG"
+    AWS_ACCESS_KEY_ID="$${R2_ACCESS_KEY}" AWS_SECRET_ACCESS_KEY="$${R2_SECRET_KEY}" \
+        aws s3 cp "$TMP_BACKUP" "s3://$${R2_BUCKET}/$${BACKUP_KEY}" \
+        --endpoint-url "$${R2_ENDPOINT}" >> "$LOG" 2>&1 && \
+        echo "R2 replication: OK ($${BACKUP_KEY})" >> "$LOG" || \
+        echo "WARNING: R2 replication failed (non-fatal, S3 primary is safe)" >> "$LOG"
+else
+    echo "R2 not configured, skipping off-AWS replication" >> "$LOG"
+fi
+
+# Step 6: Clean up old local backups (keep last 3)
 cd /opt/lightfriend/backups
 ls -t *.tar.gz.enc 2>/dev/null | tail -n +4 | xargs rm -f 2>/dev/null || true
 
-# Step 6: Write success marker to S3
-[ -n "$${BUCKET:-}" ] && echo "{\"last_success\": \"$${TIMESTAMP}\", \"type\": \"full_snapshot\", \"tier\": \"hourly\", \"backup_key\": \"$${BACKUP_KEY}\"}" | \
+# Step 7: Write success marker to S3 (includes R2 status)
+[ -n "$${BUCKET:-}" ] && echo "{\"last_success\": \"$${TIMESTAMP}\", \"type\": \"full_snapshot\", \"tier\": \"hourly\", \"backup_key\": \"$${BACKUP_KEY}\", \"r2_replicated\": $([ -n \"$${R2_BUCKET:-}\" ] && echo true || echo false)}" | \
     aws s3 cp - "s3://$${BUCKET}/backups/backup-health.json" 2>/dev/null || true
 
 echo "=== Full snapshot backup verified and complete: $${TIMESTAMP} ===" >> "$LOG"
