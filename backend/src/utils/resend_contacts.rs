@@ -18,12 +18,6 @@ struct CreateContactRequest {
 }
 
 #[derive(Deserialize, Debug)]
-#[allow(dead_code)]
-struct ContactResponse {
-    id: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
 pub struct Contact {
     pub email: String,
     pub first_name: Option<String>,

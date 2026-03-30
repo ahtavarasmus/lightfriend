@@ -1504,27 +1504,18 @@ pub async fn sync_all_users_to_resend(
     })?;
 
     let total = users.len();
-    let mut synced = 0;
-    let failed = 0;
 
     for user in &users {
         crate::utils::resend_contacts::sync_contact(&user.email).await;
-        synced += 1;
         // Small delay to avoid rate limiting
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
 
-    tracing::info!(
-        "Resend sync complete: {}/{} synced, {} failed",
-        synced,
-        total,
-        failed
-    );
+    tracing::info!("Resend sync complete: {}/{} synced", total, total);
 
     Ok(Json(json!({
         "message": "Resend sync complete",
         "total": total,
-        "synced": synced,
-        "failed": failed
+        "synced": total,
     })))
 }
