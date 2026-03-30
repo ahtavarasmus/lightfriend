@@ -248,34 +248,23 @@ pub fn trust_chain_page() -> Html {
     }
 }
 
-// Shared helpers for both sections
-fn chain_vars(d: &TrustChainData) -> (
-    &str, &str, String, String, String,
-    Option<String>, Option<String>, &str, String, bool,
-) {
+// Shared helpers
+fn v(d: &TrustChainData) -> (&str, &str, &str, &str) {
     let commit = d.commit_sha.as_deref().unwrap_or("unknown");
     let commit_short = if commit.len() > 8 { &commit[..8] } else { commit };
     let pcr0 = d.pcr0.as_deref().unwrap_or("unavailable");
-    let pcr0_short = short_hex(pcr0, 12);
-    let image_id = d.image_id.as_deref().unwrap_or("unavailable");
-    let image_id_short = short_hex(image_id, 12);
-    let commit_url = format!("https://github.com/ahtavarasmus/lightfriend/commit/{}", commit);
-    let actions_url = d.workflow_run_id.as_ref().map(|id| {
-        format!("https://github.com/ahtavarasmus/lightfriend/actions/runs/{}", id)
-    });
-    let metadata_url = d.build_metadata_url.clone();
     let contract_addr = d.kms_contract_address.as_deref().unwrap_or("");
-    let contract_source_url = format!(
-        "https://github.com/ahtavarasmus/lightfriend/blob/{}/contracts/src/LightfriendKmsVerifiable.sol",
-        commit
-    );
-    let approved = d.blockchain.as_ref().map_or(false, |b| b.approved);
-    (commit, commit_short, pcr0_short, image_id_short, commit_url, actions_url, metadata_url, contract_addr, contract_source_url, approved)
+    (commit, commit_short, pcr0, contract_addr)
 }
 
-// ---- Section 1: Verify the code is legit ----
+// ---- Section 1: Verify the code ----
 fn render_code_chain(d: &TrustChainData) -> Html {
-    let (commit, commit_short, pcr0_short, _image_id_short, commit_url, actions_url, metadata_url, _contract_addr, _contract_source_url, _approved) = chain_vars(d);
+    let (commit, commit_short, pcr0, contract_addr) = v(d);
+    let pcr0_display = short_hex(pcr0, 16);
+    let commit_url = format!("https://github.com/ahtavarasmus/lightfriend/commit/{}", commit);
+    let actions_url = d.workflow_run_id.as_ref().map(|id|
+        format!("https://github.com/ahtavarasmus/lightfriend/actions/runs/{}", id)
+    );
 
     html! {
         <div class="tc-section">
@@ -283,24 +272,20 @@ fn render_code_chain(d: &TrustChainData) -> Html {
                 <i class="fa-solid fa-magnifying-glass"></i>
                 {" Verify the Code"}
             </h2>
-            <p class="tc-section-desc">{"Is the code running on Lightfriend really the same open-source code on GitHub? Follow the chain:"}</p>
+            <p class="tc-section-desc">{"Is the code running on Lightfriend really the open-source code on GitHub?"}</p>
 
             <div class="chain">
-                // Step 1: Source Code
+                // Step 1
                 <div class="chain-card">
                     <div class="card-num">{"1"}</div>
                     <div class="card-body">
-                        <h3>{"Source Code"}</h3>
-                        <p class="card-explain">{"All code is public. Anyone can read every line."}</p>
-                        <div class="card-values">
-                            <div class="val-row">
-                                <span class="val-label">{"Commit"}</span>
-                                <code class="val-data">{commit_short}</code>
-                            </div>
-                        </div>
+                        <h3>{"The code is public on GitHub"}</h3>
+                        <p class="card-explain">{"Every line of Lightfriend's code is public. The version running right now was built from this commit:"}</p>
+                        <pre class="code-block">{format!("commit {}", commit)}</pre>
                         <div class="card-links">
                             <a href={commit_url.clone()} target="_blank" rel="noopener noreferrer">
-                                {"View source on GitHub "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                                {"Open this commit on GitHub"}<span class="link-hint">{" - you'll see every file that was changed"}</span>
+                                {" "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
                             </a>
                         </div>
                     </div>
@@ -308,38 +293,31 @@ fn render_code_chain(d: &TrustChainData) -> Html {
 
                 <div class="chain-arrow">
                     <div class="arrow-line"></div>
-                    <div class="arrow-label">{"This commit was built by GitHub Actions"}</div>
+                    <div class="arrow-label">{"GitHub Actions built this commit automatically"}</div>
                     <div class="arrow-head"><i class="fa-solid fa-arrow-down"></i></div>
                 </div>
 
-                // Step 2: Build
+                // Step 2
                 <div class="chain-card">
                     <div class="card-num">{"2"}</div>
                     <div class="card-body">
-                        <h3>{"Automated Build"}</h3>
-                        <p class="card-explain">{"GitHub Actions built this commit into an enclave image. The build is automated - no human can tamper with it."}</p>
-                        <div class="card-values">
-                            if let Some(ref run_id) = d.workflow_run_id {
-                                <div class="val-row">
-                                    <span class="val-label">{"Workflow"}</span>
-                                    <code class="val-data">{format!("#{}", run_id)}</code>
-                                </div>
-                            }
-                            <div class="val-row">
-                                <span class="val-label">{"Fingerprint"}</span>
-                                <code class="val-data val-highlight">{&pcr0_short}</code>
-                            </div>
-                            if let Some(ref ts) = d.built_at {
-                                <div class="val-row">
-                                    <span class="val-label">{"Built"}</span>
-                                    <span class="val-data val-time" title={format_ts(ts)}>{relative_time(ts)}</span>
-                                </div>
-                            }
-                        </div>
+                        <h3>{"An automated system built it"}</h3>
+                        <p class="card-explain">
+                            {"GitHub Actions (a robot, not a human) took that commit and built it into a sealed computer image. "}
+                            {"The build produced a unique fingerprint:"}
+                        </p>
+                        <pre class="code-block code-highlight">{format!("PCR0: {}", pcr0)}</pre>
+                        <p class="card-explain">
+                            {"This fingerprint is like DNA - if even one character of code changes, this value would be completely different."}
+                        </p>
+                        if let Some(ref ts) = d.built_at {
+                            <p class="card-time">{"Built "}{relative_time(ts)}{" ("}{format_ts(ts)}{")"}</p>
+                        }
                         <div class="card-links">
                             if let Some(ref url) = actions_url {
                                 <a href={url.clone()} target="_blank" rel="noopener noreferrer">
-                                    {"View build logs "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                                    {"Open the build logs"}<span class="link-hint">{" - search for \"PCR0\" to find this exact value"}</span>
+                                    {" "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
                                 </a>
                             }
                         </div>
@@ -348,39 +326,22 @@ fn render_code_chain(d: &TrustChainData) -> Html {
 
                 <div class="chain-arrow">
                     <div class="arrow-line"></div>
-                    <div class="arrow-label">{"The fingerprint was published publicly"}</div>
+                    <div class="arrow-label">{"The fingerprint was saved to a public page"}</div>
                     <div class="arrow-head"><i class="fa-solid fa-arrow-down"></i></div>
                 </div>
 
-                // Step 3: Published
+                // Step 3
                 <div class="chain-card">
                     <div class="card-num">{"3"}</div>
                     <div class="card-body">
-                        <h3>{"Public Record"}</h3>
-                        <p class="card-explain">{"The build fingerprint (PCR values) was published to a public page on GitHub. This is a permanent record anyone can check."}</p>
-                        <div class="card-values">
-                            <div class="val-row">
-                                <span class="val-label">{"PCR0"}</span>
-                                <code class="val-data val-highlight">{&pcr0_short}</code>
-                                <span class="val-match"><i class="fa-solid fa-circle-check"></i>{" same as build"}</span>
-                            </div>
-                            if let Some(ref pcr) = d.pcr1 {
-                                <div class="val-row">
-                                    <span class="val-label">{"PCR1"}</span>
-                                    <code class="val-data">{short_hex(pcr, 12)}</code>
-                                </div>
-                            }
-                            if let Some(ref pcr) = d.pcr2 {
-                                <div class="val-row">
-                                    <span class="val-label">{"PCR2"}</span>
-                                    <code class="val-data">{short_hex(pcr, 12)}</code>
-                                </div>
-                            }
-                        </div>
+                        <h3>{"The fingerprint is published permanently"}</h3>
+                        <p class="card-explain">{"The build saved the fingerprint to a public JSON file on GitHub Pages. Click the link and look for the same PCR0 value:"}</p>
+                        <pre class="code-block">{format!("{{\n  \"pcr0\": \"{}\",\n  \"commit_sha\": \"{}\"\n}}", pcr0, commit_short)}</pre>
                         <div class="card-links">
-                            if let Some(ref url) = metadata_url {
+                            if let Some(ref url) = d.build_metadata_url {
                                 <a href={url.clone()} target="_blank" rel="noopener noreferrer">
-                                    {"View published metadata (JSON) "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                                    {"Open the published metadata"}<span class="link-hint">{" - compare the pcr0 value with step 2"}</span>
+                                    {" "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
                                 </a>
                             }
                         </div>
@@ -389,34 +350,25 @@ fn render_code_chain(d: &TrustChainData) -> Html {
 
                 <div class="chain-arrow">
                     <div class="arrow-line"></div>
-                    <div class="arrow-label">{"The running enclave reports the same fingerprint"}</div>
+                    <div class="arrow-label">{"Now check: does the live server report the same fingerprint?"}</div>
                     <div class="arrow-head"><i class="fa-solid fa-arrow-down"></i></div>
                 </div>
 
-                // Step 4: Live enclave match
+                // Step 4
                 <div class="chain-card chain-card-final">
                     <div class="card-num">{"4"}</div>
                     <div class="card-body">
-                        <h3>{"Live Enclave Matches"}</h3>
-                        <p class="card-explain">
-                            {"The sealed computer running right now reports the same fingerprint and commit. "}
-                            {"Amazon's hardware signs this proof - we cannot fake it."}
+                        <h3>{"The live server matches"}</h3>
+                        <p class="card-explain">{"The server running right now reports the same fingerprint. Amazon's hardware signs this value - we cannot fake it."}</p>
+                        <pre class="code-block code-highlight">{format!("PCR0: {}", pcr0)}</pre>
+                        <p class="card-explain card-explain-match">
+                            <i class="fa-solid fa-circle-check"></i>
+                            {" This matches the build (step 2) and the published record (step 3). The code on GitHub is what's running."}
                         </p>
-                        <div class="card-values">
-                            <div class="val-row">
-                                <span class="val-label">{"PCR0"}</span>
-                                <code class="val-data val-highlight">{&pcr0_short}</code>
-                                <span class="val-match"><i class="fa-solid fa-circle-check"></i>{" same as build + published"}</span>
-                            </div>
-                            <div class="val-row">
-                                <span class="val-label">{"Commit"}</span>
-                                <code class="val-data">{commit_short}</code>
-                                <span class="val-match"><i class="fa-solid fa-circle-check"></i>{" same as source"}</span>
-                            </div>
-                        </div>
                         <div class="card-links">
                             <a href="/.well-known/lightfriend/attestation" target="_blank" rel="noopener noreferrer">
-                                {"View live attestation "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                                {"Open live attestation"}<span class="link-hint">{" - compare the pcr0 value yourself"}</span>
+                                {" "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
                             </a>
                         </div>
                     </div>
@@ -426,10 +378,15 @@ fn render_code_chain(d: &TrustChainData) -> Html {
     }
 }
 
-// ---- Section 2: How the encryption key is protected ----
+// ---- Section 2: Encryption key protection ----
 fn render_key_chain(d: &TrustChainData) -> Html {
-    let (_commit, _commit_short, pcr0_short, image_id_short, _commit_url, _actions_url, _metadata_url, contract_addr, contract_source_url, approved) = chain_vars(d);
+    let (_commit, _commit_short, pcr0, contract_addr) = v(d);
+    let image_id = d.image_id.as_deref().unwrap_or("unavailable");
     let bc = d.blockchain.as_ref();
+    let approved = bc.map_or(false, |b| b.approved);
+    let actions_url = d.workflow_run_id.as_ref().map(|id|
+        format!("https://github.com/ahtavarasmus/lightfriend/actions/runs/{}", id)
+    );
 
     html! {
         <div class="tc-section tc-section-key">
@@ -438,29 +395,25 @@ fn render_key_chain(d: &TrustChainData) -> Html {
                 {" How the Encryption Key Is Protected"}
             </h2>
             <p class="tc-section-desc">
-                {"The same fingerprint protects your encryption key. An independent third party (Marlin) holds the key and only releases it to verified code."}
+                {"Your data is encrypted with a key that only exists inside sealed rooms. Here's how that key is managed:"}
             </p>
 
             <div class="chain">
-                // Step A: GitHub Actions registers the build
+                // Step A
                 <div class="chain-card">
                     <div class="card-num-key">{"A"}</div>
                     <div class="card-body">
-                        <h3>{"Build Registered On-Chain"}</h3>
+                        <h3>{"The build registers itself on a blockchain"}</h3>
                         <p class="card-explain">
-                            {"During the same GitHub Actions build from step 2, the workflow registers the fingerprint on a public blockchain (Arbitrum) by calling the smart contract."}
+                            {"During the GitHub Actions build (step 2 above), the workflow computes an Image ID from the fingerprint and registers it on a public blockchain (Arbitrum):"}
                         </p>
-                        <div class="card-values">
-                            <div class="val-row">
-                                <span class="val-label">{"Image ID"}</span>
-                                <code class="val-data">{&image_id_short}</code>
-                                <span class="val-match"><i class="fa-solid fa-circle-check"></i>{" computed from PCR values"}</span>
-                            </div>
-                        </div>
+                        <pre class="code-block">{format!("Image ID: {}", image_id)}</pre>
+                        <p class="card-explain">{"This is a hash of the PCR values. It uniquely identifies this build."}</p>
                         <div class="card-links">
-                            if let Some(ref url) = d.workflow_run_id.as_ref().map(|id| format!("https://github.com/ahtavarasmus/lightfriend/actions/runs/{}", id)) {
+                            if let Some(ref url) = actions_url {
                                 <a href={url.clone()} target="_blank" rel="noopener noreferrer">
-                                    {"View build + approval workflow "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                                    {"Open the build workflow"}<span class="link-hint">{" - search for \"proposeImage\" to see the registration"}</span>
+                                    {" "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
                                 </a>
                             }
                         </div>
@@ -469,35 +422,22 @@ fn render_key_chain(d: &TrustChainData) -> Html {
 
                 <div class="chain-arrow">
                     <div class="arrow-line"></div>
-                    <div class="arrow-label">{"Recorded on public blockchain"}</div>
+                    <div class="arrow-label">{"Registered on a public smart contract"}</div>
                     <div class="arrow-head"><i class="fa-solid fa-arrow-down"></i></div>
                 </div>
 
-                // Step B: Blockchain state
+                // Step B
                 <div class="chain-card">
                     <div class="card-num-key">{"B"}</div>
                     <div class="card-body">
-                        <h3>{"Blockchain Approval"}</h3>
+                        <h3>{"Anyone can check the smart contract"}</h3>
                         <p class="card-explain">
-                            {"A public smart contract on Arbitrum. Anyone can check which builds are approved."}
+                            {"The smart contract is verified on Arbiscan - you can read its source code and check which builds are approved. The key function is:"}
                         </p>
-                        <div class="card-values">
-                            <div class="val-row">
-                                <span class="val-label">{"Image ID"}</span>
-                                <code class="val-data">{&image_id_short}</code>
-                            </div>
-                            <div class="val-row">
-                                <span class="val-label">{"Status"}</span>
-                                if approved {
-                                    <span class="val-data val-approved"><i class="fa-solid fa-circle-check"></i>{" APPROVED"}</span>
-                                } else if bc.is_some() {
-                                    <span class="val-data val-pending">{"NOT APPROVED"}</span>
-                                } else {
-                                    <span class="val-data val-unknown">{"Could not check"}</span>
-                                }
-                            </div>
-                            if let Some(ref b) = bc {
-                                if let Some(ref tx) = b.propose_tx {
+                        <pre class="code-block">{format!("approvedImages[{}] = {}", short_hex(image_id, 16), if approved { "true" } else { "?" })}</pre>
+                        if let Some(ref b) = bc {
+                            if let Some(ref tx) = b.propose_tx {
+                                <div class="card-values">
                                     <div class="val-row">
                                         <span class="val-label">{"Proposed"}</span>
                                         <a href={format!("https://arbiscan.io/tx/{}", tx)} target="_blank" rel="noopener noreferrer" class="val-data val-link">
@@ -507,114 +447,94 @@ fn render_key_chain(d: &TrustChainData) -> Html {
                                             <span class="val-time" title={format_ts(ts)}>{relative_time(ts)}</span>
                                         }
                                     </div>
-                                }
-                                if let Some(ref tx) = b.activate_tx {
-                                    <div class="val-row">
-                                        <span class="val-label">{"Activated"}</span>
-                                        <a href={format!("https://arbiscan.io/tx/{}", tx)} target="_blank" rel="noopener noreferrer" class="val-data val-link">
-                                            {short_hex(tx, 12)}{" "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
-                                        </a>
-                                        if let Some(ref ts) = b.activate_timestamp {
-                                            <span class="val-time" title={format_ts(ts)}>{relative_time(ts)}</span>
-                                        }
-                                    </div>
-                                }
+                                </div>
                             }
-                        </div>
+                        }
+                        <p class="card-explain card-explain-howto">
+                            <strong>{"Try it yourself: "}</strong>
+                            {"Go to Arbiscan (link below), click \"Read Contract\", find "}<code>{"approvedImages"}</code>
+                            {", paste the Image ID above, and you'll see "}<code>{"true"}</code>{"."}
+                        </p>
                         <div class="card-links">
                             if !contract_addr.is_empty() {
-                                <a href={format!("https://arbiscan.io/address/{}", contract_addr)} target="_blank" rel="noopener noreferrer">
-                                    {"View contract on Arbiscan "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                                <a href={format!("https://arbiscan.io/address/{}#readContract", contract_addr)} target="_blank" rel="noopener noreferrer">
+                                    {"Open \"Read Contract\" on Arbiscan"}<span class="link-hint">{" - check approvedImages yourself"}</span>
+                                    {" "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                                </a>
+                                <a href={format!("https://arbiscan.io/address/{}#code", contract_addr)} target="_blank" rel="noopener noreferrer">
+                                    {"Read the verified source code"}<span class="link-hint">{" - Arbiscan confirms it matches the deployed bytecode"}</span>
+                                    {" "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
                                 </a>
                             }
-                            <a href={contract_source_url.clone()} target="_blank" rel="noopener noreferrer">
-                                {"Read contract source code "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
-                            </a>
                         </div>
                     </div>
                 </div>
 
                 <div class="chain-arrow">
                     <div class="arrow-line"></div>
-                    <div class="arrow-label">{"Marlin independently checks this contract"}</div>
+                    <div class="arrow-label">{"Marlin (independent key guardian) checks this same contract"}</div>
                     <div class="arrow-head"><i class="fa-solid fa-arrow-down"></i></div>
                 </div>
 
-                // Step C: Marlin verification
+                // Step C
                 <div class="chain-card chain-card-marlin">
                     <div class="card-num-key">{"C"}</div>
                     <div class="card-body">
-                        <h3>{"Marlin Verifies Independently"}</h3>
+                        <h3>{"Marlin verifies independently"}</h3>
                         <p class="card-explain">
-                            {"Marlin holds the key and does not trust us. Before releasing it:"}
+                            {"Marlin holds the encryption key. It does not trust us. Before releasing the key, it does exactly what you just did:"}
                         </p>
 
                         <div class="substep-flow">
                             <div class="substep">
-                                <div class="substep-icon"><i class="fa-solid fa-signature"></i></div>
+                                <div class="substep-num">{"1"}</div>
                                 <div class="substep-body">
-                                    <div class="substep-title">{"1. Check Amazon's signature"}</div>
-                                    <div class="substep-desc">{"Asks the enclave for a proof signed by Amazon's hardware. Confirms it's a real sealed computer."}</div>
+                                    {"Asks the enclave for Amazon's signed proof (we can't forge this)"}
                                 </div>
                             </div>
-                            <div class="substep-connector"><i class="fa-solid fa-arrow-down"></i></div>
                             <div class="substep">
-                                <div class="substep-icon"><i class="fa-solid fa-fingerprint"></i></div>
+                                <div class="substep-num">{"2"}</div>
                                 <div class="substep-body">
-                                    <div class="substep-title">{"2. Read the fingerprint"}</div>
-                                    <div class="substep-desc">{"Extracts PCR values from the proof, computes Image ID."}</div>
-                                    if d.image_id.is_some() {
-                                        <div class="substep-value">
-                                            <span class="val-label">{"Image ID"}</span>
-                                            <code class="val-data">{&image_id_short}</code>
-                                        </div>
-                                    }
+                                    {"Reads the fingerprint from the proof, computes the Image ID"}
                                 </div>
                             </div>
-                            <div class="substep-connector"><i class="fa-solid fa-arrow-down"></i></div>
                             <div class="substep">
-                                <div class="substep-icon"><i class="fa-solid fa-link"></i></div>
+                                <div class="substep-num">{"3"}</div>
                                 <div class="substep-body">
-                                    <div class="substep-title">{"3. Ask the blockchain"}</div>
-                                    <div class="substep-desc">
-                                        {"Calls "}<code>{"oysterKMSVerify(imageId)"}</code>{". "}
-                                        if approved {
-                                            {"Result: "}<code class="substep-true">{"true"}</code>
-                                        } else if bc.is_some() {
-                                            {"Result: "}<code>{"false"}</code>
-                                        } else {
-                                            {"Could not check."}
-                                        }
-                                    </div>
+                                    {"Calls "}<code>{"approvedImages[imageId]"}</code>{" on the same contract you checked above"}
                                 </div>
                             </div>
                         </div>
 
+                        <p class="card-explain">
+                            {"If the contract says "}<code>{"true"}</code>{", Marlin releases the key."}
+                        </p>
+
                         <div class="card-links">
                             <a href="https://github.com/marlinprotocol/oyster-monorepo" target="_blank" rel="noopener noreferrer">
-                                {"Marlin source code (open source) "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                                {"Marlin's source code (open source)"}{" "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
                             </a>
                         </div>
                         <p class="card-note">
-                            {"Marlin runs in its own Nitro Enclave. We cannot influence its decision."}
+                            {"Marlin runs in its own sealed computer. We cannot influence its decision."}
                         </p>
                     </div>
                 </div>
 
                 <div class="chain-arrow">
                     <div class="arrow-line"></div>
-                    <div class="arrow-label">{"Approved - key released directly into the sealed room"}</div>
+                    <div class="arrow-label">{"Key released directly into the sealed room"}</div>
                     <div class="arrow-head"><i class="fa-solid fa-arrow-down"></i></div>
                 </div>
 
-                // Step D: Key in enclave
+                // Step D
                 <div class="chain-card chain-card-final">
                     <div class="card-num-key">{"D"}</div>
                     <div class="card-body">
-                        <h3>{"Key Inside the Sealed Room"}</h3>
+                        <h3>{"The key never leaves the sealed room"}</h3>
                         <p class="card-explain">
                             {"The key goes directly into the sealed room - never through our hands. "}
-                            {"It only ever exists inside sealed rooms, even across software updates."}
+                            {"When we release a new version, the same process repeats: the new sealed room proves itself, and the key moves from one sealed room to the next. We never touch it."}
                         </p>
                     </div>
                 </div>
@@ -811,6 +731,26 @@ const STYLES: &str = r#"
 .card-explain { color: rgba(255,255,255,0.5); font-size: 0.85rem; line-height: 1.45; margin: 0 0 0.75rem; }
 .card-note { color: rgba(255,255,255,0.4); font-size: 0.8rem; line-height: 1.4; margin: 0.75rem 0 0; font-style: italic; }
 .card-note code { background: rgba(255,255,255,0.08); padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.75rem; }
+.card-time { font-size: 0.8rem; color: rgba(255,255,255,0.35); margin: 0.3rem 0 0.5rem; }
+.card-explain-match { color: #4CAF50; font-size: 0.85rem; }
+.card-explain-match i { margin-right: 0.2rem; }
+.card-explain-howto {
+    background: rgba(30,144,255,0.06); border: 1px solid rgba(30,144,255,0.15);
+    border-radius: 6px; padding: 0.6rem 0.8rem; font-size: 0.82rem;
+}
+.card-explain-howto code { background: rgba(255,255,255,0.1); padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.78rem; }
+
+/* Code blocks */
+.code-block {
+    background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08);
+    padding: 0.6rem 0.8rem; border-radius: 6px; font-size: 0.78rem;
+    color: rgba(255,255,255,0.7); overflow-x: auto; white-space: pre-wrap;
+    word-break: break-all; font-family: monospace; margin: 0.5rem 0;
+}
+.code-highlight { color: #4CAF50; border-color: rgba(76,175,80,0.2); }
+
+/* Link hints */
+.link-hint { color: rgba(255,255,255,0.35); font-size: 0.78rem; }
 
 /* Marlin card */
 .chain-card-marlin {
@@ -819,26 +759,19 @@ const STYLES: &str = r#"
 }
 
 /* Substep flow inside Marlin card */
-.substep-flow { margin: 0.5rem 0 0.75rem; padding: 0.75rem; background: rgba(0,0,0,0.15); border-radius: 8px; }
-.substep { display: flex; gap: 0.6rem; align-items: flex-start; }
-.substep-icon {
-    width: 28px; height: 28px; border-radius: 50%;
-    background: rgba(156,39,176,0.15); border: 1.5px solid rgba(156,39,176,0.35);
+.substep-flow { margin: 0.5rem 0 0.75rem; display: flex; flex-direction: column; gap: 0.4rem; }
+.substep {
+    display: flex; gap: 0.5rem; align-items: baseline;
+    font-size: 0.82rem; color: rgba(255,255,255,0.6); line-height: 1.4;
+}
+.substep code { background: rgba(255,255,255,0.08); padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.75rem; }
+.substep-num {
+    width: 20px; height: 20px; border-radius: 50%;
+    background: rgba(156,39,176,0.15); border: 1px solid rgba(156,39,176,0.3);
     color: #CE93D8; display: flex; align-items: center; justify-content: center;
-    font-size: 0.7rem; flex-shrink: 0; margin-top: 1px;
+    font-size: 0.65rem; font-weight: 700; flex-shrink: 0;
 }
-.substep-body { flex: 1; min-width: 0; }
-.substep-title { font-size: 0.8rem; font-weight: 600; color: rgba(255,255,255,0.8); margin-bottom: 0.15rem; }
-.substep-desc { font-size: 0.78rem; color: rgba(255,255,255,0.45); line-height: 1.4; }
-.substep-desc code { background: rgba(255,255,255,0.08); padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.72rem; }
-.substep-formula {
-    display: block; margin: 0.3rem 0; padding: 0.3rem 0.5rem;
-    background: rgba(255,255,255,0.05); border-radius: 4px;
-    font-size: 0.72rem; color: rgba(255,255,255,0.55);
-}
-.substep-value { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.3rem; }
-.substep-true { color: #4CAF50; font-weight: 600; }
-.substep-connector { text-align: center; color: rgba(156,39,176,0.4); font-size: 0.65rem; padding: 0.15rem 0; }
+.substep-body { flex: 1; }
 
 /* Values */
 .card-values { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 0.75rem; }
