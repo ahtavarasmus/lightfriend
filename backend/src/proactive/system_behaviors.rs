@@ -6,6 +6,7 @@ use chrono::{TimeZone, Utc};
 use crate::context::ContextBuilder;
 use crate::proactive::utils::send_notification;
 use crate::repositories::user_core::UserCoreOps;
+use crate::repositories::user_repository::LogUsageParams;
 use crate::AppState;
 use openai_api_rs::v1::{chat_completion, types};
 
@@ -339,6 +340,19 @@ pub async fn run_system_behaviors(
                         )
                         .await;
                     }
+                } else {
+                    let _ = state.user_repository.log_usage(LogUsageParams {
+                        user_id,
+                        sid: None,
+                        activity_type: "system_screened".to_string(),
+                        credits: None,
+                        time_consumed: None,
+                        success: Some(true),
+                        reason: Some(format!("{} on {} - not urgent", sender_name, platform)),
+                        status: None,
+                        recharge_threshold_timestamp: None,
+                        zero_credits_timestamp: None,
+                    });
                 }
 
                 return Ok(());
