@@ -27,6 +27,7 @@ pub mod handlers {
     pub mod telegram_handlers;
     pub mod tesla_auth;
     pub mod totp_handlers;
+    pub mod trust_chain_handlers;
     pub mod twilio_handlers;
     pub mod webauthn_handlers;
     pub mod whatsapp_auth;

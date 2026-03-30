@@ -44,6 +44,7 @@ mod pages {
     pub mod subscription_success;
     pub mod supported_countries;
     pub mod termsprivacy;
+    pub mod trust_chain;
     pub mod trustless;
 }
 mod components {
@@ -112,6 +113,7 @@ use pages::{
     subscription_success::SubscriptionSuccess,
     supported_countries::SupportedCountries,
     termsprivacy::{PrivacyPolicy, TermsAndConditions},
+    trust_chain::TrustChainPage,
     trustless::TrustlessVerification,
 };
 
@@ -145,6 +147,8 @@ pub enum Route {
     Privacy,
     #[at("/trustless")]
     Trustless,
+    #[at("/trust-chain")]
+    TrustChain,
     #[at("/pricing")]
     Pricing,
     #[at("/light-phone-3-whatsapp-guide")]
@@ -217,6 +221,10 @@ fn switch(routes: Route) -> Html {
         Route::Trustless => {
             info!("Rendering Trustless page");
             html! { <TrustlessVerification /> }
+        }
+        Route::TrustChain => {
+            info!("Rendering Trust Chain page");
+            html! { <TrustChainPage /> }
         }
         Route::Pricing => {
             info!("Rendering Pricing page");

@@ -1154,6 +1154,8 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                         <a href="/trustless">{"Verifiably Private"}</a>
                         {" | "}
                         <a href="/updates">{"Updates"}</a>
+                        {" | "}
+                        <a href="/trust-chain">{"Trust Chain"}</a>
                     </div>
                 </div>
             </div>
