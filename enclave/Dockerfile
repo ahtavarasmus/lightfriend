@@ -145,7 +145,6 @@ RUN apt-get update && apt-get install -y \
     iproute2 \
     jq \
     busybox \
-    && ln -sf /bin/busybox /usr/sbin/udhcpc \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Install cloudflared for Cloudflare tunnel (production only) ──────────────

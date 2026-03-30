@@ -167,23 +167,36 @@ if [ -e /dev/vsock ] && [ -x /usr/local/bin/gvforwarder ]; then
     fi
     chmod 666 /dev/net/tun 2>/dev/null || true
 
-    # Create udhcpc default script (busybox udhcpc needs this to configure the interface)
-    mkdir -p /usr/share/udhcpc
+    # Create udhcpc script that configures the interface when DHCP lease is obtained.
+    # Place at BOTH common paths since Debian's busybox may use either one.
+    mkdir -p /usr/share/udhcpc /etc/udhcpc
     cat > /usr/share/udhcpc/default.script << 'DHCPSCRIPT'
 #!/bin/sh
-# Minimal udhcpc script for gvforwarder DHCP
+# udhcpc script for gvforwarder DHCP - configures tap0 when lease obtained
+# Variables from udhcpc: $ip, $mask (CIDR prefix), $subnet (dotted), $router, $interface
+echo "udhcpc-script: action=$1 ip=$ip mask=$mask subnet=$subnet router=$router iface=$interface" >&2
 case "$1" in
     bound|renew)
         ip addr flush dev "$interface" 2>/dev/null
         ip addr add "$ip/$mask" dev "$interface"
         if [ -n "$router" ]; then
             ip route del default 2>/dev/null
-            ip route add default via "$router" dev "$interface"
+            ip route add default via "$router" dev "$interface" metric 100
         fi
+        echo "udhcpc-script: configured $interface with $ip/$mask gw=$router" >&2
         ;;
 esac
 DHCPSCRIPT
     chmod +x /usr/share/udhcpc/default.script
+    cp /usr/share/udhcpc/default.script /etc/udhcpc/default.script
+
+    # Create udhcpc wrapper that forces the script path (Debian's busybox may have
+    # a different compiled-in default than /usr/share/udhcpc/default.script)
+    cat > /usr/local/bin/udhcpc << 'UDHCPC_WRAPPER'
+#!/bin/sh
+exec /bin/busybox udhcpc -s /usr/share/udhcpc/default.script "$@"
+UDHCPC_WRAPPER
+    chmod +x /usr/local/bin/udhcpc
 
     # Start gvforwarder: creates tap0, connects to host gvproxy via VSOCK port 1024
     # CID 3 = parent instance in Nitro Enclaves (CID 2 is Hyper-V default, wrong for us)
