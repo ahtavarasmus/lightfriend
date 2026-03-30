@@ -371,7 +371,7 @@ jobs:
           echo "## Recovery Complete: $NEW_INSTANCE" >> $GITHUB_STEP_SUMMARY
 
       - name: Rollback on failure
-        if: failure() && steps.launch.outputs.new_instance != ''
+        if: (failure() || cancelled()) && steps.launch.outputs.new_instance != ''
         run: |
           aws ec2 terminate-instances --instance-ids "${{ steps.launch.outputs.new_instance }}" 2>/dev/null || true
           echo "Terminated failed recovery instance"
