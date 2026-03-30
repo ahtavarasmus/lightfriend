@@ -779,7 +779,7 @@ const STYLES: &str = r#"
 .tc-page {
     max-width: 680px;
     margin: 0 auto;
-    padding: 2rem 1.5rem 3rem;
+    padding: 5rem 1.5rem 3rem;
     color: #fff;
 }
 .tc-header { text-align: center; margin-bottom: 2rem; }
