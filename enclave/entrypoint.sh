@@ -590,6 +590,7 @@ REOF
     echo "  === TUWUNEL RESTORE START ==="
     if [ -f tuwunel/tuwunel_data.tar ]; then
         echo "  [DEBUG] tuwunel tar size: $(stat -c%s tuwunel/tuwunel_data.tar 2>/dev/null || echo unknown) bytes"
+        echo "  [DEBUG] tuwunel tar contents: $(tar tf tuwunel/tuwunel_data.tar 2>/dev/null | head -5)"
 
         # Extract the BackupEngine backup dir
         rm -rf /var/lib/tuwunel-backup
@@ -597,19 +598,23 @@ REOF
             || restore_abort "Failed to extract tuwunel backup tar" "restore-tuwunel"
 
         TUWUNEL_BACKUP_DIR="/var/lib/tuwunel-backup"
-        if [ ! -d "$TUWUNEL_BACKUP_DIR" ]; then
-            restore_abort "Backup dir not found after extract: $TUWUNEL_BACKUP_DIR" "restore-tuwunel"
+        if [ -d "$TUWUNEL_BACKUP_DIR" ] && [ -d "$TUWUNEL_BACKUP_DIR/shared_checksum" ]; then
+            # New BackupEngine format - restore using tuwunel_restore binary
+            echo "  [DEBUG] BackupEngine format detected, running tuwunel_restore..."
+            RESTORE_DIR="/var/lib/tuwunel"
+            rm -rf "${RESTORE_DIR:?}"/*
+            tuwunel_restore "$TUWUNEL_BACKUP_DIR" "$RESTORE_DIR" \
+                || restore_abort "tuwunel_restore failed" "restore-tuwunel"
+
+            TOTAL_FILES=$(find "$RESTORE_DIR" -type f 2>/dev/null | wc -l)
+            TOTAL_SIZE=$(du -sh "$RESTORE_DIR" 2>/dev/null | awk '{print $1}' || echo '0')
+            echo "  === TUWUNEL RESTORE END (OK: $TOTAL_FILES files, $TOTAL_SIZE) ==="
+        else
+            # Old format or no BackupEngine dir - tuwunel will start fresh
+            echo "  [DEBUG] No BackupEngine dir found (old backup format)"
+            echo "  [DEBUG] Tuwunel will create a fresh database on startup"
+            echo "  === TUWUNEL RESTORE END (skipped - old format, fresh start) ==="
         fi
-
-        # Restore using RocksDB BackupEngine API
-        RESTORE_DIR="/var/lib/tuwunel"
-        rm -rf "${RESTORE_DIR:?}"/*
-        tuwunel_restore "$TUWUNEL_BACKUP_DIR" "$RESTORE_DIR" \
-            || restore_abort "tuwunel_restore failed" "restore-tuwunel"
-
-        TOTAL_FILES=$(find "$RESTORE_DIR" -type f 2>/dev/null | wc -l)
-        TOTAL_SIZE=$(du -sh "$RESTORE_DIR" 2>/dev/null | awk '{print $1}' || echo '0')
-        echo "  === TUWUNEL RESTORE END (OK: $TOTAL_FILES files, $TOTAL_SIZE) ==="
         RESTORED_COMPONENTS="${RESTORED_COMPONENTS}\"tuwunel\", "
     else
         restore_abort "Missing tuwunel/tuwunel_data.tar" "restore-tuwunel"
