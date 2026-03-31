@@ -75,6 +75,10 @@ echo "--- startup-services.log (last 100 lines) ---"
 tail -100 /data/seed/startup-services.log 2>/dev/null || echo "  not found"
 echo ""
 
+echo "--- export-watcher-last-run.log (last 80 lines) ---"
+tail -80 /tmp/export-watcher-last-run.log 2>/dev/null || echo "  not found (no export has run yet)"
+echo ""
+
 echo "--- boot-trace.log restore section (grep DEBUG/restore/tuwunel/bridge) ---"
 grep -i "DEBUG\|restore\|tuwunel\|bridge.*tar\|matrix_store\|STEP 2\|decrypt\|Full restore\|checkpoint\|RocksDB\|CURRENT\|IDENTITY\|file count\|total size\|MANIFEST\|sst\|whatsmeow\|user_login" /data/seed/boot-trace.log 2>/dev/null | head -100 || echo "  not found or no matches"
 echo ""

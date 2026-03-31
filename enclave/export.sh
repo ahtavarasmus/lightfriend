@@ -1,8 +1,9 @@
 #!/bin/bash
-set -euo pipefail
+set -euxo pipefail
 
 # Full encrypted export of all data stores from running enclave.
 # Produces a single .tar.gz.enc file in /data/seed/.
+# set -x enables command tracing so every line is logged for debugging.
 # All plaintext stays in /tmp/ (enclave ephemeral space).
 # The export NEVER produces a partial or unverified backup.
 

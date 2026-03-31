@@ -69,8 +69,8 @@ while true; do
         else
             echo "export-watcher: export FAILED with exit code ${EXIT_CODE} at ${FINISHED_AT}"
 
-            # Grab last 20 lines of output for error context
-            ERROR_TAIL=$(tail -20 /tmp/export-watcher-last-run.log 2>/dev/null | tr '\n' ' ' | head -c 500 || echo "no output")
+            # Grab last 40 lines of output for error context
+            ERROR_TAIL=$(tail -40 /tmp/export-watcher-last-run.log 2>/dev/null | tr '\n' ' ' | head -c 2000 || echo "no output")
 
             FAILURE="{\"status\":\"FAILED\",\"exit_code\":${EXIT_CODE},\"started_at\":\"${TIMESTAMP}\",\"finished_at\":\"${FINISHED_AT}\",\"error\":\"${ERROR_TAIL}\"}"
             echo "${FAILURE}" > /tmp/export-complete-payload.json && curl -sf --max-time 10 -T /tmp/export-complete-payload.json "${RESULT_UPLOAD_URL}/export-complete.json" 2>/dev/null || \
