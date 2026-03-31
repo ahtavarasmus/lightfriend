@@ -1,5 +1,9 @@
 #!/bin/bash
-set -euxo pipefail
+set -uxo pipefail
+# NOTE: no set -e! Every critical command has explicit || abort error handling.
+# set -e was killing the script on harmless debug commands (find, du, grep on
+# non-existent dirs). With -u we still catch unset variables, with -x we trace
+# every command, with -o pipefail we catch pipeline failures in critical paths.
 
 # Full encrypted export of all data stores from running enclave.
 # Produces a single .tar.gz.enc file in /data/seed/.
@@ -129,11 +133,14 @@ if [ -z "$TUWUNEL_PID" ]; then
     abort "Tuwunel process not found - cannot trigger backup" "dump-tuwunel"
 fi
 echo "  [DEBUG] Tuwunel PID: $TUWUNEL_PID"
-echo "  [DEBUG] Tuwunel process info: $(ps -p $TUWUNEL_PID -o pid,rss,etime,args 2>/dev/null | tail -1)"
+echo "  [DEBUG] Tuwunel process info: $(ps -p $TUWUNEL_PID -o pid,rss,etime,args 2>/dev/null | tail -1 || echo 'ps failed')"
+
+# Ensure backup dir exists (tuwunel creates it on first backup, but it may not exist yet)
+mkdir -p "$TUWUNEL_BACKUP_DIR"
 
 # Record backup dir state before signal
-BEFORE_COUNT=$(find "$TUWUNEL_BACKUP_DIR" -type f 2>/dev/null | wc -l)
-BEFORE_SIZE=$(du -sh "$TUWUNEL_BACKUP_DIR" 2>/dev/null | awk '{print $1}' || echo '0')
+BEFORE_COUNT=$(find "$TUWUNEL_BACKUP_DIR" -type f | wc -l)
+BEFORE_SIZE=$(du -sh "$TUWUNEL_BACKUP_DIR" | awk '{print $1}')
 echo "  [DEBUG] Backup dir BEFORE signal: $BEFORE_COUNT files, $BEFORE_SIZE"
 echo "  [DEBUG] Backup dir BEFORE contents:"
 ls -laR "$TUWUNEL_BACKUP_DIR" 2>/dev/null | head -15 || echo "    (empty or doesn't exist)"
