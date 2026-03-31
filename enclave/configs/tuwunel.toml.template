@@ -1,6 +1,12 @@
 [global]
 server_name = "localhost"
 database_path = "/var/lib/tuwunel"
+database_backup_path = "/var/lib/tuwunel-backup"
+database_backups_to_keep = 2
+
+# SIGUSR2 triggers these admin commands (used by export.sh for backups)
+admin_signal_execute = ["server backup-database"]
+
 address = "0.0.0.0"
 port = 8008
 
