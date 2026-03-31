@@ -384,6 +384,20 @@ jobs:
         run: |
           S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
           CURRENT_LIVE="${{ steps.infra.outputs.old_instance }}"
+
+          # Clean ALL stale deploy signal files from S3.
+          # These can cause deploys to read stale results and fail instantly.
+          echo "Cleaning stale deploy signals from S3..."
+          aws s3 rm "s3://$S3_BUCKET/deploy/export-complete.json" 2>/dev/null || true
+          aws s3 rm "s3://$S3_BUCKET/deploy/export-request.json" 2>/dev/null || true
+          # Clean old per-instance signal files (eif, pre-warm, restore, verify)
+          for prefix in eif- pre-warm- restore- verify-; do
+            aws s3 ls "s3://$S3_BUCKET/deploy/${prefix}" 2>/dev/null | awk '{print $4}' | while read -r key; do
+              [ -n "$key" ] && aws s3 rm "s3://$S3_BUCKET/deploy/$key" 2>/dev/null || true
+            done
+          done
+          echo "Stale signals cleaned"
+
           STALE_STATE=$(aws s3 cp "s3://$S3_BUCKET/deploy/deploy-state.json" - 2>/dev/null || echo "")
           if [ -n "$STALE_STATE" ]; then
             STALE_STATUS=$(echo "$STALE_STATE" | jq -r '.state // "unknown"')
@@ -927,11 +941,13 @@ jobs:
           {"deploy_id":"${{ github.run_id }}","commit_sha":"${{ github.sha }}","completed_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","outcome":"ROLLBACK","old_instance":"$OLD_INSTANCE","new_instance":"$NEW_INSTANCE","eif_key":"${{ needs.build-eif.outputs.eif_key }}","eif_sha256":"${{ needs.build-eif.outputs.eif_sha256 }}","pcr0":"${{ needs.build-eif.outputs.pcr0 }}","pcr1":"${{ needs.build-eif.outputs.pcr1 }}","pcr2":"${{ needs.build-eif.outputs.pcr2 }}"}
           EOF
 
-          # Clean up S3 signals
+          # Clean up ALL S3 deploy signals (prevents stale results blocking future deploys)
           aws s3 rm "s3://$S3_BUCKET/deploy/verify-$NEW_INSTANCE.json" 2>/dev/null || true
           aws s3 rm "s3://$S3_BUCKET/deploy/pre-warm-$NEW_INSTANCE.json" 2>/dev/null || true
           aws s3 rm "s3://$S3_BUCKET/deploy/eif-$NEW_INSTANCE.json" 2>/dev/null || true
           aws s3 rm "s3://$S3_BUCKET/deploy/restore-$NEW_INSTANCE.json" 2>/dev/null || true
+          aws s3 rm "s3://$S3_BUCKET/deploy/export-complete.json" 2>/dev/null || true
+          aws s3 rm "s3://$S3_BUCKET/deploy/export-request.json" 2>/dev/null || true
 
           echo "## ROLLBACK - old instance $OLD_INSTANCE restored" >> $GITHUB_STEP_SUMMARY
 
