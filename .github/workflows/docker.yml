@@ -833,7 +833,7 @@ jobs:
           # Brief grace period then terminate old
           sleep 15
           if [ -n "$OLD_INSTANCE" ] && [ "$OLD_INSTANCE" != "$NEW_INSTANCE" ]; then
-            aws ec2 terminate-instances --instance-ids "$OLD_INSTANCE"
+            aws ec2 terminate-instances --instance-ids "$OLD_INSTANCE" 2>/dev/null || echo "WARNING: Could not terminate old instance $OLD_INSTANCE (may already be gone)"
             echo "Old instance $OLD_INSTANCE terminated"
           fi
 
