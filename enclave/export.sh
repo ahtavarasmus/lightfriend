@@ -102,6 +102,7 @@ done
 # handle and calls DisableFileDeletions + GetLiveFiles internally.
 TUWUNEL_BACKUP_DIR="/var/lib/tuwunel-backup"
 echo "  === TUWUNEL BACKUP START ==="
+echo "  [DEBUG] COMMAND CHECK: pgrep=$(which pgrep 2>&1) kill=$(which kill 2>&1) grep=$(which grep 2>&1) find=$(which find 2>&1)"
 echo "  [DEBUG] tuwunel source DB path: /var/lib/tuwunel"
 echo "  [DEBUG] tuwunel source DB file count: $(find /var/lib/tuwunel -type f 2>/dev/null | wc -l)"
 echo "  [DEBUG] tuwunel source DB total size: $(du -sh /var/lib/tuwunel 2>/dev/null | awk '{print $1}' || echo '0')"
