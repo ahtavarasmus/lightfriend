@@ -267,6 +267,7 @@ diesel::table! {
         digest_enabled -> Bool,
         digest_time -> Nullable<Text>,
         auto_track_items_system -> Bool,
+        auto_confirm_tracked_items -> Bool,
     }
 }
 

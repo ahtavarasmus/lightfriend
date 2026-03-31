@@ -60,6 +60,7 @@ pub struct UserProfile {
     pub digest_enabled: Option<bool>,
     pub digest_time: Option<String>,
     pub auto_track_items_system: Option<bool>,
+    pub auto_confirm_tracked_items: Option<bool>,
 }
 
 pub const MIN_TOPUP_AMOUNT_CREDITS: f32 = 3.00;

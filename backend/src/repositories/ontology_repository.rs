@@ -1532,6 +1532,45 @@ impl OntologyRepository {
             .load(&mut conn)
     }
 
+    pub fn get_proposed_events(&self, user_id: i32) -> Result<Vec<OntEvent>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_events::table
+            .filter(ont_events::user_id.eq(user_id))
+            .filter(ont_events::status.eq("proposed"))
+            .order(ont_events::created_at.desc())
+            .load(&mut conn)
+    }
+
+    pub fn get_active_and_proposed_events(
+        &self,
+        user_id: i32,
+    ) -> Result<Vec<OntEvent>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_events::table
+            .filter(ont_events::user_id.eq(user_id))
+            .filter(ont_events::status.eq_any(&["active", "proposed"]))
+            .order(ont_events::created_at.desc())
+            .load(&mut conn)
+    }
+
+    pub fn get_recently_created_events(
+        &self,
+        user_id: i32,
+        since_ts: i32,
+    ) -> Result<Vec<OntEvent>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_events::table
+            .filter(ont_events::user_id.eq(user_id))
+            .filter(ont_events::status.eq_any(&["active", "proposed"]))
+            .filter(ont_events::created_at.ge(since_ts))
+            .order(ont_events::created_at.desc())
+            .load(&mut conn)
+    }
+
+    pub fn confirm_event(&self, user_id: i32, event_id: i32) -> Result<(), DieselError> {
+        self.update_event_status(user_id, event_id, "active")
+    }
+
     pub fn get_events(
         &self,
         user_id: i32,
