@@ -211,7 +211,7 @@ echo "Phase B complete."
 echo "Phase C: Assembling archive..."
 
 # Generate checksums
-cd "${STAGING}"
+cd "${STAGING}" || exit 1
 find . -type f -print0 | sort -z | xargs -0 sha256sum > checksums.sha256
 echo "  Generated checksums.sha256"
 
@@ -245,7 +245,7 @@ echo "  Generated manifest.json"
 sha256sum manifest.json >> checksums.sha256
 
 # Create tar.gz
-cd /tmp/backup-staging
+cd /tmp/backup-staging || exit 1
 tar czf "${ARCHIVE}" "${BACKUP_NAME}" \
     || abort "tar.gz creation failed" "assemble-archive"
 
