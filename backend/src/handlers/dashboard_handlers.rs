@@ -452,12 +452,20 @@ fn calculate_sun_times_from_coords(
 #[derive(Serialize)]
 pub struct ActivityFeedEntry {
     pub id: String,
-    pub entry_type: String, // "changelog", "notification", "message"
+    pub entry_type: String, // "changelog", "notification", "message", "screened"
     pub timestamp: i32,
     pub title: String,
     pub detail: Option<String>,
     pub icon: String, // FA icon class
     pub success: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub classification_prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub classification_result: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub urgency: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -615,6 +623,10 @@ pub async fn get_activity_feed(
             detail,
             icon: format!("fa-solid {}", icon),
             success: None,
+            classification_prompt: None,
+            classification_result: None,
+            urgency: None,
+            category: None,
         });
     }
 
@@ -747,6 +759,10 @@ pub async fn get_activity_feed(
             detail,
             icon: format!("fa-solid {}", icon),
             success: log.success,
+            classification_prompt: None,
+            classification_result: None,
+            urgency: None,
+            category: None,
         });
     }
 
@@ -788,6 +804,10 @@ pub async fn get_activity_feed(
             detail: Some(preview),
             icon: icon.to_string(),
             success: None,
+            classification_prompt: msg.classification_prompt.clone(),
+            classification_result: msg.classification_result.clone(),
+            urgency: msg.urgency.clone(),
+            category: msg.category.clone(),
         });
     }
 

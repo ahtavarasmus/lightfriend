@@ -516,6 +516,43 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let dismissed_ids = use_state(get_dismissed_ids);
     let chat_prefill = use_state(|| None::<String>);
     let activity_refresh_seq = use_state(|| 0u32);
+    let critical_notis_enabled = use_state(|| {
+        props
+            .user_profile
+            .system_important_notify
+            .unwrap_or(false)
+    });
+
+    // Critical notifications toggle handler
+    let on_critical_toggle = {
+        let enabled = critical_notis_enabled.clone();
+        let profile = props.user_profile.clone();
+        let on_update = props.on_profile_update.clone();
+        Callback::from(move |_: web_sys::MouseEvent| {
+            let new_val = !*enabled;
+            enabled.set(new_val);
+            let profile = profile.clone();
+            let on_update = on_update.clone();
+            spawn_local(async move {
+                let request = serde_json::json!({
+                    "field": "system_important_notify",
+                    "value": new_val
+                });
+                if let Ok(r) = Api::patch("/api/profile/field")
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    if r.ok() {
+                        let mut p = profile.clone();
+                        p.system_important_notify = Some(new_val);
+                        on_update.emit(p);
+                    }
+                }
+            });
+        })
+    };
 
     // Handle URL parameters for settings panel
     {
@@ -1104,6 +1141,25 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
 
                 // ======== RIGHT PANEL ========
                 <div class="panel-right">
+                    // ---- Critical notifications status ----
+                    <div style="display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; background: rgba(255,255,255,0.03); border-radius: 8px; cursor: pointer;"
+                        onclick={on_critical_toggle.clone()}
+                        title={if *critical_notis_enabled { "Click to pause critical notifications" } else { "Click to enable critical notifications" }}
+                    >
+                        <span style={format!("width: 10px; height: 10px; border-radius: 50%; background: {}; flex-shrink: 0;",
+                            if *critical_notis_enabled { "#4ade80" } else { "#f59e0b" }
+                        )}></span>
+                        <span style="font-size: 0.85rem; color: #ccc; flex: 1;">
+                            {"Critical Notifications"}
+                        </span>
+                        <span style={format!("font-size: 0.7rem; padding: 2px 8px; border-radius: 4px; background: {}; color: {};",
+                            if *critical_notis_enabled { "rgba(74, 222, 128, 0.12)" } else { "rgba(245, 158, 11, 0.12)" },
+                            if *critical_notis_enabled { "#4ade80" } else { "#f59e0b" }
+                        )}>
+                            {if *critical_notis_enabled { "Active" } else { "Paused" }}
+                        </span>
+                    </div>
+
                     // ---- Rules (top) ----
                     <div class="panel-right-rules">
                         <div class="rules-scroll-section">

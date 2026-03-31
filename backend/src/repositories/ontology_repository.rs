@@ -1400,6 +1400,8 @@ impl OntologyRepository {
         urgency: &str,
         category: &str,
         summary: Option<&str>,
+        prompt: Option<&str>,
+        result: Option<&str>,
     ) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(ont_messages::table.filter(ont_messages::id.eq(message_id)))
@@ -1407,6 +1409,8 @@ impl OntologyRepository {
                 ont_messages::urgency.eq(urgency),
                 ont_messages::category.eq(category),
                 ont_messages::summary.eq(summary),
+                ont_messages::classification_prompt.eq(prompt),
+                ont_messages::classification_result.eq(result),
             ))
             .execute(&mut conn)?;
         Ok(())

@@ -2639,7 +2639,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             // Auto Track Items (system-level) field
             <div class="profile-field">
                 <div class="field-label-group">
-                    <span class="field-label">{"Auto-track Commitments"}</span>
+                    <span class="field-label">{"Auto-track Commitments"}<span style="margin-left: 6px; font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; background: rgba(126, 178, 255, 0.15); color: #7EB2FF; vertical-align: middle;">{"beta"}</span></span>
                     <div class="tooltip">
                         <span class="tooltip-icon">{"?"}</span>
                         <span class="tooltip-text">

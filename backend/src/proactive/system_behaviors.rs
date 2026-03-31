@@ -489,7 +489,7 @@ pub async fn run_system_behaviors(
                     user_id, urgency, category, should_notify
                 );
 
-                // Store classification on the message
+                // Store classification + full prompt/result on the message
                 if let Some(mid) = message_id {
                     if let Err(e) = state.ontology_repository.update_message_classification(
                         mid,
@@ -500,6 +500,8 @@ pub async fn run_system_behaviors(
                         } else {
                             Some(summary)
                         },
+                        Some(&signal_report),
+                        Some(args),
                     ) {
                         tracing::warn!("Failed to store classification for message {}: {}", mid, e);
                     }

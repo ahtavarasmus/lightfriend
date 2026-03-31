@@ -172,6 +172,14 @@ struct ActivityFeedEntry {
     detail: Option<String>,
     icon: String,
     success: Option<bool>,
+    #[serde(default)]
+    classification_prompt: Option<String>,
+    #[serde(default)]
+    classification_result: Option<String>,
+    #[serde(default)]
+    urgency: Option<String>,
+    #[serde(default)]
+    category: Option<String>,
 }
 
 #[derive(Properties, PartialEq)]
@@ -435,6 +443,29 @@ fn render_entry(
                             <div class="feed-expanded-row">
                                 <span class="feed-expanded-label">{"Detail"}</span>
                                 <span class="feed-expanded-value">{"Delivery failed - check notification settings"}</span>
+                            </div>
+                        }
+                        // Classification details (urgency, category, prompt, result)
+                        if entry.urgency.is_some() || entry.category.is_some() {
+                            <div class="feed-expanded-row">
+                                <span class="feed-expanded-label">{"Classification"}</span>
+                                <span class="feed-expanded-value">{
+                                    format!("{} / {}",
+                                        entry.urgency.as_deref().unwrap_or("-"),
+                                        entry.category.as_deref().unwrap_or("-"))
+                                }</span>
+                            </div>
+                        }
+                        if let Some(ref prompt) = entry.classification_prompt {
+                            <div class="feed-expanded-row" style="flex-direction: column; gap: 0.25rem;">
+                                <span class="feed-expanded-label">{"Signal Report"}</span>
+                                <pre style="font-size: 0.7rem; color: #888; white-space: pre-wrap; word-break: break-word; margin: 0; max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 0.4rem; border-radius: 4px;">{prompt}</pre>
+                            </div>
+                        }
+                        if let Some(ref result) = entry.classification_result {
+                            <div class="feed-expanded-row" style="flex-direction: column; gap: 0.25rem;">
+                                <span class="feed-expanded-label">{"LLM Result"}</span>
+                                <pre style="font-size: 0.7rem; color: #888; white-space: pre-wrap; word-break: break-word; margin: 0; max-height: 150px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 0.4rem; border-radius: 4px;">{result}</pre>
                             </div>
                         }
                     </div>

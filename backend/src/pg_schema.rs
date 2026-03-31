@@ -432,6 +432,8 @@ diesel::table! {
         category -> Nullable<Text>,
         summary -> Nullable<Text>,
         digest_delivered_at -> Nullable<Int4>,
+        classification_prompt -> Nullable<Text>,
+        classification_result -> Nullable<Text>,
     }
 }
 
