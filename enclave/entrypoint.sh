@@ -604,14 +604,34 @@ REOF
 
         TUWUNEL_BACKUP_DIR="/var/lib/tuwunel-backup"
         echo "  [DEBUG] After extract - backup dir exists: $([ -d $TUWUNEL_BACKUP_DIR ] && echo yes || echo NO)"
+        echo "  [DEBUG] After extract - /var/lib/tuwunel has files: $(find /var/lib/tuwunel -type f 2>/dev/null | wc -l)"
+
+        # Handle backward compatibility: old backups tar'd var/lib/tuwunel directly
+        # (the broken checkpoint format). New backups tar var/lib/tuwunel-backup
+        # (BackupEngine format). Detect which we have.
+        if [ ! -d "$TUWUNEL_BACKUP_DIR" ] && [ "$(find /var/lib/tuwunel -type f 2>/dev/null | wc -l)" -gt 0 ]; then
+            echo "  [DEBUG] Old-format backup detected (var/lib/tuwunel, no BackupEngine dir)"
+            echo "  [DEBUG] /var/lib/tuwunel contents after extract:"
+            ls -la /var/lib/tuwunel/ 2>/dev/null | head -15
+            echo "  [DEBUG] SST files: $(find /var/lib/tuwunel -name '*.sst' 2>/dev/null | wc -l)"
+            echo "  [DEBUG] CURRENT: $(cat /var/lib/tuwunel/CURRENT 2>/dev/null || echo 'NOT FOUND')"
+            echo "  Skipping BackupEngine reconstruction (old format) - tuwunel will use restored dir directly"
+            TOTAL_FILES=$(find /var/lib/tuwunel -type f 2>/dev/null | wc -l)
+            TOTAL_SIZE=$(du -sh /var/lib/tuwunel 2>/dev/null | awk '{print $1}' || echo '0')
+            echo "  === TUWUNEL RESTORE END (old format: $TOTAL_FILES files, $TOTAL_SIZE) ==="
+            RESTORED_COMPONENTS="${RESTORED_COMPONENTS}\"tuwunel\", "
+        elif [ ! -d "$TUWUNEL_BACKUP_DIR" ]; then
+            echo "  [DEBUG] Neither BackupEngine dir nor old-format data found!"
+            echo "  [DEBUG] /var/lib/tuwunel-backup: $(ls -la /var/lib/tuwunel-backup 2>&1)"
+            echo "  [DEBUG] /var/lib/tuwunel: $(ls -la /var/lib/tuwunel 2>&1)"
+            restore_abort "Tuwunel backup dir not found after extract (neither old nor new format)" "restore-tuwunel"
+        else
+        # New BackupEngine format - reconstruct RocksDB
+        echo "  [DEBUG] BackupEngine format detected"
         echo "  [DEBUG] After extract - file count: $(find $TUWUNEL_BACKUP_DIR -type f 2>/dev/null | wc -l)"
         echo "  [DEBUG] After extract - total size: $(du -sh $TUWUNEL_BACKUP_DIR 2>/dev/null | awk '{print $1}' || echo '0')"
         echo "  [DEBUG] After extract - full listing:"
         find "$TUWUNEL_BACKUP_DIR" -type f 2>/dev/null | head -40
-
-        if [ ! -d "$TUWUNEL_BACKUP_DIR" ]; then
-            restore_abort "Tuwunel backup dir not found after extract" "restore-tuwunel"
-        fi
 
         # Check BackupEngine structure
         echo "  [DEBUG] shared_checksum/ exists: $([ -d $TUWUNEL_BACKUP_DIR/shared_checksum ] && echo yes || echo NO)"
@@ -712,6 +732,7 @@ REOF
 
         echo "  === TUWUNEL RESTORE END (OK: $TOTAL_FILES files, $TOTAL_SIZE) ==="
         RESTORED_COMPONENTS="${RESTORED_COMPONENTS}\"tuwunel\", "
+        fi  # end of BackupEngine else block
     else
         restore_abort "Missing tuwunel/tuwunel_data.tar" "restore-tuwunel"
     fi
