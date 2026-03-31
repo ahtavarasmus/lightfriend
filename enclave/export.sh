@@ -117,11 +117,15 @@ echo "  [DEBUG] tuwunel config admin_signal_execute check:"
 grep -i "admin_signal_execute" /etc/tuwunel/tuwunel.toml 2>/dev/null || echo "    NOT FOUND IN CONFIG!"
 
 echo "  [DEBUG] Finding tuwunel process..."
-TUWUNEL_PID=$(pgrep -f '/usr/local/bin/tuwunel' 2>/dev/null | head -1)
+# pgrep may not exist in the enclave, use supervisorctl to get PID
+TUWUNEL_PID=$(supervisorctl status tuwunel 2>/dev/null | grep -oP 'pid \K[0-9]+' || true)
 if [ -z "$TUWUNEL_PID" ]; then
-    echo "  [DEBUG] pgrep output: $(pgrep -a tuwunel 2>/dev/null || echo 'nothing')"
-    echo "  [DEBUG] ps aux tuwunel: $(ps aux 2>/dev/null | grep tuwunel | grep -v grep || echo 'nothing')"
+    # Fallback: parse ps output
+    TUWUNEL_PID=$(ps aux 2>/dev/null | grep '[t]uwunel' | awk '{print $2}' | head -1 || true)
+fi
+if [ -z "$TUWUNEL_PID" ]; then
     echo "  [DEBUG] supervisorctl: $(supervisorctl status tuwunel 2>&1)"
+    echo "  [DEBUG] ps tuwunel: $(ps aux 2>/dev/null | grep tuwunel || echo 'nothing')"
     abort "Tuwunel process not found - cannot trigger backup" "dump-tuwunel"
 fi
 echo "  [DEBUG] Tuwunel PID: $TUWUNEL_PID"

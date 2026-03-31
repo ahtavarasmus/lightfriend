@@ -248,7 +248,6 @@ CHECKS_JSON="${CHECKS_JSON}}"
 
 # Determine restore type
 if [ -f /tmp/backup-manifest.json ]; then
-    MANIFEST_FORMAT=$(grep -o '"format": "[^"]*"' /tmp/backup-manifest.json | grep -o '"[^"]*"$' | tr -d '"')
     RESTORE_TYPE="full_restore"
 else
     RESTORE_TYPE="fresh_start"
