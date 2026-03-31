@@ -589,150 +589,28 @@ REOF
     # Tuwunel (RocksDB via BackupEngine format)
     echo "  === TUWUNEL RESTORE START ==="
     if [ -f tuwunel/tuwunel_data.tar ]; then
-        echo "  [DEBUG] tuwunel tar found: tuwunel/tuwunel_data.tar"
         echo "  [DEBUG] tuwunel tar size: $(stat -c%s tuwunel/tuwunel_data.tar 2>/dev/null || echo unknown) bytes"
-        echo "  [DEBUG] tuwunel tar total entries: $(tar tf tuwunel/tuwunel_data.tar 2>/dev/null | wc -l)"
-        echo "  [DEBUG] tuwunel tar contents (first 30):"
-        tar tf tuwunel/tuwunel_data.tar 2>/dev/null | head -30
 
         # Extract the BackupEngine backup dir
-        echo "  [DEBUG] Removing old /var/lib/tuwunel-backup..."
         rm -rf /var/lib/tuwunel-backup
-        echo "  [DEBUG] Extracting tar to /..."
         tar xf tuwunel/tuwunel_data.tar -C / \
             || restore_abort "Failed to extract tuwunel backup tar" "restore-tuwunel"
 
         TUWUNEL_BACKUP_DIR="/var/lib/tuwunel-backup"
-        echo "  [DEBUG] After extract - backup dir exists: $([ -d $TUWUNEL_BACKUP_DIR ] && echo yes || echo NO)"
-        echo "  [DEBUG] After extract - /var/lib/tuwunel has files: $(find /var/lib/tuwunel -type f 2>/dev/null | wc -l)"
+        if [ ! -d "$TUWUNEL_BACKUP_DIR" ]; then
+            restore_abort "Backup dir not found after extract: $TUWUNEL_BACKUP_DIR" "restore-tuwunel"
+        fi
 
-        # Handle backward compatibility: old backups tar'd var/lib/tuwunel directly
-        # (the broken checkpoint format). New backups tar var/lib/tuwunel-backup
-        # (BackupEngine format). Detect which we have.
-        if [ ! -d "$TUWUNEL_BACKUP_DIR" ] && [ "$(find /var/lib/tuwunel -type f 2>/dev/null | wc -l)" -gt 0 ]; then
-            echo "  [DEBUG] Old-format backup detected (var/lib/tuwunel, no BackupEngine dir)"
-            echo "  [DEBUG] /var/lib/tuwunel contents after extract:"
-            ls -la /var/lib/tuwunel/ 2>/dev/null | head -15
-            echo "  [DEBUG] SST files: $(find /var/lib/tuwunel -name '*.sst' 2>/dev/null | wc -l)"
-            echo "  [DEBUG] CURRENT: $(cat /var/lib/tuwunel/CURRENT 2>/dev/null || echo 'NOT FOUND')"
-            echo "  Skipping BackupEngine reconstruction (old format) - tuwunel will use restored dir directly"
-            TOTAL_FILES=$(find /var/lib/tuwunel -type f 2>/dev/null | wc -l)
-            TOTAL_SIZE=$(du -sh /var/lib/tuwunel 2>/dev/null | awk '{print $1}' || echo '0')
-            echo "  === TUWUNEL RESTORE END (old format: $TOTAL_FILES files, $TOTAL_SIZE) ==="
-            RESTORED_COMPONENTS="${RESTORED_COMPONENTS}\"tuwunel\", "
-        elif [ ! -d "$TUWUNEL_BACKUP_DIR" ]; then
-            echo "  [DEBUG] Neither BackupEngine dir nor old-format data found!"
-            echo "  [DEBUG] /var/lib/tuwunel-backup: $(ls -la /var/lib/tuwunel-backup 2>&1)"
-            echo "  [DEBUG] /var/lib/tuwunel: $(ls -la /var/lib/tuwunel 2>&1)"
-            restore_abort "Tuwunel backup dir not found after extract (neither old nor new format)" "restore-tuwunel"
-        else
-        # New BackupEngine format - reconstruct RocksDB
-        echo "  [DEBUG] BackupEngine format detected"
-        echo "  [DEBUG] After extract - file count: $(find $TUWUNEL_BACKUP_DIR -type f 2>/dev/null | wc -l)"
-        echo "  [DEBUG] After extract - total size: $(du -sh $TUWUNEL_BACKUP_DIR 2>/dev/null | awk '{print $1}' || echo '0')"
-        echo "  [DEBUG] After extract - full listing:"
-        find "$TUWUNEL_BACKUP_DIR" -type f 2>/dev/null | head -40
-
-        # Check BackupEngine structure
-        echo "  [DEBUG] shared_checksum/ exists: $([ -d $TUWUNEL_BACKUP_DIR/shared_checksum ] && echo yes || echo NO)"
-        echo "  [DEBUG] private/ exists: $([ -d $TUWUNEL_BACKUP_DIR/private ] && echo yes || echo NO)"
-        echo "  [DEBUG] meta/ exists: $([ -d $TUWUNEL_BACKUP_DIR/meta ] && echo yes || echo NO)"
-        echo "  [DEBUG] shared_checksum/ SST count: $(find $TUWUNEL_BACKUP_DIR/shared_checksum -name '*.sst' 2>/dev/null | wc -l)"
-        echo "  [DEBUG] shared_checksum/ SST total size: $(du -sh $TUWUNEL_BACKUP_DIR/shared_checksum 2>/dev/null | awk '{print $1}' || echo '0')"
-        echo "  [DEBUG] private/ subdirs: $(ls $TUWUNEL_BACKUP_DIR/private/ 2>/dev/null || echo 'none')"
-
-        # Reconstruct RocksDB from BackupEngine format:
-        # 1. Copy SST files from shared_checksum/ (rename: strip size/checksum suffix)
-        # 2. Copy non-SST files from the latest numbered backup dir
+        # Restore using RocksDB BackupEngine API
         RESTORE_DIR="/var/lib/tuwunel"
-        echo "  [DEBUG] Clearing restore target: $RESTORE_DIR"
         rm -rf "${RESTORE_DIR:?}"/*
-        echo "  [DEBUG] Restore target after clear: $(find $RESTORE_DIR -type f 2>/dev/null | wc -l) files"
+        tuwunel_restore "$TUWUNEL_BACKUP_DIR" "$RESTORE_DIR" \
+            || restore_abort "tuwunel_restore failed" "restore-tuwunel"
 
-        # Find the latest backup number
-        LATEST_BACKUP=""
-        for d in "$TUWUNEL_BACKUP_DIR"/private/*/; do
-            bnum=$(basename "$d")
-            echo "  [DEBUG] Found backup dir: private/$bnum/"
-            if [ -z "$LATEST_BACKUP" ] || [ "$bnum" -gt "$LATEST_BACKUP" ] 2>/dev/null; then
-                LATEST_BACKUP="$bnum"
-            fi
-        done
-
-        if [ -z "$LATEST_BACKUP" ]; then
-            echo "  [DEBUG] private/ dir listing: $(ls -la $TUWUNEL_BACKUP_DIR/private/ 2>/dev/null)"
-            restore_abort "No backup found in $TUWUNEL_BACKUP_DIR/private/" "restore-tuwunel"
-        fi
-        echo "  [DEBUG] Using latest backup: #$LATEST_BACKUP"
-
-        # Step 1: Copy and rename SST files from shared_checksum/
-        echo "  [DEBUG] === Step 1: Copy SST files from shared_checksum/ ==="
-        SST_COUNT=0
-        SST_BYTES=0
-        if [ -d "$TUWUNEL_BACKUP_DIR/shared_checksum" ]; then
-            for sst_file in "$TUWUNEL_BACKUP_DIR"/shared_checksum/*.sst; do
-                [ -f "$sst_file" ] || continue
-                # Filename format: 000007_1498774076_590.sst -> 000007.sst
-                base=$(basename "$sst_file")
-                new_name="${base%%_*}.sst"
-                sst_size=$(stat -c%s "$sst_file" 2>/dev/null || echo 0)
-                cp "$sst_file" "$RESTORE_DIR/$new_name" \
-                    || restore_abort "Failed to copy SST file $base -> $new_name" "restore-tuwunel"
-                SST_COUNT=$((SST_COUNT + 1))
-                SST_BYTES=$((SST_BYTES + sst_size))
-                # Log first 5 and every 100th
-                if [ $SST_COUNT -le 5 ] || [ $((SST_COUNT % 100)) -eq 0 ]; then
-                    echo "  [DEBUG] SST #$SST_COUNT: $base -> $new_name ($sst_size bytes)"
-                fi
-            done
-        else
-            echo "  [DEBUG] WARNING: shared_checksum/ directory not found!"
-        fi
-        echo "  [DEBUG] SST copy done: $SST_COUNT files, $SST_BYTES bytes total"
-
-        # Step 2: Copy non-SST files from private/<latest>/
-        echo "  [DEBUG] === Step 2: Copy files from private/$LATEST_BACKUP/ ==="
-        PRIVATE_DIR="$TUWUNEL_BACKUP_DIR/private/$LATEST_BACKUP"
-        if [ -d "$PRIVATE_DIR" ]; then
-            echo "  [DEBUG] private/$LATEST_BACKUP/ contents:"
-            ls -la "$PRIVATE_DIR/" 2>/dev/null
-            PRIVATE_COUNT=0
-            for f in "$PRIVATE_DIR"/*; do
-                [ -f "$f" ] || continue
-                fname=$(basename "$f")
-                fsize=$(stat -c%s "$f" 2>/dev/null || echo 0)
-                echo "  [DEBUG] Copying private/$LATEST_BACKUP/$fname ($fsize bytes)"
-                cp "$f" "$RESTORE_DIR/$fname" \
-                    || restore_abort "Failed to copy private file $fname" "restore-tuwunel"
-                PRIVATE_COUNT=$((PRIVATE_COUNT + 1))
-            done
-            echo "  [DEBUG] Private copy done: $PRIVATE_COUNT files"
-        else
-            echo "  [DEBUG] Private dir listing: $(ls -la $TUWUNEL_BACKUP_DIR/private/ 2>/dev/null)"
-            restore_abort "Backup private dir not found: $PRIVATE_DIR" "restore-tuwunel"
-        fi
-
-        # Final verification
-        echo "  [DEBUG] === RESTORE VERIFICATION ==="
         TOTAL_FILES=$(find "$RESTORE_DIR" -type f 2>/dev/null | wc -l)
         TOTAL_SIZE=$(du -sh "$RESTORE_DIR" 2>/dev/null | awk '{print $1}' || echo '0')
-        TOTAL_SST=$(find "$RESTORE_DIR" -name '*.sst' 2>/dev/null | wc -l)
-        echo "  [DEBUG] Restored RocksDB: $TOTAL_FILES total files, $TOTAL_SST SST files, $TOTAL_SIZE"
-        echo "  [DEBUG] CURRENT: $(cat $RESTORE_DIR/CURRENT 2>/dev/null || echo 'NOT FOUND')"
-        echo "  [DEBUG] IDENTITY: $(cat $RESTORE_DIR/IDENTITY 2>/dev/null || echo 'NOT FOUND')"
-        echo "  [DEBUG] MANIFEST files: $(find $RESTORE_DIR -name 'MANIFEST-*' 2>/dev/null)"
-        echo "  [DEBUG] OPTIONS files: $(find $RESTORE_DIR -name 'OPTIONS-*' 2>/dev/null)"
-        echo "  [DEBUG] Restored dir listing (first 20):"
-        ls -la "$RESTORE_DIR/" 2>/dev/null | head -20
-        echo "  [DEBUG] Restored dir permissions: $(stat -c '%U:%G %a' $RESTORE_DIR 2>/dev/null || echo 'stat failed')"
-
-        if [ "$TOTAL_FILES" -lt 3 ]; then
-            restore_abort "Restored tuwunel DB too small ($TOTAL_FILES files)" "restore-tuwunel"
-        fi
-
         echo "  === TUWUNEL RESTORE END (OK: $TOTAL_FILES files, $TOTAL_SIZE) ==="
         RESTORED_COMPONENTS="${RESTORED_COMPONENTS}\"tuwunel\", "
-        fi  # end of BackupEngine else block
     else
         restore_abort "Missing tuwunel/tuwunel_data.tar" "restore-tuwunel"
     fi
