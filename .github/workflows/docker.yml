@@ -721,24 +721,55 @@ jobs:
               if [ "$STATUS" != "HEALTHY" ]; then
                 echo "FATAL: Enclave not healthy: $STATUS"
                 echo "Details: $(echo "$VERIFY" | jq -r '.details // .failed_checks // "none"')"
+                # Dump host logs for diagnosis
+                echo "=== Host debug logs ==="
+                aws ssm send-command --instance-ids "$NEW_INSTANCE" \
+                  --document-name "AWS-RunShellScript" \
+                  --parameters '{"commands":["tail -100 /tmp/launch.log 2>/dev/null; echo === RESTORE ===; tail -100 /tmp/restore-enclave-debug.log 2>/dev/null"]}' \
+                  --timeout-seconds 30 --query 'Command.CommandId' --output text 2>/dev/null || true
+                sleep 10
                 exit 1
               fi
               if [ -n "$OLD_INSTANCE" ]; then
                 echo "Data migration verified: $USER_COUNT users"
               fi
-              # Verify cloudflared is confirmed running (included in HEALTHY check)
-              CF_CHECK=$(echo "$VERIFY" | jq -r '.checks.cloudflared // "missing"')
-              if [ "$CF_CHECK" != "true" ]; then
-                echo "FATAL: Cloudflared not confirmed running in verify result"
-                exit 1
-              fi
               echo "healthy=true" >> $GITHUB_OUTPUT
               exit 0
             fi
-            echo "Waiting ($i/120)..."
+
+            # Every 30s, check host progress via SSM for visibility
+            if [ $((i % 3)) -eq 0 ]; then
+              PROGRESS=$(aws ssm send-command --instance-ids "$NEW_INSTANCE" \
+                --document-name "AWS-RunShellScript" \
+                --parameters '{"commands":["echo PHASE=$(cat /tmp/deploy-phase 2>/dev/null || echo unknown); echo ENCLAVE=$(nitro-cli describe-enclaves 2>/dev/null | jq -r \".[0].State // \\\"none\\\"\")"]}' \
+                --timeout-seconds 10 --query 'Command.CommandId' --output text 2>/dev/null || echo "")
+              if [ -n "$PROGRESS" ]; then
+                sleep 8
+                PROG_OUT=$(aws ssm get-command-invocation --command-id "$PROGRESS" \
+                  --instance-id "$NEW_INSTANCE" --query 'StandardOutputContent' --output text 2>/dev/null || echo "ssm-pending")
+                echo "Waiting ($i/120) - host: $PROG_OUT"
+              else
+                echo "Waiting ($i/120)..."
+              fi
+            else
+              echo "Waiting ($i/120)..."
+            fi
             sleep 10
           done
-          echo "FATAL: Health check timed out after 20 minutes"; exit 1
+
+          # Timeout - dump host logs for diagnosis
+          echo "FATAL: Health check timed out after 20 minutes"
+          echo "=== Dumping host logs ==="
+          CMD_ID=$(aws ssm send-command --instance-ids "$NEW_INSTANCE" \
+            --document-name "AWS-RunShellScript" \
+            --parameters '{"commands":["echo === USER_DATA ===; tail -50 /var/log/cloud-init-output.log 2>/dev/null; echo === LAUNCH ===; tail -50 /tmp/launch.log 2>/dev/null; echo === RESTORE ===; tail -50 /tmp/restore-enclave-debug.log 2>/dev/null; echo === ENCLAVE ===; nitro-cli describe-enclaves 2>/dev/null; echo === SEED DIR ===; ls -la /opt/lightfriend/seed/ 2>/dev/null"]}' \
+            --timeout-seconds 30 --query 'Command.CommandId' --output text 2>/dev/null || echo "")
+          if [ -n "$CMD_ID" ]; then
+            sleep 15
+            aws ssm get-command-invocation --command-id "$CMD_ID" \
+              --instance-id "$NEW_INSTANCE" --query 'StandardOutputContent' --output text 2>/dev/null || echo "(SSM failed)"
+          fi
+          exit 1
 
       # ── Step 8: Switch traffic to new instance ──
       # New enclave is healthy and serving via its own cloudflared.
