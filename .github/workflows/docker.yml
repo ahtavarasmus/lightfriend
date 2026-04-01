@@ -601,28 +601,35 @@ jobs:
               echo '{"github_run_id":"${{ github.run_id }}","old_instance":"'$OLD_INSTANCE'","state":"backup_started","started_at":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' | \
                 aws s3 cp - "s3://$S3_BUCKET/deploy/deploy-state.json"
 
-              echo "Restarting s3-signal-poller on old instance..."
-              RESTART_CMD=$(aws ssm send-command --instance-ids "$OLD_INSTANCE" \
+              # Write export trigger directly to host via SSM (skip S3 polling layer)
+              TRIGGER='{"action":"export","deploy_id":"${{ github.run_id }}"}'
+              echo "Writing export trigger to host via SSM..."
+              rm -f /tmp/export-trigger.json
+              echo "$TRIGGER" > /tmp/export-trigger.json
+
+              TRIGGER_CMD=$(aws ssm send-command --instance-ids "$OLD_INSTANCE" \
                 --document-name "AWS-RunShellScript" \
-                --parameters '{"commands":["systemctl restart s3-signal-poller && rm -f /opt/lightfriend/backups/export-complete.json"]}' \
+                --parameters commands=["rm -f /opt/lightfriend/backups/export-complete.json && echo '$TRIGGER' > /opt/lightfriend/seed/export-request.json && echo trigger-written"] \
                 --timeout-seconds 30 \
                 --query 'Command.CommandId' --output text 2>/dev/null || echo "")
-              if [ -z "$RESTART_CMD" ]; then
-                echo "FATAL: Could not restart s3-signal-poller via SSM - export will not work"
+              if [ -z "$TRIGGER_CMD" ]; then
+                echo "FATAL: Could not write export trigger via SSM"
                 exit 1
               fi
-              echo "Poller restart command: $RESTART_CMD"
-              sleep 5
 
-              TRIGGER='{"action":"export","deploy_id":"${{ github.run_id }}"}'
-              echo "Writing export trigger to S3..."
-              echo "$TRIGGER" | aws s3 cp - "s3://$S3_BUCKET/deploy/export-request.json"
-
-              echo "Also writing trigger directly to host via SSM..."
-              aws ssm send-command --instance-ids "$OLD_INSTANCE" \
-                --document-name "AWS-RunShellScript" \
-                --parameters '{"commands":["echo '"'"''"$TRIGGER"''"'"' > /opt/lightfriend/seed/export-request.json"]}' \
-                --timeout-seconds 30 2>/dev/null || echo "WARNING: Direct SSM trigger failed (non-fatal)"
+              # Wait for SSM command to complete
+              for i in $(seq 1 12); do
+                SSM_STATUS=$(aws ssm get-command-invocation --command-id "$TRIGGER_CMD" \
+                  --instance-id "$OLD_INSTANCE" --query 'Status' --output text 2>/dev/null || echo "Pending")
+                if [ "$SSM_STATUS" = "Success" ]; then
+                  echo "Export trigger written to host"
+                  break
+                elif [ "$SSM_STATUS" = "Failed" ] || [ "$SSM_STATUS" = "TimedOut" ]; then
+                  echo "FATAL: SSM trigger command $SSM_STATUS"
+                  exit 1
+                fi
+                sleep 5
+              done
 
               echo "Polling S3 for export completion (timeout: 10 min)..."
               COMPLETE_STATUS=""
