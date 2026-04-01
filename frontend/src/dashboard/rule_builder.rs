@@ -2924,48 +2924,6 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                         </div>
                                     }
                                     if *logic_mode == LogicMode::Llm {
-                                        <div class="rb-template-group">
-                                            {for [
-                                                (PromptTemplate::CheckCondition, "Check condition"),
-                                            ].iter().map(|(tmpl, label)| {
-                                                let is_active = *selected_template == *tmpl;
-                                                let tmpl_clone = tmpl.clone();
-                                                let st = selected_template.clone();
-                                                let as_tmpl = active_sources.clone();
-                                                let wm = when_mode.clone();
-                                                html! {
-                                                    <button
-                                                        class={classes!("rb-template-btn", is_active.then(|| "active"))}
-                                                        onclick={Callback::from(move |_: MouseEvent| {
-                                                            st.set(tmpl_clone.clone());
-                                                            match &tmpl_clone {
-                                                                PromptTemplate::Summarize => match *wm {
-                                                                    WhenMode::Schedule => {
-                                                                        as_tmpl.set(vec![SourceConfig::Email, SourceConfig::Chat { platform: "all".to_string(), limit: 50 }, SourceConfig::Events]);
-                                                                    }
-                                                                    WhenMode::Event => {
-                                                                        as_tmpl.set(vec![SourceConfig::Chat { platform: "all".to_string(), limit: 50 }]);
-                                                                    }
-                                                                },
-                                                                PromptTemplate::FilterImportant => match *wm {
-                                                                    WhenMode::Schedule => {
-                                                                        as_tmpl.set(vec![SourceConfig::Email, SourceConfig::Chat { platform: "all".to_string(), limit: 50 }]);
-                                                                    }
-                                                                    WhenMode::Event => {
-                                                                        as_tmpl.set(vec![]);
-                                                                    }
-                                                                },
-                                                                PromptTemplate::TrackItemsUpdate | PromptTemplate::TrackItemsCreate => {
-                                                                    as_tmpl.set(vec![SourceConfig::Events]);
-                                                                },
-                                                                PromptTemplate::CheckCondition | PromptTemplate::Custom => {}
-                                                            }
-                                                        })}
-                                                    >{label}</button>
-                                                }
-                                            })}
-                                        </div>
-
                                         if *selected_template == PromptTemplate::Summarize || *selected_template == PromptTemplate::FilterImportant || *selected_template == PromptTemplate::TrackItemsUpdate || *selected_template == PromptTemplate::TrackItemsCreate {
                                             <div class="rb-template-desc">
                                                 {get_template_description(&*selected_template, &*when_mode)}
