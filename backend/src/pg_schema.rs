@@ -267,6 +267,7 @@ diesel::table! {
         digest_enabled -> Bool,
         digest_time -> Nullable<Text>,
         auto_track_items_system -> Bool,
+        auto_confirm_tracked_items -> Bool,
     }
 }
 
@@ -432,6 +433,8 @@ diesel::table! {
         category -> Nullable<Text>,
         summary -> Nullable<Text>,
         digest_delivered_at -> Nullable<Int4>,
+        classification_prompt -> Nullable<Text>,
+        classification_result -> Nullable<Text>,
     }
 }
 

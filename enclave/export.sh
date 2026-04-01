@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC2009,SC2010,SC2012,SC2086,SC2164
 set -uxo pipefail
 # NOTE: no set -e! Every critical command has explicit || abort error handling.
 # set -e was killing the script on harmless debug commands (find, du, grep on

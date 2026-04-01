@@ -884,10 +884,9 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
 
         for (i, msg) in pending.iter().enumerate() {
             if i >= 10 {
-                break; // cap at 10 items
+                break;
             }
             let summary = msg.summary.as_deref().unwrap_or(&msg.content);
-            // Truncate summary to 100 chars
             let short: String = summary.chars().take(100).collect();
             lines.push(format!(
                 "{}. {} ({}): {}",
@@ -899,17 +898,53 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
             message_ids.push(msg.id);
         }
 
-        if lines.is_empty() {
+        // Add recently created tracked items
+        let six_hours_ago = now - 6 * 3600;
+        let recent_events = state
+            .ontology_repository
+            .get_recently_created_events(user_id, six_hours_ago)
+            .unwrap_or_default();
+
+        let mut event_lines = Vec::new();
+        for event in recent_events.iter().take(5) {
+            let due_str = if let Some(due) = event.due_at {
+                let days = (due - now) / 86400;
+                if days <= 0 {
+                    " (due today)".to_string()
+                } else if days == 1 {
+                    " (due tomorrow)".to_string()
+                } else {
+                    format!(" (due in {} days)", days)
+                }
+            } else {
+                String::new()
+            };
+            let prefix = if event.status == "proposed" {
+                "Proposed: "
+            } else {
+                ""
+            };
+            event_lines.push(format!("- {}{}{}", prefix, event.description, due_str));
+        }
+
+        if lines.is_empty() && event_lines.is_empty() {
             continue;
         }
 
-        let count = lines.len();
-        let digest_text = format!(
-            "{} thing{} while you were away:\n{}",
-            count,
-            if count == 1 { "" } else { "s" },
-            lines.join("\n")
-        );
+        let mut digest_parts = Vec::new();
+        if !lines.is_empty() {
+            let count = lines.len();
+            digest_parts.push(format!(
+                "{} thing{} while you were away:\n{}",
+                count,
+                if count == 1 { "" } else { "s" },
+                lines.join("\n")
+            ));
+        }
+        if !event_lines.is_empty() {
+            digest_parts.push(format!("Now tracking:\n{}", event_lines.join("\n")));
+        }
+        let digest_text = digest_parts.join("\n\n");
 
         crate::proactive::utils::send_notification(
             state,
@@ -933,8 +968,8 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
         }
 
         debug!(
-            "Delivered digest with {} items to user {} (target_hours={:?}, current_hour={})",
-            count, user_id, target_hours, current_hour
+            "Delivered digest with {} msgs + {} events to user {} (target_hours={:?}, current_hour={})",
+            lines.len(), event_lines.len(), user_id, target_hours, current_hour
         );
     }
 }

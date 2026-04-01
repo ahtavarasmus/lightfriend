@@ -264,6 +264,11 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let digest_enabled = use_state(|| (*user_profile).digest_enabled.unwrap_or(true));
     let digest_time = use_state(|| (*user_profile).digest_time.clone().unwrap_or_default());
     let auto_track_system = use_state(|| (*user_profile).auto_track_items_system.unwrap_or(false));
+    let auto_confirm_items = use_state(|| {
+        (*user_profile)
+            .auto_confirm_tracked_items
+            .unwrap_or(true)
+    });
     // Sending number selector state (for notification-only countries)
     let show_sending_number_selector = use_state(|| false);
     let available_sending_numbers = use_state(|| Vec::<serde_json::Value>::new());
@@ -291,6 +296,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let system_important_notify_save_state = use_state(|| FieldSaveState::Idle);
     let digest_save_state = use_state(|| FieldSaveState::Idle);
     let auto_track_system_save_state = use_state(|| FieldSaveState::Idle);
+    let auto_confirm_save_state = use_state(|| FieldSaveState::Idle);
     let sending_number_save_state = use_state(|| FieldSaveState::Idle);
 
     // Confirmation dialog states for sensitive fields
@@ -325,6 +331,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let digest_enabled = digest_enabled.clone();
         let digest_time = digest_time.clone();
         let auto_track_system = auto_track_system.clone();
+        let auto_confirm_items = auto_confirm_items.clone();
         let user_profile_state = user_profile.clone();
         let agent_language = agent_language.clone();
         let notification_type = notification_type.clone();
@@ -356,6 +363,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 digest_enabled.set(props_profile.digest_enabled.unwrap_or(true));
                 digest_time.set(props_profile.digest_time.clone().unwrap_or_default());
                 auto_track_system.set(props_profile.auto_track_items_system.unwrap_or(false));
+                auto_confirm_items.set(props_profile.auto_confirm_tracked_items.unwrap_or(true));
                 agent_language.set(props_profile.agent_language.clone());
                 notification_type.set(props_profile.notification_type.clone());
                 location.set(props_profile.location.clone().unwrap_or_default());
@@ -1428,6 +1436,53 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     Ok(response) if response.ok() => {
                         let mut profile = (*user_profile).clone();
                         profile.auto_track_items_system = Some(new_val);
+                        on_profile_update.emit(profile);
+                        save_state.set(FieldSaveState::Success);
+                        let s = save_state.clone();
+                        spawn_local(async move {
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
+                            s.set(FieldSaveState::Idle);
+                        });
+                    }
+                    Ok(_) => {
+                        save_state.set(FieldSaveState::Error("Failed to save".to_string()));
+                    }
+                    Err(_) => {
+                        save_state.set(FieldSaveState::Error("Network error".to_string()));
+                    }
+                }
+            });
+        })
+    };
+
+    // Auto-confirm tracked items toggle handler
+    let on_auto_confirm_toggle = {
+        let auto_confirm_items = auto_confirm_items.clone();
+        let save_state = auto_confirm_save_state.clone();
+        let user_profile = user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |e: Event| {
+            let input: HtmlInputElement = e.target_unchecked_into();
+            let new_val = input.checked();
+            auto_confirm_items.set(new_val);
+            let save_state = save_state.clone();
+            let user_profile = user_profile.clone();
+            let on_profile_update = on_profile_update.clone();
+            save_state.set(FieldSaveState::Saving);
+            spawn_local(async move {
+                let request = PatchFieldRequest {
+                    field: "auto_confirm_tracked_items".to_string(),
+                    value: serde_json::Value::Bool(new_val),
+                };
+                match Api::patch("/api/profile/field")
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    Ok(response) if response.ok() => {
+                        let mut profile = (*user_profile).clone();
+                        profile.auto_confirm_tracked_items = Some(new_val);
                         on_profile_update.emit(profile);
                         save_state.set(FieldSaveState::Success);
                         let s = save_state.clone();
@@ -2639,7 +2694,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             // Auto Track Items (system-level) field
             <div class="profile-field">
                 <div class="field-label-group">
-                    <span class="field-label">{"Auto-track Commitments"}</span>
+                    <span class="field-label">{"Auto-track Commitments"}<span style="margin-left: 6px; font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; background: rgba(126, 178, 255, 0.15); color: #7EB2FF; vertical-align: middle;">{"beta"}</span></span>
                     <div class="tooltip">
                         <span class="tooltip-icon">{"?"}</span>
                         <span class="tooltip-text">
@@ -2660,6 +2715,33 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     {render_save_indicator(&*auto_track_system_save_state)}
                 </div>
             </div>
+
+            // Auto-confirm tracked items (only shown when auto-track is enabled)
+            if *auto_track_system {
+                <div class="profile-field" style="padding-left: 1rem;">
+                    <div class="field-label-group">
+                        <span class="field-label">{"Auto-confirm items"}</span>
+                        <div class="tooltip">
+                            <span class="tooltip-icon">{"?"}</span>
+                            <span class="tooltip-text">
+                                {"When on, detected commitments are tracked immediately. When off, they are proposed and need your confirmation from the dashboard."}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="field-input-container">
+                        <label class="custom-checkbox">
+                            <input
+                                type="checkbox"
+                                checked={*auto_confirm_items}
+                                onchange={on_auto_confirm_toggle.clone()}
+                            />
+                            <span class="checkmark"></span>
+                            {if *auto_confirm_items { "Auto-create" } else { "Needs approval" }}
+                        </label>
+                        {render_save_indicator(&*auto_confirm_save_state)}
+                    </div>
+                </div>
+            }
 
             // Feature Updates field
             <div class="profile-field">

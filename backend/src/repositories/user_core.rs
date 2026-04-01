@@ -114,6 +114,11 @@ pub trait UserCoreOps: Send + Sync {
 
     // System-level auto tracking
     fn update_auto_track_items_system(&self, user_id: i32, value: bool) -> Result<(), DieselError>;
+    fn update_auto_confirm_tracked_items(
+        &self,
+        user_id: i32,
+        value: bool,
+    ) -> Result<(), DieselError>;
 
     // Notification settings
     fn get_default_notification_mode(&self, user_id: i32) -> Result<String, DieselError>;
@@ -856,6 +861,19 @@ impl UserCoreOps for UserCore {
         self.ensure_user_settings_exist(user_id)?;
         diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
             .set(user_settings::auto_track_items_system.eq(value))
+            .execute(&mut pg_conn)?;
+        Ok(())
+    }
+
+    fn update_auto_confirm_tracked_items(
+        &self,
+        user_id: i32,
+        value: bool,
+    ) -> Result<(), DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        self.ensure_user_settings_exist(user_id)?;
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set(user_settings::auto_confirm_tracked_items.eq(value))
             .execute(&mut pg_conn)?;
         Ok(())
     }

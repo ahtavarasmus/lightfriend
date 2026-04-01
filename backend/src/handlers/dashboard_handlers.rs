@@ -452,12 +452,20 @@ fn calculate_sun_times_from_coords(
 #[derive(Serialize)]
 pub struct ActivityFeedEntry {
     pub id: String,
-    pub entry_type: String, // "changelog", "notification", "message"
+    pub entry_type: String, // "changelog", "notification", "message", "screened"
     pub timestamp: i32,
     pub title: String,
     pub detail: Option<String>,
     pub icon: String, // FA icon class
     pub success: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub classification_prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub classification_result: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub urgency: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -615,6 +623,10 @@ pub async fn get_activity_feed(
             detail,
             icon: format!("fa-solid {}", icon),
             success: None,
+            classification_prompt: None,
+            classification_result: None,
+            urgency: None,
+            category: None,
         });
     }
 
@@ -747,6 +759,10 @@ pub async fn get_activity_feed(
             detail,
             icon: format!("fa-solid {}", icon),
             success: log.success,
+            classification_prompt: None,
+            classification_result: None,
+            urgency: None,
+            category: None,
         });
     }
 
@@ -788,7 +804,63 @@ pub async fn get_activity_feed(
             detail: Some(preview),
             icon: icon.to_string(),
             success: None,
+            classification_prompt: msg.classification_prompt.clone(),
+            classification_result: msg.classification_result.clone(),
+            urgency: msg.urgency.clone(),
+            category: msg.category.clone(),
         });
+    }
+
+    // Add recently created/proposed tracked events
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i32;
+    let seven_days_ago = now - 7 * 86400;
+    if let Ok(recent_events) = state
+        .ontology_repository
+        .get_recently_created_events(user_id, seven_days_ago)
+    {
+        for event in recent_events.iter().take(20) {
+            let (title, icon) = if event.status == "proposed" {
+                (
+                    format!("Proposed: {}", event.description),
+                    "fa-solid fa-question-circle",
+                )
+            } else {
+                (
+                    format!("Now tracking: {}", event.description),
+                    "fa-solid fa-thumbtack",
+                )
+            };
+            let due_detail = event.due_at.map(|due| {
+                let days = (due - now) / 86400;
+                if days <= 0 {
+                    "Due today".to_string()
+                } else if days == 1 {
+                    "Due tomorrow".to_string()
+                } else {
+                    format!("Due in {} days", days)
+                }
+            });
+            entries.push(ActivityFeedEntry {
+                id: format!("event-{}", event.id),
+                entry_type: if event.status == "proposed" {
+                    "proposed_item".to_string()
+                } else {
+                    "tracked_item".to_string()
+                },
+                timestamp: event.created_at,
+                title,
+                detail: due_detail,
+                icon: icon.to_string(),
+                success: None,
+                classification_prompt: None,
+                classification_result: None,
+                urgency: None,
+                category: None,
+            });
+        }
     }
 
     // Sort by timestamp descending, truncate
@@ -1215,4 +1287,21 @@ pub async fn mark_digest_read(
     }
 
     Ok(Json(serde_json::json!({"marked": ids.len()})))
+}
+
+pub async fn confirm_event(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(event_id): Path<i32>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    state
+        .ontology_repository
+        .confirm_event(auth_user.user_id, event_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
+    Ok(Json(serde_json::json!({"confirmed": event_id})))
 }

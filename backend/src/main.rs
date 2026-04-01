@@ -1139,6 +1139,10 @@ async fn main() {
             post(dashboard_handlers::dismiss_event),
         )
         .route(
+            "/api/events/{id}/confirm",
+            post(dashboard_handlers::confirm_event),
+        )
+        .route(
             "/api/events/{id}",
             get(dashboard_handlers::get_event_detail),
         )
