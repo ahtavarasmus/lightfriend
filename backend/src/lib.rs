@@ -44,6 +44,7 @@ pub mod utils {
     pub mod matrix_auth;
     pub mod notification_utils;
     pub mod plan_features;
+    pub mod resend_contacts;
     pub mod tesla_keys;
     pub mod tool_exec;
     pub mod usage;
@@ -51,6 +52,7 @@ pub mod utils {
 }
 pub mod proactive {
     pub mod rules;
+    pub mod signal_extraction;
     pub mod system_behaviors;
     pub mod utils;
 }
@@ -231,6 +233,8 @@ pub struct AppState {
     pub maintenance_mode: Arc<AtomicBool>,
     // (user_id, room_id) -> unix timestamp of last system_important notification
     pub system_notify_cooldowns: DashMap<(i32, String), i32>,
+    // user_id -> unix timestamp of last digest delivery
+    pub digest_cooldowns: DashMap<i32, i32>,
 }
 
 /// Build the tool registry with all static tool handlers.

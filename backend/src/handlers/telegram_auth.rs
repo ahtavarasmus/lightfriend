@@ -134,25 +134,27 @@ async fn connect_telegram(
     client: &MatrixClient,
     bridge_bot: &str,
 ) -> Result<(OwnedRoomId, String)> {
-    tracing::debug!("🚀 Starting Telegram connection process");
+    tracing::info!("Telegram connect: starting, bot={}", bridge_bot);
 
     let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
 
+    tracing::info!("Telegram connect: creating room...");
     let request = CreateRoomRequest::new();
     let response = client.create_room(request).await?;
     let room_id = response.room_id();
-
-    tracing::debug!("🏠 Created room with ID: {}", room_id);
+    tracing::info!("Telegram connect: room created {}", room_id);
 
     let room = client.get_room(room_id).ok_or(anyhow!("Room not found"))?;
 
-    tracing::debug!("🤖 Inviting bot user: {}", bot_user_id);
+    tracing::info!("Telegram connect: inviting bot...");
     room.invite_user_by_id(&bot_user_id).await?;
+    tracing::info!("Telegram connect: bot invited, syncing...");
 
     // Single sync to get the invitation processed
     client
         .sync_once(MatrixSyncSettings::default().timeout(Duration::from_secs(5)))
         .await?;
+    tracing::info!("Telegram connect: sync done, waiting for bot to join...");
 
     // Reduced wait time and more frequent checks
     let mut attempt = 0;
@@ -171,9 +173,11 @@ async fn connect_telegram(
     // Quick membership check
     let members = room.members(matrix_sdk::RoomMemberships::empty()).await?;
     if !members.iter().any(|m| m.user_id() == bot_user_id) {
-        println!("❌ Bot failed to join room after all attempts");
+        tracing::warn!("Telegram connect: bot failed to join room after 15 attempts");
         return Err(anyhow!("Bot {} failed to join room", bot_user_id));
     }
+    tracing::info!("Telegram connect: bot joined, sending cancel+login commands...");
+
     // Send cancel command to get rid of the previous login
     let cancel_command = "!tg cancel".to_string();
     room.send(RoomMessageEventContent::text_plain(&cancel_command))
@@ -181,21 +185,20 @@ async fn connect_telegram(
 
     // Send login command
     let login_command = "!tg login".to_string();
-    tracing::debug!("📤 Sending Telegram login command: {}", login_command);
     room.send(RoomMessageEventContent::text_plain(&login_command))
         .await?;
+    tracing::info!("Telegram connect: login command sent, polling for URL...");
 
     // Optimized login url detection with event handler
     let mut login_url = None;
-    tracing::debug!("⏳ Starting login url monitoring");
 
     // Use shorter sync timeout for faster response
     let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_millis(1500));
 
     for attempt in 1..=60 {
-        // Increased to 60 attempts for longer user input time
-        println!("📡 Sync attempt #{}/60", attempt);
-        tracing::debug!("📡 Sync attempt #{}", attempt);
+        if attempt <= 3 || attempt % 10 == 0 {
+            tracing::info!("Telegram connect: URL poll attempt {}/60", attempt);
+        }
         client.sync_once(sync_settings.clone()).await?;
 
         if let Some(room) = client.get_room(room_id) {
@@ -294,20 +297,25 @@ pub async fn start_telegram_connection(
         auth_user.user_id
     );
 
-    tracing::debug!("📝 Getting Matrix client...");
+    tracing::info!(
+        "Telegram connect: getting Matrix client for user {}...",
+        auth_user.user_id
+    );
     // Get or create Matrix client using the centralized function
     let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
         .await
         .map_err(|e| {
-            tracing::error!("Failed to get or create Matrix client: {}", e);
+            tracing::error!("Telegram connect: failed to get Matrix client: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 AxumJson(json!({"error": format!("Failed to initialize Matrix client: {}", e)})),
             )
         })?;
-    tracing::debug!(
-        "✅ Matrix client obtained for user: {}",
-        client.user_id().unwrap()
+    tracing::info!(
+        "Telegram connect: Matrix client ready, user={}",
+        client
+            .user_id()
+            .unwrap_or(&OwnedUserId::try_from("@unknown:localhost").unwrap())
     );
 
     // Get bridge bot from environment

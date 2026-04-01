@@ -264,6 +264,10 @@ diesel::table! {
         phone_contact_notify_on_call -> Int4,
         auto_create_items -> Bool,
         system_important_notify -> Bool,
+        digest_enabled -> Bool,
+        digest_time -> Nullable<Text>,
+        auto_track_items_system -> Bool,
+        auto_confirm_tracked_items -> Bool,
     }
 }
 
@@ -425,6 +429,12 @@ diesel::table! {
         content -> Text,
         person_id -> Nullable<Int4>,
         created_at -> Int4,
+        urgency -> Nullable<Text>,
+        category -> Nullable<Text>,
+        summary -> Nullable<Text>,
+        digest_delivered_at -> Nullable<Int4>,
+        classification_prompt -> Nullable<Text>,
+        classification_result -> Nullable<Text>,
     }
 }
 

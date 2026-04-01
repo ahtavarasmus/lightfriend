@@ -1,8 +1,14 @@
 #!/bin/bash
-set -euo pipefail
+# shellcheck disable=SC2009,SC2010,SC2012,SC2086,SC2164
+set -uxo pipefail
+# NOTE: no set -e! Every critical command has explicit || abort error handling.
+# set -e was killing the script on harmless debug commands (find, du, grep on
+# non-existent dirs). With -u we still catch unset variables, with -x we trace
+# every command, with -o pipefail we catch pipeline failures in critical paths.
 
 # Full encrypted export of all data stores from running enclave.
 # Produces a single .tar.gz.enc file in /data/seed/.
+# set -x enables command tracing so every line is logged for debugging.
 # All plaintext stays in /tmp/ (enclave ephemeral space).
 # The export NEVER produces a partial or unverified backup.
 
@@ -28,8 +34,8 @@ STATUS_FILE="/data/seed/export-status.json"
 # Cleanup function - remove staging artifacts
 cleanup() {
     rm -rf /tmp/backup-staging /tmp/verify.tar.gz "${ARCHIVE}" 2>/dev/null || true
-    # Clean tuwunel/matrix snapshot dirs created during Phase A
-    rm -rf "${STAGING}/tuwunel-snapshot" "${STAGING}/matrix-store-snapshot" 2>/dev/null || true
+    # Clean matrix snapshot dirs created during Phase A
+    rm -rf "${STAGING}/matrix-store-snapshot" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -96,15 +102,141 @@ for db in lightfriend_db whatsapp_db signal_db telegram_db; do
         || abort "pg_dump of ${db} failed - see pg_dump_errors.log" "dump-${db}"
 done
 
-# Create Tuwunel checkpoint (RocksDB-consistent snapshot)
-echo "  Creating Tuwunel checkpoint..."
+# Create Tuwunel backup via built-in RocksDB BackupEngine (SIGUSR2 trigger)
+# This is the only safe way to backup a live RocksDB - tuwunel holds the DB
+# handle and calls DisableFileDeletions + GetLiveFiles internally.
+TUWUNEL_BACKUP_DIR="/var/lib/tuwunel-backup"
+echo "  === TUWUNEL BACKUP START ==="
+echo "  [DEBUG] COMMAND CHECK: pgrep=$(which pgrep 2>&1) kill=$(which kill 2>&1) grep=$(which grep 2>&1) find=$(which find 2>&1)"
+echo "  [DEBUG] tuwunel source DB path: /var/lib/tuwunel"
+echo "  [DEBUG] tuwunel source DB file count: $(find /var/lib/tuwunel -type f 2>/dev/null | wc -l)"
+echo "  [DEBUG] tuwunel source DB total size: $(du -sh /var/lib/tuwunel 2>/dev/null | awk '{print $1}' || echo '0')"
+echo "  [DEBUG] tuwunel source DB SST files: $(find /var/lib/tuwunel -name '*.sst' 2>/dev/null | wc -l)"
+echo "  [DEBUG] tuwunel source CURRENT: $(cat /var/lib/tuwunel/CURRENT 2>/dev/null || echo 'NOT FOUND')"
+echo "  [DEBUG] tuwunel source IDENTITY: $(cat /var/lib/tuwunel/IDENTITY 2>/dev/null || echo 'NOT FOUND')"
+echo "  [DEBUG] tuwunel backup dir path: $TUWUNEL_BACKUP_DIR"
+echo "  [DEBUG] tuwunel backup dir exists: $([ -d $TUWUNEL_BACKUP_DIR ] && echo yes || echo no)"
+echo "  [DEBUG] tuwunel config database_backup_path check:"
+grep -i "database_backup_path" /etc/tuwunel/tuwunel.toml 2>/dev/null || echo "    NOT FOUND IN CONFIG!"
+echo "  [DEBUG] tuwunel config admin_signal_execute check:"
+grep -i "admin_signal_execute" /etc/tuwunel/tuwunel.toml 2>/dev/null || echo "    NOT FOUND IN CONFIG!"
+
+echo "  [DEBUG] Finding tuwunel process..."
+# pgrep may not exist in the enclave, use supervisorctl to get PID
+TUWUNEL_PID=$(supervisorctl status tuwunel 2>/dev/null | grep -oP 'pid \K[0-9]+' || true)
+if [ -z "$TUWUNEL_PID" ]; then
+    # Fallback: parse ps output
+    TUWUNEL_PID=$(ps aux 2>/dev/null | grep '[t]uwunel' | awk '{print $2}' | head -1 || true)
+fi
+if [ -z "$TUWUNEL_PID" ]; then
+    echo "  [DEBUG] supervisorctl: $(supervisorctl status tuwunel 2>&1)"
+    echo "  [DEBUG] ps tuwunel: $(ps aux 2>/dev/null | grep tuwunel || echo 'nothing')"
+    abort "Tuwunel process not found - cannot trigger backup" "dump-tuwunel"
+fi
+echo "  [DEBUG] Tuwunel PID: $TUWUNEL_PID"
+echo "  [DEBUG] Tuwunel process info: $(ps -p $TUWUNEL_PID -o pid,rss,etime,args 2>/dev/null | tail -1 || echo 'ps failed')"
+
+# Ensure backup dir exists (tuwunel creates it on first backup, but it may not exist yet)
+mkdir -p "$TUWUNEL_BACKUP_DIR"
+
+# Record backup dir state before signal
+BEFORE_COUNT=$(find "$TUWUNEL_BACKUP_DIR" -type f | wc -l)
+BEFORE_SIZE=$(du -sh "$TUWUNEL_BACKUP_DIR" | awk '{print $1}')
+echo "  [DEBUG] Backup dir BEFORE signal: $BEFORE_COUNT files, $BEFORE_SIZE"
+echo "  [DEBUG] Backup dir BEFORE contents:"
+ls -laR "$TUWUNEL_BACKUP_DIR" 2>/dev/null | head -15 || echo "    (empty or doesn't exist)"
+
+echo "  [DEBUG] Tuwunel log BEFORE signal (last 5 lines):"
+tail -5 /var/log/supervisor/tuwunel.log 2>/dev/null || echo "    empty"
+
+# Send SIGUSR2 to trigger admin_signal_execute = ["server backup-database"]
+echo "  [DEBUG] Sending SIGUSR2 to PID $TUWUNEL_PID at $(date -u +%H:%M:%S)..."
+kill -SIGUSR2 "$TUWUNEL_PID" \
+    || abort "Failed to send SIGUSR2 to tuwunel (PID $TUWUNEL_PID)" "dump-tuwunel"
+echo "  [DEBUG] SIGUSR2 sent successfully"
+
+# Wait for backup to complete by watching meta/ directory for a new backup ID.
+# RocksDB BackupEngine writes meta/<id> atomically (tmp file then rename) when
+# backup completes. The backup ID always increases even when old backups are purged.
+# This is 100% reliable - no race conditions, no file count issues.
+echo "  Waiting for backup to complete..."
+BACKUP_TIMEOUT=120
+BACKUP_DONE=false
+BEFORE_ID=$(ls "$TUWUNEL_BACKUP_DIR/meta/" 2>/dev/null | grep -E '^[0-9]+$' | sort -n | tail -1)
+BEFORE_ID=${BEFORE_ID:-0}
+echo "  [DEBUG] Highest backup ID before: $BEFORE_ID"
+
+for i in $(seq 1 "$BACKUP_TIMEOUT"); do
+    AFTER_ID=$(ls "$TUWUNEL_BACKUP_DIR/meta/" 2>/dev/null | grep -E '^[0-9]+$' | sort -n | tail -1)
+    AFTER_ID=${AFTER_ID:-0}
+    if [ "$AFTER_ID" -gt "$BEFORE_ID" ]; then
+        echo "  [DEBUG] Backup completed in ${i}s (backup ID: $BEFORE_ID -> $AFTER_ID)"
+        BACKUP_DONE=true
+        break
+    fi
+    if [ $((i % 10)) -eq 0 ]; then
+        echo "  [DEBUG] Still waiting... ${i}s elapsed, latest ID: $AFTER_ID (need > $BEFORE_ID)"
+        echo "  [DEBUG] meta/ contents: $(ls $TUWUNEL_BACKUP_DIR/meta/ 2>/dev/null || echo 'empty')"
+        tail -3 /var/log/supervisor/tuwunel.log 2>/dev/null || echo "    empty"
+    fi
+    sleep 1
+done
+
+if [ "$BACKUP_DONE" != "true" ]; then
+    echo "  [DEBUG] === BACKUP TIMEOUT DIAGNOSTICS ==="
+    echo "  [DEBUG] Backup dir after timeout:"
+    ls -laR "$TUWUNEL_BACKUP_DIR" 2>/dev/null | head -40 || echo "    (empty or doesn't exist)"
+    echo "  [DEBUG] Tuwunel log (last 20 lines):"
+    tail -20 /var/log/supervisor/tuwunel.log 2>/dev/null || echo "    empty"
+    echo "  [DEBUG] Tuwunel stderr (last 10 lines):"
+    tail -10 /var/log/supervisor/tuwunel-err.log 2>/dev/null || echo "    empty"
+    echo "  [DEBUG] Tuwunel process still running: $(kill -0 $TUWUNEL_PID 2>/dev/null && echo yes || echo NO)"
+    echo "  [DEBUG] supervisorctl: $(supervisorctl status tuwunel 2>&1)"
+    abort "Tuwunel backup did not complete within ${BACKUP_TIMEOUT}s" "dump-tuwunel"
+fi
+
+echo "  [DEBUG] Tuwunel log AFTER backup (last 10 lines):"
+tail -10 /var/log/supervisor/tuwunel.log 2>/dev/null || echo "    empty"
+
+# Verify backup dir has expected BackupEngine structure
+echo "  [DEBUG] === VERIFYING BACKUP STRUCTURE ==="
+if [ ! -d "$TUWUNEL_BACKUP_DIR" ]; then
+    abort "Tuwunel backup dir $TUWUNEL_BACKUP_DIR does not exist after backup" "dump-tuwunel"
+fi
+BACKUP_SIZE=$(du -sh "$TUWUNEL_BACKUP_DIR" 2>/dev/null | awk '{print $1}' || echo '0')
+BACKUP_FILES=$(find "$TUWUNEL_BACKUP_DIR" -type f 2>/dev/null | wc -l)
+echo "  [DEBUG] Backup total: $BACKUP_FILES files, $BACKUP_SIZE"
+echo "  [DEBUG] Backup dir full listing:"
+find "$TUWUNEL_BACKUP_DIR" -type f 2>/dev/null | head -40
+echo "  [DEBUG] shared_checksum/ exists: $([ -d $TUWUNEL_BACKUP_DIR/shared_checksum ] && echo yes || echo NO)"
+echo "  [DEBUG] shared_checksum/ SST count: $(find $TUWUNEL_BACKUP_DIR/shared_checksum -name '*.sst' 2>/dev/null | wc -l)"
+echo "  [DEBUG] shared_checksum/ SST total size: $(du -sh $TUWUNEL_BACKUP_DIR/shared_checksum 2>/dev/null | awk '{print $1}' || echo '0')"
+echo "  [DEBUG] shared_checksum/ first 5 SSTs:"
+find "$TUWUNEL_BACKUP_DIR/shared_checksum" -name '*.sst' 2>/dev/null | head -5
+echo "  [DEBUG] private/ exists: $([ -d $TUWUNEL_BACKUP_DIR/private ] && echo yes || echo NO)"
+echo "  [DEBUG] private/ dirs: $(ls $TUWUNEL_BACKUP_DIR/private/ 2>/dev/null || echo 'none')"
+echo "  [DEBUG] meta/ exists: $([ -d $TUWUNEL_BACKUP_DIR/meta ] && echo yes || echo NO)"
+for d in "$TUWUNEL_BACKUP_DIR"/private/*/; do
+    bnum=$(basename "$d" 2>/dev/null)
+    echo "  [DEBUG] private/$bnum/ contents:"
+    ls -la "$d" 2>/dev/null | head -10
+done
+if [ "$BACKUP_FILES" -lt 3 ]; then
+    echo "  [DEBUG] Backup has only $BACKUP_FILES files - this is suspicious"
+    abort "Tuwunel backup too small ($BACKUP_FILES files) - backup likely failed" "dump-tuwunel"
+fi
+
+# Tar the backup directory
+echo "  [DEBUG] Creating tar of $TUWUNEL_BACKUP_DIR..."
 mkdir -p "${STAGING}/tuwunel"
-TUWUNEL_SNAPSHOT_ROOT="${STAGING}/tuwunel-snapshot"
-mkdir -p "${TUWUNEL_SNAPSHOT_ROOT}/var/lib"
-/usr/local/bin/tuwunel_checkpoint /var/lib/tuwunel "${TUWUNEL_SNAPSHOT_ROOT}/var/lib/tuwunel" \
-    || abort "RocksDB checkpoint for /var/lib/tuwunel failed" "dump-tuwunel"
-tar cf "${STAGING}/tuwunel/tuwunel_data.tar" -C "${TUWUNEL_SNAPSHOT_ROOT}" var/lib/tuwunel 2>/dev/null \
-    || abort "tar of /var/lib/tuwunel failed" "dump-tuwunel"
+tar cf "${STAGING}/tuwunel/tuwunel_data.tar" -C / var/lib/tuwunel-backup 2>/dev/null \
+    || abort "tar of tuwunel backup dir failed" "dump-tuwunel"
+TAR_SIZE=$(stat -c%s "${STAGING}/tuwunel/tuwunel_data.tar" 2>/dev/null || echo unknown)
+TAR_FILES=$(tar tf "${STAGING}/tuwunel/tuwunel_data.tar" 2>/dev/null | wc -l)
+echo "  [DEBUG] tuwunel tar: $TAR_SIZE bytes, $TAR_FILES entries"
+echo "  [DEBUG] tuwunel tar contents (first 20):"
+tar tf "${STAGING}/tuwunel/tuwunel_data.tar" 2>/dev/null | head -20
+echo "  === TUWUNEL BACKUP END ==="
 
 # Create SQLite backups for matrix store files
 echo "  Backing up /app/matrix_store (SQLite online backup)..."

@@ -436,6 +436,7 @@ async fn main() {
         pending_rule_tests: Arc::new(DashMap::new()),
         maintenance_mode: Arc::new(AtomicBool::new(false)),
         system_notify_cooldowns: DashMap::new(),
+        digest_cooldowns: DashMap::new(),
     });
     // SMS server route - validates signature using user lookup
     let twilio_sms_routes = Router::new()
@@ -711,6 +712,14 @@ async fn main() {
         .route(
             "/api/admin/alerts/enable/{alert_type}",
             post(admin_handlers::enable_alert_type),
+        )
+        .route(
+            "/api/admin/resend-sync",
+            post(admin_handlers::sync_all_users_to_resend),
+        )
+        .route(
+            "/api/admin/recover-users",
+            post(admin_handlers::recover_users_from_external),
         )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
@@ -1134,8 +1143,20 @@ async fn main() {
             post(dashboard_handlers::dismiss_event),
         )
         .route(
+            "/api/events/{id}/confirm",
+            post(dashboard_handlers::confirm_event),
+        )
+        .route(
             "/api/events/{id}",
             get(dashboard_handlers::get_event_detail),
+        )
+        .route(
+            "/api/digest/pending",
+            get(dashboard_handlers::get_pending_digest),
+        )
+        .route(
+            "/api/digest/mark-read",
+            post(dashboard_handlers::mark_digest_read),
         )
         // Person + Channel (ontology) routes
         .route(

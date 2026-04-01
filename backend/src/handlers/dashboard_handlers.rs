@@ -452,12 +452,20 @@ fn calculate_sun_times_from_coords(
 #[derive(Serialize)]
 pub struct ActivityFeedEntry {
     pub id: String,
-    pub entry_type: String, // "changelog", "notification", "message"
+    pub entry_type: String, // "changelog", "notification", "message", "screened"
     pub timestamp: i32,
     pub title: String,
     pub detail: Option<String>,
     pub icon: String, // FA icon class
     pub success: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub classification_prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub classification_result: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub urgency: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -615,6 +623,10 @@ pub async fn get_activity_feed(
             detail,
             icon: format!("fa-solid {}", icon),
             success: None,
+            classification_prompt: None,
+            classification_result: None,
+            urgency: None,
+            category: None,
         });
     }
 
@@ -633,6 +645,11 @@ pub async fn get_activity_feed(
         };
 
         let (title, icon, detail) = match log.activity_type.as_str() {
+            "system_screened" => (
+                "Screened message".to_string(),
+                "fa-shield-halved",
+                log.reason.clone(),
+            ),
             "noti_msg" => (
                 "Sent you an SMS notification".to_string(),
                 "fa-comment-sms",
@@ -728,14 +745,24 @@ pub async fn get_activity_feed(
             ),
         };
 
+        let entry_type = if log.activity_type == "system_screened" {
+            "screened"
+        } else {
+            "notification"
+        };
+
         entries.push(ActivityFeedEntry {
             id: format!("usage-{}", log.id),
-            entry_type: "notification".to_string(),
+            entry_type: entry_type.to_string(),
             timestamp: log.created_at,
             title,
             detail,
             icon: format!("fa-solid {}", icon),
             success: log.success,
+            classification_prompt: None,
+            classification_result: None,
+            urgency: None,
+            category: None,
         });
     }
 
@@ -777,7 +804,63 @@ pub async fn get_activity_feed(
             detail: Some(preview),
             icon: icon.to_string(),
             success: None,
+            classification_prompt: msg.classification_prompt.clone(),
+            classification_result: msg.classification_result.clone(),
+            urgency: msg.urgency.clone(),
+            category: msg.category.clone(),
         });
+    }
+
+    // Add recently created/proposed tracked events
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i32;
+    let seven_days_ago = now - 7 * 86400;
+    if let Ok(recent_events) = state
+        .ontology_repository
+        .get_recently_created_events(user_id, seven_days_ago)
+    {
+        for event in recent_events.iter().take(20) {
+            let (title, icon) = if event.status == "proposed" {
+                (
+                    format!("Proposed: {}", event.description),
+                    "fa-solid fa-question-circle",
+                )
+            } else {
+                (
+                    format!("Now tracking: {}", event.description),
+                    "fa-solid fa-thumbtack",
+                )
+            };
+            let due_detail = event.due_at.map(|due| {
+                let days = (due - now) / 86400;
+                if days <= 0 {
+                    "Due today".to_string()
+                } else if days == 1 {
+                    "Due tomorrow".to_string()
+                } else {
+                    format!("Due in {} days", days)
+                }
+            });
+            entries.push(ActivityFeedEntry {
+                id: format!("event-{}", event.id),
+                entry_type: if event.status == "proposed" {
+                    "proposed_item".to_string()
+                } else {
+                    "tracked_item".to_string()
+                },
+                timestamp: event.created_at,
+                title,
+                detail: due_detail,
+                icon: icon.to_string(),
+                success: None,
+                classification_prompt: None,
+                classification_result: None,
+                urgency: None,
+                category: None,
+            });
+        }
     }
 
     // Sort by timestamp descending, truncate
@@ -1113,4 +1196,112 @@ pub async fn get_event_detail(
         },
         linked_messages,
     }))
+}
+
+// -- Digest endpoints --
+
+#[derive(Serialize)]
+pub struct DigestMessageResponse {
+    pub id: i64,
+    pub sender_name: String,
+    pub platform: String,
+    pub content: String,
+    pub urgency: Option<String>,
+    pub category: Option<String>,
+    pub summary: Option<String>,
+    pub created_at: i32,
+}
+
+pub async fn get_pending_digest(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<Vec<DigestMessageResponse>>, (StatusCode, Json<serde_json::Value>)> {
+    let messages = state
+        .ontology_repository
+        .get_pending_digest_messages(auth_user.user_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
+
+    let items: Vec<DigestMessageResponse> = messages
+        .into_iter()
+        .map(|m| DigestMessageResponse {
+            id: m.id,
+            sender_name: m.sender_name,
+            platform: m.platform,
+            content: m.content,
+            urgency: m.urgency,
+            category: m.category,
+            summary: m.summary,
+            created_at: m.created_at,
+        })
+        .collect();
+
+    Ok(Json(items))
+}
+
+#[derive(Deserialize)]
+pub struct MarkDigestReadRequest {
+    pub message_ids: Option<Vec<i64>>,
+}
+
+pub async fn mark_digest_read(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<MarkDigestReadRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i32;
+
+    let ids = if let Some(ids) = request.message_ids {
+        ids
+    } else {
+        // Mark all pending digest messages as read
+        let pending = state
+            .ontology_repository
+            .get_pending_digest_messages(auth_user.user_id)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+                )
+            })?;
+        pending.into_iter().map(|m| m.id).collect()
+    };
+
+    if !ids.is_empty() {
+        state
+            .ontology_repository
+            .mark_digest_delivered(&ids, now)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+                )
+            })?;
+    }
+
+    Ok(Json(serde_json::json!({"marked": ids.len()})))
+}
+
+pub async fn confirm_event(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(event_id): Path<i32>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    state
+        .ontology_repository
+        .confirm_event(auth_user.user_id, event_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
+    Ok(Json(serde_json::json!({"confirmed": event_id})))
 }

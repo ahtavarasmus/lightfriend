@@ -1102,6 +1102,7 @@ impl OntologyRepository {
         sender_name: &str,
         now: i32,
         tz_offset_secs: i32,
+        person_id: Option<i32>,
     ) -> crate::models::ontology_models::SenderSignals {
         use crate::models::ontology_models::SenderSignals;
 
@@ -1129,6 +1130,8 @@ impl OntologyRepository {
         if message_count_30d == 0 {
             return SenderSignals::empty();
         }
+
+        let user_message_count_30d = user_msgs.len() as i64;
 
         // Last contact: second-most-recent sender message (since newest is the current one)
         // Messages are DESC so index 1 is second-most-recent
@@ -1160,9 +1163,51 @@ impl OntologyRepository {
             None
         };
 
+        // Bidirectional ratio: how much does the user engage vs receive
+        let bidirectional_ratio = if message_count_30d > 0 {
+            user_message_count_30d as f32 / message_count_30d as f32
+        } else {
+            0.0
+        };
+
+        // Recency trend: compare last 7 days to 30-day average
+        let seven_days_ago = now - 7 * 86400;
+        let msgs_7d = sender_msgs
+            .iter()
+            .filter(|m| m.created_at >= seven_days_ago)
+            .count() as f32;
+        let expected_7d = (message_count_30d as f32 / 30.0) * 7.0;
+        let recency_trend = if message_count_30d >= 5 && expected_7d > 0.5 {
+            let ratio = msgs_7d / expected_7d;
+            if ratio >= 2.0 {
+                Some("Contact frequency from this person has increased significantly in the last week.".to_string())
+            } else if ratio <= 0.3 && msgs_7d < 1.0 {
+                Some("This person has been unusually quiet in the last week compared to their normal pattern.".to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Multi-platform count: how many platforms does this person use to reach the user
+        let platform_count = if let Some(pid) = person_id {
+            self.get_person_platform_count(user_id, pid).unwrap_or(1)
+        } else {
+            1
+        };
+
+        // First contact detection
+        let is_first_contact = message_count_30d <= 1 && last_contact_ago_secs.is_none();
+
+        // Check if user has custom notification settings for this person
+        let has_custom_settings = if let Some(pid) = person_id {
+            self.person_has_custom_settings(user_id, pid)
+        } else {
+            false
+        };
+
         // Temporal anomaly: Laplace-smoothed surprisal with confidence gating.
-        // Scales naturally with message volume - low-volume senders don't produce
-        // false anomalies, high-volume senders with zero activity at an hour do.
         let temporal_anomaly = {
             let timestamps: Vec<i32> = sender_msgs.iter().map(|m| m.created_at).collect();
             let hour_buckets = bucket_by_hour(&timestamps, tz_offset_secs);
@@ -1208,7 +1253,49 @@ impl OntologyRepository {
             user_reply_rate,
             avg_response_secs,
             temporal_anomaly,
+            user_message_count_30d,
+            bidirectional_ratio,
+            platform_count,
+            recency_trend,
+            is_first_contact,
+            has_custom_settings,
         }
+    }
+
+    /// Count distinct platforms a person contacts the user on.
+    fn get_person_platform_count(&self, user_id: i32, person_id: i32) -> Result<i32, DieselError> {
+        use crate::pg_schema::ont_channels;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let channels: Vec<OntChannel> = ont_channels::table
+            .filter(ont_channels::user_id.eq(user_id))
+            .filter(ont_channels::person_id.eq(person_id))
+            .load(&mut conn)?;
+        let platforms: std::collections::HashSet<&str> =
+            channels.iter().map(|c| c.platform.as_str()).collect();
+        Ok(platforms.len() as i32)
+    }
+
+    /// Check if user has custom notification settings for a person.
+    fn person_has_custom_settings(&self, user_id: i32, person_id: i32) -> bool {
+        use crate::pg_schema::ont_person_edits;
+        let mut conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        let count: i64 = ont_person_edits::table
+            .filter(ont_person_edits::user_id.eq(user_id))
+            .filter(ont_person_edits::person_id.eq(person_id))
+            .filter(
+                ont_person_edits::property_name
+                    .eq("notification_mode")
+                    .or(ont_person_edits::property_name.eq("notification_type"))
+                    .or(ont_person_edits::property_name.eq("importance"))
+                    .or(ont_person_edits::property_name.eq("nickname")),
+            )
+            .count()
+            .get_result(&mut conn)
+            .unwrap_or(0);
+        count > 0
     }
 
     /// Detect if user is likely sleeping based on their sent-message activity patterns.
@@ -1306,6 +1393,107 @@ impl OntologyRepository {
             .execute(&mut conn)
     }
 
+    /// Update a message's classification (urgency, category, summary) after LLM evaluation.
+    pub fn update_message_classification(
+        &self,
+        message_id: i64,
+        urgency: &str,
+        category: &str,
+        summary: Option<&str>,
+        prompt: Option<&str>,
+        result: Option<&str>,
+    ) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(ont_messages::table.filter(ont_messages::id.eq(message_id)))
+            .set((
+                ont_messages::urgency.eq(urgency),
+                ont_messages::category.eq(category),
+                ont_messages::summary.eq(summary),
+                ont_messages::classification_prompt.eq(prompt),
+                ont_messages::classification_result.eq(result),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    /// Get pending digest items: medium-urgency messages not yet delivered, for a user.
+    pub fn get_pending_digest_messages(
+        &self,
+        user_id: i32,
+    ) -> Result<Vec<OntMessage>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::urgency.eq("medium"))
+            .filter(ont_messages::digest_delivered_at.is_null())
+            .filter(ont_messages::sender_name.ne("You"))
+            .order(ont_messages::created_at.desc())
+            .limit(20)
+            .load::<OntMessage>(&mut conn)
+    }
+
+    /// Mark digest messages as delivered.
+    pub fn mark_digest_delivered(&self, message_ids: &[i64], now: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(ont_messages::table.filter(ont_messages::id.eq_any(message_ids)))
+            .set(ont_messages::digest_delivered_at.eq(now))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    /// Get all user IDs that have pending digest messages.
+    pub fn get_users_with_pending_digests(&self) -> Result<Vec<i32>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_messages::table
+            .filter(ont_messages::urgency.eq("medium"))
+            .filter(ont_messages::digest_delivered_at.is_null())
+            .filter(ont_messages::sender_name.ne("You"))
+            .select(ont_messages::user_id)
+            .distinct()
+            .load::<i32>(&mut conn)
+    }
+
+    /// Compute the user's typical wake-up hour from their activity patterns.
+    /// Returns the local hour (0-23) when the user typically starts being active.
+    pub fn compute_user_wake_hour(&self, user_id: i32, tz_offset_secs: i32) -> Option<usize> {
+        use crate::pg_schema::ont_messages;
+
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let thirty_days_ago = Self::now() - 30 * 86400;
+
+        let user_messages: Vec<OntMessage> = ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::sender_name.eq("You"))
+            .filter(ont_messages::created_at.ge(thirty_days_ago))
+            .select(OntMessage::as_select())
+            .load(&mut conn)
+            .unwrap_or_default();
+
+        if user_messages.len() < 10 {
+            return None; // not enough data
+        }
+
+        let timestamps: Vec<i32> = user_messages.iter().map(|m| m.created_at).collect();
+        let hour_buckets = bucket_by_hour(&timestamps, tz_offset_secs);
+
+        // Find the first hour of activity: scan from hour 4 (earliest reasonable wake)
+        // through the day, find the first hour with meaningful activity
+        let total: u32 = hour_buckets.iter().sum();
+        if total == 0 {
+            return None;
+        }
+        let threshold = total as f64 * 0.02; // at least 2% of messages in this hour
+
+        if let Some(h) = (4..24).find(|&h| hour_buckets[h] as f64 >= threshold) {
+            return Some(h);
+        }
+        // Wrap around: check hours 0-3
+        if let Some(h) = (0..4).find(|&h| hour_buckets[h] as f64 >= threshold) {
+            return Some(h);
+        }
+        None
+    }
+
     // -----------------------------------------------------------------------
     // Events (tracked items with lifecycle)
     // -----------------------------------------------------------------------
@@ -1342,6 +1530,45 @@ impl OntologyRepository {
             .filter(ont_events::status.eq("active"))
             .order(ont_events::created_at.desc())
             .load(&mut conn)
+    }
+
+    pub fn get_proposed_events(&self, user_id: i32) -> Result<Vec<OntEvent>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_events::table
+            .filter(ont_events::user_id.eq(user_id))
+            .filter(ont_events::status.eq("proposed"))
+            .order(ont_events::created_at.desc())
+            .load(&mut conn)
+    }
+
+    pub fn get_active_and_proposed_events(
+        &self,
+        user_id: i32,
+    ) -> Result<Vec<OntEvent>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_events::table
+            .filter(ont_events::user_id.eq(user_id))
+            .filter(ont_events::status.eq_any(&["active", "proposed"]))
+            .order(ont_events::created_at.desc())
+            .load(&mut conn)
+    }
+
+    pub fn get_recently_created_events(
+        &self,
+        user_id: i32,
+        since_ts: i32,
+    ) -> Result<Vec<OntEvent>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_events::table
+            .filter(ont_events::user_id.eq(user_id))
+            .filter(ont_events::status.eq_any(&["active", "proposed"]))
+            .filter(ont_events::created_at.ge(since_ts))
+            .order(ont_events::created_at.desc())
+            .load(&mut conn)
+    }
+
+    pub fn confirm_event(&self, user_id: i32, event_id: i32) -> Result<(), DieselError> {
+        self.update_event_status(user_id, event_id, "active")
     }
 
     pub fn get_events(

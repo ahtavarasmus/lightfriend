@@ -76,6 +76,10 @@ const FEED_STYLES: &str = r#"
     color: #a78bfa;
     background: rgba(167, 139, 250, 0.1);
 }
+.feed-icon.type-screened {
+    color: #6b7280;
+    background: rgba(107, 114, 128, 0.1);
+}
 .feed-body {
     flex: 1;
     min-width: 0;
@@ -168,6 +172,14 @@ struct ActivityFeedEntry {
     detail: Option<String>,
     icon: String,
     success: Option<bool>,
+    #[serde(default)]
+    classification_prompt: Option<String>,
+    #[serde(default)]
+    classification_result: Option<String>,
+    #[serde(default)]
+    urgency: Option<String>,
+    #[serde(default)]
+    category: Option<String>,
 }
 
 #[derive(Properties, PartialEq)]
@@ -383,8 +395,22 @@ fn render_entry(
     let type_label = match entry.entry_type.as_str() {
         "changelog" => "System change",
         "notification" => "Notification",
+        "screened" => "Screened",
         "message" => "Message",
+        "tracked_item" => "Tracked item",
+        "proposed_item" => "Proposed item",
         _ => "Event",
+    };
+
+    let is_tracked = entry.entry_type == "tracked_item" || entry.entry_type == "proposed_item";
+    let is_proposed = entry.entry_type == "proposed_item";
+    let event_id_for_action = if is_tracked {
+        entry
+            .id
+            .strip_prefix("event-")
+            .and_then(|s| s.parse::<i32>().ok())
+    } else {
+        None
     };
 
     html! {
@@ -430,6 +456,78 @@ fn render_entry(
                             <div class="feed-expanded-row">
                                 <span class="feed-expanded-label">{"Detail"}</span>
                                 <span class="feed-expanded-value">{"Delivery failed - check notification settings"}</span>
+                            </div>
+                        }
+                        // Classification details (urgency, category, prompt, result)
+                        if entry.urgency.is_some() || entry.category.is_some() {
+                            <div class="feed-expanded-row">
+                                <span class="feed-expanded-label">{"Classification"}</span>
+                                <span class="feed-expanded-value">{
+                                    format!("{} / {}",
+                                        entry.urgency.as_deref().unwrap_or("-"),
+                                        entry.category.as_deref().unwrap_or("-"))
+                                }</span>
+                            </div>
+                        }
+                        if let Some(ref prompt) = entry.classification_prompt {
+                            <div class="feed-expanded-row" style="flex-direction: column; gap: 0.25rem;">
+                                <span class="feed-expanded-label">{"Signal Report"}</span>
+                                <pre style="font-size: 0.7rem; color: #888; white-space: pre-wrap; word-break: break-word; margin: 0; max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 0.4rem; border-radius: 4px;">{prompt}</pre>
+                            </div>
+                        }
+                        if let Some(ref result) = entry.classification_result {
+                            <div class="feed-expanded-row" style="flex-direction: column; gap: 0.25rem;">
+                                <span class="feed-expanded-label">{"LLM Result"}</span>
+                                <pre style="font-size: 0.7rem; color: #888; white-space: pre-wrap; word-break: break-word; margin: 0; max-height: 150px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 0.4rem; border-radius: 4px;">{result}</pre>
+                            </div>
+                        }
+                        // Tracked item actions (dismiss / confirm)
+                        if is_tracked {
+                            <div style="display: flex; gap: 0.5rem; margin-top: 0.4rem;">
+                                {if is_proposed {
+                                    if let Some(eid) = event_id_for_action {
+                                        html! {
+                                            <button
+                                                style="font-size: 0.75rem; padding: 4px 12px; border-radius: 6px; border: 1px solid rgba(74,222,128,0.3); background: rgba(74,222,128,0.1); color: #4ade80; cursor: pointer;"
+                                                onclick={{
+                                                    let expanded = expanded_handle.clone();
+                                                    Callback::from(move |e: MouseEvent| {
+                                                        e.stop_propagation();
+                                                        let expanded = expanded.clone();
+                                                        spawn_local(async move {
+                                                            let _ = Api::post(&format!("/api/events/{}/confirm", eid)).send().await;
+                                                            expanded.set(None);
+                                                        });
+                                                    })
+                                                }}
+                                            >{"Confirm"}</button>
+                                        }
+                                    } else {
+                                        html! {}
+                                    }
+                                } else {
+                                    html! {}
+                                }}
+                                {if let Some(eid) = event_id_for_action {
+                                    html! {
+                                        <button
+                                            style="font-size: 0.75rem; padding: 4px 12px; border-radius: 6px; border: 1px solid rgba(255,107,107,0.3); background: rgba(255,107,107,0.1); color: #ff6b6b; cursor: pointer;"
+                                            onclick={{
+                                                let expanded = expanded_handle.clone();
+                                                Callback::from(move |e: MouseEvent| {
+                                                    e.stop_propagation();
+                                                    let expanded = expanded.clone();
+                                                    spawn_local(async move {
+                                                        let _ = Api::post(&format!("/api/events/{}/dismiss", eid)).send().await;
+                                                        expanded.set(None);
+                                                    });
+                                                })
+                                            }}
+                                        >{"Stop tracking"}</button>
+                                    }
+                                } else {
+                                    html! {}
+                                }}
                             </div>
                         }
                     </div>

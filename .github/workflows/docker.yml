@@ -384,6 +384,20 @@ jobs:
         run: |
           S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
           CURRENT_LIVE="${{ steps.infra.outputs.old_instance }}"
+
+          # Clean ALL stale deploy signal files from S3.
+          # These can cause deploys to read stale results and fail instantly.
+          echo "Cleaning stale deploy signals from S3..."
+          aws s3 rm "s3://$S3_BUCKET/deploy/export-complete.json" 2>/dev/null || true
+          aws s3 rm "s3://$S3_BUCKET/deploy/export-request.json" 2>/dev/null || true
+          # Clean old per-instance signal files (eif, pre-warm, restore, verify)
+          for prefix in eif- pre-warm- restore- verify-; do
+            aws s3 ls "s3://$S3_BUCKET/deploy/${prefix}" 2>/dev/null | awk '{print $4}' | while read -r key; do
+              [ -n "$key" ] && aws s3 rm "s3://$S3_BUCKET/deploy/$key" 2>/dev/null || true
+            done
+          done
+          echo "Stale signals cleaned"
+
           STALE_STATE=$(aws s3 cp "s3://$S3_BUCKET/deploy/deploy-state.json" - 2>/dev/null || echo "")
           if [ -n "$STALE_STATE" ]; then
             STALE_STATUS=$(echo "$STALE_STATE" | jq -r '.state // "unknown"')
@@ -551,102 +565,108 @@ jobs:
           echo "- PCR1: $PCR1" >> $GITHUB_STEP_SUMMARY
           echo "- PCR2: $PCR2" >> $GITHUB_STEP_SUMMARY
 
-      # ── Step 4: Backup old instance (old stays live) ──
-      # Old instance keeps serving traffic throughout backup and until new
-      # instance is verified healthy. Only cloudflared on old is stopped
-      # after new passes health checks (Step 8).
-      #
-      # Signal flow (avoids unreliable long-running VSOCK connections):
-      # 1. CI writes export-request.json to host's seed dir via SSM
-      # 2. Enclave's export-watcher polls seed HTTP (port 9080) and sees it
-      # 3. Enclave runs export.sh, uploads backup via HTTP PUT (port 9081)
-      # 4. Enclave writes export-complete.json to host's backups dir via HTTP PUT
-      # 5. CI polls host for export-complete.json via SSM
-      - name: Backup old instance
-        if: steps.infra.outputs.old_instance != ''
+      # ── Step 4: Get data source ──
+      # Priority 1: Seed dump in S3 (first-time bootstrap from old server)
+      # Priority 2: Live export from old instance (normal deploy)
+      # Priority 3: Latest encrypted backup from S3 (old instance dead)
+      - name: Get data source
         id: backup
         env:
           AWS_DEFAULT_REGION: us-east-1
         run: |
           OLD_INSTANCE="${{ steps.infra.outputs.old_instance }}"
           S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
+
+          # ── Priority 1: Seed dump for first-time bootstrap ──
+          if aws s3api head-object --bucket "$S3_BUCKET" --key "seed/lightfriend_db.sql" 2>/dev/null; then
+            echo "=== Found seed dump in S3 - first-time bootstrap ==="
+            echo "backup_key=none" >> $GITHUB_OUTPUT
+            echo "backup_sha=none" >> $GITHUB_OUTPUT
+            echo "backup_size=0" >> $GITHUB_OUTPUT
+            echo "backup_source=seed_dump" >> $GITHUB_OUTPUT
+            echo "## Data source: seed dump (first-time bootstrap)" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          # ── Priority 2: Live export from old instance ──
           LIVE_EXPORT_OK=false
 
-          # Check old instance is running
-          STATE=$(aws ec2 describe-instances --instance-ids "$OLD_INSTANCE" \
-            --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo "unknown")
-          if [ "$STATE" != "running" ]; then
-            echo "WARNING: Old instance $OLD_INSTANCE is not running (state: $STATE)"
-            echo "Will fall back to latest hourly backup from S3"
-          else
-            # ── Try live export from old instance ──
-            echo "Triggering export via signal file on $OLD_INSTANCE..."
-            echo '{"github_run_id":"${{ github.run_id }}","old_instance":"'$OLD_INSTANCE'","state":"backup_started","started_at":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' | \
-              aws s3 cp - "s3://$S3_BUCKET/deploy/deploy-state.json"
+          if [ -n "$OLD_INSTANCE" ]; then
+            STATE=$(aws ec2 describe-instances --instance-ids "$OLD_INSTANCE" \
+              --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo "unknown")
+            if [ "$STATE" != "running" ]; then
+              echo "WARNING: Old instance $OLD_INSTANCE is not running (state: $STATE)"
+            else
+              echo "Triggering export via signal file on $OLD_INSTANCE..."
+              echo '{"github_run_id":"${{ github.run_id }}","old_instance":"'$OLD_INSTANCE'","state":"backup_started","started_at":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' | \
+                aws s3 cp - "s3://$S3_BUCKET/deploy/deploy-state.json"
 
-            echo "Restarting s3-signal-poller on old instance..."
-            RESTART_CMD=$(aws ssm send-command --instance-ids "$OLD_INSTANCE" \
-              --document-name "AWS-RunShellScript" \
-              --parameters '{"commands":["systemctl restart s3-signal-poller && rm -f /opt/lightfriend/backups/export-complete.json"]}' \
-              --timeout-seconds 30 \
-              --query 'Command.CommandId' --output text 2>/dev/null || echo "")
-            [ -n "$RESTART_CMD" ] && echo "Poller restart command: $RESTART_CMD" || echo "WARNING: Poller restart via SSM failed"
-            sleep 5
-
-            TRIGGER='{"action":"export","deploy_id":"${{ github.run_id }}"}'
-            echo "Writing export trigger to S3..."
-            echo "$TRIGGER" | aws s3 cp - "s3://$S3_BUCKET/deploy/export-request.json"
-
-            echo "Also writing trigger directly to host via SSM..."
-            aws ssm send-command --instance-ids "$OLD_INSTANCE" \
-              --document-name "AWS-RunShellScript" \
-              --parameters '{"commands":["echo '"'"''"$TRIGGER"''"'"' > /opt/lightfriend/seed/export-request.json"]}' \
-              --timeout-seconds 30 2>/dev/null || echo "WARNING: Direct SSM trigger failed (non-fatal)"
-
-            echo "Polling S3 for export completion (timeout: 10 min)..."
-            COMPLETE_STATUS=""
-            for i in $(seq 1 120); do
-              COMPLETE_JSON=$(aws s3 cp "s3://$S3_BUCKET/deploy/export-complete.json" - 2>/dev/null || echo "")
-              if [ -n "$COMPLETE_JSON" ]; then
-                COMPLETE_STATUS=$(echo "$COMPLETE_JSON" | jq -r '.status // "UNKNOWN"' 2>/dev/null || echo "UNKNOWN")
-                if [ "$COMPLETE_STATUS" = "SUCCESS" ]; then
-                  echo "Live export completed successfully!"
-                  echo "$COMPLETE_JSON" | jq . 2>/dev/null || echo "$COMPLETE_JSON"
-                  LIVE_EXPORT_OK=true
-                  break
-                elif [ "$COMPLETE_STATUS" = "FAILED" ]; then
-                  echo "WARNING: Live export failed inside enclave, will fall back to S3 backup"
-                  break
-                fi
+              echo "Restarting s3-signal-poller on old instance..."
+              RESTART_CMD=$(aws ssm send-command --instance-ids "$OLD_INSTANCE" \
+                --document-name "AWS-RunShellScript" \
+                --parameters '{"commands":["systemctl restart s3-signal-poller && rm -f /opt/lightfriend/backups/export-complete.json"]}' \
+                --timeout-seconds 30 \
+                --query 'Command.CommandId' --output text 2>/dev/null || echo "")
+              if [ -z "$RESTART_CMD" ]; then
+                echo "FATAL: Could not restart s3-signal-poller via SSM - export will not work"
+                exit 1
               fi
-              [ $((i % 6)) -eq 0 ] && echo "Waiting for export ($i/120, status: ${COMPLETE_STATUS:-pending})..."
+              echo "Poller restart command: $RESTART_CMD"
               sleep 5
-            done
 
-            if [ "$LIVE_EXPORT_OK" = "false" ]; then
-              echo "FATAL: Live export from old instance failed or timed out"
-              echo "Old instance is running but export failed - something is wrong."
-              echo "Fix the issue and retry. NOT falling back to S3 backup (data could be stale)."
-              exit 1
+              TRIGGER='{"action":"export","deploy_id":"${{ github.run_id }}"}'
+              echo "Writing export trigger to S3..."
+              echo "$TRIGGER" | aws s3 cp - "s3://$S3_BUCKET/deploy/export-request.json"
+
+              echo "Also writing trigger directly to host via SSM..."
+              aws ssm send-command --instance-ids "$OLD_INSTANCE" \
+                --document-name "AWS-RunShellScript" \
+                --parameters '{"commands":["echo '"'"''"$TRIGGER"''"'"' > /opt/lightfriend/seed/export-request.json"]}' \
+                --timeout-seconds 30 2>/dev/null || echo "WARNING: Direct SSM trigger failed (non-fatal)"
+
+              echo "Polling S3 for export completion (timeout: 10 min)..."
+              COMPLETE_STATUS=""
+              for i in $(seq 1 120); do
+                COMPLETE_JSON=$(aws s3 cp "s3://$S3_BUCKET/deploy/export-complete.json" - 2>/dev/null || echo "")
+                if [ -n "$COMPLETE_JSON" ]; then
+                  COMPLETE_STATUS=$(echo "$COMPLETE_JSON" | jq -r '.status // "UNKNOWN"' 2>/dev/null || echo "UNKNOWN")
+                  if [ "$COMPLETE_STATUS" = "SUCCESS" ]; then
+                    echo "Live export completed successfully!"
+                    echo "$COMPLETE_JSON" | jq . 2>/dev/null || echo "$COMPLETE_JSON"
+                    LIVE_EXPORT_OK=true
+                    break
+                  elif [ "$COMPLETE_STATUS" = "FAILED" ]; then
+                    echo "WARNING: Live export failed inside enclave, will fall back to S3 backup"
+                    break
+                  fi
+                fi
+                [ $((i % 6)) -eq 0 ] && echo "Waiting for export ($i/120, status: ${COMPLETE_STATUS:-pending})..."
+                sleep 5
+              done
+
+              if [ "$LIVE_EXPORT_OK" = "false" ]; then
+                echo "FATAL: Live export from old instance failed or timed out"
+                echo "Old instance is running but export failed - something is wrong."
+                echo "Fix the issue and retry. NOT falling back to S3 backup (data could be stale)."
+                exit 1
+              fi
+
+              # Clean up S3 signals
+              aws s3 rm "s3://$S3_BUCKET/deploy/export-complete.json" 2>/dev/null || true
+              aws s3 rm "s3://$S3_BUCKET/deploy/export-request.json" 2>/dev/null || true
             fi
-
-            # Clean up S3 signals regardless
-            aws s3 rm "s3://$S3_BUCKET/deploy/export-complete.json" 2>/dev/null || true
-            aws s3 rm "s3://$S3_BUCKET/deploy/export-request.json" 2>/dev/null || true
           fi
 
           if [ "$LIVE_EXPORT_OK" = "true" ]; then
-            # Use live export result
             BACKUP_KEY=$(echo "$COMPLETE_JSON" | jq -r '.backup_key // empty')
             BACKUP_SHA=$(echo "$COMPLETE_JSON" | jq -r '.backup_sha256 // empty')
             BACKUP_SIZE=$(echo "$COMPLETE_JSON" | jq -r '.backup_size // 0')
             BACKUP_SOURCE="live_export"
           else
-            # ── Old instance is dead - fall back to latest S3 backup ──
+            # ── Priority 3: Latest encrypted backup from S3 ──
             echo ""
-            echo "=== Old instance not running - falling back to latest S3 backup ==="
+            echo "=== Falling back to latest S3 backup ==="
 
-            # Check deploy backups first (most recent), then hourly
             LATEST_BACKUP=""
             for PREFIX in "backups/deploy/" "backups/hourly/"; do
               LATEST_BACKUP=$(aws s3 ls "s3://$S3_BUCKET/$PREFIX" --recursive 2>/dev/null | \
@@ -658,18 +678,16 @@ jobs:
             done
 
             if [ -z "$LATEST_BACKUP" ]; then
-              echo "FATAL: No backups found in S3 - cannot deploy without data"
+              echo "FATAL: No data source available - no seed dump, no live instance, no S3 backup"
               exit 1
             fi
 
-            # Get backup metadata
             BACKUP_KEY="$LATEST_BACKUP"
             BACKUP_SIZE=$(aws s3api head-object --bucket "$S3_BUCKET" --key "$BACKUP_KEY" \
               --query 'ContentLength' --output text 2>/dev/null || echo "0")
             BACKUP_MODIFIED=$(aws s3api head-object --bucket "$S3_BUCKET" --key "$BACKUP_KEY" \
               --query 'LastModified' --output text 2>/dev/null || echo "unknown")
 
-            # Calculate SHA of the S3 backup
             TMP_SHA=$(mktemp /tmp/backup-sha.XXXXXX.enc)
             aws s3 cp "s3://$S3_BUCKET/$BACKUP_KEY" "$TMP_SHA"
             BACKUP_SHA=$(sha256sum "$TMP_SHA" | awk '{print $1}')
@@ -694,10 +712,41 @@ jobs:
           echo "backup_sha=$BACKUP_SHA" >> $GITHUB_OUTPUT
           echo "backup_size=$BACKUP_SIZE" >> $GITHUB_OUTPUT
           echo "backup_source=$BACKUP_SOURCE" >> $GITHUB_OUTPUT
-          echo "## Backup ($BACKUP_SOURCE): $BACKUP_KEY" >> $GITHUB_STEP_SUMMARY
+          echo "## Data source ($BACKUP_SOURCE): $BACKUP_KEY" >> $GITHUB_STEP_SUMMARY
+
+      # ── Step 4b: Deliver seed dump to new instance ──
+      # Downloads seed SQL from S3 to the new host's seed dir, then deletes
+      # from S3 so it doesn't get used on the next deploy.
+      - name: Deliver seed to new instance
+        if: steps.backup.outputs.backup_source == 'seed_dump'
+        run: |
+          NEW_INSTANCE="${{ steps.launch.outputs.new_instance }}"
+          S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
+
+          echo "Delivering seed SQL to $NEW_INSTANCE..."
+          CMD_ID=$(aws ssm send-command --instance-ids "$NEW_INSTANCE" \
+            --document-name "AWS-RunShellScript" \
+            --parameters '{"commands":["aws s3 cp s3://'"$S3_BUCKET"'/seed/lightfriend_db.sql /opt/lightfriend/seed/lightfriend_db.sql && ls -la /opt/lightfriend/seed/lightfriend_db.sql"]}' \
+            --timeout-seconds 120 \
+            --query 'Command.CommandId' --output text)
+
+          for i in $(seq 1 24); do
+            STATUS=$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$NEW_INSTANCE" \
+              --query "Status" --output text 2>/dev/null || echo "Pending")
+            case "$STATUS" in
+              Success) echo "Seed delivered to new instance"; break ;;
+              Failed|TimedOut|Cancelled) echo "FATAL: Seed delivery failed: $STATUS"; exit 1 ;;
+            esac
+            sleep 5
+          done
+
+          # Delete from S3 so it doesn't linger on next deploy
+          aws s3 rm "s3://$S3_BUCKET/seed/lightfriend_db.sql"
+          echo "Seed removed from S3"
 
       # ── Step 5: Re-download and validate the exact encrypted artifact ──
       - name: Validate uploaded backup artifact
+        if: steps.backup.outputs.backup_source != 'seed_dump'
         run: |
           S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
           BACKUP_KEY="${{ steps.backup.outputs.backup_key }}"
@@ -732,16 +781,24 @@ jobs:
           NEW_INSTANCE="${{ steps.launch.outputs.new_instance }}"
           S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
           BACKUP_KEY="${{ steps.backup.outputs.backup_key }}"
+          BACKUP_SOURCE="${{ steps.backup.outputs.backup_source }}"
 
-          if [ -z "$BACKUP_KEY" ]; then
-            echo "FATAL: Missing backup_key for restore manifest"
-            exit 1
-          fi
-
-          cat <<EOF | aws s3 cp - "s3://$S3_BUCKET/deploy/restore-$NEW_INSTANCE.json"
-          {"deploy_id":"${{ github.run_id }}","backup_key":"$BACKUP_KEY","restore_type":"full","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+          if [ "$BACKUP_SOURCE" = "seed_dump" ]; then
+            cat <<EOF | aws s3 cp - "s3://$S3_BUCKET/deploy/restore-$NEW_INSTANCE.json"
+            {"deploy_id":"${{ github.run_id }}","backup_key":"none","restore_type":"seed_only","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
           EOF
-          echo "Restore manifest published for $NEW_INSTANCE"
+            echo "Seed-only restore manifest published for $NEW_INSTANCE"
+          else
+            if [ -z "$BACKUP_KEY" ]; then
+              echo "FATAL: Missing backup_key for restore manifest"
+              exit 1
+            fi
+
+            cat <<EOF | aws s3 cp - "s3://$S3_BUCKET/deploy/restore-$NEW_INSTANCE.json"
+            {"deploy_id":"${{ github.run_id }}","backup_key":"$BACKUP_KEY","restore_type":"full","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+          EOF
+            echo "Restore manifest published for $NEW_INSTANCE"
+          fi
 
       # ── Step 7: Wait for new enclave to restore, verify, become healthy ──
       - name: Wait for enclave health
@@ -767,7 +824,7 @@ jobs:
                 echo "Details: $(echo "$VERIFY" | jq -r '.details // .failed_checks // "none"')"
                 exit 1
               fi
-              if [ -n "$OLD_INSTANCE" ]; then
+              if [ -n "$OLD_INSTANCE" ] && [ "${{ steps.backup.outputs.backup_source }}" != "seed_dump" ]; then
                 if [ "$RESTORE_TYPE" = "fresh_start" ]; then
                   echo "FATAL: New enclave started fresh but old had data"; exit 1
                 fi
@@ -829,7 +886,7 @@ jobs:
           # Brief grace period then terminate old
           sleep 15
           if [ -n "$OLD_INSTANCE" ] && [ "$OLD_INSTANCE" != "$NEW_INSTANCE" ]; then
-            aws ec2 terminate-instances --instance-ids "$OLD_INSTANCE"
+            aws ec2 terminate-instances --instance-ids "$OLD_INSTANCE" 2>/dev/null || echo "WARNING: Could not terminate old instance $OLD_INSTANCE (may already be gone)"
             echo "Old instance $OLD_INSTANCE terminated"
           fi
 
@@ -848,8 +905,9 @@ jobs:
           echo "## Deploy Complete" >> $GITHUB_STEP_SUMMARY
 
       # ── Rollback: terminate new instance, old stays live ──
+      # Triggers on failure AND cancellation to prevent orphaned EC2 instances
       - name: Rollback on failure
-        if: failure() && steps.launch.outputs.new_instance != ''
+        if: (failure() || cancelled()) && steps.launch.outputs.new_instance != ''
         env:
           AWS_DEFAULT_REGION: us-east-1
           CONTRACT_ADDRESS: ${{ secrets.MARLIN_KMS_CONTRACT_ADDRESS }}
@@ -883,11 +941,13 @@ jobs:
           {"deploy_id":"${{ github.run_id }}","commit_sha":"${{ github.sha }}","completed_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","outcome":"ROLLBACK","old_instance":"$OLD_INSTANCE","new_instance":"$NEW_INSTANCE","eif_key":"${{ needs.build-eif.outputs.eif_key }}","eif_sha256":"${{ needs.build-eif.outputs.eif_sha256 }}","pcr0":"${{ needs.build-eif.outputs.pcr0 }}","pcr1":"${{ needs.build-eif.outputs.pcr1 }}","pcr2":"${{ needs.build-eif.outputs.pcr2 }}"}
           EOF
 
-          # Clean up S3 signals
+          # Clean up ALL S3 deploy signals (prevents stale results blocking future deploys)
           aws s3 rm "s3://$S3_BUCKET/deploy/verify-$NEW_INSTANCE.json" 2>/dev/null || true
           aws s3 rm "s3://$S3_BUCKET/deploy/pre-warm-$NEW_INSTANCE.json" 2>/dev/null || true
           aws s3 rm "s3://$S3_BUCKET/deploy/eif-$NEW_INSTANCE.json" 2>/dev/null || true
           aws s3 rm "s3://$S3_BUCKET/deploy/restore-$NEW_INSTANCE.json" 2>/dev/null || true
+          aws s3 rm "s3://$S3_BUCKET/deploy/export-complete.json" 2>/dev/null || true
+          aws s3 rm "s3://$S3_BUCKET/deploy/export-request.json" 2>/dev/null || true
 
           echo "## ROLLBACK - old instance $OLD_INSTANCE restored" >> $GITHUB_STEP_SUMMARY
 

@@ -882,6 +882,18 @@ BUCKET=$(grep S3_BACKUP_BUCKET /opt/lightfriend/.env | cut -d= -f2)
 [ -z "$BUCKET" ] && { echo "S3_BACKUP_BUCKET not set in .env"; exit 1; }
 aws s3 cp /opt/lightfriend/.env "s3://$BUCKET/config/.env" --sse AES256
 echo "Uploaded .env to s3://$BUCKET/config/.env"
+
+# Also replicate .env to Cloudflare R2 (off-AWS disaster recovery)
+R2_BUCKET=$(grep R2_BACKUP_BUCKET /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
+R2_ENDPOINT=$(grep R2_ENDPOINT_URL /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
+R2_ACCESS=$(grep R2_ACCESS_KEY_ID /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
+R2_SECRET=$(grep R2_SECRET_ACCESS_KEY /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
+if [ -n "$R2_BUCKET" ] && [ -n "$R2_ENDPOINT" ] && [ -n "$R2_ACCESS" ]; then
+    AWS_ACCESS_KEY_ID="$R2_ACCESS" AWS_SECRET_ACCESS_KEY="$R2_SECRET" \
+        aws s3 cp /opt/lightfriend/.env "s3://$R2_BUCKET/config/.env" \
+        --endpoint-url "$R2_ENDPOINT" 2>/dev/null && \
+        echo "Replicated .env to R2" || echo "WARNING: R2 .env replication failed"
+fi
 SCRIPT
 chmod +x /opt/lightfriend/upload-env.sh
 
@@ -1009,12 +1021,28 @@ fi
     exit 1
 }
 
-# Step 5: Clean up old local backups (keep last 3)
+# Step 5: Replicate to Cloudflare R2 (off-AWS disaster recovery)
+R2_BUCKET=$(grep R2_BACKUP_BUCKET /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
+R2_ENDPOINT=$(grep R2_ENDPOINT_URL /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
+R2_ACCESS_KEY=$(grep R2_ACCESS_KEY_ID /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
+R2_SECRET_KEY=$(grep R2_SECRET_ACCESS_KEY /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
+if [ -n "$${R2_BUCKET}" ] && [ -n "$${R2_ENDPOINT}" ] && [ -n "$${R2_ACCESS_KEY}" ]; then
+    echo "Replicating backup to Cloudflare R2..." >> "$LOG"
+    AWS_ACCESS_KEY_ID="$${R2_ACCESS_KEY}" AWS_SECRET_ACCESS_KEY="$${R2_SECRET_KEY}" \
+        aws s3 cp "$TMP_BACKUP" "s3://$${R2_BUCKET}/$${BACKUP_KEY}" \
+        --endpoint-url "$${R2_ENDPOINT}" >> "$LOG" 2>&1 && \
+        echo "R2 replication: OK ($${BACKUP_KEY})" >> "$LOG" || \
+        echo "WARNING: R2 replication failed (non-fatal, S3 primary is safe)" >> "$LOG"
+else
+    echo "R2 not configured, skipping off-AWS replication" >> "$LOG"
+fi
+
+# Step 6: Clean up old local backups (keep last 3)
 cd /opt/lightfriend/backups
 ls -t *.tar.gz.enc 2>/dev/null | tail -n +4 | xargs rm -f 2>/dev/null || true
 
-# Step 6: Write success marker to S3
-[ -n "$${BUCKET:-}" ] && echo "{\"last_success\": \"$${TIMESTAMP}\", \"type\": \"full_snapshot\", \"tier\": \"hourly\", \"backup_key\": \"$${BACKUP_KEY}\"}" | \
+# Step 7: Write success marker to S3 (includes R2 status)
+[ -n "$${BUCKET:-}" ] && echo "{\"last_success\": \"$${TIMESTAMP}\", \"type\": \"full_snapshot\", \"tier\": \"hourly\", \"backup_key\": \"$${BACKUP_KEY}\", \"r2_replicated\": $([ -n \"$${R2_BUCKET:-}\" ] && echo true || echo false)}" | \
     aws s3 cp - "s3://$${BUCKET}/backups/backup-health.json" 2>/dev/null || true
 
 echo "=== Full snapshot backup verified and complete: $${TIMESTAMP} ===" >> "$LOG"
@@ -1156,27 +1184,55 @@ EOF
     RESTORE_TYPE=$(echo "$RESTORE_MANIFEST" | jq -r '.restore_type // "full"')
     DEPLOY_ID=$(echo "$RESTORE_MANIFEST" | jq -r '.deploy_id // "unknown"')
 
-    if [ -z "$BACKUP_KEY" ]; then
-        echo "{\"status\": \"INVALID_RESTORE_MANIFEST\", \"instance_id\": \"$INSTANCE_ID\"}" | \
-            aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
-        echo "FATAL: Restore manifest missing backup_key"
-        exit 1
-    fi
-
     # Re-download .env (CI may have uploaded a fresh one from old instance)
     aws s3 cp "s3://$BUCKET/config/.env" /opt/lightfriend/.env
     chmod 600 /opt/lightfriend/.env
 
-    # Restore enclave from the exact backup artifact in the manifest
-    echo "Restoring from $BACKUP_KEY..."
-    set -o pipefail
-    if ! /opt/lightfriend/restore-enclave.sh "$BACKUP_KEY" "$DEPLOY_ID" "$RESTORE_TYPE" 2>&1 | tee /tmp/launch.log; then
-        RESTORE_LOG=$(cat /tmp/restore-enclave-debug.log 2>/dev/null | tail -50 | tr '\n' '|' | sed 's/"/\\"/g' | head -c 1500)
-        echo "{\"status\": \"RESTORE_FAILED\", \"instance_id\": \"$INSTANCE_ID\", \"log\": \"$RESTORE_LOG\"}" | \
-            aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
-        exit 1
+    if [ "$RESTORE_TYPE" = "seed_only" ]; then
+        # Seed-only mode: CI already placed seed SQL at /opt/lightfriend/seed/lightfriend_db.sql
+        # Launch enclave without backup restore - entrypoint.sh will find and restore the seed
+        echo "=== Seed-only mode: launching enclave without backup restore ==="
+        echo "Seed file: $(ls -la /opt/lightfriend/seed/lightfriend_db.sql 2>&1)"
+
+        rm -f "$VERIFY"
+        VERIFY_SRC="/opt/lightfriend/backups/verify-result.json"
+        rm -f "$VERIFY_SRC"
+
+        if ! /opt/lightfriend/launch-enclave.sh 2>&1 | tee /tmp/launch.log; then
+            echo "{\"status\": \"LAUNCH_FAILED\", \"instance_id\": \"$INSTANCE_ID\"}" | \
+                aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
+            exit 1
+        fi
+
+        echo "Polling for verify result..."
+        for i in $(seq 1 180); do
+            if [ -s "$VERIFY_SRC" ]; then
+                cp "$VERIFY_SRC" "$VERIFY"
+                rm -f "$VERIFY_SRC"
+                echo "Verify result received after $((i * 5))s"
+                break
+            fi
+            sleep 5
+        done
+    else
+        # Normal backup restore
+        if [ -z "$BACKUP_KEY" ] || [ "$BACKUP_KEY" = "none" ]; then
+            echo "{\"status\": \"INVALID_RESTORE_MANIFEST\", \"instance_id\": \"$INSTANCE_ID\"}" | \
+                aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
+            echo "FATAL: Restore manifest missing backup_key"
+            exit 1
+        fi
+
+        echo "Restoring from $BACKUP_KEY..."
+        set -o pipefail
+        if ! /opt/lightfriend/restore-enclave.sh "$BACKUP_KEY" "$DEPLOY_ID" "$RESTORE_TYPE" 2>&1 | tee /tmp/launch.log; then
+            RESTORE_LOG=$(cat /tmp/restore-enclave-debug.log 2>/dev/null | tail -50 | tr '\n' '|' | sed 's/"/\\"/g' | head -c 1500)
+            echo "{\"status\": \"RESTORE_FAILED\", \"instance_id\": \"$INSTANCE_ID\", \"log\": \"$RESTORE_LOG\"}" | \
+                aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
+            exit 1
+        fi
+        set +o pipefail
     fi
-    set +o pipefail
 
     if [ -s "$VERIFY" ]; then
         aws s3 cp "$VERIFY" "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"

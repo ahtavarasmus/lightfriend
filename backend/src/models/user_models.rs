@@ -60,6 +60,10 @@ pub struct UserSettings {
     pub phone_contact_notify_on_call: i32,
     pub auto_create_items: bool,
     pub system_important_notify: bool,
+    pub digest_enabled: bool,
+    pub digest_time: Option<String>,
+    pub auto_track_items_system: bool,
+    pub auto_confirm_tracked_items: bool,
 }
 
 #[derive(Insertable)]

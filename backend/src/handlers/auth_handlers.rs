@@ -488,6 +488,12 @@ pub async fn register(
     })?;
     tracing::info!("User registered successfully, setting preferred number");
 
+    // Sync email to Resend contacts for disaster recovery
+    let email_for_resend = reg_req.email.clone();
+    tokio::spawn(async move {
+        crate::utils::resend_contacts::sync_contact(&email_for_resend).await;
+    });
+
     // Get the newly created user to get their ID
     let user = state
         .user_core

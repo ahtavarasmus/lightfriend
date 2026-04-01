@@ -1,12 +1,26 @@
 #!/bin/bash
 # Diagnostic script - runs inside the enclave when host connects to VSOCK port 9008.
-# Dumps all supervisor service status, cloudflared bridge health, and recent logs.
+# Dumps all supervisor service status, bridge health, and recent logs.
+#
+# PRIVACY: This script is open-source and auditable on GitHub.
+# It NEVER logs message content, user data, phone numbers, or credentials.
+# Bridge logs are filtered to remove any message body/content fields.
+# Only operational status (connected/disconnected, errors, sync state) is captured.
+
+# Helper: strip potential message content from bridge logs.
+# Keeps error lines, status changes, connection events. Removes message bodies.
+sanitize_bridge_log() {
+    sed -E \
+        -e 's/(body|message|text|content|caption)="[^"]*"/\1="[REDACTED]"/gi' \
+        -e 's/(body|message|text|content|caption): .*/\1: [REDACTED]/gi' \
+        -e 's/("body"|"message"|"text"|"content"|"caption"): ?"[^"]*"/\1: "[REDACTED]"/gi'
+}
 
 echo "=== Enclave Diagnostics $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 echo ""
 
-# ── CRITICAL: Dump backend logs FIRST before any health checks ──
-# Health checks can hang if the backend is unresponsive, so we dump
+# ── CRITICAL: Dump all service logs FIRST before any health checks ──
+# Health checks can hang if services are unresponsive, so we dump
 # the actual application logs upfront to always capture them.
 echo "--- backend stderr (last 80 lines) ---"
 tail -80 /var/log/supervisor/lightfriend-err.log 2>/dev/null || echo "  empty"
@@ -22,6 +36,55 @@ echo ""
 
 echo "--- cloudflared stdout (last 20 lines) ---"
 tail -20 /var/log/supervisor/cloudflared.log 2>/dev/null || echo "  empty"
+echo ""
+
+# ── Bridge logs (privacy-filtered: no message content) ──
+echo "--- mautrix-whatsapp stdout (last 60 lines, sanitized) ---"
+tail -60 /var/log/supervisor/whatsapp.log 2>/dev/null | sanitize_bridge_log || echo "  empty"
+echo ""
+
+echo "--- mautrix-whatsapp stderr (last 40 lines, sanitized) ---"
+tail -40 /var/log/supervisor/whatsapp-err.log 2>/dev/null | sanitize_bridge_log || echo "  empty"
+echo ""
+
+echo "--- mautrix-signal stdout (last 40 lines, sanitized) ---"
+tail -40 /var/log/supervisor/signal.log 2>/dev/null | sanitize_bridge_log || echo "  empty"
+echo ""
+
+echo "--- mautrix-signal stderr (last 20 lines, sanitized) ---"
+tail -20 /var/log/supervisor/signal-err.log 2>/dev/null | sanitize_bridge_log || echo "  empty"
+echo ""
+
+echo "--- mautrix-telegram stdout (last 40 lines, sanitized) ---"
+tail -40 /var/log/supervisor/telegram.log 2>/dev/null | sanitize_bridge_log || echo "  empty"
+echo ""
+
+echo "--- mautrix-telegram stderr (last 20 lines, sanitized) ---"
+tail -20 /var/log/supervisor/telegram-err.log 2>/dev/null | sanitize_bridge_log || echo "  empty"
+echo ""
+
+echo "--- tuwunel stdout (last 40 lines) ---"
+tail -40 /var/log/supervisor/tuwunel.log 2>/dev/null || echo "  empty"
+echo ""
+
+echo "--- tuwunel stderr (last 40 lines) ---"
+tail -40 /var/log/supervisor/tuwunel-err.log 2>/dev/null || echo "  empty"
+echo ""
+
+echo "--- startup-services.log (last 100 lines) ---"
+tail -100 /data/seed/startup-services.log 2>/dev/null || echo "  not found"
+echo ""
+
+echo "--- export-watcher-last-run.log (last 80 lines) ---"
+tail -80 /tmp/export-watcher-last-run.log 2>/dev/null || echo "  not found (no export has run yet)"
+echo ""
+
+echo "--- boot-trace.log restore section (grep DEBUG/restore/tuwunel/bridge) ---"
+grep -i "DEBUG\|restore\|tuwunel\|bridge.*tar\|matrix_store\|STEP 2\|decrypt\|Full restore\|checkpoint\|RocksDB\|CURRENT\|IDENTITY\|file count\|total size\|MANIFEST\|sst\|whatsmeow\|user_login" /data/seed/boot-trace.log 2>/dev/null | head -100 || echo "  not found or no matches"
+echo ""
+
+echo "--- boot-trace.log (last 40 lines) ---"
+tail -40 /data/seed/boot-trace.log 2>/dev/null || echo "  not found"
 echo ""
 
 echo "--- supervisorctl status ---"

@@ -331,14 +331,7 @@ if [ "${RESTORE_MODE}" != "none" ]; then
     if [ -s "$RECEIVED" ] && ! grep -q "NO_BACKUP" "$RECEIVED" 2>/dev/null; then
         RECEIVED_SIZE=$(stat -c%s "$RECEIVED" 2>/dev/null || stat -f%z "$RECEIVED" 2>/dev/null || echo "unknown")
         echo "Backup received from host (${RECEIVED_SIZE} bytes)"
-        case "${RESTORE_MODE}" in
-            pg_only)
-                mv "$RECEIVED" "/data/seed/lightfriend-pg-backup-received.tar.gz.enc"
-                ;;
-            *)
-                mv "$RECEIVED" "/data/seed/lightfriend-full-backup-received.tar.gz.enc"
-                ;;
-        esac
+        mv "$RECEIVED" "/data/seed/lightfriend-full-backup-received.tar.gz.enc"
     else
         rm -f "$RECEIVED"
         echo "FATAL: Restore requested but no backup available from host"
@@ -586,12 +579,35 @@ REOF
     # Restore filesystem stores
     echo "Restoring filesystem stores..."
 
-    # Tuwunel (RocksDB)
+    # Tuwunel (RocksDB via BackupEngine format)
+    echo "  === TUWUNEL RESTORE START ==="
     if [ -f tuwunel/tuwunel_data.tar ]; then
-        echo "  Restoring /var/lib/tuwunel..."
-        rm -rf /var/lib/tuwunel/*
+        echo "  [DEBUG] tuwunel tar size: $(stat -c%s tuwunel/tuwunel_data.tar 2>/dev/null || echo unknown) bytes"
+        echo "  [DEBUG] tuwunel tar contents: $(tar tf tuwunel/tuwunel_data.tar 2>/dev/null | head -5)"
+
+        # Extract the BackupEngine backup dir
+        rm -rf /var/lib/tuwunel-backup
         tar xf tuwunel/tuwunel_data.tar -C / \
-            || restore_abort "Failed to restore tuwunel data" "restore-tuwunel"
+            || restore_abort "Failed to extract tuwunel backup tar" "restore-tuwunel"
+
+        TUWUNEL_BACKUP_DIR="/var/lib/tuwunel-backup"
+        if [ -d "$TUWUNEL_BACKUP_DIR" ] && [ -d "$TUWUNEL_BACKUP_DIR/shared_checksum" ]; then
+            # New BackupEngine format - restore using tuwunel_restore binary
+            echo "  [DEBUG] BackupEngine format detected, running tuwunel_restore..."
+            RESTORE_DIR="/var/lib/tuwunel"
+            rm -rf "${RESTORE_DIR:?}"/*
+            tuwunel_restore "$TUWUNEL_BACKUP_DIR" "$RESTORE_DIR" \
+                || restore_abort "tuwunel_restore failed" "restore-tuwunel"
+
+            TOTAL_FILES=$(find "$RESTORE_DIR" -type f 2>/dev/null | wc -l)
+            TOTAL_SIZE=$(du -sh "$RESTORE_DIR" 2>/dev/null | awk '{print $1}' || echo '0')
+            echo "  === TUWUNEL RESTORE END (OK: $TOTAL_FILES files, $TOTAL_SIZE) ==="
+        else
+            # Old format or no BackupEngine dir - tuwunel will start fresh
+            echo "  [DEBUG] No BackupEngine dir found (old backup format)"
+            echo "  [DEBUG] Tuwunel will create a fresh database on startup"
+            echo "  === TUWUNEL RESTORE END (skipped - old format, fresh start) ==="
+        fi
         RESTORED_COMPONENTS="${RESTORED_COMPONENTS}\"tuwunel\", "
     else
         restore_abort "Missing tuwunel/tuwunel_data.tar" "restore-tuwunel"
@@ -600,9 +616,14 @@ REOF
     # Matrix store (per-user SQLite)
     if [ -f matrix_store/matrix_store.tar ]; then
         echo "  Restoring /app/matrix_store..."
+        echo "  [DEBUG] matrix_store tar size: $(stat -c%s matrix_store/matrix_store.tar 2>/dev/null || echo unknown) bytes"
+        echo "  [DEBUG] matrix_store tar total files: $(tar tf matrix_store/matrix_store.tar 2>/dev/null | wc -l)"
         rm -rf /app/matrix_store/*
         tar xf matrix_store/matrix_store.tar -C /app \
             || restore_abort "Failed to restore matrix_store" "restore-matrix_store"
+        echo "  [DEBUG] /app/matrix_store AFTER extract: $(find /app/matrix_store -type f 2>/dev/null | wc -l) files, $(du -sh /app/matrix_store 2>/dev/null | awk '{print $1}' || echo '0')"
+        echo "  [DEBUG] matrix_store sqlite files:"
+        find /app/matrix_store -name '*.sqlite3' 2>/dev/null | head -10
         RESTORED_COMPONENTS="${RESTORED_COMPONENTS}\"matrix_store\", "
     else
         restore_abort "Missing matrix_store/matrix_store.tar" "restore-matrix_store"
@@ -611,9 +632,15 @@ REOF
     # Bridges (registrations + device state)
     if [ -f bridges/bridge_data.tar ]; then
         echo "  Restoring /data/bridges..."
+        echo "  [DEBUG] bridges tar size: $(stat -c%s bridges/bridge_data.tar 2>/dev/null || echo unknown) bytes"
+        echo "  [DEBUG] bridges tar contents:"
+        tar tf bridges/bridge_data.tar 2>/dev/null | head -20
         rm -rf /data/bridges/*
         tar xf bridges/bridge_data.tar -C /data \
             || restore_abort "Failed to restore bridge data" "restore-bridges"
+        echo "  [DEBUG] /data/bridges AFTER extract: $(find /data/bridges -type f 2>/dev/null | wc -l) files"
+        echo "  [DEBUG] bridge config files:"
+        find /data/bridges -name '*.yaml' -o -name '*.db' 2>/dev/null | head -10
         RESTORED_COMPONENTS="${RESTORED_COMPONENTS}\"bridges\", "
     else
         restore_abort "Missing bridges/bridge_data.tar" "restore-bridges"
@@ -655,129 +682,6 @@ REOF
 
     FULL_RESTORE_DONE=true
     echo "=== Full restore complete ==="
-fi
-
-# ── 2a-pg. PG-only backup restore (disaster recovery) ────────────────────
-# If no full backup exists but a PG-only daily backup does, restore databases
-# only. Bridge/Matrix state starts fresh (users re-link).
-if [ "${FULL_RESTORE_DONE}" = "false" ]; then
-# shellcheck disable=SC2012
-PG_BACKUP=$(ls /data/seed/lightfriend-pg-backup-*.tar.gz.enc 2>/dev/null | head -1 || true)
-
-if [ -n "${PG_BACKUP}" ]; then
-    echo "=== PG-only backup detected: $(basename "${PG_BACKUP}") ==="
-    echo "  Databases will be restored. Bridge/Matrix state starts fresh."
-    RESTORE_STATUS="/data/seed/restore-status.json"
-    RESTORE_TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
-
-    pg_restore_abort() {
-        local msg="$1"
-        local step="$2"
-        echo "PG RESTORE FAILED: ${msg} (step: ${step})"
-        echo "{\"status\": \"FAILED\", \"timestamp\": \"${RESTORE_TIMESTAMP}\", \"error\": \"${msg}\", \"step\": \"${step}\"}" > "${RESTORE_STATUS}"
-        if [ -e /dev/vsock ]; then
-            echo "{\"status\": \"RESTORE_FAILED\", \"restore_type\": \"pg_only\", \"error\": \"${msg}\", \"step\": \"${step}\", \"user_count\": 0}" > /data/seed/verify-result.json
-            socat -u FILE:/data/seed/verify-result.json VSOCK-CONNECT:3:9004 2>/dev/null || true
-        fi
-        su postgres -c "$PG_BIN/pg_ctl -D $PG_DATA stop -w" 2>/dev/null || true
-        exit 1
-    }
-
-    if [ -z "${BACKUP_ENCRYPTION_KEY:-}" ]; then
-        pg_restore_abort "BACKUP_ENCRYPTION_KEY not set" "decrypt"
-    fi
-
-    # Decrypt
-    echo "Decrypting PG backup..."
-    DECRYPT_DIR="/tmp/pg-restore"
-    mkdir -p "${DECRYPT_DIR}"
-    openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
-        -pass env:BACKUP_ENCRYPTION_KEY \
-        -in "${PG_BACKUP}" \
-        -out "${DECRYPT_DIR}/backup.tar.gz" 2>/dev/null \
-        || pg_restore_abort "Decryption failed" "decrypt"
-
-    # Extract
-    echo "Extracting..."
-    cd "${DECRYPT_DIR}"
-    tar xzf backup.tar.gz \
-        || pg_restore_abort "Archive extraction failed" "extract"
-
-    # shellcheck disable=SC2012
-    BACKUP_DIR=$(ls -d lightfriend-pg-backup-* 2>/dev/null | head -1)
-    if [ -z "${BACKUP_DIR}" ]; then
-        pg_restore_abort "No lightfriend-pg-backup-* directory in archive" "extract"
-    fi
-
-    # Verify checksums
-    cd "${DECRYPT_DIR}/${BACKUP_DIR}"
-    if [ ! -f checksums.sha256 ]; then
-        pg_restore_abort "checksums.sha256 missing" "verify-checksums"
-    fi
-    grep -v "checksums.sha256" checksums.sha256 | sha256sum -c --quiet 2>/dev/null \
-        || pg_restore_abort "Checksum verification failed" "verify-checksums"
-    echo "Checksums verified."
-
-    # Save manifest for post-restore verification
-    if [ -f manifest.json ]; then
-        cp manifest.json /tmp/backup-manifest.json
-    fi
-
-    # PG-only restores intentionally do not preserve bridge state. Remove any
-    # stale hash file so verification doesn't expect full-restore semantics.
-    rm -f /tmp/bridge-registration-hashes
-
-    # Restore all 4 PostgreSQL databases
-    echo "Restoring PostgreSQL databases..."
-    RESTORED_COMPONENTS=""
-    for db in lightfriend_db whatsapp_db signal_db telegram_db; do
-        dump_file="postgres/${db}.sql"
-        if [ ! -f "${dump_file}" ]; then
-            pg_restore_abort "Missing dump: ${dump_file}" "restore-${db}"
-        fi
-        echo "  Restoring ${db}..."
-        su postgres -c "psql -c \"DROP DATABASE IF EXISTS ${db}\"" 2>/dev/null || true
-        su postgres -c "psql -c \"CREATE DATABASE ${db}\"" 2>/dev/null \
-            || pg_restore_abort "Failed to create database ${db}" "restore-${db}"
-        su postgres -c "psql --set ON_ERROR_STOP=on -d ${db} < ${dump_file}" \
-            || pg_restore_abort "psql restore of ${db} failed" "restore-${db}"
-        for db_info in "lightfriend lightfriend_db" "whatsapp_user whatsapp_db" "signal_user signal_db" "telegram_user telegram_db"; do
-            owner=$(echo "$db_info" | awk '{print $1}')
-            owned_db=$(echo "$db_info" | awk '{print $2}')
-            if [ "${owned_db}" = "${db}" ]; then
-                su postgres -c "psql -c \"ALTER DATABASE ${db} OWNER TO ${owner}\"" 2>/dev/null || true
-                su postgres -c "psql -d ${db} -c \"GRANT ALL ON ALL TABLES IN SCHEMA public TO ${owner}\"" 2>/dev/null || true
-                su postgres -c "psql -d ${db} -c \"GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${owner}\"" 2>/dev/null || true
-                su postgres -c "psql -d ${db} -c \"DO \\\$\\\$ DECLARE r RECORD; BEGIN FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP EXECUTE 'ALTER TABLE public.' || quote_ident(r.tablename) || ' OWNER TO ${owner}'; END LOOP; END \\\$\\\$\"" 2>/dev/null || true
-            fi
-        done
-        echo "  ${db} restored."
-        RESTORED_COMPONENTS="${RESTORED_COMPONENTS}\"${db}\", "
-    done
-
-    # Clean stale connection data (no bridge/Matrix state to match)
-    echo "Cleaning stale connection data (PG-only restore, bridges start fresh)..."
-    su postgres -c "psql -d lightfriend_db" <<'CLEANUP'
-        TRUNCATE bridges;
-        TRUNCATE bridge_disconnection_events;
-        TRUNCATE contact_profiles CASCADE;
-        UPDATE user_secrets
-        SET matrix_username = NULL,
-            matrix_device_id = NULL,
-            encrypted_matrix_access_token = NULL,
-            encrypted_matrix_password = NULL,
-            encrypted_matrix_secret_storage_recovery_key = NULL;
-        UPDATE users SET matrix_e2ee_enabled = false;
-CLEANUP
-    echo "Connection data cleaned."
-
-    RESTORED_COMPONENTS="${RESTORED_COMPONENTS%, }"
-    rm -rf "${DECRYPT_DIR}"
-    echo "{\"status\": \"SUCCESS\", \"timestamp\": \"${RESTORE_TIMESTAMP}\", \"type\": \"pg_only\", \"components_restored\": [${RESTORED_COMPONENTS}]}" > "${RESTORE_STATUS}"
-    rm -f "${PG_BACKUP}"
-    FULL_RESTORE_DONE=true
-    echo "=== PG-only restore complete ==="
-fi
 fi
 
 # ── 2b. Restore lightfriend_db from seed dump if present ─────────────────
@@ -1104,26 +1008,88 @@ for i in $(seq 1 30); do
 done
 beacon "pg-ready"
 
+echo "=== TUWUNEL STARTUP ==="
+echo "[DEBUG] Tuwunel config check:"
+echo "  database_path: $(grep database_path /etc/tuwunel/tuwunel.toml 2>/dev/null | head -1)"
+echo "  database_backup_path: $(grep database_backup_path /etc/tuwunel/tuwunel.toml 2>/dev/null | head -1)"
+echo "  admin_signal_execute: $(grep admin_signal_execute /etc/tuwunel/tuwunel.toml 2>/dev/null | head -1)"
+echo "[DEBUG] /var/lib/tuwunel BEFORE tuwunel start:"
+echo "  file count: $(find /var/lib/tuwunel -type f 2>/dev/null | wc -l)"
+echo "  total size: $(du -sh /var/lib/tuwunel 2>/dev/null | awk '{print $1}' || echo '0')"
+echo "  SST files: $(find /var/lib/tuwunel -name '*.sst' 2>/dev/null | wc -l)"
+echo "  CURRENT: $(cat /var/lib/tuwunel/CURRENT 2>/dev/null || echo 'NOT FOUND')"
+echo "  IDENTITY: $(cat /var/lib/tuwunel/IDENTITY 2>/dev/null || echo 'NOT FOUND')"
+echo "  MANIFEST files: $(find /var/lib/tuwunel -name 'MANIFEST-*' 2>/dev/null)"
+echo "  OPTIONS files: $(find /var/lib/tuwunel -name 'OPTIONS-*' 2>/dev/null)"
+echo "  top-level listing:"
+ls -la /var/lib/tuwunel/ 2>/dev/null | head -25
+echo "  permissions: $(stat -c '%U:%G %a' /var/lib/tuwunel 2>/dev/null || echo 'stat failed')"
+echo "[DEBUG] /var/lib/tuwunel-backup (backup dir for BackupEngine):"
+echo "  exists: $([ -d /var/lib/tuwunel-backup ] && echo yes || echo no)"
+echo "  file count: $(find /var/lib/tuwunel-backup -type f 2>/dev/null | wc -l)"
+
 echo "Starting Tuwunel..."
 supervisorctl start tuwunel
 for i in $(seq 1 30); do
     if curl -sf http://localhost:8008/_matrix/client/versions > /dev/null 2>&1; then
-        echo "Tuwunel is ready."
+        echo "Tuwunel is ready after ${i}s."
         break
+    fi
+    if [ "$i" -eq 10 ] || [ "$i" -eq 20 ]; then
+        echo "[DEBUG] Tuwunel not ready yet (${i}s), checking logs..."
+        tail -5 /var/log/supervisor/tuwunel.log 2>/dev/null || echo "  no log yet"
     fi
     [ "$i" -eq 30 ] && echo "WARNING: Tuwunel not responding after 30s"
     sleep 1
 done
 beacon "tuwunel-ready"
 
+echo "[DEBUG] === TUWUNEL POST-START DIAGNOSTICS ==="
+echo "[DEBUG] Tuwunel stdout (ALL lines so far):"
+cat /var/log/supervisor/tuwunel.log 2>/dev/null || echo "    empty"
+echo "[DEBUG] Tuwunel stderr (ALL lines so far):"
+cat /var/log/supervisor/tuwunel-err.log 2>/dev/null || echo "    empty"
+echo "[DEBUG] KEY CHECK - did tuwunel use restored data or create fresh?"
+if grep -q "Created new RocksDB database" /var/log/supervisor/tuwunel.log 2>/dev/null; then
+    echo "  FAIL: Tuwunel created a NEW database - restore did NOT work!"
+    echo "  This means all bridge connections will be lost."
+else
+    echo "  OK: Tuwunel did NOT create new database - it used existing data"
+fi
+if grep -q "Opened database" /var/log/supervisor/tuwunel.log 2>/dev/null; then
+    COLS=$(grep "Opened database" /var/log/supervisor/tuwunel.log | grep -oP 'columns=\K[0-9]+')
+    SEQ=$(grep "Opened database" /var/log/supervisor/tuwunel.log | grep -oP 'sequence=\K[0-9]+')
+    echo "  Opened database: columns=$COLS, sequence=$SEQ"
+fi
+echo "[DEBUG] /var/lib/tuwunel AFTER tuwunel start:"
+echo "  file count: $(find /var/lib/tuwunel -type f 2>/dev/null | wc -l)"
+echo "  total size: $(du -sh /var/lib/tuwunel 2>/dev/null | awk '{print $1}' || echo '0')"
+echo "  SST files: $(find /var/lib/tuwunel -name '*.sst' 2>/dev/null | wc -l)"
+echo "  CURRENT now: $(cat /var/lib/tuwunel/CURRENT 2>/dev/null || echo 'NOT FOUND')"
+echo "=== TUWUNEL STARTUP END ==="
+
 echo "Registering bridge bots..."
 cd /app && bash register-bridge-bots.sh http://localhost:8008 2>&1 || true
 
 echo "Starting bridges..."
+echo "[DEBUG] whatsapp_db user_logins count: $(psql -h localhost -U whatsapp_user -d whatsapp_db -t -A -c "SELECT count(*) FROM user_logins" 2>/dev/null || echo 'query failed')"
+echo "[DEBUG] whatsapp_db whatsmeow_device count: $(psql -h localhost -U whatsapp_user -d whatsapp_db -t -A -c "SELECT count(*) FROM whatsmeow_device" 2>/dev/null || echo 'query failed or table missing')"
+echo "[DEBUG] lightfriend_db bridges count: $(psql -h localhost -U postgres -d lightfriend_db -t -A -c "SELECT count(*) FROM bridges" 2>/dev/null || echo 'query failed')"
+echo "[DEBUG] lightfriend_db bridges rows: $(psql -h localhost -U postgres -d lightfriend_db -t -A -c "SELECT id, user_id, bridge_type, status FROM bridges" 2>/dev/null || echo 'query failed')"
+echo "[DEBUG] lightfriend_db user_secrets matrix data (user 1): $(psql -h localhost -U postgres -d lightfriend_db -t -A -c "SELECT matrix_username IS NOT NULL as has_mx_user, matrix_device_id IS NOT NULL as has_device, encrypted_matrix_access_token IS NOT NULL as has_token FROM user_secrets WHERE user_id = 1" 2>/dev/null || echo 'query failed')"
+
 supervisorctl start mautrix-whatsapp
 supervisorctl start mautrix-signal
 supervisorctl start mautrix-telegram
 beacon "bridges-started"
+
+sleep 5
+echo "[DEBUG] Bridge post-start (5s):"
+echo "  whatsapp status: $(supervisorctl status mautrix-whatsapp 2>&1)"
+echo "  whatsapp stdout (first 20 lines):"
+head -20 /var/log/supervisor/whatsapp.log 2>/dev/null || echo "    empty"
+echo "  whatsapp stderr (first 10 lines):"
+head -10 /var/log/supervisor/whatsapp-err.log 2>/dev/null || echo "    empty"
 
 if [ "${SKIP_BACKEND}" != "true" ]; then
     sleep 2

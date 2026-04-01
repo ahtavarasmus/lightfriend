@@ -1,0 +1,7 @@
+ALTER TABLE ont_messages ADD COLUMN IF NOT EXISTS urgency TEXT;
+ALTER TABLE ont_messages ADD COLUMN IF NOT EXISTS category TEXT;
+ALTER TABLE ont_messages ADD COLUMN IF NOT EXISTS summary TEXT;
+ALTER TABLE ont_messages ADD COLUMN IF NOT EXISTS digest_delivered_at INTEGER;
+
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS digest_enabled BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS digest_time TEXT;
