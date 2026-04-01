@@ -17,14 +17,16 @@ async fn initialize_matrix_clients(state: Arc<AppState>) {
         .get_users_with_matrix_bridge_connections()
     {
         Ok(users) => {
-            let mut matrix_clients = state.matrix_clients.lock().await;
-            let mut sync_tasks = state.matrix_sync_tasks.lock().await;
-
-            // Remove any existing clients and sync tasks
-            for (_, task) in sync_tasks.drain() {
-                task.abort();
+            // Clear existing clients and sync tasks
+            {
+                let mut matrix_clients = state.matrix_clients.lock().await;
+                let mut sync_tasks = state.matrix_sync_tasks.lock().await;
+                for (_, task) in sync_tasks.drain() {
+                    task.abort();
+                }
+                matrix_clients.clear();
             }
-            matrix_clients.clear();
+            // Lock is released here - get_client can safely lock it again
 
             // Setup clients and sync tasks for active users.
             // Stagger initialization to avoid overwhelming tuwunel with 229+ concurrent syncs
@@ -41,8 +43,7 @@ async fn initialize_matrix_clients(state: Arc<AppState>) {
                     user_id
                 );
 
-                // Create and initialize client
-                match crate::utils::matrix_auth::get_client(user_id, &state).await {
+                match crate::utils::matrix_auth::get_cached_client(user_id, &state).await {
                     Ok(client) => {
                         // Add event handlers before storing/cloning the client
                         use matrix_sdk::room::Room;
@@ -66,20 +67,17 @@ async fn initialize_matrix_clients(state: Arc<AppState>) {
                             },
                         );
 
-                        // Store the client
-                        let client = Arc::new(client);
-                        matrix_clients.insert(user_id, client.clone());
-
                         // Create sync task
                         let sync_settings = matrix_sdk::config::SyncSettings::default()
                             .timeout(std::time::Duration::from_secs(30));
 
+                        let client_for_sync = client.clone();
                         let handle = tokio::spawn(async move {
                             let mut backoff_secs: u64 = 1;
                             const MAX_BACKOFF_SECS: u64 = 300;
 
                             loop {
-                                match client.sync(sync_settings.clone()).await {
+                                match client_for_sync.sync(sync_settings.clone()).await {
                                     Ok(_) => {
                                         tracing::debug!(
                                             "Sync completed normally for user {}",
@@ -104,7 +102,10 @@ async fn initialize_matrix_clients(state: Arc<AppState>) {
                             }
                         });
 
-                        sync_tasks.insert(user_id, handle);
+                        {
+                            let mut sync_tasks = state.matrix_sync_tasks.lock().await;
+                            sync_tasks.insert(user_id, handle);
+                        }
 
                         // Stagger sync starts: 100ms between each to avoid thundering herd on tuwunel
                         if idx < user_count - 1 {

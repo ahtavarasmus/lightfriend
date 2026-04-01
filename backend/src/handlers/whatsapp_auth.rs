@@ -102,10 +102,10 @@ async fn connect_whatsapp_with_retry(
                     // Add delay before retry
                     sleep(RETRY_DELAY).await;
 
-                    // Reinitialize client (bypass cache since we're recovering from an error)
-                    match matrix_auth::get_client(user_id, state).await {
+                    // Reinitialize client
+                    match matrix_auth::get_cached_client(user_id, state).await {
                         Ok(new_client) => {
-                            *client = new_client.into(); // Update the client reference
+                            *client = new_client; // Update the client reference
                             tracing::info!("Client reinitialized, retrying operation");
                             continue;
                         }
@@ -463,9 +463,9 @@ async fn connect_whatsapp_phone_with_retry(
                     );
                     clear_user_store(&username).await?;
                     sleep(RETRY_DELAY).await;
-                    match matrix_auth::get_client(user_id, state).await {
+                    match matrix_auth::get_cached_client(user_id, state).await {
                         Ok(new_client) => {
-                            *client = new_client.into();
+                            *client = new_client;
                             continue;
                         }
                         Err(init_err) => return Err(init_err),

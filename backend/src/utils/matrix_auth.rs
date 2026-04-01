@@ -429,7 +429,7 @@ async fn try_bootstrap_cross_signing(
     }
 }
 
-pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixClient> {
+async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixClient> {
     tracing::info!("🔄 Starting get_client for user_id: {}", user_id);
 
     // Reuse existing client if one is already initialized for this user.

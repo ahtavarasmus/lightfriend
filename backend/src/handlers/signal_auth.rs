@@ -135,10 +135,10 @@ async fn connect_signal_with_retry(
                     // Add delay before retry
                     sleep(RETRY_DELAY).await;
 
-                    // Reinitialize client (bypass cache since we're recovering from an error)
-                    match matrix_auth::get_client(user_id, state).await {
+                    // Reinitialize client
+                    match matrix_auth::get_cached_client(user_id, state).await {
                         Ok(new_client) => {
-                            *client = new_client.into(); // Update the client reference
+                            *client = new_client; // Update the client reference
                             tracing::info!("Client reinitialized, retrying operation");
                             continue;
                         }
