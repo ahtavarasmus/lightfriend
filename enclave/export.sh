@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC2009,SC2012,SC2086
 set -euo pipefail
 
 # Full encrypted export of all data stores from running enclave.
