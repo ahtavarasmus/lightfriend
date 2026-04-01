@@ -550,6 +550,10 @@ async fn main() {
             "/api/trust-chain",
             get(trust_chain_handlers::get_trust_chain),
         )
+        .route(
+            "/api/trust-chain/verify",
+            post(trust_chain_handlers::verify_live),
+        )
         .route("/api/unsubscribe", get(admin_handlers::unsubscribe))
         .route("/api/login", post(auth_handlers::login))
         .route("/api/register", post(auth_handlers::register))
