@@ -407,25 +407,20 @@ jobs:
           done
           echo "Stale signals cleaned"
 
-          STALE_STATE=$(aws s3 cp "s3://$S3_BUCKET/deploy/deploy-state.json" - 2>/dev/null || echo "")
-          if [ -n "$STALE_STATE" ]; then
-            STALE_STATUS=$(echo "$STALE_STATE" | jq -r '.state // "unknown"')
-            ORPHAN_INSTANCE=$(echo "$STALE_STATE" | jq -r '.new_instance // ""')
-            STALE_RUN=$(echo "$STALE_STATE" | jq -r '.github_run_id // "unknown"')
-
-            if [ "$STALE_STATUS" != "complete" ] && [ -n "$ORPHAN_INSTANCE" ]; then
-              # CRITICAL: never terminate the instance SSM says is live
-              if [ "$ORPHAN_INSTANCE" = "$CURRENT_LIVE" ]; then
-                echo "WARNING: Orphan instance $ORPHAN_INSTANCE is the current live instance - NOT terminating"
-              else
-                echo "WARNING: Found orphaned deploy from run $STALE_RUN (state: $STALE_STATUS)"
-                echo "Terminating orphan instance $ORPHAN_INSTANCE..."
-                aws ec2 terminate-instances --instance-ids "$ORPHAN_INSTANCE" 2>/dev/null || true
-                echo "Orphan cleaned up"
-              fi
+          # Terminate ALL running lightfriend instances except the current live one.
+          # This catches orphans from failed deploys, manual interventions, etc.
+          echo "Checking for orphaned instances..."
+          ALL_INSTANCES=$(aws ec2 describe-instances \
+            --filters "Name=instance-state-name,Values=running" "Name=tag:Name,Values=lightfriend-*" \
+            --query 'Reservations[*].Instances[*].InstanceId' --output text 2>/dev/null || echo "")
+          for INST in $ALL_INSTANCES; do
+            if [ "$INST" != "$CURRENT_LIVE" ]; then
+              echo "Terminating orphan instance: $INST"
+              aws ec2 terminate-instances --instance-ids "$INST" 2>/dev/null || true
             fi
-            aws s3 rm "s3://$S3_BUCKET/deploy/deploy-state.json" 2>/dev/null || true
-          fi
+          done
+
+          aws s3 rm "s3://$S3_BUCKET/deploy/deploy-state.json" 2>/dev/null || true
 
       # ── Step 0: Ensure launch template is up to date ──
       # Skipped until TF_API_TOKEN is configured. Run terraform apply manually
