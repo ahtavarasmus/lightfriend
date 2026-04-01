@@ -67,9 +67,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release && \
     sccache --show-stats && \
     cp target/release/backend /backend && \
-    cp target/release/tuwunel_checkpoint /tuwunel_checkpoint && \
-    strip /tuwunel_checkpoint && \
-    strip /backend
+    cp target/release/tuwunel_restore /tuwunel_restore && \
+    strip /backend && \
+    strip /tuwunel_restore
 
 # ── Stage 2: Build Frontend (Yew/WASM) ──────────────────────────────────────
 
@@ -183,7 +183,7 @@ RUN mkdir -p /opt/mautrix-telegram && \
 # ── Copy Lightfriend backend ──────────────────────────────────────────────
 WORKDIR /app
 COPY --from=builder /backend ./backend
-COPY --from=builder /tuwunel_checkpoint /usr/local/bin/tuwunel_checkpoint
+COPY --from=builder /tuwunel_restore /usr/local/bin/tuwunel_restore
 # ── Copy Marlin Oyster binaries (production only, skipped for local builds) ──
 RUN --mount=from=marlin-builder,target=/marlin-img \
     if [ "$BUILD_MODE" = "production" ]; then \
@@ -213,6 +213,7 @@ RUN mkdir -p \
     /data/bridges/telegram \
     /data/seed \
     /var/lib/tuwunel \
+    /var/lib/tuwunel-backup \
     /etc/tuwunel \
     /var/log/supervisor \
     /run/postgresql

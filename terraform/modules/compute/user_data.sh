@@ -1184,27 +1184,55 @@ EOF
     RESTORE_TYPE=$(echo "$RESTORE_MANIFEST" | jq -r '.restore_type // "full"')
     DEPLOY_ID=$(echo "$RESTORE_MANIFEST" | jq -r '.deploy_id // "unknown"')
 
-    if [ -z "$BACKUP_KEY" ]; then
-        echo "{\"status\": \"INVALID_RESTORE_MANIFEST\", \"instance_id\": \"$INSTANCE_ID\"}" | \
-            aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
-        echo "FATAL: Restore manifest missing backup_key"
-        exit 1
-    fi
-
     # Re-download .env (CI may have uploaded a fresh one from old instance)
     aws s3 cp "s3://$BUCKET/config/.env" /opt/lightfriend/.env
     chmod 600 /opt/lightfriend/.env
 
-    # Restore enclave from the exact backup artifact in the manifest
-    echo "Restoring from $BACKUP_KEY..."
-    set -o pipefail
-    if ! /opt/lightfriend/restore-enclave.sh "$BACKUP_KEY" "$DEPLOY_ID" "$RESTORE_TYPE" 2>&1 | tee /tmp/launch.log; then
-        RESTORE_LOG=$(cat /tmp/restore-enclave-debug.log 2>/dev/null | tail -50 | tr '\n' '|' | sed 's/"/\\"/g' | head -c 1500)
-        echo "{\"status\": \"RESTORE_FAILED\", \"instance_id\": \"$INSTANCE_ID\", \"log\": \"$RESTORE_LOG\"}" | \
-            aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
-        exit 1
+    if [ "$RESTORE_TYPE" = "seed_only" ]; then
+        # Seed-only mode: CI already placed seed SQL at /opt/lightfriend/seed/lightfriend_db.sql
+        # Launch enclave without backup restore - entrypoint.sh will find and restore the seed
+        echo "=== Seed-only mode: launching enclave without backup restore ==="
+        echo "Seed file: $(ls -la /opt/lightfriend/seed/lightfriend_db.sql 2>&1)"
+
+        rm -f "$VERIFY"
+        VERIFY_SRC="/opt/lightfriend/backups/verify-result.json"
+        rm -f "$VERIFY_SRC"
+
+        if ! /opt/lightfriend/launch-enclave.sh 2>&1 | tee /tmp/launch.log; then
+            echo "{\"status\": \"LAUNCH_FAILED\", \"instance_id\": \"$INSTANCE_ID\"}" | \
+                aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
+            exit 1
+        fi
+
+        echo "Polling for verify result..."
+        for i in $(seq 1 180); do
+            if [ -s "$VERIFY_SRC" ]; then
+                cp "$VERIFY_SRC" "$VERIFY"
+                rm -f "$VERIFY_SRC"
+                echo "Verify result received after $((i * 5))s"
+                break
+            fi
+            sleep 5
+        done
+    else
+        # Normal backup restore
+        if [ -z "$BACKUP_KEY" ] || [ "$BACKUP_KEY" = "none" ]; then
+            echo "{\"status\": \"INVALID_RESTORE_MANIFEST\", \"instance_id\": \"$INSTANCE_ID\"}" | \
+                aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
+            echo "FATAL: Restore manifest missing backup_key"
+            exit 1
+        fi
+
+        echo "Restoring from $BACKUP_KEY..."
+        set -o pipefail
+        if ! /opt/lightfriend/restore-enclave.sh "$BACKUP_KEY" "$DEPLOY_ID" "$RESTORE_TYPE" 2>&1 | tee /tmp/launch.log; then
+            RESTORE_LOG=$(cat /tmp/restore-enclave-debug.log 2>/dev/null | tail -50 | tr '\n' '|' | sed 's/"/\\"/g' | head -c 1500)
+            echo "{\"status\": \"RESTORE_FAILED\", \"instance_id\": \"$INSTANCE_ID\", \"log\": \"$RESTORE_LOG\"}" | \
+                aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
+            exit 1
+        fi
+        set +o pipefail
     fi
-    set +o pipefail
 
     if [ -s "$VERIFY" ]; then
         aws s3 cp "$VERIFY" "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"

@@ -68,8 +68,8 @@ name = "migrate_to_pg"
 path = "src/bin/migrate_to_pg.rs"
 
 [[bin]]
-name = "tuwunel_checkpoint"
-path = "src/bin/tuwunel_checkpoint.rs"
+name = "tuwunel_restore"
+path = "src/bin/tuwunel_restore.rs"
 
 [dev-dependencies]
 serial_test = "3.0"  # For tests that modify environment variables
