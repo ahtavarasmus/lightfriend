@@ -1,89 +1,76 @@
 #!/bin/bash
-# S3 signal-based export watcher for Nitro enclave.
+# Export watcher for Nitro enclave.
 #
-# Polls the host's seed HTTP server (port 9080, bridged via VSOCK) for an
-# export-request.json file. When found, runs export.sh, then writes a
-# completion marker back to the host via HTTP PUT (port 9081, bridged via
-# VSOCK).
+# Polls the host's seed HTTP server for export-request.json.
+# When found, runs export.sh with presigned URLs from the trigger.
+# The enclave uploads everything directly to S3/R2 via curl - no host middleman.
 #
-# This replaces the old VSOCK port 9003 socat-based trigger which was
-# unreliable for long-running exports because VSOCK drops idle connections.
+# Two trigger types:
+#   "deploy"  - CI generated presigned URLs, uploads backup + completion marker
+#   "hourly"  - Host generated presigned URLs, uploads backup + health + R2 + tier promotions
 
 set -uo pipefail
 
 POLL_URL="http://127.0.0.1:9080/export-request.json"
-RESULT_UPLOAD_URL="http://127.0.0.1:9081/upload"
 POLL_INTERVAL=5
-
 LAST_PROCESSED=""
 
 echo "export-watcher: starting (poll every ${POLL_INTERVAL}s)"
-echo "export-watcher: poll URL = ${POLL_URL}"
-echo "export-watcher: result upload URL = ${RESULT_UPLOAD_URL}"
 
 while true; do
-    # Check for export request via the seed HTTP server
     REQUEST=$(curl -sf --max-time 5 "${POLL_URL}" 2>/dev/null || true)
 
     if [ -n "${REQUEST}" ] && [ "${REQUEST}" != "${LAST_PROCESSED}" ] && echo "${REQUEST}" | jq -e '.action == "export"' >/dev/null 2>&1; then
         TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-        echo "export-watcher: export request received at ${TIMESTAMP}"
-        echo "export-watcher: request payload: ${REQUEST}"
+        EXPORT_TYPE=$(echo "${REQUEST}" | jq -r '.type // "unknown"')
+        echo "export-watcher: ${EXPORT_TYPE} export request at ${TIMESTAMP}"
 
-        # Write in-progress marker so the host knows we started
-        echo "{\"status\":\"IN_PROGRESS\",\"started_at\":\"${TIMESTAMP}\"}" > /tmp/export-complete-payload.json
-        curl -sf --max-time 10 -T /tmp/export-complete-payload.json "${RESULT_UPLOAD_URL}/export-complete.json" 2>/dev/null || true
+        # Extract all presigned URLs from trigger into env vars for export.sh
+        export EXPORT_TYPE="${EXPORT_TYPE}"
+        export BACKUP_S3_KEY=$(echo "${REQUEST}" | jq -r '.backup_s3_key // ""')
+        export PRESIGNED_PUT_BACKUP_S3=$(echo "${REQUEST}" | jq -r '.presigned_put_backup_s3 // ""')
+        export PRESIGNED_PUT_BACKUP_R2=$(echo "${REQUEST}" | jq -r '.presigned_put_backup_r2 // ""')
+        export PRESIGNED_PUT_HEALTH=$(echo "${REQUEST}" | jq -r '.presigned_put_health // ""')
+        export PRESIGNED_PUT_COMPLETE=$(echo "${REQUEST}" | jq -r '.presigned_put_complete // ""')
+        export PROMOTE_JSON=$(echo "${REQUEST}" | jq -c '.promote // []')
 
-        # Run the existing export logic
+        # Run export
         /app/export.sh 2>&1 | tee /tmp/export-watcher-last-run.log
         EXIT_CODE=${PIPESTATUS[0]}
 
         FINISHED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
         if [ ${EXIT_CODE} -eq 0 ]; then
-            echo "export-watcher: export succeeded at ${FINISHED_AT}"
-
-            # Read the status file that export.sh wrote for detailed info
-            STATUS_JSON=""
-            if [ -f /data/seed/export-status.json ]; then
-                STATUS_JSON=$(cat /data/seed/export-status.json 2>/dev/null || echo "")
-            fi
-
-            # Build completion payload with details from export-status.json
-            if [ -n "${STATUS_JSON}" ]; then
-                BACKUP_FILE=$(echo "${STATUS_JSON}" | jq -r '.file // ""')
-                BACKUP_SIZE=$(echo "${STATUS_JSON}" | jq -r '.size_bytes // 0')
-                USER_COUNT=$(echo "${STATUS_JSON}" | jq -r '.user_count // 0')
-                COMPLETION="{\"status\":\"SUCCESS\",\"started_at\":\"${TIMESTAMP}\",\"finished_at\":\"${FINISHED_AT}\",\"file\":\"${BACKUP_FILE}\",\"size_bytes\":${BACKUP_SIZE},\"user_count\":${USER_COUNT}}"
-            else
-                COMPLETION="{\"status\":\"SUCCESS\",\"started_at\":\"${TIMESTAMP}\",\"finished_at\":\"${FINISHED_AT}\"}"
-            fi
-
-            echo "${COMPLETION}" > /tmp/export-complete-payload.json && curl -sf --max-time 10 -T /tmp/export-complete-payload.json "${RESULT_UPLOAD_URL}/export-complete.json" 2>/dev/null
-            if [ $? -ne 0 ]; then
-                echo "export-watcher: WARNING - failed to upload completion marker, retrying..."
-                sleep 2
-                echo "${COMPLETION}" > /tmp/export-complete-payload.json && curl -sf --max-time 10 -T /tmp/export-complete-payload.json "${RESULT_UPLOAD_URL}/export-complete.json" 2>/dev/null || \
-                    echo "export-watcher: ERROR - completion marker upload failed after retry"
-            fi
+            echo "export-watcher: ${EXPORT_TYPE} export succeeded at ${FINISHED_AT}"
         else
-            echo "export-watcher: export FAILED with exit code ${EXIT_CODE} at ${FINISHED_AT}"
+            echo "export-watcher: ${EXPORT_TYPE} export FAILED (exit ${EXIT_CODE}) at ${FINISHED_AT}"
 
-            # Upload full export log to host for debugging (via HTTP PUT to seed server)
-            if [ -f /tmp/export-watcher-last-run.log ]; then
-                curl -sf --max-time 30 -T /tmp/export-watcher-last-run.log "${RESULT_UPLOAD_URL}/export-debug.log" 2>/dev/null || true
-            fi
-            # Grab last 40 lines of output for error context
+            # Try to upload failure status via presigned URL
             ERROR_TAIL=$(tail -40 /tmp/export-watcher-last-run.log 2>/dev/null | tr '\n' ' ' | head -c 4000 || echo "no output")
 
-            FAILURE="{\"status\":\"FAILED\",\"exit_code\":${EXIT_CODE},\"started_at\":\"${TIMESTAMP}\",\"finished_at\":\"${FINISHED_AT}\",\"error\":\"${ERROR_TAIL}\"}"
-            echo "${FAILURE}" > /tmp/export-complete-payload.json && curl -sf --max-time 10 -T /tmp/export-complete-payload.json "${RESULT_UPLOAD_URL}/export-complete.json" 2>/dev/null || \
-                echo "export-watcher: ERROR - failed to upload failure marker"
+            # For deploy: write failure to completion URL
+            if [ -n "${PRESIGNED_PUT_COMPLETE}" ]; then
+                echo "{\"status\":\"FAILED\",\"exit_code\":${EXIT_CODE},\"error\":\"${ERROR_TAIL}\"}" | \
+                    curl -sf --max-time 30 -X PUT -H "Content-Type: application/json" \
+                    --data-binary @- -x http://127.0.0.1:3128 \
+                    "${PRESIGNED_PUT_COMPLETE}" 2>/dev/null || true
+            fi
+
+            # For hourly: write failure to health URL
+            if [ -n "${PRESIGNED_PUT_HEALTH}" ]; then
+                echo "{\"last_failure\":\"${TIMESTAMP}\",\"step\":\"export\",\"exit_code\":${EXIT_CODE}}" | \
+                    curl -sf --max-time 30 -X PUT -H "Content-Type: application/json" \
+                    --data-binary @- -x http://127.0.0.1:3128 \
+                    "${PRESIGNED_PUT_HEALTH}" 2>/dev/null || true
+            fi
         fi
 
-        # Remember we processed this request (use timestamp as dedup key)
+        # Clean env vars
+        unset EXPORT_TYPE BACKUP_S3_KEY PRESIGNED_PUT_BACKUP_S3 PRESIGNED_PUT_BACKUP_R2
+        unset PRESIGNED_PUT_HEALTH PRESIGNED_PUT_COMPLETE PROMOTE_JSON
+
         LAST_PROCESSED="${REQUEST}"
-        echo "export-watcher: cooldown 30s before resuming poll"
+        echo "export-watcher: cooldown 30s"
         sleep 30
     fi
 

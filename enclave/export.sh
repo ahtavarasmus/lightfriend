@@ -422,26 +422,92 @@ ENCRYPTED_SIZE=$(stat -c%s "${ENCRYPTED}" 2>/dev/null || stat -f%z "${ENCRYPTED}
 echo "  Encrypted: ${ENCRYPTED_SIZE} bytes, decrypt-verify OK"
 echo "Phase D complete."
 
-# ── Phase E: Transfer to host ─────────────────────────────────────────────────
-# Raw VSOCK drops large payloads. Use HTTP PUT through the VSOCK-bridged
-# backup receiver on host port 9081.
-if [ -e /dev/vsock ]; then
-    echo "Phase E: Transferring backup to host via HTTP..."
-    # Port 9081 VSOCK bridge managed by supervisord (vsock-bridge-9081)
-    BACKUP_NAME=$(basename "${ENCRYPTED}")
-    curl -sf --max-time 600 -T "${ENCRYPTED}" \
-        "http://127.0.0.1:9081/upload/${BACKUP_NAME}" \
-        || abort "HTTP backup transfer to host failed" "transfer"
+# ── Phase E: Upload via presigned URLs ────────────────────────────────────────
+# All uploads go directly to S3/R2 via presigned URLs through HTTP_PROXY.
+# The trigger JSON (from CI or host timer) provides all URLs.
 
-    echo "Phase E complete (${ENCRYPTED_SIZE} bytes transferred)."
+BACKUP_SHA=$(sha256sum "${ENCRYPTED}" | awk '{print $1}')
+PROXY="http://127.0.0.1:3128"
+
+echo "Phase E: Uploading backup..."
+echo "  S3 key: ${BACKUP_S3_KEY:-unknown}"
+echo "  Size: ${ENCRYPTED_SIZE} bytes"
+echo "  SHA256: ${BACKUP_SHA}"
+echo "  Export type: ${EXPORT_TYPE:-unknown}"
+
+# E1: Upload backup to S3
+if [ -n "${PRESIGNED_PUT_BACKUP_S3:-}" ]; then
+    echo "  E1: Uploading to S3..."
+    curl -sf --max-time 600 \
+        -X PUT -H "Content-Type: application/octet-stream" \
+        --upload-file "${ENCRYPTED}" \
+        -x "$PROXY" "${PRESIGNED_PUT_BACKUP_S3}" \
+        || abort "S3 backup upload failed" "upload-s3"
+    echo "  E1: S3 OK"
+else
+    abort "No presigned S3 URL provided" "upload-s3"
 fi
 
-# ── Write success status ────────────────────────────────────────────────────
+# E2: Upload backup to R2 (if URL provided)
+if [ -n "${PRESIGNED_PUT_BACKUP_R2:-}" ]; then
+    echo "  E2: Replicating to R2..."
+    curl -sf --max-time 600 \
+        -X PUT -H "Content-Type: application/octet-stream" \
+        --upload-file "${ENCRYPTED}" \
+        -x "$PROXY" "${PRESIGNED_PUT_BACKUP_R2}" \
+        || echo "  E2: WARNING - R2 replication failed (non-fatal)"
+else
+    echo "  E2: No R2 URL, skipping replication"
+fi
+
+# E3: Promote to daily/weekly/monthly tiers (download from S3, re-upload to tier key)
+if [ -n "${PROMOTE_JSON:-}" ] && [ "${PROMOTE_JSON}" != "[]" ]; then
+    echo "  E3: Promoting to tiers..."
+    echo "${PROMOTE_JSON}" | jq -c '.[]' 2>/dev/null | while read -r promo; do
+        TIER_KEY=$(echo "$promo" | jq -r '.tier_key')
+        PROMO_GET=$(echo "$promo" | jq -r '.presigned_get')
+        PROMO_PUT=$(echo "$promo" | jq -r '.presigned_put')
+        echo "    Promoting to ${TIER_KEY}..."
+        # Download from hourly, re-upload to tier
+        curl -sf --max-time 300 -x "$PROXY" -o /tmp/promote-tmp.enc "$PROMO_GET" \
+            && curl -sf --max-time 300 -X PUT -H "Content-Type: application/octet-stream" \
+                --upload-file /tmp/promote-tmp.enc -x "$PROXY" "$PROMO_PUT" \
+            && echo "    OK: ${TIER_KEY}" \
+            || echo "    WARNING: promotion to ${TIER_KEY} failed (non-fatal)"
+        rm -f /tmp/promote-tmp.enc
+    done
+else
+    echo "  E3: No tier promotions"
+fi
+
+# E4: Upload completion/health marker
+if [ "${EXPORT_TYPE:-}" = "deploy" ] && [ -n "${PRESIGNED_PUT_COMPLETE:-}" ]; then
+    echo "  E4: Writing deploy completion to S3..."
+    echo "{\"status\":\"SUCCESS\",\"backup_key\":\"${BACKUP_S3_KEY:-}\",\"backup_sha256\":\"${BACKUP_SHA}\",\"backup_size\":${ENCRYPTED_SIZE},\"user_count\":${USER_COUNT},\"timestamp\":\"${TIMESTAMP}\"}" | \
+        curl -sf --max-time 30 -X PUT -H "Content-Type: application/json" \
+        --data-binary @- -x "$PROXY" "${PRESIGNED_PUT_COMPLETE}" \
+        || abort "Failed to upload completion marker" "upload-complete"
+    echo "  E4: Deploy completion OK"
+elif [ -n "${PRESIGNED_PUT_HEALTH:-}" ]; then
+    echo "  E4: Writing backup health to S3..."
+    echo "{\"last_success\":\"${TIMESTAMP}\",\"backup_key\":\"${BACKUP_S3_KEY:-}\",\"backup_size\":${ENCRYPTED_SIZE},\"backup_sha256\":\"${BACKUP_SHA}\",\"user_count\":${USER_COUNT}}" | \
+        curl -sf --max-time 30 -X PUT -H "Content-Type: application/json" \
+        --data-binary @- -x "$PROXY" "${PRESIGNED_PUT_HEALTH}" \
+        || echo "  E4: WARNING - health marker upload failed (non-fatal)"
+    echo "  E4: Health marker OK"
+fi
+
+echo "Phase E complete."
+
+# ── Write local success status ────────────────────────────────────────────────
 
 write_status "SUCCESS" "${ENCRYPTED_SIZE}" "${USER_COUNT}"
 
 echo ""
 echo "=== Export Complete ==="
-echo "File: ${ENCRYPTED}"
-echo "Size: ${ENCRYPTED_SIZE} bytes"
-echo "Users: ${USER_COUNT}"
+echo "  Type: ${EXPORT_TYPE:-unknown}"
+echo "  File: ${ENCRYPTED}"
+echo "  Size: ${ENCRYPTED_SIZE} bytes"
+echo "  SHA256: ${BACKUP_SHA}"
+echo "  Users: ${USER_COUNT}"
+echo "  S3 key: ${BACKUP_S3_KEY:-}"

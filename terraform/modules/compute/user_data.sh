@@ -55,8 +55,9 @@ chown -R ec2-user:ec2-user /opt/lightfriend
 
 # ── Install HTTP forward proxy for enclave outbound traffic ──────────────────
 
-echo "Installing squid and socat for enclave networking..."
-dnf install -y squid socat jq || echo "WARNING: Failed to install squid/socat/jq"
+echo "Installing squid, socat, jq, and boto3 for enclave networking + presigned URLs..."
+dnf install -y squid socat jq python3-pip || echo "WARNING: Failed to install packages"
+pip3 install boto3 2>/dev/null || echo "WARNING: Failed to install boto3"
 
 # Configure squid - localhost only, no caching, permissive HTTPS CONNECT
 mkdir -p /var/spool/squid /var/log/squid
@@ -959,93 +960,113 @@ chmod +x /opt/lightfriend/promote-backup.sh
 
 cat > /opt/lightfriend/scheduled-backup.sh <<'SCRIPT'
 #!/bin/bash
-set -euo pipefail
+# Hourly backup: generate presigned URLs, trigger enclave export, enclave does everything.
+# Host only generates URLs and writes the trigger. Enclave uploads directly to S3/R2.
+
 LOCKFILE="/tmp/lightfriend-backup.lock"
 exec 200>"$LOCKFILE"
 flock -n 200 || { echo "Skipping: another backup/deploy is running"; exit 0; }
-LOG="/var/log/lightfriend-backup.log"
-TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-echo "=== Scheduled full snapshot backup: $${TIMESTAMP} ===" >> "$LOG"
 
+TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
 BUCKET=$(grep S3_BACKUP_BUCKET /opt/lightfriend/.env | cut -d= -f2)
+REGION=$(grep AWS_REGION /opt/lightfriend/.env | cut -d= -f2)
 
-# Step 1: Trigger full export inside enclave
-/opt/lightfriend/trigger-export.sh >> "$LOG" 2>&1 || {
-    echo "FAILED: full export trigger failed at $${TIMESTAMP}" >> "$LOG"
-    # Write failure marker to S3 so deploys can detect stale backups
-    [ -n "$${BUCKET:-}" ] && echo "{\"last_failure\": \"$${TIMESTAMP}\"}" | \
-        aws s3 cp - "s3://$${BUCKET}/backups/backup-health.json" 2>/dev/null || true
-    exit 1
-}
+BACKUP_S3_KEY="backups/hourly/lightfriend-full-backup-$${TIMESTAMP}.tar.gz.enc"
+HEALTH_S3_KEY="backups/backup-health.json"
 
-# Step 2: Upload to S3 hourly tier (upload-backup.sh verifies size/SHA after upload)
-BACKUP_TIER=hourly /opt/lightfriend/upload-backup.sh >> "$LOG" 2>&1 || {
-    echo "FAILED: S3 upload/verify failed at $${TIMESTAMP}" >> "$LOG"
-    [ -n "$${BUCKET:-}" ] && echo "{\"last_failure\": \"$${TIMESTAMP}\"}" | \
-        aws s3 cp - "s3://$${BUCKET}/backups/backup-health.json" 2>/dev/null || true
-    exit 1
-}
+echo "=== Hourly backup: $${TIMESTAMP} ==="
 
-RESULT_JSON=$(cat /opt/lightfriend/last-upload.json 2>/dev/null || echo "")
-BACKUP_KEY=$(echo "$RESULT_JSON" | jq -r '.backup_key // empty')
-BACKUP_SHA=$(echo "$RESULT_JSON" | jq -r '.sha256 // empty')
-if [ -z "$BACKUP_KEY" ] || [ -z "$BACKUP_SHA" ]; then
-    echo "FAILED: upload result missing backup_key or sha256 at $${TIMESTAMP}" >> "$LOG"
-    [ -n "$${BUCKET:-}" ] && echo "{\"last_failure\": \"$${TIMESTAMP}\"}" | \
-        aws s3 cp - "s3://$${BUCKET}/backups/backup-health.json" 2>/dev/null || true
-    exit 1
-fi
+# Generate presigned PUT URLs for S3 (backup + health marker)
+PRESIGNED_BACKUP=$(python3 -c "
+import boto3
+s3 = boto3.client('s3', region_name='$${REGION}')
+print(s3.generate_presigned_url('put_object',
+    Params={'Bucket':'$${BUCKET}','Key':'$${BACKUP_S3_KEY}','ContentType':'application/octet-stream'},
+    ExpiresIn=3600))")
 
-# Step 3: Independently re-download and validate the exact encrypted artifact
-TMP_BACKUP=$(mktemp /tmp/lightfriend-scheduled-backup.XXXXXX.enc)
-trap 'rm -f "$TMP_BACKUP"' EXIT
-aws s3 cp "s3://$${BUCKET}/$${BACKUP_KEY}" "$TMP_BACKUP" >> "$LOG" 2>&1 || {
-    echo "FAILED: could not re-download uploaded backup at $${TIMESTAMP}" >> "$LOG"
-    [ -n "$${BUCKET:-}" ] && echo "{\"last_failure\": \"$${TIMESTAMP}\"}" | \
-        aws s3 cp - "s3://$${BUCKET}/backups/backup-health.json" 2>/dev/null || true
-    exit 1
-}
-ACTUAL_SHA=$(sha256sum "$TMP_BACKUP" | awk '{print $1}')
-if [ "$ACTUAL_SHA" != "$BACKUP_SHA" ]; then
-    echo "FAILED: uploaded backup sha mismatch at $${TIMESTAMP}" >> "$LOG"
-    [ -n "$${BUCKET:-}" ] && echo "{\"last_failure\": \"$${TIMESTAMP}\"}" | \
-        aws s3 cp - "s3://$${BUCKET}/backups/backup-health.json" 2>/dev/null || true
-    exit 1
-fi
+PRESIGNED_HEALTH=$(python3 -c "
+import boto3
+s3 = boto3.client('s3', region_name='$${REGION}')
+print(s3.generate_presigned_url('put_object',
+    Params={'Bucket':'$${BUCKET}','Key':'$${HEALTH_S3_KEY}','ContentType':'application/json'},
+    ExpiresIn=3600))")
 
-# Step 4: Promote selected hourly snapshots into daily/weekly/monthly tiers
-/opt/lightfriend/promote-backup.sh "$BACKUP_KEY" >> "$LOG" 2>&1 || {
-    echo "FAILED: backup promotion failed at $${TIMESTAMP}" >> "$LOG"
-    [ -n "$${BUCKET:-}" ] && echo "{\"last_failure\": \"$${TIMESTAMP}\"}" | \
-        aws s3 cp - "s3://$${BUCKET}/backups/backup-health.json" 2>/dev/null || true
-    exit 1
-}
-
-# Step 5: Replicate to Cloudflare R2 (off-AWS disaster recovery)
+# Generate presigned PUT URL for R2 (off-AWS replica)
 R2_BUCKET=$(grep R2_BACKUP_BUCKET /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
 R2_ENDPOINT=$(grep R2_ENDPOINT_URL /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
-R2_ACCESS_KEY=$(grep R2_ACCESS_KEY_ID /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
-R2_SECRET_KEY=$(grep R2_SECRET_ACCESS_KEY /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
-if [ -n "$${R2_BUCKET}" ] && [ -n "$${R2_ENDPOINT}" ] && [ -n "$${R2_ACCESS_KEY}" ]; then
-    echo "Replicating backup to Cloudflare R2..." >> "$LOG"
-    AWS_ACCESS_KEY_ID="$${R2_ACCESS_KEY}" AWS_SECRET_ACCESS_KEY="$${R2_SECRET_KEY}" \
-        aws s3 cp "$TMP_BACKUP" "s3://$${R2_BUCKET}/$${BACKUP_KEY}" \
-        --endpoint-url "$${R2_ENDPOINT}" >> "$LOG" 2>&1 && \
-        echo "R2 replication: OK ($${BACKUP_KEY})" >> "$LOG" || \
-        echo "WARNING: R2 replication failed (non-fatal, S3 primary is safe)" >> "$LOG"
-else
-    echo "R2 not configured, skipping off-AWS replication" >> "$LOG"
+R2_ACCESS=$(grep R2_ACCESS_KEY_ID /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
+R2_SECRET=$(grep R2_SECRET_ACCESS_KEY /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
+PRESIGNED_R2=""
+if [ -n "$${R2_BUCKET:-}" ] && [ -n "$${R2_ENDPOINT:-}" ] && [ -n "$${R2_ACCESS:-}" ]; then
+    PRESIGNED_R2=$(python3 -c "
+import boto3
+s3 = boto3.client('s3',
+    endpoint_url='$${R2_ENDPOINT}',
+    aws_access_key_id='$${R2_ACCESS}',
+    aws_secret_access_key='$${R2_SECRET}',
+    region_name='auto')
+print(s3.generate_presigned_url('put_object',
+    Params={'Bucket':'$${R2_BUCKET}','Key':'$${BACKUP_S3_KEY}','ContentType':'application/octet-stream'},
+    ExpiresIn=3600))")
 fi
 
-# Step 6: Clean up old local backups (keep last 3)
-cd /opt/lightfriend/backups
-ls -t *.tar.gz.enc 2>/dev/null | tail -n +4 | xargs rm -f 2>/dev/null || true
+# Generate presigned URLs for tier promotion (daily/weekly/monthly copies)
+# These are GET (to read hourly) + PUT (to write tier copy) pairs
+UTC_HOUR=$(date -u +%H)
+UTC_DOM=$(date -u +%d)
+UTC_DOW=$(date -u +%u)
+PROMOTE_JSON="[]"
 
-# Step 7: Write success marker to S3 (includes R2 status)
-[ -n "$${BUCKET:-}" ] && echo "{\"last_success\": \"$${TIMESTAMP}\", \"type\": \"full_snapshot\", \"tier\": \"hourly\", \"backup_key\": \"$${BACKUP_KEY}\", \"r2_replicated\": $([ -n \"$${R2_BUCKET:-}\" ] && echo true || echo false)}" | \
-    aws s3 cp - "s3://$${BUCKET}/backups/backup-health.json" 2>/dev/null || true
+generate_promote_urls() {
+    local TIER_KEY="$$1"
+    python3 -c "
+import boto3, json
+s3 = boto3.client('s3', region_name='$${REGION}')
+get_url = s3.generate_presigned_url('get_object',
+    Params={'Bucket':'$${BUCKET}','Key':'$${BACKUP_S3_KEY}'},
+    ExpiresIn=3600)
+put_url = s3.generate_presigned_url('put_object',
+    Params={'Bucket':'$${BUCKET}','Key':'$$TIER_KEY','ContentType':'application/octet-stream'},
+    ExpiresIn=3600)
+print(json.dumps({'tier_key':'$$TIER_KEY','presigned_get':get_url,'presigned_put':put_url}))"
+}
 
-echo "=== Full snapshot backup verified and complete: $${TIMESTAMP} ===" >> "$LOG"
+PROMOTE_LIST=""
+BASENAME=$(basename "$$BACKUP_S3_KEY")
+if [ "$$UTC_HOUR" = "00" ]; then
+    PROMOTE_LIST="$${PROMOTE_LIST}$(generate_promote_urls "backups/daily/$$BASENAME"),"
+fi
+if [ "$$UTC_HOUR" = "00" ] && [ "$$UTC_DOW" = "7" ]; then
+    PROMOTE_LIST="$${PROMOTE_LIST}$(generate_promote_urls "backups/weekly/$$BASENAME"),"
+fi
+if [ "$$UTC_HOUR" = "00" ] && [ "$$UTC_DOM" = "01" ]; then
+    PROMOTE_LIST="$${PROMOTE_LIST}$(generate_promote_urls "backups/monthly/$$BASENAME"),"
+fi
+# Remove trailing comma, wrap in array
+PROMOTE_LIST="$${PROMOTE_LIST%,}"
+[ -n "$$PROMOTE_LIST" ] && PROMOTE_JSON="[$$PROMOTE_LIST]" || PROMOTE_JSON="[]"
+
+# Build trigger JSON with all presigned URLs
+python3 -c "
+import json
+trigger = {
+    'action': 'export',
+    'type': 'hourly',
+    'backup_s3_key': '$${BACKUP_S3_KEY}',
+    'presigned_put_backup_s3': '''$${PRESIGNED_BACKUP}''',
+    'presigned_put_health': '''$${PRESIGNED_HEALTH}''',
+    'presigned_put_backup_r2': '''$${PRESIGNED_R2}''',
+    'promote': json.loads('''$${PROMOTE_JSON}'''),
+    'timestamp': '$${TIMESTAMP}'
+}
+print(json.dumps(trigger))
+" > /opt/lightfriend/seed/export-request.json
+
+echo "Trigger written. Enclave will handle everything."
+echo "  S3 key: $${BACKUP_S3_KEY}"
+echo "  R2: $$([ -n \"$$PRESIGNED_R2\" ] && echo yes || echo no)"
+echo "  Promotions: $$(echo "$$PROMOTE_JSON" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))') tiers"
+echo "=== Host done, enclave takes over ==="
 SCRIPT
 chmod +x /opt/lightfriend/scheduled-backup.sh
 

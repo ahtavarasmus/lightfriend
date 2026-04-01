@@ -597,19 +597,44 @@ jobs:
             if [ "$STATE" != "running" ]; then
               echo "WARNING: Old instance $OLD_INSTANCE is not running (state: $STATE)"
             else
-              echo "Triggering export via signal file on $OLD_INSTANCE..."
-              echo '{"github_run_id":"${{ github.run_id }}","old_instance":"'$OLD_INSTANCE'","state":"backup_started","started_at":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' | \
-                aws s3 cp - "s3://$S3_BUCKET/deploy/deploy-state.json"
+              echo "Triggering export on $OLD_INSTANCE..."
 
-              # Write export trigger directly to host via SSM (skip S3 polling layer)
-              TRIGGER='{"action":"export","deploy_id":"${{ github.run_id }}"}'
+              # Generate presigned S3 URLs so enclave can upload directly to S3
+              # (bypasses the slow host s3-signal-poller entirely)
+              BACKUP_TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
+              BACKUP_S3_KEY="backups/deploy/lightfriend-full-backup-${BACKUP_TIMESTAMP}.tar.gz.enc"
+              COMPLETE_S3_KEY="deploy/export-complete.json"
+
+              PRESIGNED_PUT_BACKUP=$(python3 -c "
+import boto3; print(boto3.client('s3').generate_presigned_url(
+    'put_object',
+    Params={'Bucket':'$S3_BUCKET','Key':'$BACKUP_S3_KEY','ContentType':'application/octet-stream'},
+    ExpiresIn=3600))")
+              PRESIGNED_PUT_COMPLETE=$(python3 -c "
+import boto3; print(boto3.client('s3').generate_presigned_url(
+    'put_object',
+    Params={'Bucket':'$S3_BUCKET','Key':'$COMPLETE_S3_KEY','ContentType':'application/json'},
+    ExpiresIn=3600))")
+
+              echo "Generated presigned URLs (valid 1 hour)"
+              echo "  Backup key: $BACKUP_S3_KEY"
+
+              # Build trigger JSON with presigned URLs
+              TRIGGER=$(python3 -c "
+import json; print(json.dumps({
+    'action': 'export',
+    'type': 'deploy',
+    'deploy_id': '${{ github.run_id }}',
+    'backup_s3_key': '$BACKUP_S3_KEY',
+    'presigned_put_backup_s3': '''$PRESIGNED_PUT_BACKUP''',
+    'presigned_put_complete': '''$PRESIGNED_PUT_COMPLETE'''
+}))")
+
+              # Write trigger to host via SSM
               echo "Writing export trigger to host via SSM..."
-              rm -f /tmp/export-trigger.json
-              echo "$TRIGGER" > /tmp/export-trigger.json
-
               TRIGGER_CMD=$(aws ssm send-command --instance-ids "$OLD_INSTANCE" \
                 --document-name "AWS-RunShellScript" \
-                --parameters commands=["rm -f /opt/lightfriend/backups/export-complete.json && echo '$TRIGGER' > /opt/lightfriend/seed/export-request.json && echo trigger-written"] \
+                --parameters commands=["rm -f /opt/lightfriend/backups/export-complete.json && cat > /opt/lightfriend/seed/export-request.json << 'TRIGGEREOF'\n${TRIGGER}\nTRIGGEREOF"] \
                 --timeout-seconds 30 \
                 --query 'Command.CommandId' --output text 2>/dev/null || echo "")
               if [ -z "$TRIGGER_CMD" ]; then
