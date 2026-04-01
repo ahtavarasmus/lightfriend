@@ -47,12 +47,146 @@ const DASHBOARD_STYLES: &str = r#"
     overflow-y: auto;
     padding: 0.75rem 1rem;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    display: flex;
-    gap: 1rem;
 }
 .panel-right-rules > .rules-scroll-section {
     flex: 1;
     min-width: 0;
+}
+/* Custom Rules collapsible */
+.custom-rules-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    padding: 0.4rem 0;
+    color: #888;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    user-select: none;
+}
+.custom-rules-header:hover { color: #aaa; }
+.custom-rules-chevron {
+    font-size: 0.6rem;
+    transition: transform 0.2s ease;
+}
+.custom-rules-chevron.open { transform: rotate(90deg); }
+.custom-rules-body {
+    display: flex;
+    gap: 1rem;
+    margin-top: 0.5rem;
+}
+.custom-rules-body > .rules-scroll-section {
+    flex: 1;
+    min-width: 0;
+}
+/* Critical Notifications card */
+.critical-notif-card {
+    padding: 0.6rem 0.7rem;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    margin-bottom: 0.75rem;
+}
+.critical-notif-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.critical-notif-left {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.critical-notif-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.critical-notif-dot.active { background: #4ade80; }
+.critical-notif-dot.inactive { background: #666; }
+.critical-notif-title {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #ccc;
+}
+.critical-notif-badge {
+    font-size: 0.7rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s;
+}
+.critical-notif-badge.active {
+    background: rgba(74, 222, 128, 0.15);
+    color: #4ade80;
+}
+.critical-notif-badge.inactive {
+    background: rgba(102, 102, 102, 0.2);
+    color: #888;
+}
+.critical-notif-badge:hover { opacity: 0.8; }
+.critical-notif-desc {
+    font-size: 0.75rem;
+    color: #777;
+    margin-top: 0.4rem;
+    line-height: 1.4;
+}
+.critical-notif-details-toggle {
+    background: none;
+    border: none;
+    color: #7EB2FF;
+    font-size: 0.7rem;
+    cursor: pointer;
+    padding: 0.2rem 0;
+    margin-top: 0.3rem;
+}
+.critical-notif-details-toggle:hover { text-decoration: underline; }
+.critical-notif-details {
+    margin-top: 0.4rem;
+    padding: 0.5rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+    font-size: 0.7rem;
+    color: #999;
+    line-height: 1.5;
+}
+.critical-notif-details h4 {
+    margin: 0 0 0.3rem;
+    font-size: 0.72rem;
+    color: #aaa;
+}
+.critical-notif-details ul {
+    margin: 0.2rem 0 0.5rem;
+    padding-left: 1.2rem;
+}
+.critical-notif-details li { margin-bottom: 0.15rem; }
+.critical-notif-prompt-toggle {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #888;
+    font-size: 0.65rem;
+    cursor: pointer;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    margin-top: 0.4rem;
+}
+.critical-notif-prompt-toggle:hover { color: #aaa; border-color: rgba(255, 255, 255, 0.2); }
+.critical-notif-prompt {
+    margin-top: 0.3rem;
+    padding: 0.5rem;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 6px;
+    font-size: 0.65rem;
+    color: #888;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    max-height: 300px;
+    overflow-y: auto;
+    font-family: monospace;
 }
 .panel-right-activity {
     flex: 1;
@@ -316,10 +450,12 @@ const DASHBOARD_STYLES: &str = r#"
 }
 
 .lf-number-label {
-    font-size: 0.7rem;
-    color: #555;
+    font-size: 1.1rem;
+    color: #999;
     text-align: center;
-    margin-bottom: 0.25rem;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
 }
 
 .connect-prompt {
@@ -522,6 +658,9 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
             .system_important_notify
             .unwrap_or(false)
     });
+    let custom_rules_open = use_state(|| false);
+    let critical_notif_details_open = use_state(|| false);
+    let critical_notif_prompt_open = use_state(|| false);
 
     // Critical notifications toggle handler
     let on_critical_toggle = {
@@ -892,6 +1031,27 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
             .unwrap_or_else(|| timestamp.to_string())
     };
 
+    let on_toggle_custom_rules = {
+        let custom_rules_open = custom_rules_open.clone();
+        Callback::from(move |_: web_sys::MouseEvent| {
+            custom_rules_open.set(!*custom_rules_open);
+        })
+    };
+
+    let on_toggle_critical_details = {
+        let critical_notif_details_open = critical_notif_details_open.clone();
+        Callback::from(move |_: web_sys::MouseEvent| {
+            critical_notif_details_open.set(!*critical_notif_details_open);
+        })
+    };
+
+    let on_toggle_critical_prompt = {
+        let critical_notif_prompt_open = critical_notif_prompt_open.clone();
+        Callback::from(move |_: web_sys::MouseEvent| {
+            critical_notif_prompt_open.set(!*critical_notif_prompt_open);
+        })
+    };
+
     html! {
         <>
             <style>{DASHBOARD_STYLES}</style>
@@ -1141,46 +1301,98 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
 
                 // ======== RIGHT PANEL ========
                 <div class="panel-right">
-                    // ---- Critical notifications status ----
-                    <div style="display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; background: rgba(255,255,255,0.03); border-radius: 8px; cursor: pointer;"
-                        onclick={on_critical_toggle.clone()}
-                        title={if *critical_notis_enabled { "Click to pause critical notifications" } else { "Click to enable critical notifications" }}
-                    >
-                        <span style={format!("width: 10px; height: 10px; border-radius: 50%; background: {}; flex-shrink: 0;",
-                            if *critical_notis_enabled { "#4ade80" } else { "#f59e0b" }
-                        )}></span>
-                        <span style="font-size: 0.85rem; color: #ccc; flex: 1;">
-                            {"Critical Notifications"}
-                        </span>
-                        <span style={format!("font-size: 0.7rem; padding: 2px 8px; border-radius: 4px; background: {}; color: {};",
-                            if *critical_notis_enabled { "rgba(74, 222, 128, 0.12)" } else { "rgba(245, 158, 11, 0.12)" },
-                            if *critical_notis_enabled { "#4ade80" } else { "#f59e0b" }
-                        )}>
-                            {if *critical_notis_enabled { "Active" } else { "Paused" }}
-                        </span>
-                    </div>
-
-                    // ---- Rules (top) ----
                     <div class="panel-right-rules">
-                        <div class="rules-scroll-section">
-                            <RulesSection
-                                filter_trigger_type={Some("schedule".to_string())}
-                                label_override={Some("Schedule".to_string())}
-                                on_create_click={on_rule_create_click.clone()}
-                                on_edit_click={on_rule_edit_click.clone()}
-                                refresh_seq={*rules_refresh_seq}
-                            />
+                        // ---- Critical Notifications card ----
+                        <div class="critical-notif-card">
+                            <div class="critical-notif-header">
+                                <div class="critical-notif-left">
+                                    <div class={classes!("critical-notif-dot", if *critical_notis_enabled { "active" } else { "inactive" })}></div>
+                                    <span class="critical-notif-title">{"Critical Notifications"}</span>
+                                </div>
+                                <button
+                                    class={classes!("critical-notif-badge", if *critical_notis_enabled { "active" } else { "inactive" })}
+                                    onclick={on_critical_toggle.clone()}
+                                >
+                                    {if *critical_notis_enabled { "Active" } else { "Inactive" }}
+                                </button>
+                            </div>
+                            <div class="critical-notif-desc">
+                                {"AI evaluates every incoming message and notifies you via SMS when something is time-sensitive or urgent. Routine messages are silently collected for your next digest."}
+                            </div>
+                            <button class="critical-notif-details-toggle" onclick={on_toggle_critical_details}>
+                                {if *critical_notif_details_open { "Hide details" } else { "How does it classify messages?" }}
+                            </button>
+                            if *critical_notif_details_open {
+                                <div class="critical-notif-details">
+                                    <h4>{"Urgency levels"}</h4>
+                                    <ul>
+                                        <li><strong>{"Critical: "}</strong>{"immediate danger, medical emergency, security breach"}</li>
+                                        <li><strong>{"High: "}</strong>{"a 2-hour delay would cause real consequences - missed meeting, financial loss, time-sensitive decision"}</li>
+                                        <li><strong>{"Medium: "}</strong>{"important but can wait a few hours - friend asking to meet later, non-urgent work question"}</li>
+                                        <li><strong>{"Low: "}</strong>{"routine updates, casual conversation"}</li>
+                                        <li><strong>{"None: "}</strong>{"spam, automated messages"}</li>
+                                    </ul>
+                                    <p>{"You get notified only for critical or high urgency. The AI also considers sender relationship, messaging patterns, time of day, and cross-platform escalation (e.g., someone messaging you on both WhatsApp and Signal)."}</p>
+                                    <button class="critical-notif-prompt-toggle" onclick={on_toggle_critical_prompt}>
+                                        {if *critical_notif_prompt_open { "Hide full prompt" } else { "View full classification prompt" }}
+                                    </button>
+                                    if *critical_notif_prompt_open {
+                                        <div class="critical-notif-prompt">
+                                            {"You are evaluating whether an incoming message requires the user's immediate attention.\n\
+                                            The user has muted all phone notifications and relies on you to catch time-critical messages. \
+                                            If you miss something important, they won't see it for hours.\n\
+                                            \n\
+                                            The last message in the conversation is being evaluated. Each message is marked [seen] or \
+                                            [unseen] - unseen messages have not been read by the user yet. Use the conversation history, \
+                                            timestamps, and seen status to understand context and urgency. Compare mentioned times against \
+                                            the current time.\n\
+                                            \n\
+                                            Classify the urgency level:\n\
+                                            - critical: immediate danger, medical emergency, security breach\n\
+                                            - high: 2-hour delay would cause real consequences (missed meeting, financial loss, time-sensitive decision)\n\
+                                            - medium: important but can wait a few hours (friend asking to meet later today, non-urgent work question)\n\
+                                            - low: routine updates, casual conversation\n\
+                                            - none: spam, automated messages, irrelevant\n\
+                                            \n\
+                                            Set should_notify=true only for critical or high urgency.\n\
+                                            Use the signal report to calibrate - sender relationship, timing patterns, and content signals all matter.\n\
+                                            \n\
+                                            If should_notify=false, set notification_message to empty string.\n\
+                                            If should_notify=true, write a concise notification (max 480 chars, second person)."}
+                                        </div>
+                                    }
+                                </div>
+                            }
                         </div>
-                        <div class="rules-scroll-section">
-                            <RulesSection
-                                filter_trigger_type={Some("ontology_change".to_string())}
-                                label_override={Some("Monitoring".to_string())}
-                                on_create_click={on_rule_create_click.clone()}
-                                on_edit_click={on_rule_edit_click.clone()}
-                                refresh_seq={*rules_refresh_seq}
-                                show_create_button={false}
-                            />
+
+                        // ---- Custom Rules (collapsible) ----
+                        <div class="custom-rules-header" onclick={on_toggle_custom_rules}>
+                            <i class={classes!("fa-solid", "fa-chevron-right", "custom-rules-chevron", (*custom_rules_open).then_some("open"))}></i>
+                            <span>{"Custom Rules"}</span>
                         </div>
+                        if *custom_rules_open {
+                            <div class="custom-rules-body">
+                                <div class="rules-scroll-section">
+                                    <RulesSection
+                                        filter_trigger_type={Some("schedule".to_string())}
+                                        label_override={Some("Schedule".to_string())}
+                                        on_create_click={on_rule_create_click.clone()}
+                                        on_edit_click={on_rule_edit_click.clone()}
+                                        refresh_seq={*rules_refresh_seq}
+                                    />
+                                </div>
+                                <div class="rules-scroll-section">
+                                    <RulesSection
+                                        filter_trigger_type={Some("ontology_change".to_string())}
+                                        label_override={Some("Monitoring".to_string())}
+                                        on_create_click={on_rule_create_click.clone()}
+                                        on_edit_click={on_rule_edit_click.clone()}
+                                        refresh_seq={*rules_refresh_seq}
+                                        show_create_button={false}
+                                    />
+                                </div>
+                            </div>
+                        }
                     </div>
 
                     // ---- Activity feed (bottom) ----
@@ -1208,8 +1420,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                         <a href="/privacy">{"Privacy"}</a>
                         {" | "}
                         <a href="/trustless">{"Verifiably Private"}</a>
-                        {" | "}
-                        <a href="/updates">{"Updates"}</a>
                         {" | "}
                         <a href="/trust-chain">{"Trust Chain"}</a>
                     </div>
