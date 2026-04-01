@@ -45,12 +45,13 @@ while true; do
         else
             echo "export-watcher: ${EXPORT_TYPE} export FAILED (exit ${EXIT_CODE}) at ${FINISHED_AT}"
 
-            # Try to upload failure status via presigned URL
+            # Try to upload failure status via presigned URL (use jq for safe JSON encoding)
             ERROR_TAIL=$(tail -40 /tmp/export-watcher-last-run.log 2>/dev/null | tr '\n' ' ' | head -c 4000 || echo "no output")
 
             # For deploy: write failure to completion URL
             if [ -n "${PRESIGNED_PUT_COMPLETE}" ]; then
-                echo "{\"status\":\"FAILED\",\"exit_code\":${EXIT_CODE},\"error\":\"${ERROR_TAIL}\"}" | \
+                jq -n --arg error "$ERROR_TAIL" --argjson code "${EXIT_CODE}" \
+                    '{"status":"FAILED","exit_code":$code,"error":$error}' | \
                     curl -sf --max-time 30 -X PUT -H "Content-Type: application/json" \
                     --data-binary @- -x http://127.0.0.1:3128 \
                     "${PRESIGNED_PUT_COMPLETE}" 2>/dev/null || true
@@ -58,7 +59,8 @@ while true; do
 
             # For hourly: write failure to health URL
             if [ -n "${PRESIGNED_PUT_HEALTH}" ]; then
-                echo "{\"last_failure\":\"${TIMESTAMP}\",\"step\":\"export\",\"exit_code\":${EXIT_CODE}}" | \
+                jq -n --arg ts "${TIMESTAMP}" --argjson code "${EXIT_CODE}" \
+                    '{"last_failure":$ts,"step":"export","exit_code":$code}' | \
                     curl -sf --max-time 30 -X PUT -H "Content-Type: application/json" \
                     --data-binary @- -x http://127.0.0.1:3128 \
                     "${PRESIGNED_PUT_HEALTH}" 2>/dev/null || true

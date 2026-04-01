@@ -57,7 +57,9 @@ chown -R ec2-user:ec2-user /opt/lightfriend
 
 echo "Installing squid, socat, jq, and boto3 for enclave networking + presigned URLs..."
 dnf install -y squid socat jq python3-pip || echo "WARNING: Failed to install packages"
-pip3 install boto3 2>/dev/null || echo "WARNING: Failed to install boto3"
+pip3 install boto3 || echo "WARNING: Failed to install boto3"
+# Verify boto3 is usable (scheduled backups depend on it for presigned URLs)
+python3 -c "import boto3; print('boto3 OK:', boto3.__version__)" || echo "ERROR: boto3 not working - hourly backups will fail"
 
 # Configure squid - localhost only, no caching, permissive HTTPS CONNECT
 mkdir -p /var/spool/squid /var/log/squid
@@ -1046,26 +1048,25 @@ fi
 PROMOTE_LIST="$${PROMOTE_LIST%,}"
 [ -n "$$PROMOTE_LIST" ] && PROMOTE_JSON="[$$PROMOTE_LIST]" || PROMOTE_JSON="[]"
 
-# Build trigger JSON with all presigned URLs
+# Build trigger JSON with all presigned URLs (use argv to avoid shell/quote issues)
 python3 -c "
-import json
+import json, sys
 trigger = {
     'action': 'export',
     'type': 'hourly',
-    'backup_s3_key': '$${BACKUP_S3_KEY}',
-    'presigned_put_backup_s3': '''$${PRESIGNED_BACKUP}''',
-    'presigned_put_health': '''$${PRESIGNED_HEALTH}''',
-    'presigned_put_backup_r2': '''$${PRESIGNED_R2}''',
-    'promote': json.loads('''$${PROMOTE_JSON}'''),
-    'timestamp': '$${TIMESTAMP}'
+    'backup_s3_key': sys.argv[1],
+    'presigned_put_backup_s3': sys.argv[2],
+    'presigned_put_health': sys.argv[3],
+    'presigned_put_backup_r2': sys.argv[4],
+    'promote': json.loads(sys.argv[5]),
+    'timestamp': sys.argv[6]
 }
 print(json.dumps(trigger))
-" > /opt/lightfriend/seed/export-request.json
+" "$$BACKUP_S3_KEY" "$$PRESIGNED_BACKUP" "$$PRESIGNED_HEALTH" "$$PRESIGNED_R2" "$$PROMOTE_JSON" "$$TIMESTAMP" \
+    > /opt/lightfriend/seed/export-request.json
 
 echo "Trigger written. Enclave will handle everything."
-echo "  S3 key: $${BACKUP_S3_KEY}"
-echo "  R2: $$([ -n \"$$PRESIGNED_R2\" ] && echo yes || echo no)"
-echo "  Promotions: $$(echo "$$PROMOTE_JSON" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))') tiers"
+echo "  S3 key: $$BACKUP_S3_KEY"
 echo "=== Host done, enclave takes over ==="
 SCRIPT
 chmod +x /opt/lightfriend/scheduled-backup.sh
@@ -1179,74 +1180,100 @@ EOF
     # Signal pre-warm complete
     echo "{\"status\": \"PRE_WARM_COMPLETE\", \"instance_id\": \"$INSTANCE_ID\", \"eif_key\": \"$EIF_KEY\", \"eif_sha256\": \"$EIF_SHA256\", \"pcr0\": \"$PCR0\", \"pcr1\": \"$PCR1\", \"pcr2\": \"$PCR2\", \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" | \
         aws s3 cp - "s3://$BUCKET/deploy/pre-warm-$INSTANCE_ID.json"
-    echo "=== Phase 1 complete: EIF downloaded and verified, waiting for restore manifest ==="
+    echo "=== Phase 1 complete: EIF downloaded and verified ==="
 
-    # ── Phase 2: Wait for restore manifest, then restore + launch ─────────
-    RESTORE_MANIFEST_KEY="deploy/restore-$INSTANCE_ID.json"
-    echo "Polling s3://$BUCKET/$RESTORE_MANIFEST_KEY..."
-    RESTORE_MANIFEST=""
-    for i in $(seq 1 180); do
-        RESTORE_MANIFEST=$(aws s3 cp "s3://$BUCKET/$RESTORE_MANIFEST_KEY" - 2>/dev/null || echo "")
-        if [ -n "$RESTORE_MANIFEST" ]; then
-            echo "Restore manifest received"
-            break
+    # ── Phase 2: Wait for export-complete.json from old enclave, then restore ──
+    # The old enclave uploads export-complete.json directly to S3 when export finishes.
+    # We poll for it here - no CI middleman needed.
+    COMPLETE_KEY="deploy/export-complete.json"
+    # Poll for export-complete.json from old enclave (5s interval, 30 min max)
+    echo "Polling s3://$BUCKET/$COMPLETE_KEY (5s interval)..."
+    BACKUP_KEY=""
+    DEPLOY_ID="unknown"
+    RESTORE_TYPE=""
+    for i in $(seq 1 360); do
+        EXPORT_COMPLETE=$(aws s3 cp "s3://$BUCKET/$COMPLETE_KEY" - 2>/dev/null || echo "")
+        if [ -n "$EXPORT_COMPLETE" ]; then
+            STATUS=$(echo "$EXPORT_COMPLETE" | jq -r '.status // "UNKNOWN"')
+            if [ "$STATUS" = "SUCCESS" ]; then
+                BACKUP_KEY=$(echo "$EXPORT_COMPLETE" | jq -r '.backup_key // empty')
+                DEPLOY_ID=$(echo "$EXPORT_COMPLETE" | jq -r '.deploy_id // "unknown"')
+                RESTORE_TYPE=$(echo "$EXPORT_COMPLETE" | jq -r '.restore_type // "full"')
+                echo "Signal received after $((i * 5))s: type=$RESTORE_TYPE key=$BACKUP_KEY"
+                break
+            elif [ "$STATUS" = "FAILED" ]; then
+                echo "{\"status\": \"EXPORT_FAILED\", \"instance_id\": \"$INSTANCE_ID\"}" | \
+                    aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
+                echo "FATAL: Export failed"
+                exit 1
+            fi
         fi
-        sleep 10
+        [ $((i % 12)) -eq 0 ] && echo "  Waiting... $((i * 5))s"
+        sleep 5
     done
 
-    if [ -z "$RESTORE_MANIFEST" ]; then
-        echo "{\"status\": \"RESTORE_MANIFEST_TIMEOUT\", \"instance_id\": \"$INSTANCE_ID\"}" | \
+    # Validate we got what we need
+    if [ -z "$RESTORE_TYPE" ]; then
+        echo "{\"status\": \"EXPORT_TIMEOUT\", \"instance_id\": \"$INSTANCE_ID\"}" | \
             aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
-        echo "FATAL: No restore manifest after 30 minutes"
+        echo "FATAL: No export-complete.json after 30 minutes"
+        exit 1
+    fi
+    if [ "$RESTORE_TYPE" = "full" ] && [ -z "$BACKUP_KEY" ]; then
+        echo "{\"status\": \"MISSING_BACKUP_KEY\", \"instance_id\": \"$INSTANCE_ID\"}" | \
+            aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
+        echo "FATAL: export-complete.json has restore_type=full but no backup_key"
         exit 1
     fi
 
-    BACKUP_KEY=$(echo "$RESTORE_MANIFEST" | jq -r '.backup_key // empty')
-    RESTORE_TYPE=$(echo "$RESTORE_MANIFEST" | jq -r '.restore_type // "full"')
-    DEPLOY_ID=$(echo "$RESTORE_MANIFEST" | jq -r '.deploy_id // "unknown"')
-
-    # Re-download .env (CI may have uploaded a fresh one from old instance)
+    # Re-download .env
     aws s3 cp "s3://$BUCKET/config/.env" /opt/lightfriend/.env
     chmod 600 /opt/lightfriend/.env
 
-    if [ "$RESTORE_TYPE" = "seed_only" ]; then
-        # Seed-only mode: CI already placed seed SQL at /opt/lightfriend/seed/lightfriend_db.sql
-        # Launch enclave without backup restore - entrypoint.sh will find and restore the seed
-        echo "=== Seed-only mode: launching enclave without backup restore ==="
-        echo "Seed file: $(ls -la /opt/lightfriend/seed/lightfriend_db.sql 2>&1)"
-
-        rm -f "$VERIFY"
-        VERIFY_SRC="/opt/lightfriend/backups/verify-result.json"
-        rm -f "$VERIFY_SRC"
-
-        if ! /opt/lightfriend/launch-enclave.sh 2>&1 | tee /tmp/launch.log; then
+    if [ "$RESTORE_TYPE" = "seed" ]; then
+        # Seed mode: seed SQL should already be at /opt/lightfriend/seed/lightfriend_db.sql
+        # (delivered by disaster recovery workflow via SSM, or placed manually)
+        # If not there, try S3
+        if [ ! -f /opt/lightfriend/seed/lightfriend_db.sql ]; then
+            aws s3 cp "s3://$BUCKET/seed/lightfriend_db.sql" /opt/lightfriend/seed/lightfriend_db.sql 2>/dev/null || true
+        fi
+        echo "=== Seed mode: launching enclave (entrypoint.sh will find seed SQL) ==="
+        /opt/lightfriend/launch-enclave.sh 2>&1 | tee /tmp/launch.log || {
             echo "{\"status\": \"LAUNCH_FAILED\", \"instance_id\": \"$INSTANCE_ID\"}" | \
                 aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
             exit 1
-        fi
-
-        echo "Polling for verify result..."
+        }
+        VERIFY_SRC="/opt/lightfriend/backups/verify-result.json"
         for i in $(seq 1 180); do
             if [ -s "$VERIFY_SRC" ]; then
                 cp "$VERIFY_SRC" "$VERIFY"
                 rm -f "$VERIFY_SRC"
-                echo "Verify result received after $((i * 5))s"
+                break
+            fi
+            sleep 5
+        done
+    elif [ "$RESTORE_TYPE" = "fresh" ]; then
+        # Fresh start: launch enclave with empty database
+        echo "=== Fresh start: launching enclave with empty database ==="
+        /opt/lightfriend/launch-enclave.sh 2>&1 | tee /tmp/launch.log || {
+            echo "{\"status\": \"LAUNCH_FAILED\", \"instance_id\": \"$INSTANCE_ID\"}" | \
+                aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
+            exit 1
+        }
+        VERIFY_SRC="/opt/lightfriend/backups/verify-result.json"
+        for i in $(seq 1 180); do
+            if [ -s "$VERIFY_SRC" ]; then
+                cp "$VERIFY_SRC" "$VERIFY"
+                rm -f "$VERIFY_SRC"
                 break
             fi
             sleep 5
         done
     else
         # Normal backup restore
-        if [ -z "$BACKUP_KEY" ] || [ "$BACKUP_KEY" = "none" ]; then
-            echo "{\"status\": \"INVALID_RESTORE_MANIFEST\", \"instance_id\": \"$INSTANCE_ID\"}" | \
-                aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
-            echo "FATAL: Restore manifest missing backup_key"
-            exit 1
-        fi
-
-        echo "Restoring from $BACKUP_KEY..."
+        echo "Restoring from: $BACKUP_KEY"
         set -o pipefail
-        if ! /opt/lightfriend/restore-enclave.sh "$BACKUP_KEY" "$DEPLOY_ID" "$RESTORE_TYPE" 2>&1 | tee /tmp/launch.log; then
+        if ! /opt/lightfriend/restore-enclave.sh "$BACKUP_KEY" "$DEPLOY_ID" "full" 2>&1 | tee /tmp/launch.log; then
             RESTORE_LOG=$(cat /tmp/restore-enclave-debug.log 2>/dev/null | tail -50 | tr '\n' '|' | sed 's/"/\\"/g' | head -c 1500)
             echo "{\"status\": \"RESTORE_FAILED\", \"instance_id\": \"$INSTANCE_ID\", \"log\": \"$RESTORE_LOG\"}" | \
                 aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
@@ -1261,10 +1288,10 @@ EOF
         cat "$VERIFY"
     else
         ENCLAVE_STATUS=$(nitro-cli describe-enclaves 2>/dev/null | jq -r '.[0].State // "unknown"')
-        RESTORE_LOG=$(cat /tmp/restore-enclave-debug.log 2>/dev/null | tail -50 | tr '\n' '|' | sed 's/"/\\"/g' | head -c 1500)
-        echo "{\"status\": \"TIMEOUT\", \"instance_id\": \"$INSTANCE_ID\", \"enclave_state\": \"$ENCLAVE_STATUS\", \"log\": \"$RESTORE_LOG\"}" | \
+        echo "{\"status\": \"TIMEOUT\", \"instance_id\": \"$INSTANCE_ID\", \"enclave_state\": \"$ENCLAVE_STATUS\"}" | \
             aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
-        echo "WARNING: No verify result received (enclave state: $ENCLAVE_STATUS)"
+        echo "FATAL: No verify result"
+        exit 1
     fi
 
     echo "=== Auto-bootstrap complete ==="

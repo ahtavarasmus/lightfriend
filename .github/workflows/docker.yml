@@ -15,6 +15,15 @@ env:
   IMAGE_REPO: docker.io/ahtavarasmus/lightfriend-enclave
 
 jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only repo owner can deploy
+        if: github.actor != 'ahtavarasmus'
+        run: |
+          echo "FATAL: Only repo owner can deploy (actor: ${{ github.actor }})"
+          exit 1
+
   check-secrets:
     runs-on: ubuntu-latest
     outputs:
@@ -310,7 +319,7 @@ jobs:
           path: /tmp/eif-metadata.json
 
   deploy:
-    needs: [build-and-push, build-eif]
+    needs: [authorize, build-and-push, build-eif]
     if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
@@ -577,18 +586,7 @@ jobs:
           OLD_INSTANCE="${{ steps.infra.outputs.old_instance }}"
           S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
 
-          # ── Priority 1: Seed dump for first-time bootstrap ──
-          if aws s3api head-object --bucket "$S3_BUCKET" --key "seed/lightfriend_db.sql" 2>/dev/null; then
-            echo "=== Found seed dump in S3 - first-time bootstrap ==="
-            echo "backup_key=none" >> $GITHUB_OUTPUT
-            echo "backup_sha=none" >> $GITHUB_OUTPUT
-            echo "backup_size=0" >> $GITHUB_OUTPUT
-            echo "backup_source=seed_dump" >> $GITHUB_OUTPUT
-            echo "## Data source: seed dump (first-time bootstrap)" >> $GITHUB_STEP_SUMMARY
-            exit 0
-          fi
-
-          # ── Priority 2: Live export from old instance ──
+          # ── Live export from old instance (no fallbacks - use disaster-recovery for special cases) ──
           LIVE_EXPORT_OK=false
 
           if [ -n "$OLD_INSTANCE" ]; then
@@ -619,22 +617,29 @@ import boto3; print(boto3.client('s3').generate_presigned_url(
               echo "Generated presigned URLs (valid 1 hour)"
               echo "  Backup key: $BACKUP_S3_KEY"
 
-              # Build trigger JSON with presigned URLs
-              TRIGGER=$(python3 -c "
-import json; print(json.dumps({
+              # Build trigger JSON with presigned URLs (use python for safe JSON encoding)
+              python3 -c "
+import json, sys
+trigger = {
     'action': 'export',
     'type': 'deploy',
     'deploy_id': '${{ github.run_id }}',
-    'backup_s3_key': '$BACKUP_S3_KEY',
-    'presigned_put_backup_s3': '''$PRESIGNED_PUT_BACKUP''',
-    'presigned_put_complete': '''$PRESIGNED_PUT_COMPLETE'''
-}))")
+    'backup_s3_key': sys.argv[1],
+    'presigned_put_backup_s3': sys.argv[2],
+    'presigned_put_complete': sys.argv[3]
+}
+print(json.dumps(trigger))
+" "$BACKUP_S3_KEY" "$PRESIGNED_PUT_BACKUP" "$PRESIGNED_PUT_COMPLETE" > /tmp/trigger.json
 
-              # Write trigger to host via SSM
+              # Base64 encode to safely pass through SSM (presigned URLs have &, =, % chars)
+              TRIGGER_B64=$(base64 -w0 /tmp/trigger.json)
+              rm -f /tmp/trigger.json
+
+              # Write trigger to host via SSM (decode base64 on the host)
               echo "Writing export trigger to host via SSM..."
               TRIGGER_CMD=$(aws ssm send-command --instance-ids "$OLD_INSTANCE" \
                 --document-name "AWS-RunShellScript" \
-                --parameters commands=["rm -f /opt/lightfriend/backups/export-complete.json && cat > /opt/lightfriend/seed/export-request.json << 'TRIGGEREOF'\n${TRIGGER}\nTRIGGEREOF"] \
+                --parameters commands=["rm -f /opt/lightfriend/backups/export-complete.json && echo $TRIGGER_B64 | base64 -d > /opt/lightfriend/seed/export-request.json"] \
                 --timeout-seconds 30 \
                 --query 'Command.CommandId' --output text 2>/dev/null || echo "")
               if [ -z "$TRIGGER_CMD" ]; then
@@ -689,150 +694,31 @@ import json; print(json.dumps({
             fi
           fi
 
-          if [ "$LIVE_EXPORT_OK" = "true" ]; then
-            BACKUP_KEY=$(echo "$COMPLETE_JSON" | jq -r '.backup_key // empty')
-            BACKUP_SHA=$(echo "$COMPLETE_JSON" | jq -r '.backup_sha256 // empty')
-            BACKUP_SIZE=$(echo "$COMPLETE_JSON" | jq -r '.backup_size // 0')
-            BACKUP_SOURCE="live_export"
-          else
-            # ── Priority 3: Latest encrypted backup from S3 ──
-            echo ""
-            echo "=== Falling back to latest S3 backup ==="
-
-            LATEST_BACKUP=""
-            for PREFIX in "backups/deploy/" "backups/hourly/"; do
-              LATEST_BACKUP=$(aws s3 ls "s3://$S3_BUCKET/$PREFIX" --recursive 2>/dev/null | \
-                grep '\.tar\.gz\.enc$' | sort -k1,2 | tail -1 | awk '{print $4}')
-              if [ -n "$LATEST_BACKUP" ]; then
-                echo "Found backup in $PREFIX: $LATEST_BACKUP"
-                break
-              fi
-            done
-
-            if [ -z "$LATEST_BACKUP" ]; then
-              echo "FATAL: No data source available - no seed dump, no live instance, no S3 backup"
-              exit 1
-            fi
-
-            BACKUP_KEY="$LATEST_BACKUP"
-            BACKUP_SIZE=$(aws s3api head-object --bucket "$S3_BUCKET" --key "$BACKUP_KEY" \
-              --query 'ContentLength' --output text 2>/dev/null || echo "0")
-            BACKUP_MODIFIED=$(aws s3api head-object --bucket "$S3_BUCKET" --key "$BACKUP_KEY" \
-              --query 'LastModified' --output text 2>/dev/null || echo "unknown")
-
-            TMP_SHA=$(mktemp /tmp/backup-sha.XXXXXX.enc)
-            aws s3 cp "s3://$S3_BUCKET/$BACKUP_KEY" "$TMP_SHA"
-            BACKUP_SHA=$(sha256sum "$TMP_SHA" | awk '{print $1}')
-            rm -f "$TMP_SHA"
-
-            BACKUP_SOURCE="s3_fallback"
-
-            echo "Using S3 fallback backup:"
-            echo "  Key: $BACKUP_KEY"
-            echo "  Size: $BACKUP_SIZE bytes"
-            echo "  Modified: $BACKUP_MODIFIED"
-            echo "  SHA256: $BACKUP_SHA"
-            echo "  :warning: This may be up to 1 hour behind live data" >> $GITHUB_STEP_SUMMARY
+          # Export must succeed for normal deploys. No fallbacks.
+          # For disaster recovery (seed, S3 fallback), use the manual disaster-recovery workflow.
+          if [ "$LIVE_EXPORT_OK" != "true" ]; then
+            echo "FATAL: Live export failed. Deploy cannot proceed."
+            echo "For disaster recovery, use the manual workflow_dispatch disaster-recovery action."
+            exit 1
           fi
 
-          if [ -z "$BACKUP_KEY" ] || [ -z "$BACKUP_SHA" ]; then
-            echo "FATAL: Missing backup_key or backup_sha256"
+          BACKUP_KEY=$(echo "$COMPLETE_JSON" | jq -r '.backup_key // empty')
+          BACKUP_SHA=$(echo "$COMPLETE_JSON" | jq -r '.backup_sha256 // empty')
+          BACKUP_SIZE=$(echo "$COMPLETE_JSON" | jq -r '.backup_size // 0')
+
+          if [ -z "$BACKUP_KEY" ]; then
+            echo "FATAL: export-complete.json missing backup_key"
             exit 1
           fi
 
           echo "backup_key=$BACKUP_KEY" >> $GITHUB_OUTPUT
           echo "backup_sha=$BACKUP_SHA" >> $GITHUB_OUTPUT
           echo "backup_size=$BACKUP_SIZE" >> $GITHUB_OUTPUT
-          echo "backup_source=$BACKUP_SOURCE" >> $GITHUB_OUTPUT
-          echo "## Data source ($BACKUP_SOURCE): $BACKUP_KEY" >> $GITHUB_STEP_SUMMARY
+          echo "## Backup: $BACKUP_KEY ($BACKUP_SIZE bytes)" >> $GITHUB_STEP_SUMMARY
 
-      # ── Step 4b: Deliver seed dump to new instance ──
-      # Downloads seed SQL from S3 to the new host's seed dir, then deletes
-      # from S3 so it doesn't get used on the next deploy.
-      - name: Deliver seed to new instance
-        if: steps.backup.outputs.backup_source == 'seed_dump'
-        run: |
-          NEW_INSTANCE="${{ steps.launch.outputs.new_instance }}"
-          S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
-
-          echo "Delivering seed SQL to $NEW_INSTANCE..."
-          CMD_ID=$(aws ssm send-command --instance-ids "$NEW_INSTANCE" \
-            --document-name "AWS-RunShellScript" \
-            --parameters '{"commands":["aws s3 cp s3://'"$S3_BUCKET"'/seed/lightfriend_db.sql /opt/lightfriend/seed/lightfriend_db.sql && ls -la /opt/lightfriend/seed/lightfriend_db.sql"]}' \
-            --timeout-seconds 120 \
-            --query 'Command.CommandId' --output text)
-
-          for i in $(seq 1 24); do
-            STATUS=$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$NEW_INSTANCE" \
-              --query "Status" --output text 2>/dev/null || echo "Pending")
-            case "$STATUS" in
-              Success) echo "Seed delivered to new instance"; break ;;
-              Failed|TimedOut|Cancelled) echo "FATAL: Seed delivery failed: $STATUS"; exit 1 ;;
-            esac
-            sleep 5
-          done
-
-          # Delete from S3 so it doesn't linger on next deploy
-          aws s3 rm "s3://$S3_BUCKET/seed/lightfriend_db.sql"
-          echo "Seed removed from S3"
-
-      # ── Step 5: Re-download and validate the exact encrypted artifact ──
-      - name: Validate uploaded backup artifact
-        if: steps.backup.outputs.backup_source != 'seed_dump'
-        run: |
-          S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
-          BACKUP_KEY="${{ steps.backup.outputs.backup_key }}"
-          BACKUP_SHA="${{ steps.backup.outputs.backup_sha }}"
-          BACKUP_SIZE="${{ steps.backup.outputs.backup_size }}"
-          TMP_BACKUP="$(mktemp /tmp/lightfriend-backup.XXXXXX.enc)"
-
-          [ -n "$BACKUP_KEY" ] || { echo "FATAL: Missing backup_key"; exit 1; }
-          [ -n "$BACKUP_SHA" ] || { echo "FATAL: Missing backup_sha"; exit 1; }
-
-          HEAD_SIZE=$(aws s3api head-object --bucket "$S3_BUCKET" --key "$BACKUP_KEY" --query 'ContentLength' --output text)
-          if [ "$BACKUP_SIZE" != "0" ] && [ "$HEAD_SIZE" != "$BACKUP_SIZE" ]; then
-            echo "FATAL: head-object size mismatch: expected $BACKUP_SIZE got $HEAD_SIZE"
-            exit 1
-          fi
-
-          aws s3 cp "s3://$S3_BUCKET/$BACKUP_KEY" "$TMP_BACKUP"
-          ACTUAL_SHA=$(sha256sum "$TMP_BACKUP" | awk '{print $1}')
-          rm -f "$TMP_BACKUP"
-
-          if [ "$ACTUAL_SHA" != "$BACKUP_SHA" ]; then
-            echo "FATAL: encrypted artifact SHA-256 mismatch"
-            echo "expected=$BACKUP_SHA actual=$ACTUAL_SHA"
-            exit 1
-          fi
-
-          echo "Encrypted artifact validated: $BACKUP_KEY"
-
-      # ── Step 6: Publish restore manifest for the new instance ──
-      - name: Publish restore manifest
-        run: |
-          NEW_INSTANCE="${{ steps.launch.outputs.new_instance }}"
-          S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
-          BACKUP_KEY="${{ steps.backup.outputs.backup_key }}"
-          BACKUP_SOURCE="${{ steps.backup.outputs.backup_source }}"
-
-          if [ "$BACKUP_SOURCE" = "seed_dump" ]; then
-            cat <<EOF | aws s3 cp - "s3://$S3_BUCKET/deploy/restore-$NEW_INSTANCE.json"
-            {"deploy_id":"${{ github.run_id }}","backup_key":"none","restore_type":"seed_only","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
-          EOF
-            echo "Seed-only restore manifest published for $NEW_INSTANCE"
-          else
-            if [ -z "$BACKUP_KEY" ]; then
-              echo "FATAL: Missing backup_key for restore manifest"
-              exit 1
-            fi
-
-            cat <<EOF | aws s3 cp - "s3://$S3_BUCKET/deploy/restore-$NEW_INSTANCE.json"
-            {"deploy_id":"${{ github.run_id }}","backup_key":"$BACKUP_KEY","restore_type":"full","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
-          EOF
-            echo "Restore manifest published for $NEW_INSTANCE"
-          fi
-
-      # ── Step 7: Wait for new enclave to restore, verify, become healthy ──
+      # ── Step 5: Wait for new enclave to restore, verify, become healthy ──
+      # The new host polls S3 for export-complete.json directly (written by old enclave).
+      # It reads the backup_key, downloads and restores. No CI middleman needed.
       - name: Wait for enclave health
         id: health
         run: |
@@ -856,10 +742,7 @@ import json; print(json.dumps({
                 echo "Details: $(echo "$VERIFY" | jq -r '.details // .failed_checks // "none"')"
                 exit 1
               fi
-              if [ -n "$OLD_INSTANCE" ] && [ "${{ steps.backup.outputs.backup_source }}" != "seed_dump" ]; then
-                if [ "$RESTORE_TYPE" = "fresh_start" ]; then
-                  echo "FATAL: New enclave started fresh but old had data"; exit 1
-                fi
+              if [ -n "$OLD_INSTANCE" ]; then
                 echo "Data migration verified: $USER_COUNT users"
               fi
               # Verify cloudflared is confirmed running (included in HEALTHY check)
@@ -1003,4 +886,5 @@ import json; print(json.dumps({
             Deploy ${{ needs.deploy.result }} for commit ${{ github.sha }}
 
             Branch: ${{ github.ref_name }}
+            Actor: ${{ github.actor }}
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

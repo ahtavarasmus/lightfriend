@@ -69,6 +69,8 @@ echo "Timestamp: ${TIMESTAMP}"
 
 # ── Preflight ────────────────────────────────────────────────────────────────
 
+command -v jq >/dev/null 2>&1 || abort "jq is required but not installed" "preflight"
+
 if [ -z "${BACKUP_ENCRYPTION_KEY:-}" ]; then
     abort "BACKUP_ENCRYPTION_KEY is not set" "preflight"
 fi
@@ -427,6 +429,10 @@ echo "Phase D complete."
 # The trigger JSON (from CI or host timer) provides all URLs.
 
 BACKUP_SHA=$(sha256sum "${ENCRYPTED}" | awk '{print $1}')
+
+# Use explicit proxy for S3/R2 uploads. Unset env proxies to avoid conflicts
+# (curl may use HTTP_PROXY env var instead of -x flag in some versions)
+unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy ALL_PROXY all_proxy 2>/dev/null || true
 PROXY="http://127.0.0.1:3128"
 
 echo "Phase E: Uploading backup..."
