@@ -603,33 +603,14 @@ jobs:
               BACKUP_S3_KEY="backups/deploy/lightfriend-full-backup-${BACKUP_TIMESTAMP}.tar.gz.enc"
               COMPLETE_S3_KEY="deploy/export-complete.json"
 
-              PRESIGNED_PUT_BACKUP=$(python3 -c "
-import boto3; print(boto3.client('s3').generate_presigned_url(
-    'put_object',
-    Params={'Bucket':'$S3_BUCKET','Key':'$BACKUP_S3_KEY','ContentType':'application/octet-stream'},
-    ExpiresIn=3600))")
-              PRESIGNED_PUT_COMPLETE=$(python3 -c "
-import boto3; print(boto3.client('s3').generate_presigned_url(
-    'put_object',
-    Params={'Bucket':'$S3_BUCKET','Key':'$COMPLETE_S3_KEY','ContentType':'application/json'},
-    ExpiresIn=3600))")
+              PRESIGNED_PUT_BACKUP=$(python3 -c "import boto3; print(boto3.client('s3').generate_presigned_url('put_object', Params={'Bucket':'$S3_BUCKET','Key':'$BACKUP_S3_KEY','ContentType':'application/octet-stream'}, ExpiresIn=3600))")
+              PRESIGNED_PUT_COMPLETE=$(python3 -c "import boto3; print(boto3.client('s3').generate_presigned_url('put_object', Params={'Bucket':'$S3_BUCKET','Key':'$COMPLETE_S3_KEY','ContentType':'application/json'}, ExpiresIn=3600))")
 
               echo "Generated presigned URLs (valid 1 hour)"
               echo "  Backup key: $BACKUP_S3_KEY"
 
               # Build trigger JSON with presigned URLs (use python for safe JSON encoding)
-              python3 -c "
-import json, sys
-trigger = {
-    'action': 'export',
-    'type': 'deploy',
-    'deploy_id': '${{ github.run_id }}',
-    'backup_s3_key': sys.argv[1],
-    'presigned_put_backup_s3': sys.argv[2],
-    'presigned_put_complete': sys.argv[3]
-}
-print(json.dumps(trigger))
-" "$BACKUP_S3_KEY" "$PRESIGNED_PUT_BACKUP" "$PRESIGNED_PUT_COMPLETE" > /tmp/trigger.json
+              python3 -c "import json,sys; print(json.dumps({'action':'export','type':'deploy','deploy_id':'${{ github.run_id }}','backup_s3_key':sys.argv[1],'presigned_put_backup_s3':sys.argv[2],'presigned_put_complete':sys.argv[3]}))" "$BACKUP_S3_KEY" "$PRESIGNED_PUT_BACKUP" "$PRESIGNED_PUT_COMPLETE" > /tmp/trigger.json
 
               # Base64 encode to safely pass through SSM (presigned URLs have &, =, % chars)
               TRIGGER_B64=$(base64 -w0 /tmp/trigger.json)
