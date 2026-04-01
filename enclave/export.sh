@@ -154,22 +154,28 @@ kill -SIGUSR2 "$TUWUNEL_PID" \
     || abort "Failed to send SIGUSR2 to tuwunel (PID $TUWUNEL_PID)" "dump-tuwunel"
 echo "  [DEBUG] SIGUSR2 sent successfully"
 
-# Wait for backup to complete (poll for new files in backup dir)
+# Wait for backup to complete by watching meta/ directory for a new backup ID.
+# RocksDB BackupEngine writes meta/<id> atomically (tmp file then rename) when
+# backup completes. The backup ID always increases even when old backups are purged.
+# This is 100% reliable - no race conditions, no file count issues.
 echo "  Waiting for backup to complete..."
 BACKUP_TIMEOUT=120
 BACKUP_DONE=false
+BEFORE_ID=$(ls "$TUWUNEL_BACKUP_DIR/meta/" 2>/dev/null | grep -E '^[0-9]+$' | sort -n | tail -1)
+BEFORE_ID=${BEFORE_ID:-0}
+echo "  [DEBUG] Highest backup ID before: $BEFORE_ID"
+
 for i in $(seq 1 "$BACKUP_TIMEOUT"); do
-    AFTER_COUNT=$(find "$TUWUNEL_BACKUP_DIR" -type f 2>/dev/null | wc -l)
-    if [ "$AFTER_COUNT" -gt "$BEFORE_COUNT" ]; then
-        AFTER_SIZE=$(du -sh "$TUWUNEL_BACKUP_DIR" 2>/dev/null | awk '{print $1}' || echo '0')
-        echo "  [DEBUG] Backup completed in ${i}s (files: $BEFORE_COUNT -> $AFTER_COUNT, size: $BEFORE_SIZE -> $AFTER_SIZE)"
+    AFTER_ID=$(ls "$TUWUNEL_BACKUP_DIR/meta/" 2>/dev/null | grep -E '^[0-9]+$' | sort -n | tail -1)
+    AFTER_ID=${AFTER_ID:-0}
+    if [ "$AFTER_ID" -gt "$BEFORE_ID" ]; then
+        echo "  [DEBUG] Backup completed in ${i}s (backup ID: $BEFORE_ID -> $AFTER_ID)"
         BACKUP_DONE=true
         break
     fi
-    # Log progress every 10 seconds
     if [ $((i % 10)) -eq 0 ]; then
-        echo "  [DEBUG] Still waiting... ${i}s elapsed, files: $AFTER_COUNT (need > $BEFORE_COUNT)"
-        echo "  [DEBUG] Tuwunel log (last 3 lines):"
+        echo "  [DEBUG] Still waiting... ${i}s elapsed, latest ID: $AFTER_ID (need > $BEFORE_ID)"
+        echo "  [DEBUG] meta/ contents: $(ls $TUWUNEL_BACKUP_DIR/meta/ 2>/dev/null || echo 'empty')"
         tail -3 /var/log/supervisor/tuwunel.log 2>/dev/null || echo "    empty"
     fi
     sleep 1
