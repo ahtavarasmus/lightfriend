@@ -7,7 +7,7 @@ use yew::prelude::*;
 
 use super::activity_feed::ActivityFeed;
 use super::chat_box::ChatBox;
-use super::rule_builder::{RuleBuilder, RuleTemplate, RuleTemplatePicker};
+use super::rule_builder::{RuleBuilder, RuleTemplate};
 use super::rules_section::RulesSection;
 use super::settings_panel::{SettingsPanel, SettingsTab};
 
@@ -473,6 +473,158 @@ const DASHBOARD_STYLES: &str = r#"
     text-decoration: underline;
 }
 
+/* ---- Setup mode (no connections) ---- */
+.palantir-dashboard.setup-mode {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+        "left"
+        "footer";
+}
+.palantir-dashboard.setup-mode .panel-left {
+    border-right: none;
+    max-width: 560px;
+    margin: 0 auto;
+    justify-content: center;
+}
+.setup-hero {
+    text-align: center;
+    padding: 1rem 0;
+}
+.setup-title {
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: #e0e0e0;
+    margin-bottom: 0.6rem;
+}
+.setup-subtitle {
+    font-size: 0.9rem;
+    color: #888;
+    line-height: 1.5;
+    margin-bottom: 1.5rem;
+}
+.setup-sources {
+    display: flex;
+    gap: 1.5rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 1.5rem;
+}
+.setup-source-icon {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.72rem;
+    color: #666;
+}
+.setup-connect-btn {
+    background: rgba(126, 178, 255, 0.15);
+    border: 1px solid rgba(126, 178, 255, 0.35);
+    color: #7EB2FF;
+    padding: 0.6rem 1.5rem;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.setup-connect-btn:hover {
+    background: rgba(126, 178, 255, 0.25);
+}
+.setup-chat-hint {
+    font-size: 0.75rem;
+    color: #555;
+    text-align: center;
+    margin: 1.5rem 0 0.5rem;
+}
+
+/* ---- Running mode additions ---- */
+.monitoring-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    color: #4ade80;
+    padding: 0.25rem 0;
+}
+.monitoring-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #4ade80;
+    flex-shrink: 0;
+}
+.assistant-plan-note {
+    font-size: 0.78rem;
+    color: #999;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    line-height: 1.4;
+}
+.assistant-plan-note a {
+    color: #7EB2FF;
+    text-decoration: none;
+}
+.assistant-plan-note a:hover {
+    text-decoration: underline;
+}
+.rules-compact-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 0.75rem;
+    color: #666;
+    flex-shrink: 0;
+}
+.rules-compact-bar .rules-add-btn {
+    font-size: 0.7rem;
+    color: #7EB2FF;
+    background: rgba(126, 178, 255, 0.1);
+    border: 1px solid rgba(126, 178, 255, 0.25);
+    border-radius: 5px;
+    padding: 0.2rem 0.6rem;
+    cursor: pointer;
+}
+.rules-compact-bar .rules-add-btn:hover {
+    background: rgba(126, 178, 255, 0.2);
+}
+.rules-compact-bar .rules-manage-btn {
+    font-size: 0.7rem;
+    color: #888;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 5px;
+    padding: 0.2rem 0.6rem;
+    cursor: pointer;
+}
+.rules-compact-bar .rules-manage-btn:hover {
+    color: #bbb;
+    border-color: rgba(255, 255, 255, 0.15);
+}
+.rules-expandable {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.25s ease;
+    border-bottom: 1px solid transparent;
+}
+.rules-expandable.expanded {
+    max-height: 50vh;
+    overflow-y: auto;
+    border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+.rules-expandable-inner {
+    padding: 0.5rem 1rem;
+    display: flex;
+    gap: 1rem;
+}
+.rules-expandable-inner > .rules-scroll-section {
+    flex: 1;
+    min-width: 0;
+}
+
 /* ---- Responsive: single column on mobile ---- */
 @media (max-width: 768px) {
     .palantir-dashboard {
@@ -526,6 +678,17 @@ const DASHBOARD_STYLES: &str = r#"
     .person-name { color: #333; }
     .person-channel-badge { color: #888; background: rgba(0,0,0,0.05); }
     .person-row:hover { background: rgba(0,0,0,0.03); }
+    .setup-title { color: #222; }
+    .setup-subtitle { color: #666; }
+    .setup-source-icon { color: #888; }
+    .setup-connect-btn { background: rgba(30, 100, 220, 0.1); border-color: rgba(30, 100, 220, 0.3); color: #1a65dc; }
+    .setup-connect-btn:hover { background: rgba(30, 100, 220, 0.18); }
+    .setup-chat-hint { color: #999; }
+    .monitoring-status { color: #16a34a; }
+    .monitoring-dot { background: #16a34a; }
+    .assistant-plan-note { color: #666; background: rgba(0,0,0,0.02); border-color: rgba(0,0,0,0.08); }
+    .rules-compact-bar { border-bottom-color: rgba(0,0,0,0.06); color: #888; }
+    .rules-expandable.expanded { border-bottom-color: rgba(0,0,0,0.06); }
 }
 "#;
 
@@ -643,6 +806,9 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let youtube_connected = use_state(|| false);
     let tesla_connected = use_state(|| false);
     let has_any_bridge = use_state(|| false);
+    let has_whatsapp = use_state(|| false);
+    let has_signal = use_state(|| false);
+    let has_telegram = use_state(|| false);
     let has_email = use_state(|| false);
     let settings_open = use_state(|| false);
     let expanded_event_id = use_state(|| None::<i32>);
@@ -771,7 +937,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let rule_builder_open = use_state(|| false);
     let editing_rule = use_state(|| None::<super::rules_section::RuleData>);
     let rules_refresh_seq = use_state(|| 0u32);
-    let template_picker_open = use_state(|| false);
     let selected_template = use_state(|| None::<RuleTemplate>);
 
     // Fetch YouTube/Tesla status
@@ -815,6 +980,9 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     // Check bridge connections (any of whatsapp/signal/telegram)
     {
         let has_any_bridge = has_any_bridge.clone();
+        let has_whatsapp = has_whatsapp.clone();
+        let has_signal = has_signal.clone();
+        let has_telegram = has_telegram.clone();
         use_effect_with_deps(
             move |_| {
                 spawn_local(async move {
@@ -824,7 +992,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                             if let Ok(data) = r.json::<serde_json::Value>().await {
                                 if data.get("connected").and_then(|v| v.as_bool()) == Some(true) {
                                     has_any_bridge.set(true);
-                                    return;
+                                    match *bridge {
+                                        "whatsapp" => has_whatsapp.set(true),
+                                        "signal" => has_signal.set(true),
+                                        "telegram" => has_telegram.set(true),
+                                        _ => {}
+                                    }
                                 }
                             }
                         }
@@ -941,26 +1114,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let on_usage_change = fetch_summary.clone();
 
     let on_rule_create_click = {
-        let template_picker_open = template_picker_open.clone();
-        let editing_rule = editing_rule.clone();
-        Callback::from(move |_: ()| {
-            editing_rule.set(None);
-            template_picker_open.set(true);
-        })
-    };
-    let on_template_picker_close = {
-        let template_picker_open = template_picker_open.clone();
-        Callback::from(move |_: ()| template_picker_open.set(false))
-    };
-    let on_template_selected = {
-        let template_picker_open = template_picker_open.clone();
         let rule_builder_open = rule_builder_open.clone();
         let selected_template = selected_template.clone();
         let editing_rule = editing_rule.clone();
-        Callback::from(move |tmpl: RuleTemplate| {
+        Callback::from(move |_: ()| {
             editing_rule.set(None);
-            selected_template.set(Some(tmpl));
-            template_picker_open.set(false);
+            selected_template.set(Some(RuleTemplate::Custom));
             rule_builder_open.set(true);
         })
     };
@@ -1013,16 +1172,14 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         .map(|s| s.events.iter().collect())
         .unwrap_or_default();
     let has_events = !events.is_empty();
-    let messages_handled = (*summary)
-        .as_ref()
-        .map(|s| s.messages_handled_today)
-        .unwrap_or(0);
-    let notifications_sent = (*summary)
-        .as_ref()
-        .map(|s| s.notifications_sent_today)
-        .unwrap_or(0);
-    let rules_active = (*summary).as_ref().map(|s| s.rules_active).unwrap_or(0);
-    let filtered_count = (*summary).as_ref().map(|s| s.filtered_count).unwrap_or(0);
+
+    // Mode detection
+    let has_auto = matches!(
+        props.user_profile.plan_type.as_deref(),
+        Some("autopilot") | Some("byot")
+    );
+    let is_setup_mode =
+        !*has_any_bridge && !*has_email && !props.user_profile.has_any_connection;
 
     let format_event_time = |timestamp: i32| {
         let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(timestamp as f64 * 1000.0));
@@ -1055,12 +1212,84 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     html! {
         <>
             <style>{DASHBOARD_STYLES}</style>
-            <div class="palantir-dashboard">
+            <div class={classes!("palantir-dashboard", is_setup_mode.then_some("setup-mode"))}>
 
                 // ======== LEFT PANEL ========
                 <div class="panel-left">
 
-                    // ---- Status (compact) - only show when action items need attention ----
+                if is_setup_mode {
+                    // ---- Setup mode: guide user to connect data sources ----
+                    <div class="setup-hero">
+                        <div class="setup-title">{"Get started with Lightfriend"}</div>
+                        <div class="setup-subtitle">
+                            if has_auto {
+                                {"Connect your messaging apps and Lightfriend will monitor your messages, track commitments, and alert you when something needs your attention."}
+                            } else {
+                                {"Connect your messaging apps so you can ask Lightfriend to check messages, send replies, and manage your communications."}
+                            }
+                        </div>
+                        <div class="setup-sources">
+                            <div class="setup-source-icon">
+                                <i class="fa-brands fa-whatsapp" style="font-size: 1.8rem; color: #25D366;"></i>
+                                <span>{"WhatsApp"}</span>
+                            </div>
+                            <div class="setup-source-icon">
+                                <i class="fa-brands fa-signal-messenger" style="font-size: 1.8rem; color: #3A76F0;"></i>
+                                <span>{"Signal"}</span>
+                            </div>
+                            <div class="setup-source-icon">
+                                <i class="fa-brands fa-telegram" style="font-size: 1.8rem; color: #26A5E4;"></i>
+                                <span>{"Telegram"}</span>
+                            </div>
+                            <div class="setup-source-icon">
+                                <i class="fa-solid fa-envelope" style="font-size: 1.8rem; color: #EA4335;"></i>
+                                <span>{"Email"}</span>
+                            </div>
+                        </div>
+                        <button class="setup-connect-btn" onclick={open_capabilities.clone()}>
+                            {"Connect your first app"}
+                        </button>
+                        <div class="setup-chat-hint">{"Or chat with your assistant directly"}</div>
+                    </div>
+                    <div>
+                        <ChatBox
+                            on_usage_change={on_usage_change.clone()}
+                            youtube_connected={*youtube_connected}
+                            tesla_connected={*tesla_connected}
+                            prefill_text={(*chat_prefill).clone()}
+                            on_prefill_consumed={on_prefill_consumed.clone()}
+                        />
+                    </div>
+                } else {
+                    // ---- Running mode ----
+
+                    // Monitoring status with source icons
+                    <div class="monitoring-status">
+                        <span class="monitoring-dot"></span>
+                        <span>{"Monitoring: "}</span>
+                        if *has_whatsapp {
+                            <i class="fa-brands fa-whatsapp" style="font-size: 0.9rem; color: #25D366;" title="WhatsApp"></i>
+                        }
+                        if *has_signal {
+                            <i class="fa-brands fa-signal-messenger" style="font-size: 0.9rem; color: #3A76F0;" title="Signal"></i>
+                        }
+                        if *has_telegram {
+                            <i class="fa-brands fa-telegram" style="font-size: 0.9rem; color: #26A5E4;" title="Telegram"></i>
+                        }
+                        if *has_email {
+                            <i class="fa-solid fa-envelope" style="font-size: 0.85rem; color: #EA4335;" title="Email"></i>
+                        }
+                    </div>
+
+                    // Assistant plan note
+                    if !has_auto {
+                        <div class="assistant-plan-note">
+                            {"Monitoring is not automatic on the Assistant plan. Ask your assistant when you want to check messages or send replies. "}
+                            <a href="/pricing">{"Upgrade to Autopilot"}</a>
+                        </div>
+                    }
+
+                    // Status (compact) - only show when action items need attention
                     if has_action_items {
                         <div class="status-compact">
                             <span class="status-compact-icon needs-attention">
@@ -1075,7 +1304,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                         </div>
                     }
 
-                    // ---- Tracked events ----
+                    // Tracked events
                     if has_events {
                         <div class="events-section">
                             <div class="events-header">
@@ -1200,28 +1429,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                         </div>
                     }
 
-                    // ---- Trust stats ----
-                    if messages_handled > 0 || notifications_sent > 0 || rules_active > 0 {
-                        <div class="trust-stats-compact">
-                            if messages_handled > 0 {
-                                <span>{format!("{} messages handled", messages_handled)}</span>
-                            }
-                            if messages_handled > 0 && notifications_sent > 0 {
-                                <span class="trust-stat-sep">{"-"}</span>
-                            }
-                            if notifications_sent > 0 {
-                                <span>{format!("{} notifications sent", notifications_sent)}</span>
-                            }
-                            if (messages_handled > 0 || notifications_sent > 0) && rules_active > 0 {
-                                <span class="trust-stat-sep">{"-"}</span>
-                            }
-                            if rules_active > 0 {
-                                <span>{format!("{} {} active", rules_active, if rules_active == 1 { "rule" } else { "rules" })}</span>
-                            }
-                        </div>
-                    }
-
-                    // ---- Action Cards ----
+                    // Action Cards
                     if has_action_items {
                         <div class="action-cards">
                             { for visible_action_items.iter().map(|item| {
@@ -1266,7 +1474,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                         </div>
                     }
 
-                    // ---- ChatBox ----
+                    // ChatBox
                     <div>
                         if let Some(ref num) = props.user_profile.preferred_number {
                             <div class="lf-number-label">{"SMS: "}{num}</div>
@@ -1278,128 +1486,131 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                             prefill_text={(*chat_prefill).clone()}
                             on_prefill_consumed={on_prefill_consumed}
                         />
-                        if !*has_any_bridge && !*has_email {
+                        // Partial connection hints with icons
+                        if !*has_any_bridge {
                             <div class="connect-prompt">
-                                {"Connect a messaging app or email to get the most out of your assistant. "}
-                                <a href="#" onclick={open_capabilities.clone()}>{"Set up connections"}</a>
-                            </div>
-                        } else if !*has_any_bridge {
-                            <div class="connect-prompt">
-                                {"Connect WhatsApp, Signal, or Telegram to manage your messages. "}
+                                <i class="fa-brands fa-whatsapp" style="color: #25D366; margin-right: 0.2rem;"></i>
+                                <i class="fa-brands fa-signal-messenger" style="color: #3A76F0; margin-right: 0.2rem;"></i>
+                                <i class="fa-brands fa-telegram" style="color: #26A5E4; margin-right: 0.4rem;"></i>
+                                {"Connect a messaging app. "}
                                 <a href="#" onclick={open_capabilities.clone()}>{"Set up connections"}</a>
                             </div>
                         } else if !*has_email {
                             <div class="connect-prompt">
-                                {"Connect your email to read and send emails through your assistant. "}
+                                <i class="fa-solid fa-envelope" style="color: #EA4335; margin-right: 0.4rem;"></i>
+                                {"Connect your email. "}
                                 <a href="#" onclick={open_capabilities.clone()}>{"Set up connections"}</a>
                             </div>
                         }
                     </div>
 
                     <div class="peace-separator"></div>
+                }
                 </div>
 
-                // ======== RIGHT PANEL ========
-                <div class="panel-right">
-                    <div class="panel-right-rules">
-                        // ---- Critical Notifications card ----
-                        <div class="critical-notif-card">
-                            <div class="critical-notif-header">
-                                <div class="critical-notif-left">
-                                    <div class={classes!("critical-notif-dot", if *critical_notis_enabled { "active" } else { "inactive" })}></div>
-                                    <span class="critical-notif-title">{"Critical Notifications"}</span>
-                                </div>
-                                <button
-                                    class={classes!("critical-notif-badge", if *critical_notis_enabled { "active" } else { "inactive" })}
-                                    onclick={on_critical_toggle.clone()}
-                                >
-                                    {if *critical_notis_enabled { "Active" } else { "Inactive" }}
-                                </button>
-                            </div>
-                            <div class="critical-notif-desc">
-                                {"AI evaluates every incoming message and notifies you via SMS when something is time-sensitive or urgent. Routine messages are silently collected for your next digest."}
-                            </div>
-                            <button class="critical-notif-details-toggle" onclick={on_toggle_critical_details}>
-                                {if *critical_notif_details_open { "Hide details" } else { "How does it classify messages?" }}
-                            </button>
-                            if *critical_notif_details_open {
-                                <div class="critical-notif-details">
-                                    <h4>{"Urgency levels"}</h4>
-                                    <ul>
-                                        <li><strong>{"Critical: "}</strong>{"immediate danger, medical emergency, security breach"}</li>
-                                        <li><strong>{"High: "}</strong>{"a 2-hour delay would cause real consequences - missed meeting, financial loss, time-sensitive decision"}</li>
-                                        <li><strong>{"Medium: "}</strong>{"important but can wait a few hours - friend asking to meet later, non-urgent work question"}</li>
-                                        <li><strong>{"Low: "}</strong>{"routine updates, casual conversation"}</li>
-                                        <li><strong>{"None: "}</strong>{"spam, automated messages"}</li>
-                                    </ul>
-                                    <p>{"You get notified only for critical or high urgency. The AI also considers sender relationship, messaging patterns, time of day, and cross-platform escalation (e.g., someone messaging you on both WhatsApp and Signal)."}</p>
-                                    <button class="critical-notif-prompt-toggle" onclick={on_toggle_critical_prompt}>
-                                        {if *critical_notif_prompt_open { "Hide full prompt" } else { "View full classification prompt" }}
+                // ======== RIGHT PANEL (running mode only) ========
+                if !is_setup_mode {
+                    <div class="panel-right">
+                        <div class="panel-right-rules">
+                            // ---- Critical Notifications card ----
+                            <div class="critical-notif-card">
+                                <div class="critical-notif-header">
+                                    <div class="critical-notif-left">
+                                        <div class={classes!("critical-notif-dot", if *critical_notis_enabled { "active" } else { "inactive" })}></div>
+                                        <span class="critical-notif-title">{"Critical Notifications"}</span>
+                                    </div>
+                                    <button
+                                        class={classes!("critical-notif-badge", if *critical_notis_enabled { "active" } else { "inactive" })}
+                                        onclick={on_critical_toggle.clone()}
+                                    >
+                                        {if *critical_notis_enabled { "Active" } else { "Inactive" }}
                                     </button>
-                                    if *critical_notif_prompt_open {
-                                        <div class="critical-notif-prompt">
-                                            {"You are evaluating whether an incoming message requires the user's immediate attention.\n\
-                                            The user has muted all phone notifications and relies on you to catch time-critical messages. \
-                                            If you miss something important, they won't see it for hours.\n\
-                                            \n\
-                                            The last message in the conversation is being evaluated. Each message is marked [seen] or \
-                                            [unseen] - unseen messages have not been read by the user yet. Use the conversation history, \
-                                            timestamps, and seen status to understand context and urgency. Compare mentioned times against \
-                                            the current time.\n\
-                                            \n\
-                                            Classify the urgency level:\n\
-                                            - critical: immediate danger, medical emergency, security breach\n\
-                                            - high: 2-hour delay would cause real consequences (missed meeting, financial loss, time-sensitive decision)\n\
-                                            - medium: important but can wait a few hours (friend asking to meet later today, non-urgent work question)\n\
-                                            - low: routine updates, casual conversation\n\
-                                            - none: spam, automated messages, irrelevant\n\
-                                            \n\
-                                            Set should_notify=true only for critical or high urgency.\n\
-                                            Use the signal report to calibrate - sender relationship, timing patterns, and content signals all matter.\n\
-                                            \n\
-                                            If should_notify=false, set notification_message to empty string.\n\
-                                            If should_notify=true, write a concise notification (max 480 chars, second person)."}
-                                        </div>
-                                    }
+                                </div>
+                                <div class="critical-notif-desc">
+                                    {"AI evaluates every incoming message and notifies you via SMS when something is time-sensitive or urgent. Routine messages are silently collected for your next digest."}
+                                </div>
+                                <button class="critical-notif-details-toggle" onclick={on_toggle_critical_details}>
+                                    {if *critical_notif_details_open { "Hide details" } else { "How does it classify messages?" }}
+                                </button>
+                                if *critical_notif_details_open {
+                                    <div class="critical-notif-details">
+                                        <h4>{"Urgency levels"}</h4>
+                                        <ul>
+                                            <li><strong>{"Critical: "}</strong>{"immediate danger, medical emergency, security breach"}</li>
+                                            <li><strong>{"High: "}</strong>{"a 2-hour delay would cause real consequences - missed meeting, financial loss, time-sensitive decision"}</li>
+                                            <li><strong>{"Medium: "}</strong>{"important but can wait a few hours - friend asking to meet later, non-urgent work question"}</li>
+                                            <li><strong>{"Low: "}</strong>{"routine updates, casual conversation"}</li>
+                                            <li><strong>{"None: "}</strong>{"spam, automated messages"}</li>
+                                        </ul>
+                                        <p>{"You get notified only for critical or high urgency. The AI also considers sender relationship, messaging patterns, time of day, and cross-platform escalation (e.g., someone messaging you on both WhatsApp and Signal)."}</p>
+                                        <button class="critical-notif-prompt-toggle" onclick={on_toggle_critical_prompt}>
+                                            {if *critical_notif_prompt_open { "Hide full prompt" } else { "View full classification prompt" }}
+                                        </button>
+                                        if *critical_notif_prompt_open {
+                                            <div class="critical-notif-prompt">
+                                                {"You are evaluating whether an incoming message requires the user's immediate attention.\n\
+                                                The user has muted all phone notifications and relies on you to catch time-critical messages. \
+                                                If you miss something important, they won't see it for hours.\n\
+                                                \n\
+                                                The last message in the conversation is being evaluated. Each message is marked [seen] or \
+                                                [unseen] - unseen messages have not been read by the user yet. Use the conversation history, \
+                                                timestamps, and seen status to understand context and urgency. Compare mentioned times against \
+                                                the current time.\n\
+                                                \n\
+                                                Classify the urgency level:\n\
+                                                - critical: immediate danger, medical emergency, security breach\n\
+                                                - high: 2-hour delay would cause real consequences (missed meeting, financial loss, time-sensitive decision)\n\
+                                                - medium: important but can wait a few hours (friend asking to meet later today, non-urgent work question)\n\
+                                                - low: routine updates, casual conversation\n\
+                                                - none: spam, automated messages, irrelevant\n\
+                                                \n\
+                                                Set should_notify=true only for critical or high urgency.\n\
+                                                Use the signal report to calibrate - sender relationship, timing patterns, and content signals all matter.\n\
+                                                \n\
+                                                If should_notify=false, set notification_message to empty string.\n\
+                                                If should_notify=true, write a concise notification (max 480 chars, second person)."}
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+
+                            // ---- Custom Rules (collapsible) ----
+                            <div class="custom-rules-header" onclick={on_toggle_custom_rules}>
+                                <i class={classes!("fa-solid", "fa-chevron-right", "custom-rules-chevron", (*custom_rules_open).then_some("open"))}></i>
+                                <span>{"Custom Rules"}</span>
+                            </div>
+                            if *custom_rules_open {
+                                <div class="custom-rules-body">
+                                    <div class="rules-scroll-section">
+                                        <RulesSection
+                                            filter_trigger_type={Some("schedule".to_string())}
+                                            label_override={Some("Schedule".to_string())}
+                                            on_create_click={on_rule_create_click.clone()}
+                                            on_edit_click={on_rule_edit_click.clone()}
+                                            refresh_seq={*rules_refresh_seq}
+                                        />
+                                    </div>
+                                    <div class="rules-scroll-section">
+                                        <RulesSection
+                                            filter_trigger_type={Some("ontology_change".to_string())}
+                                            label_override={Some("Monitoring".to_string())}
+                                            on_create_click={on_rule_create_click.clone()}
+                                            on_edit_click={on_rule_edit_click.clone()}
+                                            refresh_seq={*rules_refresh_seq}
+                                            show_create_button={false}
+                                        />
+                                    </div>
                                 </div>
                             }
                         </div>
 
-                        // ---- Custom Rules (collapsible) ----
-                        <div class="custom-rules-header" onclick={on_toggle_custom_rules}>
-                            <i class={classes!("fa-solid", "fa-chevron-right", "custom-rules-chevron", (*custom_rules_open).then_some("open"))}></i>
-                            <span>{"Custom Rules"}</span>
+                        // Activity feed (primary surface)
+                        <div class="panel-right-activity">
+                            <ActivityFeed refresh_seq={*activity_refresh_seq} />
                         </div>
-                        if *custom_rules_open {
-                            <div class="custom-rules-body">
-                                <div class="rules-scroll-section">
-                                    <RulesSection
-                                        filter_trigger_type={Some("schedule".to_string())}
-                                        label_override={Some("Schedule".to_string())}
-                                        on_create_click={on_rule_create_click.clone()}
-                                        on_edit_click={on_rule_edit_click.clone()}
-                                        refresh_seq={*rules_refresh_seq}
-                                    />
-                                </div>
-                                <div class="rules-scroll-section">
-                                    <RulesSection
-                                        filter_trigger_type={Some("ontology_change".to_string())}
-                                        label_override={Some("Monitoring".to_string())}
-                                        on_create_click={on_rule_create_click.clone()}
-                                        on_edit_click={on_rule_edit_click.clone()}
-                                        refresh_seq={*rules_refresh_seq}
-                                        show_create_button={false}
-                                    />
-                                </div>
-                            </div>
-                        }
                     </div>
-
-                    // ---- Activity feed (bottom) ----
-                    <div class="panel-right-activity">
-                        <ActivityFeed refresh_seq={*activity_refresh_seq} />
-                    </div>
-                </div>
+                }
 
                 // ---- Footer links ----
                 <div class="sidebar-footer">
@@ -1433,11 +1644,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 on_close={on_settings_close}
                 on_profile_update={props.on_profile_update.clone()}
                 initial_tab={*settings_initial_tab}
-            />
-            <RuleTemplatePicker
-                is_open={*template_picker_open}
-                on_close={on_template_picker_close}
-                on_select={on_template_selected}
             />
             <RuleBuilder
                 is_open={*rule_builder_open}

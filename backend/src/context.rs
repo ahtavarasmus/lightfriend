@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use chrono::{FixedOffset, Utc};
+use chrono::{FixedOffset, TimeZone, Utc};
 use openai_api_rs::v1::api::OpenAIClient;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionMessage};
 
@@ -367,7 +367,11 @@ impl ContextBuilder {
                     .user_repository
                     .get_conversation_history(user_id, depth as i64, true)
                     .unwrap_or_default();
-                Some(convert_history(raw))
+                let tz_offset = timezone
+                    .as_ref()
+                    .map(|tz| tz.fixed_offset)
+                    .unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+                Some(convert_history(raw, &tz_offset))
             } else {
                 Some(Vec::new())
             }
@@ -402,10 +406,38 @@ impl ContextBuilder {
 
 const SKIP_FROM_HISTORY: &[&str] = &["get_weather"];
 
-pub fn convert_history(raw: Vec<crate::pg_models::PgMessageHistory>) -> Vec<ChatCompletionMessage> {
+/// Minimum gap (seconds) before inserting a conversation break marker.
+const GAP_THRESHOLD_SECS: i32 = 30 * 60; // 30 minutes
+
+pub fn convert_history(
+    raw: Vec<crate::pg_models::PgMessageHistory>,
+    offset: &FixedOffset,
+) -> Vec<ChatCompletionMessage> {
     let mut out = Vec::new();
+    let mut last_ts: Option<i32> = None;
 
     for msg in raw.into_iter().rev() {
+        // Before user messages, check for a significant time gap
+        if msg.role == "user" && !msg.encrypted_content.trim().is_empty() {
+            if let Some(prev) = last_ts {
+                let gap = msg.created_at - prev;
+                if gap >= GAP_THRESHOLD_SECS {
+                    out.push(ChatCompletionMessage {
+                        role: chat_completion::MessageRole::system,
+                        content: chat_completion::Content::Text(format!(
+                            "[{} gap - treat what follows as a new conversation]",
+                            format_duration(gap)
+                        )),
+                        name: None,
+                        tool_calls: None,
+                        tool_call_id: None,
+                    });
+                }
+            }
+        }
+
+        last_ts = Some(msg.created_at);
+
         if msg.role == "assistant" && msg.tool_calls_json.is_some() {
             continue;
         }
@@ -438,9 +470,21 @@ pub fn convert_history(raw: Vec<crate::pg_models::PgMessageHistory>) -> Vec<Chat
             continue;
         }
 
+        // Prefix user messages with their timestamp
+        let content = if role == chat_completion::MessageRole::user {
+            let ts_str = offset
+                .timestamp_opt(msg.created_at as i64, 0)
+                .single()
+                .map(|dt| dt.format("%-I:%M %p").to_string())
+                .unwrap_or_default();
+            format!("[{}] {}", ts_str, msg.encrypted_content)
+        } else {
+            msg.encrypted_content
+        };
+
         out.push(ChatCompletionMessage {
             role,
-            content: chat_completion::Content::Text(msg.encrypted_content),
+            content: chat_completion::Content::Text(content),
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -448,4 +492,25 @@ pub fn convert_history(raw: Vec<crate::pg_models::PgMessageHistory>) -> Vec<Chat
     }
 
     out
+}
+
+fn format_duration(secs: i32) -> String {
+    if secs >= 86400 {
+        let days = secs / 86400;
+        if days == 1 {
+            "1 day".to_string()
+        } else {
+            format!("{} days", days)
+        }
+    } else if secs >= 3600 {
+        let hours = secs / 3600;
+        if hours == 1 {
+            "1 hour".to_string()
+        } else {
+            format!("{} hours", hours)
+        }
+    } else {
+        let mins = secs / 60;
+        format!("{} min", mins)
+    }
 }
