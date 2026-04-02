@@ -222,6 +222,7 @@ pub async fn handle_send_chat_message(
     let cloned_platform = args.platform.clone();
     let cloned_exact_name = exact_name.clone();
     let cloned_message = args.message.clone();
+    let cloned_room_id = best_match.room_id.clone();
     // Log outbound bandwidth estimate
     let outbound_bytes = args.message.len() as i32 + if image_url.is_some() { 50_000 } else { 0 };
     if let Err(e) = state.bandwidth_repository.log_bandwidth(
@@ -258,6 +259,7 @@ pub async fn handle_send_chat_message(
                 &cloned_exact_name,
                 &cloned_message,
                 cloned_image_url,
+                Some(cloned_room_id.as_str()),
             )
             .await
             {

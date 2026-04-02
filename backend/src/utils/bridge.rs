@@ -951,9 +951,14 @@ pub async fn send_bridge_message(
     chat_name: &str,
     message: &str,
     media_url: Option<String>,
+    target_room_id: Option<&str>,
 ) -> Result<BridgeMessage> {
-    // Get user for timezone info
-    tracing::info!("Sending {} message", service);
+    tracing::info!(
+        "Sending {} message to '{}' (room_id={:?})",
+        service,
+        chat_name,
+        target_room_id
+    );
 
     let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
     let bridge = state.user_repository.get_bridge(user_id, service)?;
@@ -963,37 +968,43 @@ pub async fn send_bridge_message(
             capitalize(service)
         ));
     }
-    let service_rooms = get_service_rooms(&client, service).await?;
-    let exact_room = find_exact_room(&service_rooms, chat_name);
-    let room = match exact_room {
-        Some(room_info) => {
-            let room_id = match matrix_sdk::ruma::OwnedRoomId::try_from(room_info.room_id.as_str())
-            {
-                Ok(id) => id,
-                Err(e) => return Err(anyhow!("Invalid room ID: {}", e)),
-            };
-            match client.get_room(&room_id) {
-                Some(r) => r,
-                None => return Err(anyhow!("Room not found")),
+
+    // If we have a room_id from the initial lookup, use it directly (no re-search)
+    let room = if let Some(rid) = target_room_id {
+        let room_id = matrix_sdk::ruma::OwnedRoomId::try_from(rid)
+            .map_err(|e| anyhow!("Invalid room ID '{}': {}", rid, e))?;
+        client
+            .get_room(&room_id)
+            .ok_or_else(|| anyhow!("Room {} not found in client", rid))?
+    } else {
+        let service_rooms = get_service_rooms(&client, service).await?;
+        let exact_room = find_exact_room(&service_rooms, chat_name);
+        match exact_room {
+            Some(room_info) => {
+                let room_id = matrix_sdk::ruma::OwnedRoomId::try_from(room_info.room_id.as_str())
+                    .map_err(|e| anyhow!("Invalid room ID: {}", e))?;
+                client
+                    .get_room(&room_id)
+                    .ok_or_else(|| anyhow!("Room not found"))?
             }
-        }
-        None => {
-            let suggestions = get_best_matches(&service_rooms, chat_name);
-            let error_msg = if suggestions.is_empty() {
-                format!(
-                    "Could not find exact matching {} room for '{}'",
-                    capitalize(service),
-                    chat_name
-                )
-            } else {
-                format!(
-                    "Could not find exact matching {} room for '{}'. Did you mean one of these?\n{}",
-                    capitalize(service),
-                    chat_name,
-                    suggestions.join("\n")
-                )
-            };
-            return Err(anyhow!(error_msg));
+            None => {
+                let suggestions = get_best_matches(&service_rooms, chat_name);
+                let error_msg = if suggestions.is_empty() {
+                    format!(
+                        "Could not find exact matching {} room for '{}'",
+                        capitalize(service),
+                        chat_name
+                    )
+                } else {
+                    format!(
+                        "Could not find exact matching {} room for '{}'. Did you mean one of these?\n{}",
+                        capitalize(service),
+                        chat_name,
+                        suggestions.join("\n")
+                    )
+                };
+                return Err(anyhow!(error_msg));
+            }
         }
     };
     use matrix_sdk::ruma::events::room::message::{
