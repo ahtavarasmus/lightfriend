@@ -861,6 +861,44 @@ done
 
 ensure_telegram_config_compat
 
+# Patch displayname_template in existing bridge configs to match current templates.
+# This ensures contact detection (WA/WA~ and Signal/Signal~) stays correct
+# without regenerating the full config (which would lose mautrix-generated fields).
+patch_displayname_templates() {
+    python3 - <<'PY'
+from pathlib import Path
+
+WA_TEMPLATE = '"{{if .FullName}}{{.FullName}} (WA){{else}}{{or .PushName .BusinessName .Phone}} (WA~){{end}}"'
+SIGNAL_TEMPLATE = '"{{if .ContactName}}{{.ContactName}} (Signal){{else}}{{or .ProfileName .PhoneNumber}} (Signal~){{end}}"'
+
+patches = {
+    "/data/bridges/whatsapp/config.yaml": WA_TEMPLATE,
+    "/data/bridges/signal/config.yaml": SIGNAL_TEMPLATE,
+}
+
+for config_path, desired_template in patches.items():
+    path = Path(config_path)
+    if not path.exists():
+        continue
+    lines = path.read_text().splitlines(keepends=True)
+    changed = False
+    for i, line in enumerate(lines):
+        stripped = line.lstrip()
+        if stripped.startswith("displayname_template:"):
+            indent = line[: len(line) - len(stripped)]
+            new_line = f"{indent}displayname_template: {desired_template}\n"
+            if lines[i] != new_line:
+                lines[i] = new_line
+                changed = True
+    if changed:
+        path.write_text("".join(lines))
+        print(f"  Patched displayname_template in {config_path}", flush=True)
+    else:
+        print(f"  displayname_template already correct in {config_path}", flush=True)
+PY
+}
+patch_displayname_templates
+
 # Clean stale telegram sessions on boot (prevents AuthKeyUnregisteredError).
 # The backend also cleans up at runtime before each new connection attempt.
 TG_CONNECTIONS=$(su postgres -c "psql -t -A -d lightfriend_db -c \"SELECT count(*) FROM bridges WHERE bridge_type = 'telegram' AND status = 'connected'\"" 2>/dev/null || echo "0")

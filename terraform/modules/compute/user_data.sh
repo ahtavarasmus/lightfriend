@@ -439,103 +439,6 @@ done
 
 echo "VSOCK services configured: proxy:8001, config:9000, boot-trace:9007, seed-http:9080, cf-edge:7844, dot:8530, marlin-kms:9010, gvproxy:1024"
 
-# S3 deploy signal poller - polls S3 for export-request.json and copies locally.
-# Needed because SSM send-command from the deploy runner stays Pending.
-cat > /opt/lightfriend/s3-signal-poller.sh <<'SCRIPT'
-#!/bin/bash
-# Bridges the deploy pipeline (S3) with the enclave (local HTTP).
-# Pipeline writes to S3, this poller copies locally, and when done
-# uploads results back to S3. No SSM needed.
-BUCKET=$(aws ssm get-parameter --name /lightfriend/s3-bucket --query Parameter.Value --output text 2>/dev/null || echo "")
-[ -z "$BUCKET" ] && echo "No S3 bucket configured" && exit 0
-echo "s3-signal-poller: bucket=$BUCKET"
-
-LAST_TRIGGER=""
-POLL_COUNT=0
-while true; do
-    POLL_COUNT=$((POLL_COUNT + 1))
-    # Heartbeat every 60 iterations (~5 min)
-    [ $((POLL_COUNT % 60)) -eq 0 ] && echo "$(date -u): heartbeat poll=$POLL_COUNT last_trigger=$${LAST_TRIGGER:-none}"
-
-    # Check for export trigger in S3 (timeout prevents hanging on DNS/credential issues)
-    S3_ERR=$(timeout 10 aws s3 cp "s3://$BUCKET/deploy/export-request.json" /tmp/export-request-check.json 2>&1)
-    S3_RC=$?
-    if [ $S3_RC -eq 0 ] && [ -s /tmp/export-request-check.json ]; then
-        TRIGGER=$(cat /tmp/export-request-check.json)
-        if [ "$TRIGGER" != "$LAST_TRIGGER" ]; then
-            echo "$(date -u): New export request: $TRIGGER"
-            LAST_TRIGGER="$TRIGGER"
-            # Copy to seed dir for enclave's watcher
-            cp /tmp/export-request-check.json /opt/lightfriend/seed/export-request.json
-            rm -f /opt/lightfriend/backups/export-complete.json
-            # Remove from S3 so we don't re-trigger
-            aws s3 rm "s3://$BUCKET/deploy/export-request.json" 2>/dev/null || true
-        fi
-        rm -f /tmp/export-request-check.json
-    elif [ $S3_RC -ne 0 ] && ! echo "$S3_ERR" | grep -q "404\|NoSuchKey\|Not Found"; then
-        # Log unexpected S3 errors (not 404)
-        echo "$(date -u): S3 poll error (rc=$S3_RC): $S3_ERR"
-    fi
-
-    # Check for completed export and upload to S3
-    if [ -f /opt/lightfriend/backups/export-complete.json ] && [ -s /opt/lightfriend/backups/export-complete.json ]; then
-        STATUS=$(cat /opt/lightfriend/backups/export-complete.json | python3 -c "import json,sys; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
-        if [ "$STATUS" = "SUCCESS" ] || [ "$STATUS" = "FAILED" ]; then
-            echo "$(date -u): Export $STATUS, uploading results to S3..."
-            # Upload the backup .enc file to S3 if successful
-            if [ "$STATUS" = "SUCCESS" ]; then
-                BACKUP_FILE=$(ls -t /opt/lightfriend/backups/*.enc 2>/dev/null | head -1)
-                if [ -n "$BACKUP_FILE" ]; then
-                    BACKUP_KEY="backups/deploy/$(basename $BACKUP_FILE)"
-                    timeout 120 aws s3 cp "$BACKUP_FILE" "s3://$BUCKET/$BACKUP_KEY" 2>/dev/null
-                    BACKUP_SHA=$(sha256sum "$BACKUP_FILE" | awk '{print $1}')
-                    BACKUP_SIZE=$(stat -c%s "$BACKUP_FILE")
-                    # Add S3 key to completion JSON
-                    python3 -c "
-import json
-with open('/opt/lightfriend/backups/export-complete.json') as f:
-    data = json.load(f)
-data['backup_key'] = '$BACKUP_KEY'
-data['backup_sha256'] = '$BACKUP_SHA'
-data['backup_size'] = $BACKUP_SIZE
-print(json.dumps(data))
-" > /tmp/export-complete-s3.json
-                    timeout 30 aws s3 cp /tmp/export-complete-s3.json "s3://$BUCKET/deploy/export-complete.json" 2>/dev/null
-                    echo "$(date -u): Backup uploaded: s3://$BUCKET/$BACKUP_KEY ($BACKUP_SIZE bytes)"
-                fi
-            else
-                # Upload failure status as-is
-                aws s3 cp /opt/lightfriend/backups/export-complete.json "s3://$BUCKET/deploy/export-complete.json" 2>/dev/null
-            fi
-            # Clean up local files
-            rm -f /opt/lightfriend/backups/export-complete.json
-            rm -f /opt/lightfriend/seed/export-request.json
-        fi
-    fi
-
-    sleep 5
-done
-SCRIPT
-chmod +x /opt/lightfriend/s3-signal-poller.sh
-
-cat > /etc/systemd/system/s3-signal-poller.service <<'POLLEREOF'
-[Unit]
-Description=S3 deploy signal poller
-After=network-online.target
-
-[Service]
-ExecStart=/opt/lightfriend/s3-signal-poller.sh
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-POLLEREOF
-
-systemctl daemon-reload
-systemctl enable s3-signal-poller
-systemctl start s3-signal-poller || echo "WARNING: s3-signal-poller failed to start"
-
 # ── Enclave launch script ───────────────────────────────────────────────────
 
 cat > /opt/lightfriend/launch-enclave.sh <<'SCRIPT'
@@ -687,40 +590,7 @@ echo "========================================"
 SCRIPT
 chmod +x /opt/lightfriend/diagnose.sh
 
-# ── S3 backup upload/download scripts ───────────────────────────────────────
-
-cat > /opt/lightfriend/upload-backup.sh <<'SCRIPT'
-#!/bin/bash
-set -euo pipefail
-BACKUP=$(ls -t /opt/lightfriend/backups/*.tar.gz.enc 2>/dev/null | head -1)
-[ -z "$BACKUP" ] && { echo "No backup found"; exit 1; }
-BUCKET=$(grep S3_BACKUP_BUCKET /opt/lightfriend/.env | cut -d= -f2)
-[ -z "$BUCKET" ] && { echo "S3_BACKUP_BUCKET not set in .env"; exit 1; }
-BACKUP_TIER="$${BACKUP_TIER:-hourly}"
-
-LOCAL_SIZE=$(stat -c%s "$BACKUP" 2>/dev/null || stat -f%z "$BACKUP" 2>/dev/null)
-LOCAL_SHA=$(sha256sum "$BACKUP" | awk '{print $1}')
-S3_KEY="backups/$${BACKUP_TIER}/$(basename $BACKUP)"
-RESULT_FILE="/opt/lightfriend/last-upload.json"
-
-# Upload with checksum verification (S3 validates Content-MD5 on receipt)
-aws s3 cp "$BACKUP" "s3://$${BUCKET}/$${S3_KEY}" --sse AES256
-
-# Verify: S3 object exists and size matches local file
-S3_SIZE=$(aws s3api head-object --bucket "$${BUCKET}" --key "$${S3_KEY}" --query ContentLength --output text 2>/dev/null || echo "0")
-if [ "$${LOCAL_SIZE}" != "$${S3_SIZE}" ]; then
-    echo "FATAL: S3 size mismatch - local=$${LOCAL_SIZE} s3=$${S3_SIZE}"
-    exit 1
-fi
-
-cat > "$RESULT_FILE" <<EOF
-{"backup_key":"$${S3_KEY}","size_bytes":$${LOCAL_SIZE},"sha256":"$${LOCAL_SHA}","local_path":"$${BACKUP}"}
-EOF
-
-echo "UPLOAD_RESULT $(cat "$RESULT_FILE")"
-echo "Uploaded and verified: s3://$${BUCKET}/$${S3_KEY} ($${S3_SIZE} bytes)"
-SCRIPT
-chmod +x /opt/lightfriend/upload-backup.sh
+# ── S3 backup download scripts ───────────────────────────────────────
 
 cat > /opt/lightfriend/download-eif.sh <<'SCRIPT'
 #!/bin/bash
@@ -877,93 +747,16 @@ echo "=== restore-enclave.sh completed successfully ==="
 SCRIPT
 chmod +x /opt/lightfriend/restore-enclave.sh
 
-cat > /opt/lightfriend/upload-env.sh <<'SCRIPT'
-#!/bin/bash
-set -e
-[ -f /opt/lightfriend/.env ] || { echo "No .env file found"; exit 1; }
-BUCKET=$(grep S3_BACKUP_BUCKET /opt/lightfriend/.env | cut -d= -f2)
-[ -z "$BUCKET" ] && { echo "S3_BACKUP_BUCKET not set in .env"; exit 1; }
-aws s3 cp /opt/lightfriend/.env "s3://$BUCKET/config/.env" --sse AES256
-echo "Uploaded .env to s3://$BUCKET/config/.env"
-
-# Also replicate .env to Cloudflare R2 (off-AWS disaster recovery)
-R2_BUCKET=$(grep R2_BACKUP_BUCKET /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
-R2_ENDPOINT=$(grep R2_ENDPOINT_URL /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
-R2_ACCESS=$(grep R2_ACCESS_KEY_ID /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
-R2_SECRET=$(grep R2_SECRET_ACCESS_KEY /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
-if [ -n "$R2_BUCKET" ] && [ -n "$R2_ENDPOINT" ] && [ -n "$R2_ACCESS" ]; then
-    AWS_ACCESS_KEY_ID="$R2_ACCESS" AWS_SECRET_ACCESS_KEY="$R2_SECRET" \
-        aws s3 cp /opt/lightfriend/.env "s3://$R2_BUCKET/config/.env" \
-        --endpoint-url "$R2_ENDPOINT" 2>/dev/null && \
-        echo "Replicated .env to R2" || echo "WARNING: R2 .env replication failed"
-fi
-SCRIPT
-chmod +x /opt/lightfriend/upload-env.sh
-
-cat > /opt/lightfriend/pre-deploy.sh <<'SCRIPT'
-#!/bin/bash
-set -e
-LOCKFILE="/tmp/lightfriend-backup.lock"
-exec 200>"$LOCKFILE"
-flock -n 200 || { echo "FATAL: Another backup/export is already running"; exit 1; }
-echo "=== Pre-deploy: export + upload (old instance stays live) ==="
-/opt/lightfriend/trigger-export.sh
-BACKUP_TIER=hourly /opt/lightfriend/upload-backup.sh
-/opt/lightfriend/upload-env.sh
-echo "=== Pre-deploy complete ==="
-SCRIPT
-chmod +x /opt/lightfriend/pre-deploy.sh
-
 # ── Scheduled hourly full snapshot backup ────────────────────────────────
-# Runs the same full export path used during deploys, but without enabling
-# maintenance mode. Each backing store snapshot is taken live inside export.sh,
-# then the encrypted archive is uploaded and verified against S3 by size/SHA.
-# Worst-case data loss target: 1 hour.
-
-cat > /opt/lightfriend/promote-backup.sh <<'SCRIPT'
-#!/bin/bash
-set -euo pipefail
-SOURCE_KEY="$${1:-}"
-BUCKET=$(grep S3_BACKUP_BUCKET /opt/lightfriend/.env | cut -d= -f2)
-[ -n "$SOURCE_KEY" ] || { echo "Usage: promote-backup.sh <source-key>"; exit 1; }
-[ -n "$BUCKET" ] || { echo "S3_BACKUP_BUCKET not set in .env"; exit 1; }
-
-SOURCE_SIZE=$(aws s3api head-object --bucket "$BUCKET" --key "$SOURCE_KEY" --query ContentLength --output text)
-BASENAME=$(basename "$SOURCE_KEY")
-
-copy_and_verify() {
-    DEST_KEY="$1"
-    aws s3 cp "s3://$BUCKET/$SOURCE_KEY" "s3://$BUCKET/$DEST_KEY" --sse AES256
-    DEST_SIZE=$(aws s3api head-object --bucket "$BUCKET" --key "$DEST_KEY" --query ContentLength --output text)
-    if [ "$SOURCE_SIZE" != "$DEST_SIZE" ]; then
-        echo "FATAL: Promotion size mismatch for $DEST_KEY"
-        exit 1
-    fi
-    echo "Promoted and verified: $DEST_KEY"
-}
-
-UTC_HOUR=$(date -u +%H)
-UTC_DOM=$(date -u +%d)
-UTC_DOW=$(date -u +%u)
-
-if [ "$UTC_HOUR" = "00" ]; then
-    copy_and_verify "backups/daily/$BASENAME"
-fi
-
-if [ "$UTC_HOUR" = "00" ] && [ "$UTC_DOW" = "7" ]; then
-    copy_and_verify "backups/weekly/$BASENAME"
-fi
-
-if [ "$UTC_HOUR" = "00" ] && [ "$UTC_DOM" = "01" ]; then
-    copy_and_verify "backups/monthly/$BASENAME"
-fi
-SCRIPT
-chmod +x /opt/lightfriend/promote-backup.sh
+# Host generates presigned PUT URLs and writes trigger JSON to seed/.
+# Enclave's export-watcher picks it up, runs export.sh, uploads directly.
+# Promote rules included in trigger - enclave re-uploads to tier keys.
 
 cat > /opt/lightfriend/scheduled-backup.sh <<'SCRIPT'
 #!/bin/bash
-# Hourly backup: generate presigned URLs, trigger enclave export, enclave does everything.
-# Host only generates URLs and writes the trigger. Enclave uploads directly to S3/R2.
+# Hourly backup: generate presigned PUT URLs, write trigger to seed/.
+# Enclave's export-watcher picks it up, runs export.sh, uploads directly.
+set -euo pipefail
 
 LOCKFILE="/tmp/lightfriend-backup.lock"
 exec 200>"$LOCKFILE"
@@ -972,101 +765,76 @@ flock -n 200 || { echo "Skipping: another backup/deploy is running"; exit 0; }
 TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
 BUCKET=$(grep S3_BACKUP_BUCKET /opt/lightfriend/.env | cut -d= -f2)
 REGION=$(grep AWS_REGION /opt/lightfriend/.env | cut -d= -f2)
+BACKUP_S3_KEY="backups/hourly/lightfriend-full-backup-$TIMESTAMP.tar.gz.enc"
 
-BACKUP_S3_KEY="backups/hourly/lightfriend-full-backup-$${TIMESTAMP}.tar.gz.enc"
-HEALTH_S3_KEY="backups/backup-health.json"
+echo "=== Hourly backup: $TIMESTAMP ==="
 
-echo "=== Hourly backup: $${TIMESTAMP} ==="
+# Single python script generates all presigned URLs and writes trigger JSON.
+# Promote rules: at midnight copy to daily, on Sunday to weekly, on 1st to monthly.
+python3 - "$BUCKET" "$REGION" "$BACKUP_S3_KEY" "$TIMESTAMP" <<'PYEOF'
+import boto3, json, sys, os
+from datetime import datetime, timezone
 
-# Generate presigned PUT URLs for S3 (backup + health marker)
-PRESIGNED_BACKUP=$(python3 -c "
-import boto3
-s3 = boto3.client('s3', region_name='$${REGION}')
-print(s3.generate_presigned_url('put_object',
-    Params={'Bucket':'$${BUCKET}','Key':'$${BACKUP_S3_KEY}','ContentType':'application/octet-stream'},
-    ExpiresIn=3600))")
+bucket, region, backup_key, timestamp = sys.argv[1:5]
+s3 = boto3.client('s3', region_name=region)
 
-PRESIGNED_HEALTH=$(python3 -c "
-import boto3
-s3 = boto3.client('s3', region_name='$${REGION}')
-print(s3.generate_presigned_url('put_object',
-    Params={'Bucket':'$${BUCKET}','Key':'$${HEALTH_S3_KEY}','ContentType':'application/json'},
-    ExpiresIn=3600))")
+def put_url(client, bkt, key, content_type='application/octet-stream'):
+    return client.generate_presigned_url('put_object',
+        Params={'Bucket': bkt, 'Key': key, 'ContentType': content_type},
+        ExpiresIn=3600)
 
-# Generate presigned PUT URL for R2 (off-AWS replica)
-R2_BUCKET=$(grep R2_BACKUP_BUCKET /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
-R2_ENDPOINT=$(grep R2_ENDPOINT_URL /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
-R2_ACCESS=$(grep R2_ACCESS_KEY_ID /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
-R2_SECRET=$(grep R2_SECRET_ACCESS_KEY /opt/lightfriend/.env 2>/dev/null | cut -d= -f2)
-PRESIGNED_R2=""
-if [ -n "$${R2_BUCKET:-}" ] && [ -n "$${R2_ENDPOINT:-}" ] && [ -n "$${R2_ACCESS:-}" ]; then
-    PRESIGNED_R2=$(python3 -c "
-import boto3
-s3 = boto3.client('s3',
-    endpoint_url='$${R2_ENDPOINT}',
-    aws_access_key_id='$${R2_ACCESS}',
-    aws_secret_access_key='$${R2_SECRET}',
-    region_name='auto')
-print(s3.generate_presigned_url('put_object',
-    Params={'Bucket':'$${R2_BUCKET}','Key':'$${BACKUP_S3_KEY}','ContentType':'application/octet-stream'},
-    ExpiresIn=3600))")
-fi
-
-# Generate presigned URLs for tier promotion (daily/weekly/monthly copies)
-# These are GET (to read hourly) + PUT (to write tier copy) pairs
-UTC_HOUR=$(date -u +%H)
-UTC_DOM=$(date -u +%d)
-UTC_DOW=$(date -u +%u)
-PROMOTE_JSON="[]"
-
-generate_promote_urls() {
-    local TIER_KEY="$$1"
-    python3 -c "
-import boto3, json
-s3 = boto3.client('s3', region_name='$${REGION}')
-get_url = s3.generate_presigned_url('get_object',
-    Params={'Bucket':'$${BUCKET}','Key':'$${BACKUP_S3_KEY}'},
-    ExpiresIn=3600)
-put_url = s3.generate_presigned_url('put_object',
-    Params={'Bucket':'$${BUCKET}','Key':'$$TIER_KEY','ContentType':'application/octet-stream'},
-    ExpiresIn=3600)
-print(json.dumps({'tier_key':'$$TIER_KEY','presigned_get':get_url,'presigned_put':put_url}))"
-}
-
-PROMOTE_LIST=""
-BASENAME=$(basename "$$BACKUP_S3_KEY")
-if [ "$$UTC_HOUR" = "00" ]; then
-    PROMOTE_LIST="$${PROMOTE_LIST}$(generate_promote_urls "backups/daily/$$BASENAME"),"
-fi
-if [ "$$UTC_HOUR" = "00" ] && [ "$$UTC_DOW" = "7" ]; then
-    PROMOTE_LIST="$${PROMOTE_LIST}$(generate_promote_urls "backups/weekly/$$BASENAME"),"
-fi
-if [ "$$UTC_HOUR" = "00" ] && [ "$$UTC_DOM" = "01" ]; then
-    PROMOTE_LIST="$${PROMOTE_LIST}$(generate_promote_urls "backups/monthly/$$BASENAME"),"
-fi
-# Remove trailing comma, wrap in array
-PROMOTE_LIST="$${PROMOTE_LIST%,}"
-[ -n "$$PROMOTE_LIST" ] && PROMOTE_JSON="[$$PROMOTE_LIST]" || PROMOTE_JSON="[]"
-
-# Build trigger JSON with all presigned URLs (use argv to avoid shell/quote issues)
-python3 -c "
-import json, sys
 trigger = {
     'action': 'export',
     'type': 'hourly',
-    'backup_s3_key': sys.argv[1],
-    'presigned_put_backup_s3': sys.argv[2],
-    'presigned_put_health': sys.argv[3],
-    'presigned_put_backup_r2': sys.argv[4],
-    'promote': json.loads(sys.argv[5]),
-    'timestamp': sys.argv[6]
+    'backup_s3_key': backup_key,
+    'presigned_put_backup_s3': put_url(s3, bucket, backup_key),
+    'presigned_put_health': put_url(s3, bucket, 'backups/backup-health.json', 'application/json'),
+    'timestamp': timestamp,
 }
-print(json.dumps(trigger))
-" "$$BACKUP_S3_KEY" "$$PRESIGNED_BACKUP" "$$PRESIGNED_HEALTH" "$$PRESIGNED_R2" "$$PROMOTE_JSON" "$$TIMESTAMP" \
-    > /opt/lightfriend/seed/export-request.json
 
-echo "Trigger written. Enclave will handle everything."
-echo "  S3 key: $$BACKUP_S3_KEY"
+# Load R2 creds from .env file
+env_vars = {}
+try:
+    with open('/opt/lightfriend/.env') as f:
+        for line in f:
+            if '=' in line and not line.startswith('#'):
+                k, v = line.strip().split('=', 1)
+                env_vars[k] = v
+except Exception:
+    pass
+
+r2_bucket = env_vars.get('R2_BACKUP_BUCKET', '')
+r2_endpoint = env_vars.get('R2_ENDPOINT_URL', '')
+r2_access = env_vars.get('R2_ACCESS_KEY_ID', '')
+r2_secret = env_vars.get('R2_SECRET_ACCESS_KEY', '')
+if r2_bucket and r2_endpoint and r2_access:
+    try:
+        r2 = boto3.client('s3', endpoint_url=r2_endpoint,
+            aws_access_key_id=r2_access, aws_secret_access_key=r2_secret,
+            region_name='auto')
+        trigger['presigned_put_backup_r2'] = put_url(r2, r2_bucket, backup_key)
+    except Exception as e:
+        print(f"WARNING: R2 URL generation failed: {e}", flush=True)
+
+# Promote rules: at midnight -> daily, Sunday midnight -> weekly, 1st midnight -> monthly
+# Enclave uploads the same local file to tier keys (no download needed)
+now = datetime.now(timezone.utc)
+basename = backup_key.rsplit('/', 1)[-1]
+promote = []
+if now.hour == 0:
+    promote.append({'tier_key': f'backups/daily/{basename}', 'presigned_put': put_url(s3, bucket, f'backups/daily/{basename}')})
+if now.hour == 0 and now.isoweekday() == 7:
+    promote.append({'tier_key': f'backups/weekly/{basename}', 'presigned_put': put_url(s3, bucket, f'backups/weekly/{basename}')})
+if now.hour == 0 and now.day == 1:
+    promote.append({'tier_key': f'backups/monthly/{basename}', 'presigned_put': put_url(s3, bucket, f'backups/monthly/{basename}')})
+trigger['promote'] = promote
+
+with open('/opt/lightfriend/seed/export-request.json', 'w') as f:
+    json.dump(trigger, f)
+print(f"Trigger written: {backup_key}")
+print(f"Promote tiers: {len(promote)}")
+PYEOF
+
 echo "=== Host done, enclave takes over ==="
 SCRIPT
 chmod +x /opt/lightfriend/scheduled-backup.sh

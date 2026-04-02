@@ -466,21 +466,17 @@ else
     echo "  E2: No R2 URL, skipping replication"
 fi
 
-# E3: Promote to daily/weekly/monthly tiers (download from S3, re-upload to tier key)
+# E3: Promote to daily/weekly/monthly tiers (upload same local file to tier keys)
 if [ -n "${PROMOTE_JSON:-}" ] && [ "${PROMOTE_JSON}" != "[]" ]; then
     echo "  E3: Promoting to tiers..."
     echo "${PROMOTE_JSON}" | jq -c '.[]' 2>/dev/null | while read -r promo; do
         TIER_KEY=$(echo "$promo" | jq -r '.tier_key')
-        PROMO_GET=$(echo "$promo" | jq -r '.presigned_get')
         PROMO_PUT=$(echo "$promo" | jq -r '.presigned_put')
         echo "    Promoting to ${TIER_KEY}..."
-        # Download from hourly, re-upload to tier
-        curl -sf --max-time 300 -x "$PROXY" -o /tmp/promote-tmp.enc "$PROMO_GET" \
-            && curl -sf --max-time 300 -X PUT -H "Content-Type: application/octet-stream" \
-                --upload-file /tmp/promote-tmp.enc -x "$PROXY" "$PROMO_PUT" \
+        curl -sf --max-time 600 -X PUT -H "Content-Type: application/octet-stream" \
+            --upload-file "${ENCRYPTED}" -x "$PROXY" "$PROMO_PUT" \
             && echo "    OK: ${TIER_KEY}" \
             || echo "    WARNING: promotion to ${TIER_KEY} failed (non-fatal)"
-        rm -f /tmp/promote-tmp.enc
     done
 else
     echo "  E3: No tier promotions"

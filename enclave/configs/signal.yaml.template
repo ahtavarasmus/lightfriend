@@ -29,7 +29,7 @@ signal:
 
 bridge:
     username_template: signal_{{.}}
-    displayname_template: "{{or .ContactName .ProfileName .PhoneNumber \"Unknown user\"}} (Signal)"
+    displayname_template: "{{if .ContactName}}{{.ContactName}} (Signal){{else}}{{or .ProfileName .PhoneNumber \"Unknown user\"}} (Signal~){{end}}"
     permissions:
         "*": user
         "@admin:localhost": admin

@@ -1504,6 +1504,44 @@ pub async fn handle_bridge_message(
             None
         });
 
+    // Auto-create Person for recognized phone contacts (WhatsApp/Signal only).
+    // Telegram returns None from is_phone_contact_from_room_name - no auto-creation.
+    let matching_person = if matching_person.is_none() && !is_group {
+        match is_phone_contact_from_room_name(&room_name) {
+            Some(true) => {
+                tracing::info!(
+                    "Auto-creating person '{}' on {} for user {} (phone contact)",
+                    chat_name,
+                    service,
+                    user_id
+                );
+                match state.ontology_repository.upsert_person(
+                    user_id,
+                    &chat_name,
+                    &service,
+                    None,
+                    Some(&current_room_id),
+                ) {
+                    Ok(person) => {
+                        tracing::info!("Created person '{}' (id={})", person.name, person.id);
+                        // Fetch the full PersonWithChannels for consistency
+                        state
+                            .ontology_repository
+                            .get_person_with_channels(user_id, person.id)
+                            .ok()
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to auto-create person '{}': {}", chat_name, e);
+                        None
+                    }
+                }
+            }
+            _ => None, // Not a contact (Some(false)) or can't determine (None/Telegram)
+        }
+    } else {
+        matching_person
+    };
+
     // Store message in ont_messages + emit ontology change.
     // Rules handle all notification logic from here.
     let person_id = matching_person.as_ref().map(|p| p.person.id);
