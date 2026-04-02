@@ -862,18 +862,11 @@ async fn find_room_id_for_chat(
         }
     }
 
-    // Use Matrix room list to resolve name -> room_id (not for reading messages)
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
-    let rooms = get_service_rooms(&client, service).await?;
-    let matching_room = search_best_match(&rooms, chat_name);
-    match matching_room {
-        Some(room_info) => Ok(room_info.room_id.clone()),
-        None => Err(anyhow!(
-            "No matching {} room found for '{}'",
-            capitalize(service),
-            chat_name
-        )),
-    }
+    Err(anyhow!(
+        "No {} messages found for '{}'. They need to send you a message first, or create them as a contact.",
+        capitalize(service),
+        chat_name
+    ))
 }
 
 /// Convert an OntMessage to a BridgeMessage for display.
