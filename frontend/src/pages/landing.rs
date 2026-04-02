@@ -415,7 +415,7 @@ pub fn landing() -> Html {
                             {" | "}
                             <Link<Route> to={Route::Trustless}>{"Verifiably Private"}</Link<Route>>
                             {" | "}
-                            <Link<Route> to={Route::Changelog}>{"Updates"}</Link<Route>>
+                            <Link<Route> to={Route::Faq}>{"FAQ"}</Link<Route>>
                             {" | "}
                             <Link<Route> to={Route::TrustChain}>{"Trust Chain"}</Link<Route>>
                         </div>

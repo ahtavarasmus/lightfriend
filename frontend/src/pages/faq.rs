@@ -1,9 +1,11 @@
 use crate::utils::seo::{use_seo, SeoMeta};
+use crate::Route;
 use gloo_timers::callback::Timeout;
 use wasm_bindgen::prelude::*;
 use web_sys::MouseEvent;
 use yew::prelude::*;
 use yew::{Children, Properties};
+use yew_router::prelude::Link;
 
 #[derive(Clone, PartialEq)]
 struct ChatMessage {
@@ -461,6 +463,59 @@ pub fn faq() -> Html {
                     </div>
                 </FaqItem>
 
+                <h2>{"How It Works"}</h2>
+
+                <FaqItem
+                    question="What can lightfriend actually do?"
+                    id="what-can-it-do"
+                >
+                    <p>{"Lightfriend bridges your dumbphone to the modern world via SMS and voice calls. Here's what you get:"}</p>
+                    <ul>
+                        <li><strong>{"Messaging bridges:"}</strong>{" Connect WhatsApp, Telegram, and Signal. Receive and reply to messages from any basic phone."}</li>
+                        <li><strong>{"Email:"}</strong>{" Read and respond to emails without an app."}</li>
+                        <li><strong>{"Critical notifications:"}</strong>{" AI screens your incoming messages and only alerts you about genuinely urgent or important things."}</li>
+                        <li><strong>{"Smart digests:"}</strong>{" Instead of constant pings, get a summary of what happened while you were away - delivered at times that suit you."}</li>
+                        <li><strong>{"Tracked items:"}</strong>{" AI automatically detects deliveries, invoices, deadlines, and commitments from your messages and tracks them for you."}</li>
+                        <li><strong>{"Rule builder:"}</strong>{" Create your own automation rules - 'if this happens, do that'. Keyword triggers, AI conditions, scheduled actions, tool calls."}</li>
+                        <li><strong>{"Web search:"}</strong>{" Ask any question and get a concise answer, no scrolling."}</li>
+                        <li><strong>{"Image understanding:"}</strong>{" Send a photo of a menu, sign, or QR code and get it translated or read back to you."}</li>
+                        <li><strong>{"Voice calls:"}</strong>{" For urgent notifications, lightfriend can call you instead of texting."}</li>
+                        <li><strong>{"Learns over time:"}</strong>{" The system builds context about your life - who matters to you, what's urgent, what can wait. It gets better at filtering and prioritizing the longer you use it."}</li>
+                        <li><strong>{"Tesla integration:"}</strong>{" Lock, unlock, climate control, and check your Tesla's status via SMS."}</li>
+                        <li><strong>{"MCP server support:"}</strong>{" Connect external tools and services via the Model Context Protocol. Extend what lightfriend can do with custom integrations."}</li>
+                        <li><strong>{"Minimalist YouTube:"}</strong>{" A built-in player with no algorithm, no recommendations, no rabbit holes. Just search and play."}</li>
+                    </ul>
+                </FaqItem>
+
+                <FaqItem
+                    question="How do critical notifications work?"
+                    id="critical-notifications"
+                >
+                    <p>{"When a message arrives on WhatsApp, Telegram, Signal, or email, the AI evaluates whether it needs your immediate attention. If it's urgent - a server going down, a family emergency, a time-sensitive request - you get notified right away via SMS or even a phone call."}</p>
+                    <p>{"Non-urgent messages get batched into your digest instead of interrupting your day. You stay in control of what counts as critical."}</p>
+                </FaqItem>
+
+                <FaqItem
+                    question="What are tracked items?"
+                    id="tracked-items"
+                >
+                    <p>{"When someone says 'I'll send you the invoice by Friday' or you get a shipping notification, the AI automatically creates a tracked item with a due date. These show up on your dashboard so nothing falls through the cracks."}</p>
+                    <p>{"Tracked items include delivery updates, payment deadlines, follow-up commitments, booking confirmations - anything concrete with a timeline that you'd want to remember."}</p>
+                </FaqItem>
+
+                <FaqItem
+                    question="What's the rule builder?"
+                    id="rule-builder"
+                >
+                    <p>{"The rule builder lets you create custom automations. Each rule has three parts:"}</p>
+                    <ul>
+                        <li><strong>{"WHEN:"}</strong>{" A trigger - either a schedule (daily at 9am) or an event (new message arrives)."}</li>
+                        <li><strong>{"IF:"}</strong>{" A condition - always, keyword match, or an AI-evaluated condition you write in plain English."}</li>
+                        <li><strong>{"THEN:"}</strong>{" An action - send an SMS/call notification, send a chat message, or trigger a tool."}</li>
+                    </ul>
+                    <p>{"Example: 'Every day at 9am, summarize my unread messages and text me.' Or: 'When a WhatsApp message mentions a meeting, notify me immediately.'"}</p>
+                </FaqItem>
+
                 <h2>{"Why Go Light?"}</h2>
 
 
@@ -580,12 +635,13 @@ pub fn faq() -> Html {
                     question="How does LightFriend protect my data?"
                     id="data-protection"
                     >
-                    <p>{"Your data is kept minimal, secure, and private. As a solo developer behind this bootstrapped project, I am committed to protecting your privacy. Your data is never sold or shared with third parties."}</p>
+                    <p>{"Lightfriend runs inside an AWS Nitro Enclave - a hardware-isolated environment where even the server operator cannot access your data while it's being processed. This is verifiable, not just a promise."}</p>
                     <ul>
+                        <li><strong>{"Nitro Enclave:"}</strong>{" Your data is processed inside a cryptographically attested enclave. No SSH access, no debugging ports, no way for anyone (including the developer) to peek inside while it's running. See the "}<Link<Route> to={Route::TrustChain}>{"Trust Chain"}</Link<Route>>{" page for the full verification."}</li>
+                        <li><strong>{"Encryption:"}</strong>{" All data is encrypted at rest (AES-256-GCM). Backups are encrypted before leaving the enclave. Credentials and sensitive fields use per-field encryption."}</li>
                         <li><strong>{"Calls:"}</strong>{" No recordings. Just anonymous metrics to improve service."}</li>
-                        <li><strong>{"Messages:"}</strong>{" Users can optionally store up to 10 recent message exchanges (encrypted at rest) for better context and follow-up questions; older messages are automatically deleted as new ones are added. Users can also choose zero stored history, though this means the assistant starts each interaction with cleared memory, limiting follow-up capabilities. We have a strict no-logging policy for message content."}</li>
-                        <li><strong>{"Service Overview:"}</strong>{" As the developer hosting the service, I naturally have access to the server to keep things running smoothly. I guarantee I will never view or access your messages personally - only the AI handles them. It's not zero access, but your data stays secure and private. If you're not comfortable with this and are technical, the code is open source on GitHub for self-hosting from source."}</li>
-                        <li><strong>{"Other data:"}</strong>{" All sensitive credentials and user data are encrypted, never shared or sold to anyone, stored only temporarily, and deleted upon user command or naturally when not needed."}</li>
+                        <li><strong>{"Messages:"}</strong>{" Your messages never exist as plain text outside the enclave. They are processed, stored, and backed up entirely within the hardware-isolated environment. See "}<Link<Route> to={Route::Trustless}>{"Verifiably Private"}</Link<Route>>{" and "}<Link<Route> to={Route::TrustChain}>{"Trust Chain"}</Link<Route>>{" for the full architecture."}</li>
+                        <li><strong>{"Open source:"}</strong>{" The entire codebase is open source (AGPLv3) on GitHub. You can verify what runs inside the enclave, or self-host it."}</li>
                     </ul>
                 </FaqItem>
 
