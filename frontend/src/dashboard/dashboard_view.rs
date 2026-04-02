@@ -1263,24 +1263,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 } else {
                     // ---- Running mode ----
 
-                    // Monitoring status with source icons
-                    <div class="monitoring-status">
-                        <span class="monitoring-dot"></span>
-                        <span>{"Monitoring: "}</span>
-                        if *has_whatsapp {
-                            <i class="fa-brands fa-whatsapp" style="font-size: 0.9rem; color: #25D366;" title="WhatsApp"></i>
-                        }
-                        if *has_signal {
-                            <i class="fa-brands fa-signal-messenger" style="font-size: 0.9rem; color: #3A76F0;" title="Signal"></i>
-                        }
-                        if *has_telegram {
-                            <i class="fa-brands fa-telegram" style="font-size: 0.9rem; color: #26A5E4;" title="Telegram"></i>
-                        }
-                        if *has_email {
-                            <i class="fa-solid fa-envelope" style="font-size: 0.85rem; color: #EA4335;" title="Email"></i>
-                        }
-                    </div>
-
                     // Assistant plan note
                     if !has_auto {
                         <div class="assistant-plan-note">
@@ -1526,14 +1508,28 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                         {if *critical_notis_enabled { "Active" } else { "Inactive" }}
                                     </button>
                                 </div>
-                                <div class="critical-notif-desc">
-                                    {"AI evaluates every incoming message and notifies you via SMS when something is time-sensitive or urgent. Routine messages are silently collected for your next digest."}
+                                <div class="monitoring-status">
+                                    <span class="monitoring-dot"></span>
+                                    <span>{"Monitoring: "}</span>
+                                    if *has_whatsapp {
+                                        <i class="fa-brands fa-whatsapp" style="font-size: 0.9rem; color: #25D366;" title="WhatsApp"></i>
+                                    }
+                                    if *has_signal {
+                                        <i class="fa-brands fa-signal-messenger" style="font-size: 0.9rem; color: #3A76F0;" title="Signal"></i>
+                                    }
+                                    if *has_telegram {
+                                        <i class="fa-brands fa-telegram" style="font-size: 0.9rem; color: #26A5E4;" title="Telegram"></i>
+                                    }
+                                    if *has_email {
+                                        <i class="fa-solid fa-envelope" style="font-size: 0.85rem; color: #EA4335;" title="Email"></i>
+                                    }
                                 </div>
                                 <button class="critical-notif-details-toggle" onclick={on_toggle_critical_details}>
-                                    {if *critical_notif_details_open { "Hide details" } else { "How does it classify messages?" }}
+                                    {if *critical_notif_details_open { "Hide info" } else { "More info" }}
                                 </button>
                                 if *critical_notif_details_open {
                                     <div class="critical-notif-details">
+                                        <p>{"AI evaluates every incoming message and notifies you via SMS when something is time-sensitive or urgent. Routine messages are silently collected for your next digest."}</p>
                                         <h4>{"Urgency levels"}</h4>
                                         <ul>
                                             <li><strong>{"Critical: "}</strong>{"immediate danger, medical emergency, security breach"}</li>
@@ -1544,7 +1540,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                         </ul>
                                         <p>{"You get notified only for critical or high urgency. The AI also considers sender relationship, messaging patterns, time of day, and cross-platform escalation (e.g., someone messaging you on both WhatsApp and Signal)."}</p>
                                         <button class="critical-notif-prompt-toggle" onclick={on_toggle_critical_prompt}>
-                                            {if *critical_notif_prompt_open { "Hide full prompt" } else { "View full classification prompt" }}
+                                            {if *critical_notif_prompt_open { "Hide classification prompt" } else { "View classification prompt" }}
                                         </button>
                                         if *critical_notif_prompt_open {
                                             <div class="critical-notif-prompt">
@@ -1552,10 +1548,19 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                                 The user has muted all phone notifications and relies on you to catch time-critical messages. \
                                                 If you miss something important, they won't see it for hours.\n\
                                                 \n\
+                                                Current time: [current time]\n\
+                                                \n\
+                                                SIGNAL REPORT\n\
+                                                Sender: [sender name]\n\
+                                                Relationship: [sender context - how often they message, typical hours, response patterns]\n\
+                                                Cross-platform: [if sender messaged on multiple platforms recently]\n\
+                                                User state: [if user is likely sleeping based on activity patterns]\n\
+                                                Content signals: [detected keywords, question marks, urgency indicators]\n\
+                                                Thread context: [if this is a reply to user's earlier message or question]\n\
+                                                \n\
                                                 The last message in the conversation is being evaluated. Each message is marked [seen] or \
-                                                [unseen] - unseen messages have not been read by the user yet. Use the conversation history, \
-                                                timestamps, and seen status to understand context and urgency. Compare mentioned times against \
-                                                the current time.\n\
+                                                [unseen]. Use the conversation history, timestamps, and seen status to understand context \
+                                                and urgency. Compare mentioned times against the current time.\n\
                                                 \n\
                                                 Classify the urgency level:\n\
                                                 - critical: immediate danger, medical emergency, security breach\n\
@@ -1568,7 +1573,15 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                                 Use the signal report to calibrate - sender relationship, timing patterns, and content signals all matter.\n\
                                                 \n\
                                                 If should_notify=false, set notification_message to empty string.\n\
-                                                If should_notify=true, write a concise notification (max 480 chars, second person)."}
+                                                If should_notify=true, write a concise notification (max 480 chars, second person).\n\
+                                                \n\
+                                                COMMITMENT TRACKING (when enabled):\n\
+                                                Also detect if this message contains a concrete commitment or obligation that the user \
+                                                could forget and would benefit from being reminded about. Examples: paying a bill, booking \
+                                                something, confirming attendance, sending a document, following up by a date.\n\
+                                                - Set contains_commitment=true only for specific, actionable obligations with a timeframe.\n\
+                                                - Do NOT track vague intentions or past-tense actions already done.\n\
+                                                - Detect commitments both TO the user and BY the user."}
                                             </div>
                                         }
                                     </div>
