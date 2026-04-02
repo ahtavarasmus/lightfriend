@@ -223,9 +223,38 @@ jobs:
             [ -n "$BACKUP_KEY" ] || { echo "FATAL: No backups in S3"; exit 1; }
           fi
 
+          # Validate backup size
+          BACKUP_SIZE=$(aws s3api head-object --bucket "$S3_BUCKET" --key "$BACKUP_KEY" \
+            --query 'ContentLength' --output text 2>/dev/null || echo "0")
+          if [ "$BACKUP_SIZE" = "0" ] || [ -z "$BACKUP_SIZE" ]; then
+            echo "FATAL: Backup file is empty or missing: $BACKUP_KEY"
+            exit 1
+          fi
+          if [ "$BACKUP_SIZE" -lt 1048576 ]; then
+            echo "::warning::Backup is suspiciously small ($BACKUP_SIZE bytes)"
+          fi
+
+          # Check backup age
+          LAST_MOD=$(aws s3api head-object --bucket "$S3_BUCKET" --key "$BACKUP_KEY" \
+            --query 'LastModified' --output text 2>/dev/null || echo "")
+          if [ -n "$LAST_MOD" ]; then
+            BACKUP_EPOCH=$(date -d "$LAST_MOD" +%s 2>/dev/null || echo "0")
+            NOW_EPOCH=$(date +%s)
+            if [ "$BACKUP_EPOCH" -gt 0 ]; then
+              HOURS_OLD=$(( (NOW_EPOCH - BACKUP_EPOCH) / 3600 ))
+              echo "Backup age: ${HOURS_OLD}h"
+              if [ "$HOURS_OLD" -gt 168 ]; then
+                echo "::warning::Backup is ${HOURS_OLD}h old (>7 days). Significant data loss likely."
+              elif [ "$HOURS_OLD" -gt 24 ]; then
+                echo "::warning::Backup is ${HOURS_OLD}h old (>24h). Some data loss possible."
+              fi
+              echo "Backup age: ${HOURS_OLD}h" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
           echo "mode=backup" >> $GITHUB_OUTPUT
           echo "backup_key=$BACKUP_KEY" >> $GITHUB_OUTPUT
-          echo "Backup: $BACKUP_KEY" >> $GITHUB_STEP_SUMMARY
+          echo "Backup: $BACKUP_KEY ($BACKUP_SIZE bytes)" >> $GITHUB_STEP_SUMMARY
 
       - name: Clean stale deploy signals
         run: |
@@ -281,6 +310,51 @@ jobs:
           if [ "$PRE_WARM_OK" != "true" ]; then
             echo "FATAL: Pre-warm timed out after 20 minutes"; exit 1
           fi
+
+      - name: Approve image for Marlin KMS
+        env:
+          CONTRACT_ADDRESS: ${{ secrets.MARLIN_KMS_CONTRACT_ADDRESS }}
+          RPC_URL: ${{ secrets.ARBITRUM_RPC_URL }}
+          PRIVATE_KEY: ${{ secrets.ARBITRUM_PRIVATE_KEY }}
+        run: |
+          PCR0="${{ needs.build-eif.outputs.pcr0 }}"
+          PCR1="${{ needs.build-eif.outputs.pcr1 }}"
+          PCR2="${{ needs.build-eif.outputs.pcr2 }}"
+          COMMIT_SHA="${{ github.sha }}"
+          [ -n "$CONTRACT_ADDRESS" ] || { echo "FATAL: MARLIN_KMS_CONTRACT_ADDRESS secret missing"; exit 1; }
+          [ -n "$RPC_URL" ] || { echo "FATAL: ARBITRUM_RPC_URL secret missing"; exit 1; }
+          [ -n "$PRIVATE_KEY" ] || { echo "FATAL: ARBITRUM_PRIVATE_KEY secret missing"; exit 1; }
+          [ -n "$PCR0" ] || { echo "FATAL: Missing PCR0"; exit 1; }
+
+          IMAGE_ID=$(python3 -c "
+          import hashlib, struct
+          bitflags = struct.pack('>I', (1 << 0) | (1 << 1) | (1 << 2) | (1 << 16))
+          pcr0 = bytes.fromhex('${PCR0#0x}')
+          pcr1 = bytes.fromhex('${PCR1#0x}')
+          pcr2 = bytes.fromhex('${PCR2#0x}')
+          pcr16 = b'\x00' * 48
+          print('0x' + hashlib.sha256(bitflags + pcr0 + pcr1 + pcr2 + pcr16).hexdigest())
+          ")
+          echo "Computed image_id: $IMAGE_ID"
+
+          VERIFY_BEFORE=$(cast call "$CONTRACT_ADDRESS" "oysterKMSVerify(bytes32)(bool)" "$IMAGE_ID" --rpc-url "$RPC_URL")
+          if [ "$VERIFY_BEFORE" != "true" ]; then
+            echo "Image not yet approved, registering..."
+            cast send "$CONTRACT_ADDRESS" "proposeImage(bytes32,string)" "$IMAGE_ID" "$COMMIT_SHA" \
+              --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY"
+            cast send "$CONTRACT_ADDRESS" "activateImage()" \
+              --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY"
+          else
+            echo "Image already approved"
+          fi
+
+          VERIFY_AFTER=$(cast call "$CONTRACT_ADDRESS" "oysterKMSVerify(bytes32)(bool)" "$IMAGE_ID" --rpc-url "$RPC_URL")
+          if [ "$VERIFY_AFTER" != "true" ]; then
+            echo "FATAL: Contract did not verify image_id $IMAGE_ID after approval"
+            exit 1
+          fi
+          echo "Image approved and verified on Arbitrum"
+          echo "## Marlin KMS: $IMAGE_ID approved" >> $GITHUB_STEP_SUMMARY
 
       - name: Write data source signal for new host
         run: |
