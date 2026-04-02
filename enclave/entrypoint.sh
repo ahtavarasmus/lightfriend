@@ -822,10 +822,25 @@ if shared_secret:
     if re.search(login_secret_pattern, text):
         text = re.sub(login_secret_pattern, login_secret_block, text, count=1)
 
+# Patch proxy fields from current .env (config may have stale values from backup)
+proxy_fields = {
+    "type": os.environ.get("TELEGRAM_PROXY_TYPE", "socks5"),
+    "address": os.environ.get("TELEGRAM_PROXY_ADDRESS", ""),
+    "port": os.environ.get("TELEGRAM_PROXY_PORT", ""),
+    "username": os.environ.get("TELEGRAM_PROXY_USERNAME", ""),
+    "password": os.environ.get("TELEGRAM_PROXY_PASSWORD", ""),
+}
+if proxy_fields["address"] and proxy_fields["port"]:
+    for field, value in proxy_fields.items():
+        pattern = rf"(?m)^(        {field}:).*$"
+        replacement = rf"\1 {value}"
+        text = re.sub(pattern, replacement, text, count=1)
+    print(f"  Patched proxy: {proxy_fields['address']}:{proxy_fields['port']}", flush=True)
+
 path.write_text(text)
 PY
 
-    echo "  Ensured Telegram public login config in ${config_file}"
+    echo "  Ensured Telegram config (public login + proxy) in ${config_file}"
 }
 
 # Generate Tuwunel config
