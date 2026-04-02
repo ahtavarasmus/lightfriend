@@ -150,6 +150,8 @@ pub async fn send_notification_with_context(
 
     let notification_type = if content_type.contains("critical") {
         user_settings.critical_enabled.as_deref().unwrap_or("sms")
+    } else if content_type == "digest" {
+        "sms" // Digests are always SMS - never call for informational summaries
     } else if content_type.contains("_call") {
         "call"
     } else if content_type.contains("_sms") {

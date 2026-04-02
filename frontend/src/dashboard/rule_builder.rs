@@ -1260,7 +1260,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
     let active_sources = use_state(|| Vec::<SourceConfig>::new());
     let expanded_source = use_state(|| None::<String>);
     let mcp_source_tools = use_state(|| HashMap::<String, Vec<McpToolOption>>::new());
-    let selected_template = use_state(|| PromptTemplate::Summarize);
+    let selected_template = use_state(|| PromptTemplate::CheckCondition);
     let condition_input = use_state(|| String::new());
     let keyword_input = use_state(|| String::new());
 
@@ -1756,7 +1756,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                     notify_message.set(String::new());
                     logic_prompt.set(String::new());
                     active_sources_init.set(Vec::new());
-                    selected_template.set(PromptTemplate::Summarize);
+                    selected_template.set(PromptTemplate::CheckCondition);
                     condition_input.set(String::new());
                     keyword_input.set(String::new());
                     once_date.set(String::new());
@@ -2924,26 +2924,8 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                         </div>
                                     }
                                     if *logic_mode == LogicMode::Llm {
-                                        if *selected_template == PromptTemplate::Summarize || *selected_template == PromptTemplate::FilterImportant || *selected_template == PromptTemplate::TrackItemsUpdate || *selected_template == PromptTemplate::TrackItemsCreate {
-                                            <div class="rb-template-desc">
-                                                {get_template_description(&*selected_template, &*when_mode)}
-                                            </div>
-                                            <button class="rb-template-edit-link"
-                                                onclick={{
-                                                    let st = selected_template.clone();
-                                                    let lp = logic_prompt.clone();
-                                                    let wm = when_mode.clone();
-                                                    let tmpl = (*selected_template).clone();
-                                                    Callback::from(move |_: MouseEvent| {
-                                                        let prompt = get_template_prompt(&tmpl, &*wm, "");
-                                                        lp.set(prompt);
-                                                        st.set(PromptTemplate::Custom);
-                                                    })
-                                                }}
-                                            >{"Customize..."}</button>
-                                        }
-
-                                        if *selected_template == PromptTemplate::CheckCondition {
+                                        // "AI decides" = freeform condition field
+                                        if *selected_template != PromptTemplate::Custom {
                                             <div class="rb-field">
                                                 <div class="rb-field-label">{"Condition"}</div>
                                                 <input
