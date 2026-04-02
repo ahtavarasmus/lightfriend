@@ -861,6 +861,17 @@ done
 
 ensure_telegram_config_compat
 
+# Clean stale telegram bridge matrix state (prevents UniqueViolationError on mx_user_profile
+# from failed login attempts). Only cleans if no active telegram connection exists.
+TG_CONNECTIONS=$(su postgres -c "psql -t -A -d lightfriend_db -c \"SELECT count(*) FROM bridges WHERE bridge_type = 'telegram' AND status = 'connected'\"" 2>/dev/null || echo "0")
+if [ "${TG_CONNECTIONS:-0}" = "0" ]; then
+    echo "  No active telegram connections, cleaning stale bridge state..."
+    su postgres -c "psql -d telegram_db -c 'TRUNCATE mx_user_profile, mx_room_state CASCADE'" 2>/dev/null || true
+    su postgres -c "psql -d lightfriend_db -c \"DELETE FROM bridges WHERE bridge_type = 'telegram'\"" 2>/dev/null || true
+else
+    echo "  ${TG_CONNECTIONS} active telegram connection(s), keeping state"
+fi
+
 # Generate doublepuppet registration
 substitute_vars /etc/enclave-configs/doublepuppet.yaml.template /data/bridges/doublepuppet.yaml
 echo "  Generated /data/bridges/doublepuppet.yaml"

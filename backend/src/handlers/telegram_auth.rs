@@ -297,6 +297,14 @@ pub async fn start_telegram_connection(
         auth_user.user_id
     );
 
+    // Clean up any stale telegram bridge records from previous failed attempts
+    if let Err(e) = state
+        .user_repository
+        .delete_bridge(auth_user.user_id, "telegram")
+    {
+        tracing::warn!("Failed to clean stale telegram bridge record: {}", e);
+    }
+
     tracing::info!(
         "Telegram connect: getting Matrix client for user {}...",
         auth_user.user_id
