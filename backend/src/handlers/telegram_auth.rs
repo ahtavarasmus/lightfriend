@@ -178,15 +178,12 @@ async fn connect_telegram(
     }
     tracing::info!("Telegram connect: bot joined, cleaning up stale session...");
 
-    // Clean up any stale session from previous failed attempts.
+    // Logout any stale session from previous failed attempts.
     // Without this, a half-completed login leaves a stale auth key that
     // causes AuthKeyUnregisteredError on the next attempt.
     room.send(RoomMessageEventContent::text_plain("!tg logout"))
         .await?;
-    sleep(Duration::from_millis(500)).await;
-    room.send(RoomMessageEventContent::text_plain("!tg delete-session"))
-        .await?;
-    sleep(Duration::from_millis(500)).await;
+    sleep(Duration::from_secs(1)).await;
 
     // Cancel any in-progress login flow
     let cancel_command = "!tg cancel".to_string();
