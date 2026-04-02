@@ -861,13 +861,14 @@ done
 
 ensure_telegram_config_compat
 
-# Clean stale telegram bridge matrix state (prevents UniqueViolationError on mx_user_profile
-# from failed login attempts). Only cleans if no active telegram connection exists.
+# Clean stale telegram sessions on boot (prevents AuthKeyUnregisteredError).
+# The backend also cleans up at runtime before each new connection attempt.
 TG_CONNECTIONS=$(su postgres -c "psql -t -A -d lightfriend_db -c \"SELECT count(*) FROM bridges WHERE bridge_type = 'telegram' AND status = 'connected'\"" 2>/dev/null || echo "0")
 if [ "${TG_CONNECTIONS:-0}" = "0" ]; then
-    echo "  No active telegram connections, cleaning stale bridge state..."
-    su postgres -c "psql -d telegram_db -c 'TRUNCATE mx_user_profile, mx_room_state CASCADE'" 2>/dev/null || true
+    echo "  No active telegram connections, cleaning stale state..."
+    su postgres -c "psql -d telegram_db -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO telegram_user'" 2>/dev/null || true
     su postgres -c "psql -d lightfriend_db -c \"DELETE FROM bridges WHERE bridge_type = 'telegram'\"" 2>/dev/null || true
+    echo "  telegram_db schema reset"
 else
     echo "  ${TG_CONNECTIONS} active telegram connection(s), keeping state"
 fi

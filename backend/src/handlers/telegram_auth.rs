@@ -176,9 +176,19 @@ async fn connect_telegram(
         tracing::warn!("Telegram connect: bot failed to join room after 15 attempts");
         return Err(anyhow!("Bot {} failed to join room", bot_user_id));
     }
-    tracing::info!("Telegram connect: bot joined, sending cancel+login commands...");
+    tracing::info!("Telegram connect: bot joined, cleaning up stale session...");
 
-    // Send cancel command to get rid of the previous login
+    // Clean up any stale session from previous failed attempts.
+    // Without this, a half-completed login leaves a stale auth key that
+    // causes AuthKeyUnregisteredError on the next attempt.
+    room.send(RoomMessageEventContent::text_plain("!tg logout"))
+        .await?;
+    sleep(Duration::from_millis(500)).await;
+    room.send(RoomMessageEventContent::text_plain("!tg delete-session"))
+        .await?;
+    sleep(Duration::from_millis(500)).await;
+
+    // Cancel any in-progress login flow
     let cancel_command = "!tg cancel".to_string();
     room.send(RoomMessageEventContent::text_plain(&cancel_command))
         .await?;
