@@ -897,6 +897,61 @@ fi
 SCRIPT
 chmod +x /opt/lightfriend/upload-env.sh
 
+cat > /opt/lightfriend/trigger-export.sh <<'SCRIPT'
+#!/bin/bash
+# Trigger a full export inside the enclave and wait for completion.
+# Writes an export request to the seed dir (served to enclave via HTTP on
+# port 9080). The enclave's export-watcher picks it up, runs export.sh,
+# and transfers the encrypted backup to the host via HTTP PUT (port 9081)
+# which lands in /opt/lightfriend/backups/.
+set -euo pipefail
+
+SEED_DIR="/opt/lightfriend/seed"
+COMPLETE_FILE="/opt/lightfriend/backups/export-complete.json"
+TIMEOUT=600  # 10 minutes max
+POLL_INTERVAL=5
+
+TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+echo "trigger-export: starting at ${TIMESTAMP}"
+
+# Clear any old completion marker
+rm -f "${COMPLETE_FILE}"
+
+# Write export request for the enclave's export-watcher
+cat > "${SEED_DIR}/export-request.json" <<EOF
+{"action": "export", "type": "hourly", "timestamp": "${TIMESTAMP}"}
+EOF
+
+echo "trigger-export: request written, waiting for enclave (timeout ${TIMEOUT}s)..."
+
+ELAPSED=0
+while [ $ELAPSED -lt $TIMEOUT ]; do
+    if [ -f "${COMPLETE_FILE}" ] && [ -s "${COMPLETE_FILE}" ]; then
+        STATUS=$(python3 -c "import json,sys; print(json.load(sys.stdin).get('status',''))" < "${COMPLETE_FILE}" 2>/dev/null || echo "")
+        if [ "$STATUS" = "SUCCESS" ]; then
+            echo "trigger-export: enclave export succeeded"
+            cat "${COMPLETE_FILE}"
+            # Clean up the request so export-watcher doesn't re-trigger
+            rm -f "${SEED_DIR}/export-request.json"
+            exit 0
+        elif [ "$STATUS" = "FAILED" ]; then
+            echo "trigger-export: enclave export FAILED"
+            cat "${COMPLETE_FILE}"
+            rm -f "${SEED_DIR}/export-request.json"
+            exit 1
+        fi
+        # IN_PROGRESS or other status - keep waiting
+    fi
+    sleep $POLL_INTERVAL
+    ELAPSED=$((ELAPSED + POLL_INTERVAL))
+done
+
+echo "trigger-export: TIMEOUT after ${TIMEOUT}s waiting for enclave"
+rm -f "${SEED_DIR}/export-request.json"
+exit 1
+SCRIPT
+chmod +x /opt/lightfriend/trigger-export.sh
+
 cat > /opt/lightfriend/pre-deploy.sh <<'SCRIPT'
 #!/bin/bash
 set -e
