@@ -502,10 +502,24 @@ pub(crate) async fn prefetch_sources(
     for source in sources {
         match source {
             FetchSource::Email => {
-                let emails =
-                    crate::tool_call_utils::email::handle_fetch_emails(state, rule.user_id).await;
-                if !emails.is_empty() {
-                    prefetched.push_str(&format!("\n\n--- Recent emails ---\n{}", emails));
+                let twelve_hours_ago = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i32
+                    - 43200;
+                if let Ok(msgs) = state.ontology_repository.get_recent_messages_filtered(
+                    rule.user_id,
+                    Some("email"),
+                    twelve_hours_ago,
+                    20,
+                ) {
+                    if !msgs.is_empty() {
+                        prefetched.push_str("\n\n--- Recent emails ---");
+                        for m in &msgs {
+                            prefetched
+                                .push_str(&format!("\nFrom: {}\n{}\n", m.sender_name, m.content));
+                        }
+                    }
                 }
             }
             FetchSource::Chat { platform, limit } => {
