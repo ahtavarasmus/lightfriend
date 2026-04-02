@@ -1703,6 +1703,40 @@ impl OntologyRepository {
             .load(&mut conn)
     }
 
+    /// Get the N most upcoming active events, ordered by closest deadline first.
+    /// Events with a due_at come first (sorted ascending), then events without due_at
+    /// sorted by most recently created.
+    pub fn get_upcoming_events(
+        &self,
+        user_id: i32,
+        limit: i64,
+    ) -> Result<Vec<OntEvent>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        // COALESCE(due_at, 2147483647) sorts: events with due_at first (ascending),
+        // no-due_at events last. For ties (all max), created_at DESC breaks it.
+        ont_events::table
+            .filter(ont_events::user_id.eq(user_id))
+            .filter(ont_events::status.eq("active"))
+            .order((
+                diesel::dsl::sql::<diesel::sql_types::Integer>("COALESCE(due_at, 2147483647)")
+                    .asc(),
+                ont_events::created_at.desc(),
+            ))
+            .limit(limit)
+            .load(&mut conn)
+    }
+
+    /// Get active events with no due_at that haven't been updated in max_age_secs.
+    pub fn get_stale_events(&self, max_age_secs: i32) -> Result<Vec<OntEvent>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let cutoff = Self::now() - max_age_secs;
+        ont_events::table
+            .filter(ont_events::status.eq("active"))
+            .filter(ont_events::due_at.is_null())
+            .filter(ont_events::updated_at.lt(cutoff))
+            .load(&mut conn)
+    }
+
     /// Purge completed/dismissed/expired/notified events older than max_age_secs.
     pub fn purge_old_events(&self, max_age_secs: i32) -> Result<usize, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
