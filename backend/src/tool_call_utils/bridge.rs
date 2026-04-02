@@ -243,10 +243,15 @@ pub async fn handle_send_chat_message(
             _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => "timeout",
             _ = cancel_rx => "cancel",
         };
+        tracing::info!(
+            "Delayed send for user {}: reason={}, platform={}, recipient={}",
+            cloned_user_id,
+            reason,
+            cloned_platform,
+            cloned_exact_name
+        );
         if reason == "timeout" {
-            // Proceed with send using captured variables
-            println!("sending message now");
-            if let Err(e) = crate::utils::bridge::send_bridge_message(
+            match crate::utils::bridge::send_bridge_message(
                 &cloned_platform,
                 &cloned_state,
                 cloned_user_id,
@@ -256,18 +261,38 @@ pub async fn handle_send_chat_message(
             )
             .await
             {
-                let error_msg = format!(
-                    "Failed to send {} message: {}",
-                    cloned_capitalized_platform, e
-                );
-                if let Err(e) = cloned_state
-                    .twilio_message_service
-                    .send_sms(&error_msg, None, &cloned_user)
-                    .await
-                {
-                    eprintln!("Failed to send error message: {}", e);
+                Ok(msg) => {
+                    tracing::info!(
+                        "Sent {} message to '{}' for user {} (room={:?})",
+                        cloned_capitalized_platform,
+                        cloned_exact_name,
+                        cloned_user_id,
+                        msg.room_id
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to send {} message to '{}' for user {}: {}",
+                        cloned_capitalized_platform,
+                        cloned_exact_name,
+                        cloned_user_id,
+                        e
+                    );
+                    let error_msg = format!(
+                        "Failed to send {} message: {}",
+                        cloned_capitalized_platform, e
+                    );
+                    if let Err(e) = cloned_state
+                        .twilio_message_service
+                        .send_sms(&error_msg, None, &cloned_user)
+                        .await
+                    {
+                        tracing::error!("Failed to send error SMS: {}", e);
+                    }
                 }
             }
+        } else {
+            tracing::info!("Message to '{}' was cancelled by user", cloned_exact_name);
         }
         // Remove from map
         let mut senders = cloned_state.pending_message_senders.lock().await;
