@@ -651,12 +651,31 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 );
             }
 
-            // Expire events past their expiration
+            // Expire events past their due date
             let expired_events = state
                 .ontology_repository
                 .get_expired_events(now)
                 .unwrap_or_default();
             for event in &expired_events {
+                let _ = state.ontology_repository.update_event_status(
+                    event.user_id,
+                    event.id,
+                    "expired",
+                );
+            }
+
+            // Expire stale events with no due_at that haven't been updated in 14 days
+            let stale_max_age = 14 * 24 * 3600;
+            let stale_events = state
+                .ontology_repository
+                .get_stale_events(stale_max_age)
+                .unwrap_or_default();
+            for event in &stale_events {
+                tracing::info!(
+                    "Auto-expiring stale event {} for user {} (no due_at, inactive 14d)",
+                    event.id,
+                    event.user_id
+                );
                 let _ = state.ontology_repository.update_event_status(
                     event.user_id,
                     event.id,

@@ -290,12 +290,12 @@ impl ContextBuilder {
                 String::new()
             };
 
-            // Fetch active events/reminders to inject into prompt
+            // Fetch the 5 most upcoming active events for the prompt
             let now_ts = current_time_unix;
             let events_fragment = match self
                 .state
                 .ontology_repository
-                .get_events(user_id, Some("active"))
+                .get_upcoming_events(user_id, 5)
             {
                 Ok(events) if !events.is_empty() => {
                     let mut f = String::from("\n\nYour active reminders/events:\n");
@@ -315,10 +315,8 @@ impl ContextBuilder {
                             }
                             None => String::new(),
                         };
-                        f.push_str(&format!(
-                            "- [id={}]{} {}\n",
-                            e.id, deadline_str, e.description
-                        ));
+                        let desc: String = e.description.chars().take(200).collect();
+                        f.push_str(&format!("- [id={}]{} {}\n", e.id, deadline_str, desc));
                     }
                     f
                 }

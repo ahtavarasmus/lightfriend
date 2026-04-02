@@ -632,11 +632,19 @@ async fn run_commitment_pass2(
         return;
     }
 
-    // Build candidate list for dedup (fuzzy matching)
-    let candidates: Vec<String> = active_events
+    // Build candidate list for dedup, sorted by text similarity to the message
+    let conv_lower = conversation.to_lowercase();
+    let mut scored: Vec<(f64, &crate::models::ontology_models::OntEvent)> = active_events
         .iter()
-        .take(10)
-        .map(|e| format!("[id={}] {}", e.id, e.description))
+        .map(|e| {
+            let score = strsim::jaro_winkler(&conv_lower, &e.description.to_lowercase());
+            (score, e)
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    let candidates: Vec<String> = scored
+        .iter()
+        .map(|(_, e)| format!("[id={}] {}", e.id, e.description))
         .collect();
     let candidates_text = if candidates.is_empty() {
         "No existing tracked items.".to_string()
