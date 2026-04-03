@@ -1498,6 +1498,32 @@ pub async fn handle_bridge_message(
                         snapshot,
                     )
                     .await;
+
+                    // Auto-resolve: user replied, so clear pending digests and resolve urgency
+                    let now = msg.created_at;
+                    if let Err(e) = state_clone.ontology_repository.mark_room_digest_delivered(
+                        user_id,
+                        &current_room_id,
+                        now,
+                    ) {
+                        tracing::warn!("Failed to mark room digest delivered: {}", e);
+                    }
+                    if let Err(e) = state_clone
+                        .ontology_repository
+                        .resolve_high_urgency_for_room(user_id, &current_room_id, now)
+                    {
+                        tracing::warn!("Failed to resolve high urgency for room: {}", e);
+                    }
+
+                    // Check if outgoing message completes any tracked events
+                    crate::proactive::system_behaviors::check_outgoing_event_resolution(
+                        &state_clone,
+                        user_id,
+                        &current_room_id,
+                        &msg.content,
+                        created.id,
+                    )
+                    .await;
                 }
                 Err(e) => tracing::warn!("Failed to store user message: {}", e),
             }
