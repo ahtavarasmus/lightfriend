@@ -471,8 +471,8 @@ pub async fn run_system_behaviors(
                         .unwrap_or("none");
 
                     if message_type != "none" {
-                        let auto_confirm = settings.auto_confirm_tracked_items;
-                        // Fetch active events only when Pass 2 needs them
+                        let auto_confirm = true; // always auto-create when tracking is enabled
+                                                 // Fetch active events only when Pass 2 needs them
                         let active_events = state
                             .ontology_repository
                             .get_active_and_proposed_events(user_id)
