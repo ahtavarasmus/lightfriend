@@ -191,26 +191,13 @@ pub async fn handle_send_chat_message(
             capitalized_platform, exact_name, args.message
         )
     };
-    // Send the queued message
-    match state
+    // Send the queued confirmation SMS (best-effort, don't block the actual send)
+    if let Err(e) = state
         .twilio_message_service
         .send_sms(&queued_msg, None, user)
         .await
     {
-        Ok(_) => {
-            // SMS credits deducted at Twilio status callback
-        }
-        Err(e) => {
-            eprintln!("Failed to send queued message: {}", e);
-            return Ok((
-                StatusCode::OK,
-                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                Json(TwilioResponse {
-                    message: "Failed to send message queue notification".to_string(),
-                    created_item_id: None,
-                }),
-            ));
-        }
+        tracing::warn!("Failed to send queue confirmation SMS (non-fatal): {}", e);
     }
     // Create cancellation channel
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
