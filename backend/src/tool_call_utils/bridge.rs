@@ -64,6 +64,127 @@ struct SendChatMessageArgs {
     chat_name: String,
     message: String,
 }
+/// Fuzzy search Persons for a matching name/nickname with a room_id on the given platform.
+/// Returns a BridgeRoom if found, None otherwise. No Matrix client needed.
+fn find_person_room(
+    state: &Arc<AppState>,
+    user_id: i32,
+    search_term: &str,
+    platform: &str,
+) -> Option<crate::utils::bridge::BridgeRoom> {
+    let search_lower = search_term.trim().to_lowercase();
+
+    // Search persons by substring match (name or nickname)
+    let persons = match state
+        .ontology_repository
+        .search_persons(user_id, search_term)
+    {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("SEND_FLOW find_person_room search_persons failed: {}", e);
+            return None;
+        }
+    };
+
+    // Among matched persons, find one with a room_id for this platform
+    // Prefer exact name match, then substring, then we'll try fuzzy below
+    for person in &persons {
+        let name = person.display_name().to_lowercase();
+        if name == search_lower {
+            if let Some(ch) = person
+                .channels
+                .iter()
+                .find(|c| c.platform == platform && c.room_id.is_some())
+            {
+                let rid = ch.room_id.as_ref().unwrap();
+                tracing::info!(
+                    "SEND_FLOW find_person_room: exact Person match '{}', room_id={}",
+                    person.display_name(),
+                    rid
+                );
+                return Some(crate::utils::bridge::BridgeRoom {
+                    room_id: rid.clone(),
+                    display_name: person.display_name().to_string(),
+                    last_activity: 0,
+                    last_activity_formatted: String::new(),
+                    is_group: false,
+                });
+            }
+        }
+    }
+
+    // Substring matches (search_persons already filtered these)
+    for person in &persons {
+        if let Some(ch) = person
+            .channels
+            .iter()
+            .find(|c| c.platform == platform && c.room_id.is_some())
+        {
+            let rid = ch.room_id.as_ref().unwrap();
+            tracing::info!(
+                "SEND_FLOW find_person_room: substring Person match '{}', room_id={}",
+                person.display_name(),
+                rid
+            );
+            return Some(crate::utils::bridge::BridgeRoom {
+                room_id: rid.clone(),
+                display_name: person.display_name().to_string(),
+                last_activity: 0,
+                last_activity_formatted: String::new(),
+                is_group: false,
+            });
+        }
+    }
+
+    // No substring match found - try fuzzy similarity on all persons
+    let all_persons = match state
+        .ontology_repository
+        .get_persons_with_channels(user_id, 500, 0)
+    {
+        Ok(p) => p,
+        Err(_) => return None,
+    };
+
+    let best = all_persons
+        .iter()
+        .filter_map(|p| {
+            let name = p.display_name().to_lowercase();
+            let score = strsim::jaro_winkler(&search_lower, &name);
+            if score >= 0.7 {
+                p.channels
+                    .iter()
+                    .find(|c| c.platform == platform && c.room_id.is_some())
+                    .map(|ch| (score, p, ch))
+            } else {
+                None
+            }
+        })
+        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+    if let Some((score, person, ch)) = best {
+        let rid = ch.room_id.as_ref().unwrap();
+        tracing::info!(
+            "SEND_FLOW find_person_room: fuzzy Person match '{}' (score={}), room_id={}",
+            person.display_name(),
+            score,
+            rid
+        );
+        return Some(crate::utils::bridge::BridgeRoom {
+            room_id: rid.clone(),
+            display_name: person.display_name().to_string(),
+            last_activity: 0,
+            last_activity_formatted: String::new(),
+            is_group: false,
+        });
+    }
+
+    tracing::info!(
+        "SEND_FLOW find_person_room: no Person match for '{}'",
+        search_term
+    );
+    None
+}
+
 pub async fn handle_send_chat_message(
     state: &Arc<AppState>,
     user_id: i32,
@@ -125,100 +246,35 @@ pub async fn handle_send_chat_message(
             }),
         ));
     }
+    // Step 1: Try to find a Person with a room_id for this platform (fast, no Matrix needed)
     tracing::info!(
-        "SEND_FLOW Getting cached Matrix client for user={}",
-        user_id
-    );
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
-    tracing::info!(
-        "SEND_FLOW Got Matrix client, fetching {} rooms",
-        args.platform
-    );
-    let rooms = match crate::utils::bridge::get_service_rooms(&client, &args.platform).await {
-        Ok(rooms) => {
-            tracing::info!(
-                "SEND_FLOW Got {} rooms for platform={}",
-                rooms.len(),
-                args.platform
-            );
-            rooms
-        }
-        Err(e) => {
-            tracing::error!("SEND_FLOW Failed to fetch rooms: {}", e);
-            let error_msg = format!("Failed to fetch {} rooms: {}", capitalized_platform, e);
-            if let Err(e) = state
-                .twilio_message_service
-                .send_sms(&error_msg, None, user)
-                .await
-            {
-                eprintln!("Failed to send error message: {}", e);
-            }
-            return Ok((
-                StatusCode::OK,
-                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                Json(TwilioResponse {
-                    message: error_msg,
-                    created_item_id: None,
-                }),
-            ));
-        }
-    };
-
-    // Try ontology Person for room_id lookup
-    tracing::info!(
-        "SEND_FLOW Looking up Person by name='{}' for user={}",
+        "SEND_FLOW Step 1: Fuzzy searching Persons for '{}' on {} for user={}",
         args.chat_name,
+        args.platform,
         user_id
     );
-    let best_match = if let Ok(Some(person)) = state
-        .ontology_repository
-        .find_person_by_name(user_id, &args.chat_name)
-    {
-        tracing::info!(
-            "SEND_FLOW Found Person: name={}, channels={}",
-            person.person.name,
-            person.channels.len()
-        );
-        if let Some(channel) = person
-            .channels
-            .iter()
-            .find(|c| c.platform == args.platform && c.room_id.is_some())
-        {
-            let rid = channel.room_id.as_ref().unwrap();
-            tracing::info!(
-                "SEND_FLOW Person has {} channel with room_id={}",
-                args.platform,
-                rid
-            );
-            // First try to find in rooms list, but if rooms list is empty or doesn't contain it,
-            // construct a BridgeRoom directly from the Person's channel data
-            let found = rooms.iter().find(|r| r.room_id == *rid).cloned();
-            if found.is_some() {
-                tracing::info!("SEND_FLOW Room found in rooms list");
-                found
-            } else {
-                tracing::info!(
-                    "SEND_FLOW Room NOT in rooms list (rooms_count={}), constructing BridgeRoom directly from Person data",
-                    rooms.len()
-                );
-                Some(crate::utils::bridge::BridgeRoom {
-                    room_id: rid.clone(),
-                    display_name: person.person.name.clone(),
-                    last_activity: 0,
-                    last_activity_formatted: String::new(),
-                    is_group: false,
-                })
-            }
-        } else {
-            tracing::info!("SEND_FLOW Person has no {} channel with room_id, falling back to display name search", args.platform);
-            crate::utils::bridge::search_best_match(&rooms, &args.chat_name)
-        }
+    let best_match = find_person_room(state, user_id, &args.chat_name, &args.platform);
+
+    // Step 2: If no Person match, fall back to Matrix room search
+    let best_match = if best_match.is_some() {
+        best_match
     } else {
-        tracing::info!(
-            "SEND_FLOW No Person found, using display name search for '{}'",
-            args.chat_name
-        );
-        crate::utils::bridge::search_best_match(&rooms, &args.chat_name)
+        tracing::info!("SEND_FLOW Step 2: No Person match, falling back to Matrix room search");
+        let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
+        match crate::utils::bridge::get_service_rooms(&client, &args.platform).await {
+            Ok(rooms) => {
+                tracing::info!(
+                    "SEND_FLOW Got {} rooms for platform={}",
+                    rooms.len(),
+                    args.platform
+                );
+                crate::utils::bridge::search_best_match(&rooms, &args.chat_name)
+            }
+            Err(e) => {
+                tracing::error!("SEND_FLOW Failed to fetch rooms: {}", e);
+                None
+            }
+        }
     };
     tracing::info!(
         "SEND_FLOW best_match result: found={}, display_name={:?}, room_id={:?}",
