@@ -26,8 +26,8 @@ echo "--- backend stderr (last 80 lines) ---"
 tail -80 /var/log/supervisor/lightfriend-err.log 2>/dev/null || echo "  empty"
 echo ""
 
-echo "--- backend stdout (last 40 lines) ---"
-tail -40 /var/log/supervisor/lightfriend.log 2>/dev/null || echo "  empty"
+echo "--- backend stdout (last 200 lines) ---"
+tail -200 /var/log/supervisor/lightfriend.log 2>/dev/null || echo "  empty"
 echo ""
 
 echo "--- cloudflared stderr (last 40 lines) ---"
