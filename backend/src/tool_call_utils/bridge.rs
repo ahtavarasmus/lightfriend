@@ -190,9 +190,25 @@ pub async fn handle_send_chat_message(
                 args.platform,
                 rid
             );
+            // First try to find in rooms list, but if rooms list is empty or doesn't contain it,
+            // construct a BridgeRoom directly from the Person's channel data
             let found = rooms.iter().find(|r| r.room_id == *rid).cloned();
-            tracing::info!("SEND_FLOW Room found in rooms list: {}", found.is_some());
-            found
+            if found.is_some() {
+                tracing::info!("SEND_FLOW Room found in rooms list");
+                found
+            } else {
+                tracing::info!(
+                    "SEND_FLOW Room NOT in rooms list (rooms_count={}), constructing BridgeRoom directly from Person data",
+                    rooms.len()
+                );
+                Some(crate::utils::bridge::BridgeRoom {
+                    room_id: rid.clone(),
+                    display_name: person.person.name.clone(),
+                    last_activity: 0,
+                    last_activity_formatted: String::new(),
+                    is_group: false,
+                })
+            }
         } else {
             tracing::info!("SEND_FLOW Person has no {} channel with room_id, falling back to display name search", args.platform);
             crate::utils::bridge::search_best_match(&rooms, &args.chat_name)
