@@ -96,6 +96,7 @@ pub async fn handle_send_email(
     user_id: i32,
     args: &str,
     user: &crate::models::user_models::User,
+    skip_sms: bool,
 ) -> Result<
     (
         axum::http::StatusCode,
@@ -151,25 +152,27 @@ pub async fn handle_send_email(
         "Will send email to {} with subject '{}' and body '{}' in 60s. Reply 'C' to discard.",
         recipient_email, args.subject, args.body
     );
-    // Send the queued message
-    match state
-        .twilio_message_service
-        .send_sms(&queued_msg, None, user)
-        .await
-    {
-        Ok(_) => {
-            // SMS credits deducted at Twilio status callback
-        }
-        Err(e) => {
-            eprintln!("Failed to send queued message: {}", e);
-            return Ok((
-                axum::http::StatusCode::OK,
-                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                axum::Json(crate::api::twilio_sms::TwilioResponse {
-                    message: "Failed to send message queue notification".to_string(),
-                    created_item_id: None,
-                }),
-            ));
+    // Send the queued confirmation via SMS (skip when from web dashboard)
+    if !skip_sms {
+        match state
+            .twilio_message_service
+            .send_sms(&queued_msg, None, user)
+            .await
+        {
+            Ok(_) => {
+                // SMS credits deducted at Twilio status callback
+            }
+            Err(e) => {
+                eprintln!("Failed to send queued message: {}", e);
+                return Ok((
+                    axum::http::StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    axum::Json(crate::api::twilio_sms::TwilioResponse {
+                        message: "Failed to send message queue notification".to_string(),
+                        created_item_id: None,
+                    }),
+                ));
+            }
         }
     }
     // Create cancellation channel
@@ -181,6 +184,7 @@ pub async fn handle_send_email(
     let cloned_to = recipient_email.clone();
     let cloned_subject = args.subject.clone();
     let cloned_body = args.body.clone();
+    let cloned_skip_sms = skip_sms;
     tokio::spawn(async move {
         let reason = tokio::select! {
             _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => "timeout",
@@ -214,12 +218,14 @@ pub async fn handle_send_email(
                             .and_then(|v| v.as_str())
                             .unwrap_or("Unknown error")
                     );
-                    if let Err(e) = cloned_state
-                        .twilio_message_service
-                        .send_sms(&error_msg, None, &cloned_user)
-                        .await
-                    {
-                        eprintln!("Failed to send error message: {}", e);
+                    if !cloned_skip_sms {
+                        if let Err(e) = cloned_state
+                            .twilio_message_service
+                            .send_sms(&error_msg, None, &cloned_user)
+                            .await
+                        {
+                            eprintln!("Failed to send error message: {}", e);
+                        }
                     }
                 }
             }
@@ -256,6 +262,7 @@ pub async fn handle_respond_to_email(
     user_id: i32,
     args: &str,
     user: &crate::models::user_models::User,
+    skip_sms: bool,
 ) -> Result<
     (
         axum::http::StatusCode,
@@ -286,12 +293,14 @@ pub async fn handle_respond_to_email(
                     .and_then(|v| v.as_str())
                     .unwrap_or("Unknown error")
             );
-            if let Err(e) = state
-                .twilio_message_service
-                .send_sms(&error_msg, None, user)
-                .await
-            {
-                eprintln!("Failed to send error message: {}", e);
+            if !skip_sms {
+                if let Err(e) = state
+                    .twilio_message_service
+                    .send_sms(&error_msg, None, user)
+                    .await
+                {
+                    eprintln!("Failed to send error message: {}", e);
+                }
             }
             return Ok((
                 axum::http::StatusCode::OK,
@@ -315,25 +324,27 @@ pub async fn handle_respond_to_email(
         "Will respond to email '{}' with '{}' in 60s. Reply 'C' to discard.",
         subject, args.response_text
     );
-    // Send the queued message
-    match state
-        .twilio_message_service
-        .send_sms(&queued_msg, None, user)
-        .await
-    {
-        Ok(_) => {
-            // SMS credits deducted at Twilio status callback
-        }
-        Err(e) => {
-            eprintln!("Failed to send queued message: {}", e);
-            return Ok((
-                axum::http::StatusCode::OK,
-                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                axum::Json(crate::api::twilio_sms::TwilioResponse {
-                    message: "Failed to send message queue notification".to_string(),
-                    created_item_id: None,
-                }),
-            ));
+    // Send the queued confirmation via SMS (skip when from web dashboard)
+    if !skip_sms {
+        match state
+            .twilio_message_service
+            .send_sms(&queued_msg, None, user)
+            .await
+        {
+            Ok(_) => {
+                // SMS credits deducted at Twilio status callback
+            }
+            Err(e) => {
+                eprintln!("Failed to send queued message: {}", e);
+                return Ok((
+                    axum::http::StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    axum::Json(crate::api::twilio_sms::TwilioResponse {
+                        message: "Failed to send message queue notification".to_string(),
+                        created_item_id: None,
+                    }),
+                ));
+            }
         }
     }
     // Create cancellation channel
@@ -344,6 +355,7 @@ pub async fn handle_respond_to_email(
     let cloned_user = user.clone();
     let cloned_email_id = args.email_id.clone();
     let cloned_response_text = args.response_text.clone();
+    let cloned_skip_sms = skip_sms;
     tokio::spawn(async move {
         let reason = tokio::select! {
             _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => "timeout",
@@ -376,12 +388,14 @@ pub async fn handle_respond_to_email(
                             .and_then(|v| v.as_str())
                             .unwrap_or("Unknown error")
                     );
-                    if let Err(e) = cloned_state
-                        .twilio_message_service
-                        .send_sms(&error_msg, None, &cloned_user)
-                        .await
-                    {
-                        eprintln!("Failed to send error message: {}", e);
+                    if !cloned_skip_sms {
+                        if let Err(e) = cloned_state
+                            .twilio_message_service
+                            .send_sms(&error_msg, None, &cloned_user)
+                            .await
+                        {
+                            eprintln!("Failed to send error message: {}", e);
+                        }
                     }
                 }
             }

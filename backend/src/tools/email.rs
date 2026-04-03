@@ -35,6 +35,7 @@ impl ToolHandler for SendEmailHandler {
             ctx.user_id,
             ctx.arguments,
             ctx.user,
+            ctx.skip_sms,
         )
         .await
         {
@@ -107,6 +108,7 @@ impl ToolHandler for RespondEmailHandler {
             ctx.user_id,
             ctx.arguments,
             ctx.user,
+            ctx.skip_sms,
         )
         .await
         {

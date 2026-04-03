@@ -947,6 +947,7 @@ async fn execute_flow_action(
                     tool_call_id: format!("rule_{}", rule.id),
                     user_given_info: "",
                     current_time: now,
+                    skip_sms: false,
                     client: None,
                     model: None,
                     tools: None,
