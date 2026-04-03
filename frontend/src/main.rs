@@ -553,14 +553,14 @@ pub fn nav(props: &NavProps) -> Html {
                             AuthState::LoggedOut => html! {
                                 <>
                                     <div class="nav-trust-badges">
-                                        <div class="nav-trust-badge">
+                                        <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer" class="nav-trust-badge">
                                             <i class="fa-brands fa-github"></i>
                                             <span>{"Open Source"}</span>
-                                        </div>
-                                        <div class="nav-trust-badge">
+                                        </a>
+                                        <Link<Route> to={Route::Trustless} classes="nav-trust-badge">
                                             <i class="fa-solid fa-shield-halved"></i>
                                             <span>{"Verifiably Private"}</span>
-                                        </div>
+                                        </Link<Route>>
                                     </div>
                                     if !is_pricing {
                                         <Link<Route> to={Route::Pricing} classes="nav-link">
