@@ -816,6 +816,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let event_detail_loading = use_state(std::collections::HashSet::<i32>::new);
     let settings_initial_tab = use_state(|| SettingsTab::Capabilities);
     let dismissed_ids = use_state(get_dismissed_ids);
+    let action_items_expanded = use_state(|| false);
     let chat_prefill = use_state(|| None::<String>);
     let activity_refresh_seq = use_state(|| 0u32);
     let critical_notis_enabled = use_state(|| {
@@ -1271,9 +1272,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                         </div>
                     }
 
-                    // Status (compact) - only show when action items need attention
+                    // Status (compact) - clickable to expand/collapse action items
                     if has_action_items {
-                        <div class="status-compact">
+                        <div class="status-compact" style="cursor: pointer;" onclick={{
+                            let expanded = action_items_expanded.clone();
+                            Callback::from(move |_: MouseEvent| expanded.set(!*expanded))
+                        }}>
                             <span class="status-compact-icon needs-attention">
                                 <i class="fa-solid fa-bell"></i>
                             </span>
@@ -1282,6 +1286,9 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                     visible_action_items.len(),
                                     if visible_action_items.len() == 1 { "message needs" } else { "messages need" }
                                 )}
+                            </span>
+                            <span style="margin-left: auto; color: #888; font-size: 0.8rem;">
+                                {if *action_items_expanded { "Hide" } else { "Show" }}
                             </span>
                         </div>
                     }
@@ -1412,7 +1419,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     }
 
                     // Action Cards
-                    if has_action_items {
+                    if has_action_items && *action_items_expanded {
                         <div class="action-cards">
                             { for visible_action_items.iter().map(|item| {
                                 let msg_id = item.message_id;

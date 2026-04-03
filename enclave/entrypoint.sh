@@ -371,9 +371,9 @@ if [ "${RESTORE_MODE}" = "none" ]; then
         SEED_FETCHED=false
         for seed_attempt in $(seq 1 5); do
             echo "  seed attempt $seed_attempt: curl http://127.0.0.1:9080/lightfriend_db.sql..."
-            CURL_OUT=$(curl -s --max-time 120 \
+            CURL_OUT=$(curl -s --max-time 10 \
                 -o "$RECEIVED_SEED" -w '%{http_code}' \
-                http://127.0.0.1:9080/lightfriend_db.sql 2>&1)
+                http://127.0.0.1:9080/lightfriend_db.sql 2>&1) || true
             CURL_RC=$?
             SEED_BYTES=$(stat -c%s "$RECEIVED_SEED" 2>/dev/null || echo "0")
             echo "  seed attempt $seed_attempt: curl exit=$CURL_RC, http=$CURL_OUT, received ${SEED_BYTES} bytes"

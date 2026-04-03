@@ -78,7 +78,19 @@ pub async fn handle_send_chat_message(
     ),
     Box<dyn std::error::Error>,
 > {
+    tracing::info!(
+        "SEND_FLOW handle_send_chat_message ENTER: user={}, raw_args={}",
+        user_id,
+        args
+    );
     let args: SendChatMessageArgs = serde_json::from_str(args)?;
+    tracing::info!(
+        "SEND_FLOW Parsed args: platform={}, chat_name={}, message_len={}, has_image={}",
+        args.platform,
+        args.chat_name,
+        args.message.len(),
+        image_url.is_some()
+    );
     let capitalized_platform = args
         .platform
         .chars()
@@ -87,6 +99,11 @@ pub async fn handle_send_chat_message(
         .unwrap_or_default()
         + &args.platform[1..];
     let bridge = state.user_repository.get_bridge(user_id, &args.platform)?;
+    tracing::info!(
+        "SEND_FLOW Bridge lookup: found={}, status={:?}",
+        bridge.is_some(),
+        bridge.as_ref().map(|b| b.status.clone())
+    );
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
         let error_msg = format!(
             "Failed to find contact. Please make sure you're connected to {} bridge.",
@@ -108,10 +125,26 @@ pub async fn handle_send_chat_message(
             }),
         ));
     }
+    tracing::info!(
+        "SEND_FLOW Getting cached Matrix client for user={}",
+        user_id
+    );
     let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
+    tracing::info!(
+        "SEND_FLOW Got Matrix client, fetching {} rooms",
+        args.platform
+    );
     let rooms = match crate::utils::bridge::get_service_rooms(&client, &args.platform).await {
-        Ok(rooms) => rooms,
+        Ok(rooms) => {
+            tracing::info!(
+                "SEND_FLOW Got {} rooms for platform={}",
+                rooms.len(),
+                args.platform
+            );
+            rooms
+        }
         Err(e) => {
+            tracing::error!("SEND_FLOW Failed to fetch rooms: {}", e);
             let error_msg = format!("Failed to fetch {} rooms: {}", capitalized_platform, e);
             if let Err(e) = state
                 .twilio_message_service
@@ -132,25 +165,67 @@ pub async fn handle_send_chat_message(
     };
 
     // Try ontology Person for room_id lookup
+    tracing::info!(
+        "SEND_FLOW Looking up Person by name='{}' for user={}",
+        args.chat_name,
+        user_id
+    );
     let best_match = if let Ok(Some(person)) = state
         .ontology_repository
         .find_person_by_name(user_id, &args.chat_name)
     {
+        tracing::info!(
+            "SEND_FLOW Found Person: name={}, channels={}",
+            person.person.name,
+            person.channels.len()
+        );
         if let Some(channel) = person
             .channels
             .iter()
             .find(|c| c.platform == args.platform && c.room_id.is_some())
         {
             let rid = channel.room_id.as_ref().unwrap();
-            rooms.iter().find(|r| r.room_id == *rid).cloned()
+            tracing::info!(
+                "SEND_FLOW Person has {} channel with room_id={}",
+                args.platform,
+                rid
+            );
+            // First try to find in rooms list, but if rooms list is empty or doesn't contain it,
+            // construct a BridgeRoom directly from the Person's channel data
+            let found = rooms.iter().find(|r| r.room_id == *rid).cloned();
+            if found.is_some() {
+                tracing::info!("SEND_FLOW Room found in rooms list");
+                found
+            } else {
+                tracing::info!(
+                    "SEND_FLOW Room NOT in rooms list (rooms_count={}), constructing BridgeRoom directly from Person data",
+                    rooms.len()
+                );
+                Some(crate::utils::bridge::BridgeRoom {
+                    room_id: rid.clone(),
+                    display_name: person.person.name.clone(),
+                    last_activity: 0,
+                    last_activity_formatted: String::new(),
+                    is_group: false,
+                })
+            }
         } else {
-            // Person exists but no channel for this platform - fall back to display name search
+            tracing::info!("SEND_FLOW Person has no {} channel with room_id, falling back to display name search", args.platform);
             crate::utils::bridge::search_best_match(&rooms, &args.chat_name)
         }
     } else {
-        // No Person found - search by display name
+        tracing::info!(
+            "SEND_FLOW No Person found, using display name search for '{}'",
+            args.chat_name
+        );
         crate::utils::bridge::search_best_match(&rooms, &args.chat_name)
     };
+    tracing::info!(
+        "SEND_FLOW best_match result: found={}, display_name={:?}, room_id={:?}",
+        best_match.is_some(),
+        best_match.as_ref().map(|r| &r.display_name),
+        best_match.as_ref().map(|r| &r.room_id)
+    );
     let best_match = match best_match {
         Some(room) => room,
         None => {
@@ -178,7 +253,12 @@ pub async fn handle_send_chat_message(
     };
     // Get the best match
     let exact_name = crate::utils::bridge::remove_bridge_suffix(&best_match.display_name);
-    tracing::info!("Message will be sent to {}", exact_name);
+    tracing::info!(
+        "SEND_FLOW Matched room: display_name='{}', exact_name='{}', room_id={}",
+        best_match.display_name,
+        exact_name,
+        best_match.room_id
+    );
     // Format the queued message with the found contact name and image if present
     let queued_msg = if image_url.is_some() {
         format!(
@@ -191,28 +271,18 @@ pub async fn handle_send_chat_message(
             capitalized_platform, exact_name, args.message
         )
     };
-    // Send the queued message
+    // Send the queued confirmation SMS (best-effort, don't block the actual send)
+    tracing::info!("SEND_FLOW Sending confirmation SMS (best-effort)...");
     match state
         .twilio_message_service
         .send_sms(&queued_msg, None, user)
         .await
     {
-        Ok(_) => {
-            // SMS credits deducted at Twilio status callback
-        }
-        Err(e) => {
-            eprintln!("Failed to send queued message: {}", e);
-            return Ok((
-                StatusCode::OK,
-                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                Json(TwilioResponse {
-                    message: "Failed to send message queue notification".to_string(),
-                    created_item_id: None,
-                }),
-            ));
-        }
+        Ok(_) => tracing::info!("SEND_FLOW Confirmation SMS sent successfully"),
+        Err(e) => tracing::warn!("SEND_FLOW Confirmation SMS failed (non-fatal): {}", e),
     }
     // Create cancellation channel
+    tracing::info!("SEND_FLOW Creating cancellation channel and preparing delayed send task");
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
     // Spawn the delayed send task after sending the message
     let cloned_state = state.clone();
@@ -222,6 +292,7 @@ pub async fn handle_send_chat_message(
     let cloned_platform = args.platform.clone();
     let cloned_exact_name = exact_name.clone();
     let cloned_message = args.message.clone();
+    let cloned_room_id = best_match.room_id.clone();
     // Log outbound bandwidth estimate
     let outbound_bytes = args.message.len() as i32 + if image_url.is_some() { 50_000 } else { 0 };
     if let Err(e) = state.bandwidth_repository.log_bandwidth(
@@ -238,46 +309,103 @@ pub async fn handle_send_chat_message(
     }
 
     let cloned_image_url = image_url.map(|s| s.to_string());
+    tracing::info!(
+        "SEND_FLOW About to tokio::spawn delayed send task for user={}, room_id={}",
+        user_id,
+        cloned_room_id
+    );
     tokio::spawn(async move {
+        tracing::info!(
+            "SEND_FLOW_TASK Delayed task STARTED for user={}, waiting 60s or cancel. platform={}, recipient={}, room_id={}",
+            cloned_user_id, cloned_platform, cloned_exact_name, cloned_room_id
+        );
         let reason = tokio::select! {
             _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => "timeout",
             _ = cancel_rx => "cancel",
         };
+        tracing::info!(
+            "SEND_FLOW_TASK Select resolved: reason={}, user={}, platform={}, recipient={}",
+            reason,
+            cloned_user_id,
+            cloned_platform,
+            cloned_exact_name
+        );
         if reason == "timeout" {
-            // Proceed with send using captured variables
-            println!("sending message now");
-            if let Err(e) = crate::utils::bridge::send_bridge_message(
+            tracing::info!(
+                "SEND_FLOW_TASK Calling send_bridge_message: service={}, user={}, chat_name={}, room_id={}",
+                cloned_platform, cloned_user_id, cloned_exact_name, cloned_room_id
+            );
+            match crate::utils::bridge::send_bridge_message(
                 &cloned_platform,
                 &cloned_state,
                 cloned_user_id,
                 &cloned_exact_name,
                 &cloned_message,
                 cloned_image_url,
+                Some(cloned_room_id.as_str()),
             )
             .await
             {
-                let error_msg = format!(
-                    "Failed to send {} message: {}",
-                    cloned_capitalized_platform, e
-                );
-                if let Err(e) = cloned_state
-                    .twilio_message_service
-                    .send_sms(&error_msg, None, &cloned_user)
-                    .await
-                {
-                    eprintln!("Failed to send error message: {}", e);
+                Ok(msg) => {
+                    tracing::info!(
+                        "SEND_FLOW_TASK SUCCESS: Sent {} message to '{}' for user {} (room={:?})",
+                        cloned_capitalized_platform,
+                        cloned_exact_name,
+                        cloned_user_id,
+                        msg.room_id
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "SEND_FLOW_TASK FAILED: send_bridge_message error for user={}: {}",
+                        cloned_user_id,
+                        e
+                    );
+                    let error_msg = format!(
+                        "Failed to send {} message: {}",
+                        cloned_capitalized_platform, e
+                    );
+                    if let Err(e) = cloned_state
+                        .twilio_message_service
+                        .send_sms(&error_msg, None, &cloned_user)
+                        .await
+                    {
+                        tracing::error!("SEND_FLOW_TASK Also failed to send error SMS: {}", e);
+                    }
                 }
             }
+        } else {
+            tracing::info!(
+                "SEND_FLOW_TASK Message to '{}' was CANCELLED by user",
+                cloned_exact_name
+            );
         }
         // Remove from map
+        tracing::info!(
+            "SEND_FLOW_TASK Removing user {} from pending_message_senders map",
+            cloned_user_id
+        );
         let mut senders = cloned_state.pending_message_senders.lock().await;
         senders.remove(&cloned_user_id);
+        tracing::info!("SEND_FLOW_TASK Task complete for user={}", cloned_user_id);
     });
+    tracing::info!(
+        "SEND_FLOW tokio::spawn returned, storing cancel_tx in pending_message_senders for user={}",
+        user_id
+    );
     // Store the cancel sender in the map
     {
         let mut senders = state.pending_message_senders.lock().await;
         senders.insert(user_id, cancel_tx);
+        tracing::info!(
+            "SEND_FLOW Stored cancel_tx, pending_message_senders now has {} entries",
+            senders.len()
+        );
     }
+    tracing::info!(
+        "SEND_FLOW handle_send_chat_message RETURNING OK for user={} - delayed task is running in background",
+        user_id
+    );
     Ok((
         StatusCode::OK,
         [(axum::http::header::CONTENT_TYPE, "application/json")],

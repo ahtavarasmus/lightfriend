@@ -55,6 +55,7 @@ pub async fn send_message(
         &request.chat_name,
         &request.message,
         request.image_url,
+        None,
     )
     .await
     {

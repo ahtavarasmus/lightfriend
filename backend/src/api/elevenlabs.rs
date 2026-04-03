@@ -1266,6 +1266,7 @@ pub async fn handle_send_chat_message(
                 &cloned_exact_name,
                 &cloned_message,
                 None, // No image URL
+                None, // No cached room_id
             )
             .await
             {

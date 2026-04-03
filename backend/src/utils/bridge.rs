@@ -951,55 +951,108 @@ pub async fn send_bridge_message(
     chat_name: &str,
     message: &str,
     media_url: Option<String>,
+    target_room_id: Option<&str>,
 ) -> Result<BridgeMessage> {
-    // Get user for timezone info
-    tracing::info!("Sending {} message", service);
+    tracing::info!(
+        "SEND_FLOW_BRIDGE send_bridge_message ENTER: service={}, user={}, chat_name='{}', room_id={:?}, has_media={}",
+        service, user_id, chat_name, target_room_id, media_url.is_some()
+    );
 
+    tracing::info!(
+        "SEND_FLOW_BRIDGE Getting cached Matrix client for user={}",
+        user_id
+    );
     let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
+    tracing::info!("SEND_FLOW_BRIDGE Got Matrix client OK");
+
     let bridge = state.user_repository.get_bridge(user_id, service)?;
+    tracing::info!(
+        "SEND_FLOW_BRIDGE Bridge status: found={}, status={:?}",
+        bridge.is_some(),
+        bridge.as_ref().map(|b| b.status.clone())
+    );
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
+        tracing::error!("SEND_FLOW_BRIDGE Bridge not connected, aborting");
         return Err(anyhow!(
             "{} bridge is not connected. Please log in first.",
             capitalize(service)
         ));
     }
-    let service_rooms = get_service_rooms(&client, service).await?;
-    let exact_room = find_exact_room(&service_rooms, chat_name);
-    let room = match exact_room {
-        Some(room_info) => {
-            let room_id = match matrix_sdk::ruma::OwnedRoomId::try_from(room_info.room_id.as_str())
-            {
-                Ok(id) => id,
-                Err(e) => return Err(anyhow!("Invalid room ID: {}", e)),
-            };
-            match client.get_room(&room_id) {
-                Some(r) => r,
-                None => return Err(anyhow!("Room not found")),
+
+    // If we have a room_id from the initial lookup, use it directly (no re-search)
+    let room = if let Some(rid) = target_room_id {
+        tracing::info!("SEND_FLOW_BRIDGE Using target_room_id directly: {}", rid);
+        let room_id = matrix_sdk::ruma::OwnedRoomId::try_from(rid).map_err(|e| {
+            tracing::error!("SEND_FLOW_BRIDGE Invalid room ID '{}': {}", rid, e);
+            anyhow!("Invalid room ID '{}': {}", rid, e)
+        })?;
+        let r = client.get_room(&room_id);
+        tracing::info!(
+            "SEND_FLOW_BRIDGE client.get_room({}) returned: found={}",
+            rid,
+            r.is_some()
+        );
+        r.ok_or_else(|| {
+            tracing::error!("SEND_FLOW_BRIDGE Room {} not found in Matrix client!", rid);
+            anyhow!("Room {} not found in client", rid)
+        })?
+    } else {
+        tracing::info!(
+            "SEND_FLOW_BRIDGE No target_room_id, searching by name '{}'",
+            chat_name
+        );
+        let service_rooms = get_service_rooms(&client, service).await?;
+        tracing::info!("SEND_FLOW_BRIDGE Got {} service rooms", service_rooms.len());
+        let exact_room = find_exact_room(&service_rooms, chat_name);
+        tracing::info!(
+            "SEND_FLOW_BRIDGE find_exact_room result: found={}",
+            exact_room.is_some()
+        );
+        match exact_room {
+            Some(room_info) => {
+                tracing::info!(
+                    "SEND_FLOW_BRIDGE Exact room: id={}, name={}",
+                    room_info.room_id,
+                    room_info.display_name
+                );
+                let room_id = matrix_sdk::ruma::OwnedRoomId::try_from(room_info.room_id.as_str())
+                    .map_err(|e| anyhow!("Invalid room ID: {}", e))?;
+                client
+                    .get_room(&room_id)
+                    .ok_or_else(|| anyhow!("Room not found"))?
+            }
+            None => {
+                let suggestions = get_best_matches(&service_rooms, chat_name);
+                let error_msg = if suggestions.is_empty() {
+                    format!(
+                        "Could not find exact matching {} room for '{}'",
+                        capitalize(service),
+                        chat_name
+                    )
+                } else {
+                    format!(
+                        "Could not find exact matching {} room for '{}'. Did you mean one of these?\n{}",
+                        capitalize(service),
+                        chat_name,
+                        suggestions.join("\n")
+                    )
+                };
+                tracing::error!("SEND_FLOW_BRIDGE No room found: {}", error_msg);
+                return Err(anyhow!(error_msg));
             }
         }
-        None => {
-            let suggestions = get_best_matches(&service_rooms, chat_name);
-            let error_msg = if suggestions.is_empty() {
-                format!(
-                    "Could not find exact matching {} room for '{}'",
-                    capitalize(service),
-                    chat_name
-                )
-            } else {
-                format!(
-                    "Could not find exact matching {} room for '{}'. Did you mean one of these?\n{}",
-                    capitalize(service),
-                    chat_name,
-                    suggestions.join("\n")
-                )
-            };
-            return Err(anyhow!(error_msg));
-        }
     };
+    tracing::info!(
+        "SEND_FLOW_BRIDGE Got Matrix room object: room_id={}, display_name will be fetched after send",
+        room.room_id()
+    );
     use matrix_sdk::ruma::events::room::message::{
         ImageMessageEventContent, MessageType, RoomMessageEventContent,
     };
     if let Some(url) = media_url {
+        tracing::info!(
+            "SEND_FLOW_BRIDGE Sending IMAGE message with caption, downloading from URL..."
+        );
         // ── 1. Download the image and get MIME type ────────────────────────────────
         let resp = reqwest::get(&url).await?;
         // Get MIME type from headers before consuming the response
@@ -1012,30 +1065,66 @@ pub async fn send_bridge_message(
         // Now consume the response to get the bytes
         let bytes = resp.bytes().await?;
         let size = bytes.len();
+        tracing::info!(
+            "SEND_FLOW_BRIDGE Downloaded image: {} bytes, mime={}",
+            size,
+            mime
+        );
         // ── 2. Upload to the homeserver ──────────────────────────────────────────
         let upload_resp = client.media().upload(&mime, bytes.to_vec(), None).await?;
         let mxc: matrix_sdk::ruma::OwnedMxcUri = upload_resp.content_uri;
+        tracing::info!("SEND_FLOW_BRIDGE Uploaded to homeserver: mxc={}", mxc);
         // ── 4. Build the image-message content with caption in *one* event ──────
         let mut img = ImageMessageEventContent::plain(
-            message.to_owned(), // ← this is the caption / body
+            message.to_owned(), // the caption / body
             mxc,
         );
         // Optional but nice: add basic metadata so bridges & clients know the size
         let mut imageinfo = matrix_sdk::ruma::events::room::ImageInfo::new();
         imageinfo.size = Some(matrix_sdk::ruma::UInt::new(size as u64).unwrap_or_default());
         img.info = Some(Box::new(imageinfo));
-        // Wrap it as a generic “m.room.message”
+        // Wrap it as a generic "m.room.message"
         let content = RoomMessageEventContent::new(MessageType::Image(img));
         // ── 5. Send it ───────────────────────────────────────────────────────────
+        let rid_str = room.room_id().to_string();
+        tracing::info!(
+            "SEND_FLOW_BRIDGE Calling room.send for image message, room_id={}",
+            rid_str
+        );
         room.send(content).await?;
+        tracing::info!(
+            "SEND_FLOW_BRIDGE room.send for image returned OK, room_id={}",
+            rid_str
+        );
     } else {
         // plain text
+        let rid_str = room.room_id().to_string();
+        tracing::info!(
+            "SEND_FLOW_BRIDGE Sending plain text message to room_id={}",
+            rid_str
+        );
         room.send(RoomMessageEventContent::text_plain(message))
             .await?;
+        tracing::info!(
+            "SEND_FLOW_BRIDGE room.send for text returned OK, room_id={}",
+            rid_str
+        );
     }
-    tracing::debug!("Message sent!");
+    let rid_str = room.room_id().to_string();
+    tracing::info!(
+        "SEND_FLOW_BRIDGE Message sent via {}, building response, room_id={}",
+        service,
+        rid_str
+    );
     let user_info = state.user_core.get_user_info(user_id)?;
     let current_timestamp = chrono::Utc::now().timestamp();
+    let display_name = room.display_name().await?.to_string();
+    tracing::info!(
+        "SEND_FLOW_BRIDGE send_bridge_message COMPLETE: room_id={}, display_name={}, service={}",
+        rid_str,
+        display_name,
+        service
+    );
     // Return the sent message details
     Ok(BridgeMessage {
         sender: "You".to_string(),
@@ -1044,7 +1133,7 @@ pub async fn send_bridge_message(
         timestamp: current_timestamp,
         formatted_timestamp: format_timestamp(current_timestamp, user_info.timezone),
         message_type: "text".to_string(),
-        room_name: room.display_name().await?.to_string(),
+        room_name: display_name,
         media_url: None,
         room_id: Some(room.room_id().to_string()),
     })

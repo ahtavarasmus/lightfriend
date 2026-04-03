@@ -29,7 +29,11 @@ impl ToolHandler for SendMessageHandler {
     }
 
     async fn execute(&self, ctx: ToolContext<'_>) -> Result<ToolResult, String> {
-        tracing::debug!("Executing send_chat_message tool call");
+        tracing::info!(
+            "SEND_FLOW send_chat_message tool execute() called for user={}, args={}",
+            ctx.user_id,
+            ctx.arguments
+        );
         match crate::tool_call_utils::bridge::handle_send_chat_message(
             ctx.state,
             ctx.user_id,
@@ -40,6 +44,12 @@ impl ToolHandler for SendMessageHandler {
         .await
         {
             Ok((status, _headers, axum::Json(twilio_response))) => {
+                tracing::info!(
+                    "SEND_FLOW handle_send_chat_message returned OK for user={}, status={}, msg={}",
+                    ctx.user_id,
+                    status,
+                    twilio_response.message
+                );
                 write_outgoing_history(
                     ctx.state,
                     ctx.user_id,
@@ -48,13 +58,21 @@ impl ToolHandler for SendMessageHandler {
                     &twilio_response.message,
                     ctx.current_time,
                 );
+                tracing::info!(
+                    "SEND_FLOW Returning EarlyReturn for user={}, this should spawn delayed task and return immediately",
+                    ctx.user_id
+                );
                 Ok(ToolResult::EarlyReturn {
                     response: twilio_response,
                     status,
                 })
             }
             Err(e) => {
-                tracing::error!("Failed to handle chat message sending: {}", e);
+                tracing::error!(
+                    "SEND_FLOW handle_send_chat_message FAILED for user={}: {}",
+                    ctx.user_id,
+                    e
+                );
                 write_outgoing_error_history(
                     ctx.state,
                     ctx.user_id,
