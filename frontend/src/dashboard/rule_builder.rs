@@ -482,6 +482,23 @@ const BUILDER_STYLES: &str = r#"
     margin-top: 0.2rem;
     font-style: italic;
 }
+.rb-security-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.6rem;
+    background: rgba(255, 200, 50, 0.08);
+    border: 1px solid rgba(255, 200, 50, 0.25);
+    border-radius: 6px;
+    font-size: 0.72rem;
+    color: #cca730;
+    line-height: 1.45;
+}
+.rb-security-warning i {
+    margin-top: 0.1rem;
+    flex-shrink: 0;
+}
 .rb-context-hint {
     font-size: 0.75rem;
     color: #888;
@@ -3506,6 +3523,10 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                     </optgroup>
                                                 }
                                             </select>
+                                            <div class="rb-security-warning">
+                                                <i class="fa-solid fa-triangle-exclamation"></i>
+                                                <span>{"Tool-call rules can be exploited via prompt injection. A malicious sender could craft a message that tricks the AI into executing this action when it shouldn't. Only use tool actions with trusted message sources."}</span>
+                                            </div>
                                         </div>
 
                                         // Show LLM-fillable params when in AI mode

@@ -41,14 +41,9 @@ pub async fn check_user_credits(
     let required = match event_type {
         // SMS events: just check > 0 (actual cost deducted at Twilio callback)
         "message" | "noti_msg" | "digest" => 0.01,
-        // Voice/web events: estimate upfront cost (these commit resources)
+        // Voice events: estimate upfront cost (these commit resources)
         "voice" | "noti_call" => {
             get_voice_cost_estimate(state, &user.phone_number, event_type, amount).await
-        }
-        "web_call" => {
-            // Web call: 0.15 per minute (ElevenLabs only, no Twilio)
-            let minutes = (amount.unwrap_or(60) as f32 / 60.0).ceil().max(1.0);
-            minutes * 0.15
         }
         _ => return Err("Invalid event type".to_string()),
     };
@@ -114,15 +109,18 @@ pub async fn check_user_credits(
     Ok(())
 }
 
+/// Tinfoil inference cost per minute (STT + LLM + TTS).
+/// This covers whisper transcription, llama3-3-70b inference, and qwen3-tts.
+const TINFOIL_COST_PER_MIN: f32 = 0.05;
+
 /// Estimate voice call cost for pre-send credit check.
+/// Cost = Twilio phone leg (country-specific, inbound vs outbound) + Tinfoil inference.
 async fn get_voice_cost_estimate(
     state: &Arc<AppState>,
     phone_number: &str,
     event_type: &str,
     amount: Option<i32>,
 ) -> f32 {
-    const ELEVENLABS_COST_PER_MIN: f32 = 0.11;
-
     let country_code = get_country_code_from_phone(phone_number);
     let pricing = if let Some(code) = country_code {
         crate::api::twilio_pricing::get_notification_only_pricing(state, &code)
@@ -132,17 +130,25 @@ async fn get_voice_cost_estimate(
         None
     };
 
-    let voice_price = match pricing {
-        Some(p) => p.calculated_voice_price,
-        None => 0.13, // fallback
-    };
-
     match event_type {
         "voice" => {
+            // Inbound call: user calls us (originating price, usually cheaper)
+            let twilio_price = match &pricing {
+                Some(p) => p.inbound_voice_price,
+                None => 0.03, // fallback inbound
+            };
             let minutes = (amount.unwrap_or(60) as f32 / 60.0).ceil().max(1.0);
-            minutes * (voice_price + ELEVENLABS_COST_PER_MIN)
+            minutes * (twilio_price + TINFOIL_COST_PER_MIN)
         }
-        "noti_call" => voice_price + ELEVENLABS_COST_PER_MIN,
+        "noti_call" => {
+            // Outbound notification call: we call user (terminating price, more expensive)
+            let twilio_price = match &pricing {
+                Some(p) => p.calculated_voice_price,
+                None => 0.13, // fallback outbound
+            };
+            let minutes = (amount.unwrap_or(60) as f32 / 60.0).ceil().max(1.0);
+            minutes * (twilio_price + TINFOIL_COST_PER_MIN)
+        }
         _ => 0.0,
     }
 }
@@ -212,37 +218,39 @@ pub fn deduct_user_credits(
     Ok(())
 }
 
-/// Calculate cost for voice/web events using cached pricing.
+/// Calculate cost for voice events using cached pricing.
+/// Cost = Twilio phone leg (country-specific, direction-aware) + Tinfoil inference.
 fn get_activity_cost(
     state: &Arc<AppState>,
     phone_number: &str,
     event_type: &str,
     amount: Option<i32>,
 ) -> f32 {
-    const ELEVENLABS_COST_PER_MIN: f32 = 0.11;
-    const WEB_CALL_COST_PER_MIN: f32 = 0.15;
-
     let country_code = get_country_code_from_phone(phone_number);
     let pricing = country_code.and_then(|code| {
         crate::api::twilio_pricing::get_cached_notification_pricing_sync(state, &code)
     });
 
-    let voice_price = match &pricing {
-        Some(p) => p.calculated_voice_price,
-        None => 0.13, // fallback
-    };
-
     match event_type {
         "voice" => {
+            // Inbound: originating price
+            let twilio_price = match &pricing {
+                Some(p) => p.inbound_voice_price,
+                None => 0.03,
+            };
             let minutes = (amount.unwrap_or(60) as f32 / 60.0).ceil().max(1.0);
-            minutes * (voice_price + ELEVENLABS_COST_PER_MIN)
+            minutes * (twilio_price + TINFOIL_COST_PER_MIN)
         }
-        "noti_call" => voice_price + ELEVENLABS_COST_PER_MIN,
-        "web_call" => {
+        "noti_call" => {
+            // Outbound: terminating price
+            let twilio_price = match &pricing {
+                Some(p) => p.calculated_voice_price,
+                None => 0.13,
+            };
             let minutes = (amount.unwrap_or(60) as f32 / 60.0).ceil().max(1.0);
-            minutes * WEB_CALL_COST_PER_MIN
+            minutes * (twilio_price + TINFOIL_COST_PER_MIN)
         }
-        _ => 0.0, // SMS events should not reach here
+        _ => 0.0,
     }
 }
 

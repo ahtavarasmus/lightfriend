@@ -65,7 +65,7 @@ pub fn build_system_prompt(ctx: &AgentContext, mode: ChannelMode) -> String {
         }
         ChannelMode::Voice => {
             format!(
-                "You are speaking to {} over a phone call. Keep responses to 1-2 short sentences. Be concise - the user is paying per minute. Say \"just a moment\" before calling a tool. Never mention internal tool names to the user.",
+                "You are speaking to {} over a phone call. Keep responses to 1-2 short sentences. Be concise - the user is paying per minute. When you need to use a tool, call it immediately. Never mention internal tool names to the user.",
                 if nickname.is_empty() { "the user" } else { nickname },
             )
         }

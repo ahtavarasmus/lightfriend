@@ -4,7 +4,7 @@ use crate::handlers::auth_middleware::AuthUser;
 use crate::AppState;
 use crate::UserCoreOps;
 use axum::extract::ws::{Message, WebSocket};
-use axum::extract::{Query, State, WebSocketUpgrade};
+use axum::extract::{State, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -281,11 +281,14 @@ struct TwilioStart {
     stream_sid: String,
     call_sid: String,
     custom_parameters: Option<serde_json::Value>,
+    tracks: Option<Vec<String>>,
+    media_format: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize, Debug)]
 struct TwilioMedia {
     payload: String,
+    track: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -303,8 +306,8 @@ enum CallState {
 enum TransportMode {
     /// Twilio media stream: mulaw, 8kHz, base64 JSON messages
     Twilio,
-    /// Debug web client: raw PCM i16 at 16kHz, binary WebSocket frames
-    Debug,
+    /// Browser WebSocket: raw PCM i16 at 16kHz in, 24kHz out
+    WebCall,
 }
 
 struct CallSession {
@@ -327,9 +330,11 @@ struct CallSession {
     app_state: Arc<AppState>,
     user: crate::models::user_models::User,
     tool_defs_json: Vec<serde_json::Value>,
-    // Timing
+    // Timing & billing
     call_start: Instant,
     mark_counter: u32,
+    is_outbound: bool,
+    media_count: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -376,11 +381,13 @@ pub async fn voice_incoming(State(state): State<Arc<AppState>>, body: String) ->
     let twiml = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Connect>
-    <Stream url="{}/api/voice/ws">
+  <Start>
+    <Stream url="{}/api/voice/ws" track="both_tracks">
       <Parameter name="user_id" value="{}" />
     </Stream>
-  </Connect>
+  </Start>
+  <Say>Please speak now, I am listening for audio debug.</Say>
+  <Pause length="30"/>
 </Response>"#,
         ws_url, user.id
     );
@@ -393,13 +400,22 @@ pub async fn voice_incoming(State(state): State<Arc<AppState>>, body: String) ->
         .into_response()
 }
 
+/// Escape a string for safe inclusion in XML/TwiML.
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
 fn twiml_say(message: &str) -> Response {
     let twiml = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say>{}</Say>
 </Response>"#,
-        message
+        xml_escape(message)
     );
     (
         axum::http::StatusCode::OK,
@@ -407,6 +423,68 @@ fn twiml_say(message: &str) -> Response {
         twiml,
     )
         .into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Outbound notification call
+// ---------------------------------------------------------------------------
+
+/// Initiate an outbound voice call to a user using Twilio + our voice pipeline.
+/// The call connects to our WebSocket and speaks the notification message as the greeting.
+pub async fn make_notification_call(
+    state: &Arc<AppState>,
+    user: &crate::models::user_models::User,
+    notification_message: &str,
+) -> Result<String, String> {
+    let server_url =
+        std::env::var("SERVER_URL").unwrap_or_else(|_| "https://localhost:3000".to_string());
+    let ws_url = server_url
+        .replace("https://", "wss://")
+        .replace("http://", "ws://");
+
+    // XML-escape then URL-encode the greeting for safe TwiML inclusion
+    let greeting_escaped = xml_escape(notification_message);
+    let greeting_encoded = urlencoding::encode(&greeting_escaped);
+
+    let twiml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <Stream url="{}/api/voice/ws">
+      <Parameter name="user_id" value="{}" />
+      <Parameter name="greeting" value="{}" />
+    </Stream>
+  </Connect>
+</Response>"#,
+        ws_url, user.id, greeting_encoded
+    );
+
+    // Get credentials and from number
+    let credentials = state
+        .twilio_message_service
+        .resolve_credentials(user)
+        .map_err(|e| format!("Failed to resolve Twilio credentials: {}", e))?;
+
+    let from_number = user
+        .preferred_number
+        .clone()
+        .ok_or_else(|| "No from number available for voice call".to_string())?;
+
+    // Initiate the call
+    use crate::api::twilio_client::TwilioClient;
+    let call_sid = state
+        .twilio_client
+        .make_call(&credentials, &user.phone_number, &from_number, &twiml)
+        .await
+        .map_err(|e| format!("Twilio call failed: {}", e))?;
+
+    tracing::info!(
+        "Outbound notification call initiated for user {}: SID {}",
+        user.id,
+        call_sid
+    );
+
+    Ok(call_sid)
 }
 
 // ---------------------------------------------------------------------------
@@ -437,13 +515,23 @@ pub async fn voice_web_start(
             )
         })?;
 
-    // Check credits
-    if let Err(e) = crate::utils::usage::check_user_credits(&state, &user, "web_call", None).await {
+    // Check credits (web calls use voice pricing - no Twilio leg, just Tinfoil)
+    if let Err(e) = crate::utils::usage::check_user_credits(&state, &user, "voice", None).await {
         return Err((StatusCode::FORBIDDEN, Json(serde_json::json!({"error": e}))));
     }
 
-    // Return relative WS path - JS will build the full URL using the request origin
-    let ws_url = format!("/api/voice/ws-debug?user_id={}", user_id);
+    // Generate a one-time token for WebSocket auth (expires in 30s)
+    let token = uuid::Uuid::new_v4().to_string();
+    let expiry = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+        + 30;
+    state
+        .pending_totp_logins
+        .insert(format!("voice_{}", token), (user_id, expiry));
+
+    let ws_url = format!("/api/voice/web-ws?token={}", token);
 
     Ok(Json(serde_json::json!({
         "ws_url": ws_url,
@@ -452,17 +540,210 @@ pub async fn voice_web_start(
 }
 
 // ---------------------------------------------------------------------------
-// Debug test page: GET /api/voice/test
+// Web voice call WebSocket: GET /api/voice/web-ws?user_id=N
 // ---------------------------------------------------------------------------
 
-pub async fn voice_test_page() -> Response {
-    let html = include_str!("voice_test.html");
-    (
-        axum::http::StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        html,
+#[derive(Deserialize)]
+pub struct WebWsParams {
+    token: String,
+}
+
+pub async fn voice_web_ws(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<WebWsParams>,
+    ws: WebSocketUpgrade,
+) -> Response {
+    let key = format!("voice_{}", params.token);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+
+    // Validate and consume token (one-time use)
+    let user_id = match state.pending_totp_logins.remove(&key) {
+        Some((_, (uid, expiry))) if expiry > now => uid,
+        Some(_) => {
+            tracing::warn!("Expired voice WS token");
+            return (StatusCode::UNAUTHORIZED, "Token expired").into_response();
+        }
+        None => {
+            tracing::warn!("Invalid voice WS token");
+            return (StatusCode::UNAUTHORIZED, "Invalid token").into_response();
+        }
+    };
+
+    ws.on_upgrade(move |socket| handle_web_ws(state, socket, user_id))
+}
+
+/// Browser-based voice call: raw PCM i16 at 16kHz in, 24kHz out.
+/// No Twilio, no mulaw. Direct browser <-> server audio.
+async fn handle_web_ws(state: Arc<AppState>, socket: WebSocket, user_id: i32) {
+    use futures::stream::StreamExt;
+
+    let (ws_tx, mut ws_rx) = socket.split();
+    let (send_tx, send_rx) = mpsc::channel::<Message>(64);
+
+    tokio::spawn(sender_loop(ws_tx, send_rx));
+
+    let mut session = match init_session(
+        &state,
+        user_id,
+        "web".to_string(),
+        false,
+        TransportMode::WebCall,
     )
-        .into_response()
+    .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(
+                "Failed to init web call session for user {}: {}",
+                user_id,
+                e
+            );
+            let err = serde_json::json!({"type": "error", "message": e});
+            let _ = send_tx.send(Message::Text(err.to_string().into())).await;
+            return;
+        }
+    };
+
+    // Send greeting
+    let greeting = build_greeting(&state, user_id);
+    if let Err(e) = send_tts_response(&mut session, &greeting, &send_tx).await {
+        tracing::error!("Failed to send web call greeting: {}", e);
+    }
+    session.state = CallState::Listening;
+
+    let ready = serde_json::json!({"type": "ready", "user_id": user_id});
+    let _ = send_tx.send(Message::Text(ready.to_string().into())).await;
+
+    const MAX_CALL_DURATION: std::time::Duration = std::time::Duration::from_secs(600); // 10 min
+
+    while let Some(msg) = tokio::select! {
+        msg = ws_rx.next() => msg,
+        _ = tokio::time::sleep(MAX_CALL_DURATION.saturating_sub(session.call_start.elapsed())) => {
+            tracing::info!("Web call max duration reached for user {}", user_id);
+            let _ = send_tts_response(&mut session, "Call time limit reached. Goodbye.", &send_tx).await;
+            None
+        }
+    } {
+        let msg = match msg {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!("Web call WS error: {}", e);
+                break;
+            }
+        };
+
+        match msg {
+            Message::Binary(data) => {
+                if session.state != CallState::Listening {
+                    continue;
+                }
+
+                let pcm_16k: Vec<i16> = data
+                    .chunks_exact(2)
+                    .map(|c| i16::from_le_bytes([c[0], c[1]]))
+                    .collect();
+
+                let rms = compute_rms(&pcm_16k);
+
+                if rms > SPEECH_RMS_THRESHOLD {
+                    if !session.is_speaking {
+                        session.is_speaking = true;
+                        session.speech_start = Some(Instant::now());
+                        session.silence_start = None;
+
+                        let evt = serde_json::json!({"type": "vad", "speaking": true});
+                        let _ = send_tx.send(Message::Text(evt.to_string().into())).await;
+                    }
+                    session.speech_audio.extend_from_slice(&pcm_16k);
+                    session.silence_start = None;
+                } else if session.is_speaking {
+                    session.speech_audio.extend_from_slice(&pcm_16k);
+
+                    if session.silence_start.is_none() {
+                        session.silence_start = Some(Instant::now());
+                    }
+
+                    if let Some(silence_start) = session.silence_start {
+                        if silence_start.elapsed().as_millis() as u64 >= SILENCE_DURATION_MS {
+                            let speech_duration = session
+                                .speech_start
+                                .map(|s| s.elapsed().as_millis() as u64)
+                                .unwrap_or(0);
+
+                            if speech_duration >= MIN_SPEECH_DURATION_MS
+                                && !session.speech_audio.is_empty()
+                            {
+                                let speech = std::mem::take(&mut session.speech_audio);
+                                session.is_speaking = false;
+                                session.silence_start = None;
+                                session.speech_start = None;
+                                session.state = CallState::Processing;
+
+                                let evt = serde_json::json!({
+                                    "type": "vad",
+                                    "speaking": false,
+                                    "processing": true,
+                                    "speech_ms": speech_duration,
+                                });
+                                let _ = send_tx.send(Message::Text(evt.to_string().into())).await;
+
+                                if let Err(e) =
+                                    process_utterance(&mut session, &speech, &send_tx).await
+                                {
+                                    tracing::error!("Web call process_utterance error: {}", e);
+                                    let _ = send_tts_response(
+                                        &mut session,
+                                        "Sorry, something went wrong. Please try again.",
+                                        &send_tx,
+                                    )
+                                    .await;
+                                }
+
+                                session.state = CallState::Listening;
+                            } else {
+                                session.speech_audio.clear();
+                                session.is_speaking = false;
+                                session.silence_start = None;
+                                session.speech_start = None;
+                            }
+                        }
+                    }
+                }
+            }
+            Message::Text(text) => {
+                if let Ok(cmd) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if cmd.get("type").and_then(|t| t.as_str()) == Some("ping") {
+                        let pong = serde_json::json!({"type": "pong"});
+                        let _ = send_tx.send(Message::Text(pong.to_string().into())).await;
+                    }
+                }
+            }
+            Message::Close(_) => break,
+            _ => {}
+        }
+    }
+
+    // Deduct credits (Tinfoil only, no Twilio leg for web calls)
+    let duration_secs = session.call_start.elapsed().as_secs() as i32;
+    tracing::info!(
+        "Web call ended for user {}. Duration: {}s",
+        user_id,
+        duration_secs
+    );
+    if let Err(e) =
+        crate::utils::usage::deduct_user_credits(&state, user_id, "voice", Some(duration_secs))
+    {
+        tracing::error!(
+            "Failed to deduct credits for web call user {}: {}",
+            user_id,
+            e
+        );
+    }
+
+    tracing::info!("Web voice call closed for user {}", user_id);
 }
 
 // ---------------------------------------------------------------------------
@@ -517,9 +798,11 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
             "start" => {
                 if let Some(start) = twilio_msg.start {
                     tracing::info!(
-                        "Stream started: streamSid={}, callSid={}",
+                        "Stream started: streamSid={}, callSid={}, tracks={:?}, mediaFormat={:?}",
                         start.stream_sid,
-                        start.call_sid
+                        start.call_sid,
+                        start.tracks,
+                        start.media_format
                     );
 
                     let user_id = start
@@ -535,20 +818,72 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
                         break;
                     }
 
+                    // Check for custom greeting (outbound notification calls)
+                    let custom_greeting = start
+                        .custom_parameters
+                        .as_ref()
+                        .and_then(|p| p.get("greeting"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| urlencoding::decode(s).unwrap_or_default().to_string());
+
+                    let is_outbound = custom_greeting.is_some();
+
                     match init_session(
                         &state,
                         user_id,
                         start.stream_sid.clone(),
+                        is_outbound,
                         TransportMode::Twilio,
                     )
                     .await
                     {
-                        Ok(mut s) => {
-                            // Send greeting via TTS
-                            let greeting = build_greeting(&state, user_id);
-                            if let Err(e) = send_tts_response(&mut s, &greeting, &send_tx).await {
-                                tracing::error!("Failed to send greeting: {}", e);
-                            }
+                        Ok(s) => {
+                            // Spawn greeting TTS on a separate task so we don't
+                            // block the WS receive loop (TTS HTTP takes ~2s).
+                            let greeting =
+                                custom_greeting.unwrap_or_else(|| build_greeting(&state, user_id));
+                            let stream_sid = s.stream_sid.clone();
+                            let tinfoil = s.tinfoil.clone();
+                            let tts_voice = s.tts_voice.clone();
+                            let send_tx_clone = send_tx.clone();
+                            tokio::spawn(async move {
+                                tracing::info!("TTS requesting for: \"{}\"", greeting);
+                                match tinfoil.text_to_speech(&greeting, &tts_voice).await {
+                                    Ok(tts_wav) => {
+                                        tracing::info!("TTS returned {} bytes", tts_wav.len());
+                                        let pcm_bytes = strip_wav_header(&tts_wav);
+                                        if pcm_bytes.is_empty() {
+                                            tracing::warn!("TTS returned empty audio");
+                                            return;
+                                        }
+                                        let pcm_samples: Vec<i16> = pcm_bytes
+                                            .chunks_exact(2)
+                                            .map(|c| i16::from_le_bytes([c[0], c[1]]))
+                                            .collect();
+                                        let pcm_8k = resample(&pcm_samples, 24000, 8000);
+                                        let mulaw_bytes: Vec<u8> =
+                                            pcm_8k.iter().map(|&s| mulaw_encode(s)).collect();
+                                        for chunk in mulaw_bytes.chunks(160) {
+                                            let payload = BASE64.encode(chunk);
+                                            let msg = serde_json::json!({
+                                                "event": "media",
+                                                "streamSid": stream_sid,
+                                                "media": { "payload": payload }
+                                            });
+                                            let _ = send_tx_clone
+                                                .send(Message::Text(msg.to_string().into()))
+                                                .await;
+                                        }
+                                        tracing::info!(
+                                            "Greeting audio queued ({} bytes mulaw)",
+                                            mulaw_bytes.len()
+                                        );
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("Failed to generate greeting TTS: {}", e);
+                                    }
+                                }
+                            });
                             session = Some(s);
                         }
                         Err(e) => {
@@ -561,8 +896,7 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
 
             "media" => {
                 if let (Some(ref mut sess), Some(media)) = (&mut session, twilio_msg.media) {
-                    if sess.state == CallState::Processing || sess.state == CallState::Speaking {
-                        // Ignore audio while we're processing or speaking
+                    if sess.state == CallState::Processing {
                         continue;
                     }
 
@@ -580,12 +914,47 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
                     // Energy-based VAD
                     let rms = compute_rms(&pcm_16k);
 
+                    // Log audio debug info
+                    sess.media_count += 1;
+                    if sess.media_count == 1 {
+                        // Log first media event in detail
+                        let raw_hex: String = mulaw_bytes
+                            .iter()
+                            .take(20)
+                            .map(|b| format!("{:02x}", b))
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        tracing::info!(
+                            "FIRST media: track={:?}, mulaw_len={}, raw_hex=[{}], pcm8k_range=[{}, {}], rms={:.0}",
+                            media.track,
+                            mulaw_bytes.len(),
+                            raw_hex,
+                            pcm_8k.iter().min().unwrap_or(&0),
+                            pcm_8k.iter().max().unwrap_or(&0),
+                            rms
+                        );
+                    } else if sess.media_count % 25 == 0 {
+                        let non_silent = mulaw_bytes
+                            .iter()
+                            .filter(|&&b| b != 0xFE && b != 0xFF && b != 0x7F && b != 0x7E)
+                            .count();
+                        tracing::info!(
+                            "[media #{}] track={:?}, RMS={:.0}, non_silent_bytes={}/{}, state={:?}",
+                            sess.media_count,
+                            media.track,
+                            rms,
+                            non_silent,
+                            mulaw_bytes.len(),
+                            sess.state
+                        );
+                    }
+
                     if rms > SPEECH_RMS_THRESHOLD {
                         if !sess.is_speaking {
                             sess.is_speaking = true;
                             sess.speech_start = Some(Instant::now());
                             sess.silence_start = None;
-                            tracing::debug!("Speech detected (RMS={:.0})", rms);
+                            tracing::info!(">>> SPEECH DETECTED (RMS={:.0})", rms);
                         }
                         sess.speech_audio.extend_from_slice(&pcm_16k);
                         sess.silence_start = None;
@@ -624,6 +993,13 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
                                     if let Err(e) = process_utterance(sess, &speech, &send_tx).await
                                     {
                                         tracing::error!("process_utterance error: {}", e);
+                                        // Speak the error so the user isn't left hanging
+                                        let _ = send_tts_response(
+                                            sess,
+                                            "Sorry, something went wrong. Please try again.",
+                                            &send_tx,
+                                        )
+                                        .await;
                                     }
 
                                     sess.state = CallState::Listening;
@@ -653,17 +1029,23 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
                 tracing::info!("Stream stopped");
                 if let Some(ref sess) = session {
                     let duration_secs = sess.call_start.elapsed().as_secs() as i32;
+                    let event_type = if sess.is_outbound {
+                        "noti_call"
+                    } else {
+                        "voice"
+                    };
                     tracing::info!(
-                        "Call ended for user {}. Duration: {}s",
+                        "Call ended for user {}. Duration: {}s, type: {}",
                         sess.user_id,
-                        duration_secs
+                        duration_secs,
+                        event_type
                     );
 
-                    // Deduct credits
+                    // Deduct credits (uses outbound vs inbound pricing)
                     if let Err(e) = crate::utils::usage::deduct_user_credits(
                         &state,
                         sess.user_id,
-                        "voice",
+                        event_type,
                         Some(duration_secs),
                     ) {
                         tracing::error!(
@@ -677,7 +1059,11 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
             }
 
             other => {
-                tracing::debug!("Unhandled Twilio event: {}", other);
+                tracing::info!(
+                    "Twilio event: {} (raw: {})",
+                    other,
+                    &text[..text.len().min(200)]
+                );
             }
         }
     }
@@ -707,6 +1093,7 @@ async fn init_session(
     state: &Arc<AppState>,
     user_id: i32,
     stream_sid: String,
+    is_outbound: bool,
     transport: TransportMode,
 ) -> Result<CallSession, String> {
     let ctx = ContextBuilder::for_user(state, user_id)
@@ -766,6 +1153,8 @@ async fn init_session(
         tool_defs_json,
         call_start: Instant::now(),
         mark_counter: 0,
+        is_outbound,
+        media_count: 0,
     })
 }
 
@@ -816,14 +1205,18 @@ async fn process_utterance(
 
     tracing::info!("STT transcript: \"{}\"", transcript);
 
-    // 4. Add user message to history
+    // 4. Immediate feedback - say "just a moment" while we process
+    send_tts_response(session, "Just a moment.", send_tx).await?;
+
+    // 5. Add user message to history
     session.history.push(ChatMessage::user(&transcript));
 
-    // 5. Agentic loop: LLM -> maybe tool calls -> LLM -> ... -> text response
-    let tools = if session.tool_defs_json.is_empty() {
+    // 6. Agentic loop: LLM -> maybe tool calls -> LLM -> ... -> text response
+    let tools_owned = session.tool_defs_json.clone();
+    let tools = if tools_owned.is_empty() {
         None
     } else {
-        Some(session.tool_defs_json.as_slice())
+        Some(tools_owned.as_slice())
     };
 
     let mut final_response = String::new();
@@ -868,12 +1261,84 @@ async fn process_utterance(
                     tool_calls.clone(),
                 ));
 
-                // Execute each tool call
+                // Execute each tool call with progress feedback
                 for tc in &tool_calls {
-                    let answer =
-                        execute_tool(session, &tc.function.name, &tc.function.arguments).await;
-                    tracing::info!("Tool {} result: {} chars", tc.function.name, answer.len());
+                    let tool_name = tc.function.name.clone();
+                    let tool_args = tc.function.arguments.clone();
 
+                    // Spawn tool execution so we can give progress feedback
+                    let state = Arc::clone(&session.app_state);
+                    let user = session.user.clone();
+                    let user_id = session.user_id;
+                    let tool_handle = tokio::spawn(async move {
+                        let user_given_info = state
+                            .user_core
+                            .get_user_info(user_id)
+                            .ok()
+                            .and_then(|i| i.info)
+                            .unwrap_or_default();
+                        let current_time = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs() as i32;
+                        let result = crate::agent_core::dispatch_tool(
+                            &state,
+                            &user,
+                            &tool_name,
+                            &tool_args,
+                            "voice-call",
+                            &user_given_info,
+                            current_time,
+                            None,
+                        )
+                        .await;
+                        match result {
+                            crate::agent_core::ToolDispatchResult::Answer(a) => a,
+                            crate::agent_core::ToolDispatchResult::AnswerWithTask {
+                                answer,
+                                ..
+                            } => answer,
+                            crate::agent_core::ToolDispatchResult::EarlyReturn {
+                                response, ..
+                            } => response.message,
+                            crate::agent_core::ToolDispatchResult::SubscriptionRequired(m) => m,
+                            crate::agent_core::ToolDispatchResult::Unknown(m) => m,
+                            crate::agent_core::ToolDispatchResult::Error(e) => {
+                                format!("Tool error: {}", e)
+                            }
+                        }
+                    });
+
+                    let started = std::time::Instant::now();
+                    let mut progress_count = 0u32;
+                    let mut tool_handle = tool_handle;
+
+                    let progress_messages = [
+                        "Still working on it, one moment.",
+                        "Still on it, almost there.",
+                        "Taking a while, hang tight.",
+                    ];
+
+                    let answer = loop {
+                        tokio::select! {
+                            tool_result = &mut tool_handle => {
+                                break tool_result.unwrap_or_else(|e| format!("Tool error: {}", e));
+                            }
+                            _ = tokio::time::sleep(tokio::time::Duration::from_secs(if progress_count == 0 { 8 } else { 15 })) => {
+                                let msg = progress_messages[progress_count.min(2) as usize];
+                                progress_count += 1;
+                                tracing::info!("Tool {} taking {:.0}s, progress #{}", tc.function.name, started.elapsed().as_secs_f32(), progress_count);
+                                let _ = send_tts_response(session, msg, send_tx).await;
+                            }
+                        }
+                    };
+
+                    tracing::info!(
+                        "Tool {} result: {} chars ({:.1}s)",
+                        tc.function.name,
+                        answer.len(),
+                        started.elapsed().as_secs_f32()
+                    );
                     session
                         .history
                         .push(ChatMessage::tool_result(&tc.id, &answer));
@@ -904,51 +1369,6 @@ async fn process_utterance(
 
     // 6. TTS and send audio
     send_tts_response(session, &final_response, send_tx).await
-}
-
-/// Execute a single tool call via the shared agent_core dispatch.
-async fn execute_tool(session: &CallSession, name: &str, arguments: &str) -> String {
-    let state = &session.app_state;
-    let current_time = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i32;
-
-    let user_given_info = state
-        .user_core
-        .get_user_info(session.user_id)
-        .ok()
-        .and_then(|i| i.info)
-        .unwrap_or_default();
-
-    let result = crate::agent_core::dispatch_tool(
-        state,
-        &session.user,
-        name,
-        arguments,
-        "voice-call",
-        &user_given_info,
-        current_time,
-        None,
-    )
-    .await;
-
-    match result {
-        crate::agent_core::ToolDispatchResult::Answer(answer) => answer,
-        crate::agent_core::ToolDispatchResult::AnswerWithTask { answer, .. } => answer,
-        crate::agent_core::ToolDispatchResult::EarlyReturn { .. } => {
-            "Action completed.".to_string()
-        }
-        crate::agent_core::ToolDispatchResult::SubscriptionRequired(msg) => msg,
-        crate::agent_core::ToolDispatchResult::Unknown(msg) => {
-            tracing::warn!("Unknown tool called: {}", name);
-            msg
-        }
-        crate::agent_core::ToolDispatchResult::Error(e) => {
-            tracing::error!("Tool {} error: {}", name, e);
-            format!("Tool error: {}", e)
-        }
-    }
 }
 
 async fn send_tts_response(
@@ -1016,15 +1436,19 @@ async fn send_tts_response(
             let _ = send_tx
                 .send(Message::Text(mark_msg.to_string().into()))
                 .await;
-        }
-        TransportMode::Debug => {
+
+            // Transition to Listening immediately after queuing audio.
+            // We can't block waiting for the mark echo because this function
+            // runs inline in the WS receive loop - blocking here drops
+            // incoming media events from Twilio.
+            session.state = CallState::Listening;
             tracing::info!(
-                "Sending {} PCM samples ({} bytes) to debug client at 24kHz",
-                pcm_samples.len(),
-                pcm_samples.len() * 2
+                "TTS audio queued ({} bytes mulaw), now listening",
+                mulaw_bytes.len()
             );
+        }
+        TransportMode::WebCall => {
             // Send raw PCM at 24kHz as binary frames (browser plays directly)
-            // First send a text message with metadata
             let meta = serde_json::json!({
                 "type": "audio_start",
                 "sample_rate": 24000,
@@ -1039,12 +1463,10 @@ async fn send_tts_response(
                 let _ = send_tx.send(Message::Binary(chunk.to_vec().into())).await;
             }
 
-            // Signal end of audio
             let end = serde_json::json!({"type": "audio_end"});
             let _ = send_tx.send(Message::Text(end.to_string().into())).await;
 
-            // Wait for estimated playback duration to avoid echo feedback
-            // (server picks up TTS audio from speakers as mic input)
+            // Wait for estimated playback to avoid echo
             let playback_ms = (pcm_samples.len() as u64 * 1000) / 24000;
             tokio::time::sleep(tokio::time::Duration::from_millis(playback_ms + 300)).await;
         }
@@ -1056,157 +1478,3 @@ async fn send_tts_response(
 // ---------------------------------------------------------------------------
 // Debug WebSocket handler: GET /api/voice/ws-debug?user_id=N
 // ---------------------------------------------------------------------------
-
-#[derive(Deserialize)]
-pub struct DebugWsParams {
-    user_id: i32,
-}
-
-pub async fn voice_ws_debug(
-    State(state): State<Arc<AppState>>,
-    Query(params): Query<DebugWsParams>,
-    ws: WebSocketUpgrade,
-) -> Response {
-    let user_id = params.user_id;
-    ws.on_upgrade(move |socket| handle_debug_ws(state, socket, user_id))
-}
-
-/// Debug WebSocket: receives raw 16kHz mono PCM i16 as binary frames,
-/// sends back 24kHz mono PCM i16 as binary frames.
-/// No Twilio protocol, no mulaw, no resampling on input.
-async fn handle_debug_ws(state: Arc<AppState>, socket: WebSocket, user_id: i32) {
-    use futures::stream::StreamExt;
-
-    let (ws_tx, mut ws_rx) = socket.split();
-    let (send_tx, send_rx) = mpsc::channel::<Message>(64);
-
-    tokio::spawn(sender_loop(ws_tx, send_rx));
-
-    // Init session immediately (no Twilio "start" event needed)
-    let mut session =
-        match init_session(&state, user_id, "debug".to_string(), TransportMode::Debug).await {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::error!("Failed to init debug session for user {}: {}", user_id, e);
-                let err = serde_json::json!({"type": "error", "message": e});
-                let _ = send_tx.send(Message::Text(err.to_string().into())).await;
-                return;
-            }
-        };
-
-    // Send greeting
-    let greeting = build_greeting(&state, user_id);
-    if let Err(e) = send_tts_response(&mut session, &greeting, &send_tx).await {
-        tracing::error!("Failed to send debug greeting: {}", e);
-    }
-    session.state = CallState::Listening;
-
-    // Send ready signal
-    let ready = serde_json::json!({"type": "ready", "user_id": user_id});
-    let _ = send_tx.send(Message::Text(ready.to_string().into())).await;
-
-    while let Some(msg) = ws_rx.next().await {
-        let msg = match msg {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::error!("Debug WS receive error: {}", e);
-                break;
-            }
-        };
-
-        match msg {
-            Message::Binary(data) => {
-                if session.state != CallState::Listening {
-                    continue;
-                }
-
-                // Binary frames are raw i16 PCM at 16kHz, little-endian
-                let pcm_16k: Vec<i16> = data
-                    .chunks_exact(2)
-                    .map(|c| i16::from_le_bytes([c[0], c[1]]))
-                    .collect();
-
-                // Energy-based VAD (same as Twilio path)
-                let rms = compute_rms(&pcm_16k);
-
-                if rms > SPEECH_RMS_THRESHOLD {
-                    if !session.is_speaking {
-                        session.is_speaking = true;
-                        session.speech_start = Some(Instant::now());
-                        session.silence_start = None;
-                        tracing::debug!("Debug: speech detected (RMS={:.0})", rms);
-
-                        let evt = serde_json::json!({"type": "vad", "speaking": true});
-                        let _ = send_tx.send(Message::Text(evt.to_string().into())).await;
-                    }
-                    session.speech_audio.extend_from_slice(&pcm_16k);
-                    session.silence_start = None;
-                } else if session.is_speaking {
-                    session.speech_audio.extend_from_slice(&pcm_16k);
-
-                    if session.silence_start.is_none() {
-                        session.silence_start = Some(Instant::now());
-                    }
-
-                    if let Some(silence_start) = session.silence_start {
-                        if silence_start.elapsed().as_millis() as u64 >= SILENCE_DURATION_MS {
-                            let speech_duration = session
-                                .speech_start
-                                .map(|s| s.elapsed().as_millis() as u64)
-                                .unwrap_or(0);
-
-                            if speech_duration >= MIN_SPEECH_DURATION_MS
-                                && !session.speech_audio.is_empty()
-                            {
-                                let speech = std::mem::take(&mut session.speech_audio);
-                                session.is_speaking = false;
-                                session.silence_start = None;
-                                session.speech_start = None;
-                                session.state = CallState::Processing;
-
-                                let evt = serde_json::json!({
-                                    "type": "vad",
-                                    "speaking": false,
-                                    "processing": true,
-                                    "speech_ms": speech_duration,
-                                });
-                                let _ = send_tx.send(Message::Text(evt.to_string().into())).await;
-
-                                if let Err(e) =
-                                    process_utterance(&mut session, &speech, &send_tx).await
-                                {
-                                    tracing::error!("Debug process_utterance error: {}", e);
-                                    let err_msg =
-                                        serde_json::json!({"type": "error", "message": e});
-                                    let _ = send_tx
-                                        .send(Message::Text(err_msg.to_string().into()))
-                                        .await;
-                                }
-
-                                session.state = CallState::Listening;
-                            } else {
-                                session.speech_audio.clear();
-                                session.is_speaking = false;
-                                session.silence_start = None;
-                                session.speech_start = None;
-                            }
-                        }
-                    }
-                }
-            }
-            Message::Text(text) => {
-                // Handle text commands from debug client
-                if let Ok(cmd) = serde_json::from_str::<serde_json::Value>(&text) {
-                    if cmd.get("type").and_then(|t| t.as_str()) == Some("ping") {
-                        let pong = serde_json::json!({"type": "pong"});
-                        let _ = send_tx.send(Message::Text(pong.to_string().into())).await;
-                    }
-                }
-            }
-            Message::Close(_) => break,
-            _ => {}
-        }
-    }
-
-    tracing::info!("Debug voice WebSocket closed for user {}", user_id);
-}

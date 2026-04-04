@@ -140,7 +140,7 @@ pub async fn send_notification_with_context(
         }
     }
 
-    let user_info = match state.user_core.get_user_info(user_id) {
+    let _user_info = match state.user_core.get_user_info(user_id) {
         Ok(info) => info,
         Err(e) => {
             tracing::error!("Failed to get info for user {}: {}", user_id, e);
@@ -177,29 +177,19 @@ pub async fn send_notification_with_context(
                 .await
                 .is_ok()
             {
-                match crate::api::elevenlabs::make_notification_call(
-                    &state.clone(),
-                    format!("{}_call_conditional", content_type),
-                    first_message.clone().unwrap_or(
-                        "Hello, you have a notification. Check your SMS for details.".to_string(),
-                    ),
-                    notification.to_string(),
-                    user.id.to_string(),
-                    user_info.timezone.clone(),
-                )
-                .await
+                // Build the greeting: use first_message if provided, otherwise the notification
+                let greeting = first_message
+                    .clone()
+                    .unwrap_or_else(|| notification.to_string());
+
+                match crate::api::voice_pipeline::make_notification_call(state, &user, &greeting)
+                    .await
                 {
-                    Ok(response) => {
-                        tracing::info!(
-                            "Call initiated for user {} (will be charged if answered)",
-                            user_id
-                        );
+                    Ok(call_sid) => {
+                        tracing::info!("Call initiated for user {} (SID: {})", user_id, call_sid);
                         if let Err(e) = state.user_repository.log_usage(LogUsageParams {
                             user_id,
-                            sid: response
-                                .get("sid")
-                                .and_then(|v| v.as_str())
-                                .map(String::from),
+                            sid: Some(call_sid),
                             activity_type: format!("{}_call_conditional", content_type),
                             credits: None,
                             time_consumed: None,
@@ -212,12 +202,8 @@ pub async fn send_notification_with_context(
                             tracing::error!("Failed to log call notification usage: {}", e);
                         }
                     }
-                    Err((_, json_err)) => {
-                        tracing::error!(
-                            "Failed to initiate call for user {}: {:?}",
-                            user_id,
-                            json_err
-                        );
+                    Err(e) => {
+                        tracing::error!("Failed to initiate call for user {}: {}", user_id, e);
                     }
                 }
             }

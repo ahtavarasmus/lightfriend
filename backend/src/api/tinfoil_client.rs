@@ -77,6 +77,7 @@ pub enum CompletionResult {
 }
 
 /// HTTP client wrapping Tinfoil's STT, LLM, and TTS endpoints.
+#[derive(Clone)]
 pub struct TinfoilVoiceClient {
     client: reqwest::Client,
     base_url: String,
