@@ -64,7 +64,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/sccache \
     --mount=type=cache,target=/app/target \
-    cargo build --release && \
+    cargo build --release --features tuwunel-restore && \
     sccache --show-stats && \
     cp target/release/backend /backend && \
     cp target/release/tuwunel_restore /tuwunel_restore && \
