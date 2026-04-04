@@ -4794,43 +4794,16 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
                     </div>
                 }
                 if mode == "llm" {
-                    <div class="rb-template-group">
-                        {for template_buttons}
+                    <div class="rb-field">
+                        <div class="rb-field-label">{"Condition"}</div>
+                        <input
+                            class="rb-input"
+                            type="text"
+                            placeholder="e.g. mentions a meeting or deadline"
+                            value={condition_input_val.clone()}
+                            oninput={on_condition_change}
+                        />
                     </div>
-
-                    if is_summarize || is_filter || is_track_create {
-                        <div class="rb-template-desc">
-                            {get_template_description(&selected_template, &props.when_mode)}
-                        </div>
-                        <button class="rb-template-edit-link" onclick={on_edit_prompt}>
-                            {"Customize..."}
-                        </button>
-                    }
-
-                    if is_check {
-                        <div class="rb-field">
-                            <div class="rb-field-label">{"Condition"}</div>
-                            <input
-                                class="rb-input"
-                                type="text"
-                                placeholder="e.g. mentions a meeting or deadline"
-                                value={condition_input_val.clone()}
-                                oninput={on_condition_change}
-                            />
-                        </div>
-                    }
-
-                    if is_custom {
-                        <div class="rb-field">
-                            <div class="rb-field-label">{"Prompt"}</div>
-                            <textarea
-                                class="rb-textarea"
-                                placeholder="Describe what the AI should evaluate..."
-                                value={prompt.clone()}
-                                oninput={on_prompt_change}
-                            ></textarea>
-                        </div>
-                    }
 
                     {source_pills_html}
                 }
