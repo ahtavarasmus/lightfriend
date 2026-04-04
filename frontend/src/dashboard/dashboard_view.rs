@@ -80,6 +80,17 @@ const DASHBOARD_STYLES: &str = r#"
     flex: 1;
     min-width: 0;
 }
+/* Cards row */
+.cards-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+.cards-row > .critical-notif-card {
+    flex: 1;
+    min-width: 0;
+    margin-bottom: 0;
+}
 /* Critical Notifications card */
 .critical-notif-card {
     padding: 0.6rem 0.7rem;
@@ -825,6 +836,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
             .system_important_notify
             .unwrap_or(false)
     });
+    let digest_enabled = use_state(|| {
+        props.user_profile.digest_enabled.unwrap_or(false)
+    });
+    let digest_time_display = use_state(|| {
+        props.user_profile.digest_time.clone().unwrap_or_default()
+    });
     let custom_rules_open = use_state(|| false);
     let critical_notif_details_open = use_state(|| false);
     let critical_notif_prompt_open = use_state(|| false);
@@ -853,6 +870,37 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     if r.ok() {
                         let mut p = profile.clone();
                         p.system_important_notify = Some(new_val);
+                        on_update.emit(p);
+                    }
+                }
+            });
+        })
+    };
+
+    // Digest toggle handler
+    let on_digest_toggle = {
+        let enabled = digest_enabled.clone();
+        let profile = props.user_profile.clone();
+        let on_update = props.on_profile_update.clone();
+        Callback::from(move |_: web_sys::MouseEvent| {
+            let new_val = !*enabled;
+            enabled.set(new_val);
+            let profile = profile.clone();
+            let on_update = on_update.clone();
+            spawn_local(async move {
+                let request = serde_json::json!({
+                    "field": "digest_enabled",
+                    "value": new_val
+                });
+                if let Ok(r) = Api::patch("/api/profile/field")
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    if r.ok() {
+                        let mut p = profile.clone();
+                        p.digest_enabled = Some(new_val);
                         on_update.emit(p);
                     }
                 }
@@ -1501,7 +1549,8 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 if !is_setup_mode {
                     <div class="panel-right">
                         <div class="panel-right-rules">
-                            // ---- Critical Notifications card ----
+                            // ---- Cards row: Critical Notifications + Digests ----
+                            <div class="cards-row">
                             <div class="critical-notif-card">
                                 <div class="critical-notif-header">
                                     <div class="critical-notif-left">
@@ -1593,6 +1642,34 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                         }
                                     </div>
                                 }
+                            </div>
+
+                            // ---- Message Digests card ----
+                            <div class="critical-notif-card">
+                                <div class="critical-notif-header">
+                                    <div class="critical-notif-left">
+                                        <div class={classes!("critical-notif-dot", if *digest_enabled { "active" } else { "inactive" })}></div>
+                                        <span class="critical-notif-title">{"Message Digests"}</span>
+                                    </div>
+                                    <button
+                                        class={classes!("critical-notif-badge", if *digest_enabled { "active" } else { "inactive" })}
+                                        onclick={on_digest_toggle.clone()}
+                                    >
+                                        {if *digest_enabled { "Active" } else { "Inactive" }}
+                                    </button>
+                                </div>
+                                <div class="critical-notif-desc">
+                                    {if *digest_enabled {
+                                        if (*digest_time_display).is_empty() {
+                                            "Auto-scheduled based on your activity patterns."
+                                        } else {
+                                            "Delivering at your custom times."
+                                        }
+                                    } else {
+                                        "Medium-priority messages collected and delivered periodically."
+                                    }}
+                                </div>
+                            </div>
                             </div>
 
                             // ---- Custom Rules (collapsible) ----
