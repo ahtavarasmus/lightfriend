@@ -82,6 +82,9 @@ jobs:
   build-eif:
     needs: build-and-push
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     outputs:
       eif_key: ${{ steps.publish.outputs.eif_key }}
       eif_sha256: ${{ steps.publish.outputs.eif_sha256 }}
@@ -147,6 +150,9 @@ jobs:
   recover:
     needs: [build-and-push, build-eif]
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     environment: production
     steps:
       - uses: actions/checkout@v4
