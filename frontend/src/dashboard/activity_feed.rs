@@ -151,6 +151,9 @@ const FEED_STYLES: &str = r#"
     font-size: 0.8rem;
     padding: 3rem 1rem;
 }
+.feed-batch-children .feed-entry {
+    padding: 0.3rem 0.25rem;
+}
 
 @media (prefers-color-scheme: light) {
     .activity-feed-header { background: #f8f8f8; color: #888; }
@@ -311,6 +314,13 @@ pub fn activity_feed(props: &ActivityFeedProps) -> Html {
     }
 }
 
+/// Key for grouping consecutive similar entries
+fn batch_key(entry: &ActivityFeedEntry) -> String {
+    // Group by type + detail (which contains sender + platform info)
+    let detail = entry.detail.as_deref().unwrap_or("");
+    format!("{}|{}", entry.entry_type, detail)
+}
+
 fn render_grouped_entries(
     entries: &[ActivityFeedEntry],
     now_secs: i32,
@@ -321,22 +331,123 @@ fn render_grouped_entries(
         return html! {};
     }
 
+    // Build batches: consecutive entries with the same type+detail get grouped
+    let mut batches: Vec<Vec<&ActivityFeedEntry>> = Vec::new();
+    for entry in entries {
+        if let Some(last_batch) = batches.last() {
+            if batch_key(last_batch[0]) == batch_key(entry)
+                && date_group_label(last_batch[0].timestamp, now_secs)
+                    == date_group_label(entry.timestamp, now_secs)
+            {
+                // Safe: we just checked last() is Some
+                batches.last_mut().unwrap().push(entry);
+                continue;
+            }
+        }
+        batches.push(vec![entry]);
+    }
+
     let mut result = Vec::new();
     let mut current_date_label = String::new();
 
-    for entry in entries {
-        let date_label = date_group_label(entry.timestamp, now_secs);
+    for batch in &batches {
+        let first = batch[0];
+        let date_label = date_group_label(first.timestamp, now_secs);
         if date_label != current_date_label {
             current_date_label = date_label.clone();
             result.push(html! {
                 <div class="feed-date-group">{&date_label}</div>
             });
         }
-        let is_expanded = expanded_id.as_ref() == Some(&entry.id);
-        result.push(render_entry(entry, now_secs, is_expanded, expanded_handle));
+
+        if batch.len() == 1 {
+            // Single entry - render normally
+            let is_expanded = expanded_id.as_ref() == Some(&first.id);
+            result.push(render_entry(first, now_secs, is_expanded, expanded_handle));
+        } else {
+            // Batch - render collapsed group
+            let batch_id = format!("batch-{}", first.id);
+            let is_batch_expanded = expanded_id.as_ref() == Some(&batch_id);
+            result.push(render_batch(batch, &batch_id, now_secs, is_batch_expanded, expanded_id, expanded_handle));
+        }
     }
 
     html! { <>{for result}</> }
+}
+
+fn render_batch(
+    batch: &[&ActivityFeedEntry],
+    batch_id: &str,
+    now_secs: i32,
+    is_batch_expanded: bool,
+    expanded_id: &Option<String>,
+    expanded_handle: &UseStateHandle<Option<String>>,
+) -> Html {
+    let first = batch[0];
+    let last = batch[batch.len() - 1];
+    let count = batch.len();
+
+    let icon_class = format!(
+        "feed-icon type-{}{}",
+        first.entry_type,
+        if first.success == Some(false) { " failed" } else { "" }
+    );
+
+    let time_str = relative_time(first.timestamp, now_secs);
+
+    let batch_id_owned = batch_id.to_string();
+    let on_click = {
+        let expanded_handle = expanded_handle.clone();
+        let bid = batch_id_owned.clone();
+        Callback::from(move |_: MouseEvent| {
+            if *expanded_handle == Some(bid.clone()) {
+                expanded_handle.set(None);
+            } else {
+                expanded_handle.set(Some(bid.clone()));
+            }
+        })
+    };
+
+    // Time range
+    let time_range = {
+        let first_time = relative_time(first.timestamp, now_secs);
+        let last_time = relative_time(last.timestamp, now_secs);
+        if first_time == last_time {
+            first_time
+        } else {
+            format!("{} - {}", last_time, first_time)
+        }
+    };
+
+    html! {
+        <div key={batch_id_owned.clone()}>
+            <div class="feed-entry" onclick={on_click}>
+                <div class={icon_class}>
+                    <i class={first.icon.clone()}></i>
+                </div>
+                <div class="feed-body">
+                    <div class="feed-title">{format!("{} ({}x)", first.title, count)}</div>
+                    if let Some(ref detail) = first.detail {
+                        <div class="feed-detail">{detail}</div>
+                    }
+                </div>
+                <div class="feed-time">
+                    {&time_str}
+                    <div style="font-size: 0.6rem; color: #555; margin-top: 0.1rem;">
+                        {if is_batch_expanded { "Hide" } else { "Expand" }}
+                    </div>
+                </div>
+            </div>
+            if is_batch_expanded {
+                <div style="padding-left: 2.1rem; border-left: 1px solid rgba(255,255,255,0.05); margin-left: 0.75rem;">
+                    { for batch.iter().map(|entry| {
+                        let is_expanded = expanded_id.as_ref() == Some(&entry.id);
+                        render_entry(entry, now_secs, is_expanded, expanded_handle)
+                    })}
+                </div>
+            }
+        </div>
+    }
 }
 
 fn render_entry(
