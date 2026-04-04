@@ -335,7 +335,14 @@ pub async fn broadcast_email(
         }
 
         // Send to waitlist entries (updates-only subscribers)
+        // Waitlist = non-subscribers, skip when targeting subscribers only
+        if request_clone.audience == "only_subs" {
+            tracing::info!("Skipping waitlist entries for subscribers-only broadcast");
+        }
         for entry in waitlist_entries {
+            if request_clone.audience == "only_subs" {
+                break;
+            }
             // Skip if already sent to this email (user is both registered and on waitlist)
             if sent_emails.contains(&entry.email.to_lowercase()) {
                 tracing::info!(
