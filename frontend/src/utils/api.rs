@@ -158,11 +158,19 @@ impl RequestWrapper {
                     Ok(retry_response)
                 }
                 _ => {
-                    // Token refresh failed - session is expired, redirect to login
-                    gloo_console::log!("Token refresh failed, redirecting to login");
-                    REDIRECTING_TO_LOGIN.store(true, Ordering::Relaxed);
-                    if let Some(window) = web_sys::window() {
-                        let _ = window.location().set_href("/login");
+                    // Token refresh failed - redirect to login only if on an authenticated page
+                    let on_auth_page = web_sys::window()
+                        .and_then(|w| w.location().pathname().ok())
+                        .map(|p| p.starts_with("/dashboard") || p.starts_with("/admin") || p.starts_with("/profile"))
+                        .unwrap_or(false);
+                    if on_auth_page {
+                        gloo_console::log!("Token refresh failed on auth page, redirecting to login");
+                        REDIRECTING_TO_LOGIN.store(true, Ordering::Relaxed);
+                        if let Some(window) = web_sys::window() {
+                            let _ = window.location().set_href("/login");
+                        }
+                    } else {
+                        gloo_console::log!("Token refresh failed on public page, not redirecting");
                     }
                     Ok(response)
                 }
