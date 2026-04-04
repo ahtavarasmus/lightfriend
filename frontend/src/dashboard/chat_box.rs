@@ -996,22 +996,21 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
             call_error.set(None);
 
             spawn_local(async move {
-                match Api::get("/api/call/web-signed-url").send().await {
+                match Api::get("/api/voice/web-start").send().await {
                     Ok(response) => {
                         if response.ok() {
                             match response.json::<Value>().await {
                                 Ok(data) => {
-                                    if let Some(signed_url) = data["signed_url"].as_str() {
-                                        let overrides = data
-                                            .get("agent_overrides")
-                                            .map(|v| {
-                                                serde_wasm_bindgen::to_value(v)
-                                                    .unwrap_or(wasm_bindgen::JsValue::NULL)
-                                            })
-                                            .unwrap_or(wasm_bindgen::JsValue::NULL);
+                                    if let Some(ws_path) = data["ws_url"].as_str() {
+                                        // Build full WS URL from backend URL
+                                        let backend = crate::config::get_backend_url();
+                                        let full_ws_url = backend
+                                            .replace("https://", "wss://")
+                                            .replace("http://", "ws://")
+                                            + ws_path;
                                         let result =
                                             crate::utils::elevenlabs_web::start_elevenlabs_call(
-                                                signed_url, overrides,
+                                                &full_ws_url, wasm_bindgen::JsValue::NULL,
                                             )
                                             .await;
                                         if result.is_truthy() {

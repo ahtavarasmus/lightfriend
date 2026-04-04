@@ -61,6 +61,7 @@ async-stream = "0.3"
 resend-rs = "0.9"
 serde_urlencoded = "0.7.1"
 phonenumber = "0.3"  # Google libphonenumber port for Rust - handles E.164 parsing and country detection
+rubato = "0.16"  # Audio resampling for voice pipeline (8kHz<->16kHz<->24kHz)
 rocksdb = "0.24"
 
 [[bin]]

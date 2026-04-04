@@ -13,8 +13,10 @@ pub enum AiProvider {
 
 #[derive(Debug, Clone, Copy)]
 pub enum ModelPurpose {
-    /// Normal conversation/tasks with tool calling
+    /// Normal conversation/tasks with tool calling (reasoning model)
     Default,
+    /// Fast model for voice calls (low latency, no reasoning)
+    Voice,
 }
 
 /// Centralized AI configuration
@@ -81,6 +83,9 @@ impl AiConfig {
         match (provider, purpose) {
             (AiProvider::OpenRouter, ModelPurpose::Default) => "openai/gpt-4o-2024-11-20",
             (AiProvider::Tinfoil, ModelPurpose::Default) => "kimi-k2-5",
+            // Voice: fast non-reasoning model for low-latency responses
+            (AiProvider::Tinfoil, ModelPurpose::Voice) => "llama3-3-70b",
+            (AiProvider::OpenRouter, ModelPurpose::Voice) => "openai/gpt-4o-2024-11-20",
         }
     }
 

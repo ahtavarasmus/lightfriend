@@ -108,176 +108,179 @@
         <link rel="preload" href="/assets/fontawesome/webfonts/fa-brands-400.woff2" as="font" type="font/woff2" crossorigin>
         <link rel="preload" href="/assets/inter-400-latin.woff2" as="font" type="font/woff2" crossorigin>
 
-        <!-- ElevenLabs Conversational AI SDK -->
-        <script type="module">
-            import { Conversation } from 'https://cdn.jsdelivr.net/npm/@11labs/client@latest/+esm';
+        <!-- Voice Pipeline (replaces ElevenLabs SDK) -->
+        <script>
+            console.log('Voice pipeline JS loaded');
 
-            console.log('ElevenLabs SDK loaded');
+            window._voiceWs = null;
+            window._voiceMicStream = null;
+            window._voiceAudioCtx = null;
+            window._voiceScriptNode = null;
+            window._voiceCallStartTime = null;
+            window._voiceCallStatus = 'disconnected';
+            window._voicePlaybackQueue = [];
+            window._voiceCurrentSampleRate = 24000;
 
-            // Store the active conversation instance
-            window._elevenLabsConversation = null;
-            window._elevenLabsCallStartTime = null;
-            window._elevenLabsCallStatus = 'disconnected';
-            window._elevenLabsOnStatusChange = null;
-
-            // Start a web call with signed URL and overrides
+            // Keep old function names so Yew frontend works unchanged
             window.startElevenLabsCall = async function(signedUrl, overrides) {
-                console.log('startElevenLabsCall called with URL:', signedUrl ? signedUrl.substring(0, 50) + '...' : 'null');
-                console.log('Overrides:', overrides);
+                // signedUrl is now the WS URL with user_id param
+                console.log('startElevenLabsCall (voice pipeline) called');
                 try {
-                    // Request microphone permission
-                    console.log('Requesting microphone permission...');
-                    await navigator.mediaDevices.getUserMedia({ audio: true });
-                    console.log('Microphone permission granted');
+                    console.log('Requesting microphone...');
+                    window._voiceMicStream = await navigator.mediaDevices.getUserMedia({
+                        audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true }
+                    });
+                    console.log('Mic granted');
 
-                    window._elevenLabsCallStatus = 'connecting';
-                    window._elevenLabsCallStartTime = Date.now(); // Start timer immediately
-                    if (window._elevenLabsOnStatusChange) {
-                        window._elevenLabsOnStatusChange('connecting');
-                    }
+                    window._voiceCallStatus = 'connecting';
+                    window._voiceCallStartTime = Date.now();
 
-                    console.log('Starting ElevenLabs session...');
-                    const sessionConfig = {
-                        signedUrl: signedUrl,
-                        onConnect: () => {
-                            console.log('ElevenLabs call connected!');
-                            window._elevenLabsCallStatus = 'connected';
-                            if (window._elevenLabsOnStatusChange) {
-                                window._elevenLabsOnStatusChange('connected');
+                    // Set up AudioContext at 16kHz for mic capture
+                    window._voiceAudioCtx = new AudioContext({ sampleRate: 16000 });
+                    const source = window._voiceAudioCtx.createMediaStreamSource(window._voiceMicStream);
+                    window._voiceScriptNode = window._voiceAudioCtx.createScriptProcessor(4096, 1, 1);
+
+                    // Connect WebSocket
+                    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsUrl = signedUrl.startsWith('ws') ? signedUrl : `${proto}//${location.host}${signedUrl}`;
+                    console.log('Connecting WS:', wsUrl);
+                    window._voiceWs = new WebSocket(wsUrl);
+                    window._voiceWs.binaryType = 'arraybuffer';
+
+                    window._voiceWs.onopen = () => {
+                        console.log('Voice WS connected');
+                        window._voiceCallStatus = 'connected';
+                    };
+
+                    window._voiceWs.onmessage = (evt) => {
+                        if (typeof evt.data === 'string') {
+                            const msg = JSON.parse(evt.data);
+                            if (msg.type === 'audio_start') {
+                                window._voiceCurrentSampleRate = msg.sample_rate || 24000;
+                                window._voicePlaybackQueue = [];
+                            } else if (msg.type === 'audio_end') {
+                                window._voicePlayAudio();
+                            } else if (msg.type === 'error') {
+                                console.error('Voice pipeline error:', msg.message);
+                            } else if (msg.type === 'vad') {
+                                console.log('VAD:', msg.speaking ? 'speaking' : 'silent', msg.processing ? '(processing)' : '');
                             }
-                        },
-                        onDisconnect: () => {
-                            console.log('ElevenLabs call disconnected');
-                            window._elevenLabsCallStatus = 'disconnected';
-                            if (window._elevenLabsOnStatusChange) {
-                                window._elevenLabsOnStatusChange('disconnected');
-                            }
-                        },
-                        onError: (error) => {
-                            console.error('ElevenLabs call error:', error);
-                            window._elevenLabsCallStatus = 'error';
-                            if (window._elevenLabsOnStatusChange) {
-                                window._elevenLabsOnStatusChange('error');
-                            }
-                        },
-                        onMessage: (message) => {
-                            console.log('ElevenLabs message:', message);
-                        },
-                        onModeChange: (mode) => {
-                            console.log('ElevenLabs mode changed:', mode);
-                        },
-                        onStatusChange: (status) => {
-                            console.log('ElevenLabs status changed:', status);
+                        } else {
+                            // Binary: PCM i16 audio
+                            window._voicePlaybackQueue.push(new Int16Array(evt.data));
                         }
                     };
 
-                    // Helper to convert Map objects to plain objects (serde_wasm_bindgen creates Maps)
-                    function mapToObject(item) {
-                        if (item instanceof Map) {
-                            const obj = {};
-                            item.forEach((value, key) => {
-                                obj[key] = mapToObject(value);
-                            });
-                            return obj;
-                        } else if (Array.isArray(item)) {
-                            return item.map(mapToObject);
-                        } else {
-                            return item;
+                    window._voiceWs.onclose = () => {
+                        console.log('Voice WS closed');
+                        window._voiceCallStatus = 'disconnected';
+                        window._voiceCleanup();
+                    };
+
+                    window._voiceWs.onerror = (e) => {
+                        console.error('Voice WS error:', e);
+                        window._voiceCallStatus = 'error';
+                    };
+
+                    // Send mic audio as binary PCM i16 chunks
+                    window._voiceScriptNode.onaudioprocess = (e) => {
+                        if (!window._voiceWs || window._voiceWs.readyState !== WebSocket.OPEN) return;
+                        const f32 = e.inputBuffer.getChannelData(0);
+                        const i16 = new Int16Array(f32.length);
+                        for (let i = 0; i < f32.length; i++) {
+                            i16[i] = Math.max(-32768, Math.min(32767, Math.round(f32[i] * 32767)));
                         }
-                    }
-
-                    // Add overrides if provided - dynamicVariables goes at TOP LEVEL, not inside overrides
-                    if (overrides) {
-                        // Convert Maps to plain objects
-                        const plainOverrides = mapToObject(overrides);
-                        console.log('Processing overrides:', JSON.stringify(plainOverrides, null, 2));
-
-                        // dynamicVariables must be at top level per ElevenLabs SDK docs
-                        if (plainOverrides.dynamicVariables) {
-                            sessionConfig.dynamicVariables = plainOverrides.dynamicVariables;
-                            console.log('Set dynamicVariables at top level:', sessionConfig.dynamicVariables);
-                        }
-
-                        // agent and tts stay inside overrides
-                        const actualOverrides = {};
-                        if (plainOverrides.agent) {
-                            actualOverrides.agent = plainOverrides.agent;
-                        }
-                        if (plainOverrides.tts) {
-                            actualOverrides.tts = plainOverrides.tts;
-                        }
-                        if (plainOverrides.conversation) {
-                            actualOverrides.conversation = plainOverrides.conversation;
-                        }
-
-                        if (Object.keys(actualOverrides).length > 0) {
-                            sessionConfig.overrides = actualOverrides;
-                            console.log('Set overrides:', JSON.stringify(actualOverrides, null, 2));
-                        }
-                    }
-
-                    const conversation = await Conversation.startSession(sessionConfig);
-
-                    console.log('ElevenLabs session started successfully');
-                    console.log('Conversation object:', conversation);
-                    console.log('Conversation methods:', Object.keys(conversation));
-                    window._elevenLabsConversation = conversation;
-
-                    // Try to get the conversation ID if available
-                    if (conversation.getId) {
-                        console.log('Conversation ID:', conversation.getId());
-                    }
+                        window._voiceWs.send(i16.buffer);
+                    };
+                    source.connect(window._voiceScriptNode);
+                    window._voiceScriptNode.connect(window._voiceAudioCtx.destination);
 
                     return true;
                 } catch (error) {
-                    console.error('Failed to start ElevenLabs call:', error);
-                    window._elevenLabsCallStatus = 'error';
-                    window._elevenLabsCallStartTime = null;
-                    if (window._elevenLabsOnStatusChange) {
-                        window._elevenLabsOnStatusChange('error');
-                    }
+                    console.error('Failed to start voice call:', error);
+                    window._voiceCallStatus = 'error';
+                    window._voiceCallStartTime = null;
+                    window._voiceCleanup();
                     return false;
                 }
             };
 
-            // End the active call
-            window.endElevenLabsCall = async function() {
-                console.log('endElevenLabsCall called');
-                if (window._elevenLabsConversation) {
-                    try {
-                        await window._elevenLabsConversation.endSession();
-                        console.log('Session ended');
-                    } catch (e) {
-                        console.error('Error ending call:', e);
-                    }
-                    window._elevenLabsConversation = null;
+            window._voicePlaybackCtx = null;
+            window._voicePlaybackSrc = null;
+
+            window._voicePlayAudio = function() {
+                const queue = window._voicePlaybackQueue;
+                if (!queue.length) return;
+
+                // Stop any currently playing audio
+                if (window._voicePlaybackSrc) {
+                    try { window._voicePlaybackSrc.stop(); } catch(e) {}
+                    window._voicePlaybackSrc = null;
                 }
+                if (window._voicePlaybackCtx) {
+                    window._voicePlaybackCtx.close().catch(()=>{});
+                    window._voicePlaybackCtx = null;
+                }
+
+                let totalLen = 0;
+                for (const c of queue) totalLen += c.length;
+                const merged = new Float32Array(totalLen);
+                let off = 0;
+                for (const c of queue) {
+                    for (let i = 0; i < c.length; i++) merged[off++] = c[i] / 32768.0;
+                }
+                window._voicePlaybackQueue = [];
+                const sr = window._voiceCurrentSampleRate;
+                const ctx = new AudioContext({ sampleRate: sr });
+                window._voicePlaybackCtx = ctx;
+                const buf = ctx.createBuffer(1, merged.length, sr);
+                buf.getChannelData(0).set(merged);
+                const src = ctx.createBufferSource();
+                window._voicePlaybackSrc = src;
+                src.buffer = buf;
+                src.connect(ctx.destination);
+                src.onended = () => {
+                    window._voicePlaybackSrc = null;
+                    ctx.close().catch(()=>{});
+                    window._voicePlaybackCtx = null;
+                };
+                src.start();
+            };
+
+            window._voiceCleanup = function() {
+                if (window._voiceScriptNode) { window._voiceScriptNode.disconnect(); window._voiceScriptNode = null; }
+                if (window._voiceMicStream) { window._voiceMicStream.getTracks().forEach(t => t.stop()); window._voiceMicStream = null; }
+                if (window._voiceAudioCtx) { window._voiceAudioCtx.close().catch(()=>{}); window._voiceAudioCtx = null; }
+            };
+
+            window.endElevenLabsCall = async function() {
+                console.log('endElevenLabsCall (voice pipeline) called');
+                if (window._voiceWs) {
+                    window._voiceWs.close();
+                    window._voiceWs = null;
+                }
+                window._voiceCleanup();
                 const duration = window.getElevenLabsCallDuration();
-                console.log('Call duration:', duration, 'seconds');
-                window._elevenLabsCallStartTime = null;
-                window._elevenLabsCallStatus = 'disconnected';
+                window._voiceCallStartTime = null;
+                window._voiceCallStatus = 'disconnected';
                 return duration;
             };
 
-            // Get current call duration in seconds
             window.getElevenLabsCallDuration = function() {
-                if (!window._elevenLabsCallStartTime) return 0;
-                return Math.floor((Date.now() - window._elevenLabsCallStartTime) / 1000);
+                if (!window._voiceCallStartTime) return 0;
+                return Math.floor((Date.now() - window._voiceCallStartTime) / 1000);
             };
 
-            // Check if call is active
             window.isElevenLabsCallActive = function() {
-                return window._elevenLabsCallStatus === 'connected' || window._elevenLabsCallStatus === 'connecting';
+                return window._voiceCallStatus === 'connected' || window._voiceCallStatus === 'connecting';
             };
 
-            // Get current call status
             window.getElevenLabsCallStatus = function() {
-                return window._elevenLabsCallStatus;
+                return window._voiceCallStatus;
             };
 
-            // Set status change callback
             window.setElevenLabsStatusCallback = function(callback) {
-                window._elevenLabsOnStatusChange = callback;
+                // Not used in new pipeline but keep for compatibility
             };
         </script>
     </body>

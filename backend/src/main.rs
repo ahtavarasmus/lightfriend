@@ -23,7 +23,7 @@ use tower_sessions::{MemoryStore, SessionManagerLayer};
 use tracing::Level;
 
 // Import modules and types from library crate
-use api::{elevenlabs, elevenlabs_webhook, twilio_sms};
+use api::{elevenlabs, elevenlabs_webhook, twilio_sms, voice_pipeline};
 use backend::{
     api, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState, LlmUsageRepository,
     TotpRepository, UserCore, UserCoreOps, UserRepository, WebauthnRepository,
@@ -524,6 +524,25 @@ async fn main() {
             state.clone(),
             elevenlabs_webhook::validate_elevenlabs_hmac,
         ));
+    // Voice pipeline: TwiML endpoint validated by Twilio signature
+    let voice_twiml_routes = Router::new()
+        .route("/api/voice/incoming", post(voice_pipeline::voice_incoming))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            api::twilio_utils::validate_twilio_signature,
+        ));
+    // Voice pipeline: WebSocket + debug endpoints (no auth - WS handshake)
+    let voice_ws_routes = Router::new()
+        .route("/api/voice/ws", get(voice_pipeline::voice_ws))
+        .route("/api/voice/ws-debug", get(voice_pipeline::voice_ws_debug))
+        .route("/api/voice/test", get(voice_pipeline::voice_test_page));
+    // Voice pipeline: authenticated endpoint for web call start
+    let voice_auth_routes = Router::new()
+        .route("/api/voice/web-start", get(voice_pipeline::voice_web_start))
+        .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
+    let voice_routes = voice_twiml_routes
+        .merge(voice_ws_routes)
+        .merge(voice_auth_routes);
     let auth_built_in_webhook_routes = Router::new()
         .route("/api/stripe/webhook", post(stripe_handlers::stripe_webhook))
         .route("/api/auth/tesla/callback", get(tesla_auth::tesla_callback))
@@ -1268,6 +1287,7 @@ async fn main() {
         .merge(elevenlabs_routes)
         .merge(elevenlabs_free_routes)
         .merge(elevenlabs_webhook_routes)
+        .merge(voice_routes)
         .route("/public/{*path}", any(proxy_telegram_public))
         .route("/public", any(proxy_telegram_public))
         .nest_service("/uploads", ServeDir::new("uploads"))

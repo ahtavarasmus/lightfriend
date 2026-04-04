@@ -73,12 +73,15 @@ pub mod api {
     pub mod matrix_client;
     pub mod tesla;
     pub mod tesla_client;
+    pub mod tinfoil_client;
     pub mod twilio_availability;
     pub mod twilio_client;
     pub mod twilio_pricing;
     pub mod twilio_sms;
     pub mod twilio_utils;
+    pub mod voice_pipeline;
 }
+pub mod agent_core;
 pub mod context;
 pub mod error;
 pub mod tools {

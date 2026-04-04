@@ -807,41 +807,20 @@ pub async fn process_sms(
         }
     };
 
-    let tz = ctx.timezone.as_ref().unwrap();
-    let formatted_time = &tz.formatted_now;
-    let timezone_str = &tz.tz_str;
-    let offset = &tz.offset_string;
-    let contacts_info = ctx.contacts_prompt_fragment.as_deref().unwrap_or("");
-    let events_info = ctx.events_prompt_fragment.as_deref().unwrap_or("");
     let user_given_info = ctx.user_given_info.as_deref().unwrap_or("");
-    let cancel_hint = if options.skip_twilio_send {
-        ""
+
+    // Build system prompt via shared agent_core
+    let mode = if options.skip_twilio_send {
+        crate::agent_core::ChannelMode::WebChat
     } else {
-        " User can reply 'cancel' to stop."
+        crate::agent_core::ChannelMode::Sms
     };
+    let system_prompt_text = crate::agent_core::build_system_prompt(&ctx, mode);
 
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
-        content: chat_completion::Content::Text(format!("You are lightfriend, a concise AI assistant. Current date: {}. Max 480 characters per response. Characters are expensive - be succinct! ALWAYS list multiple items one per line, never in a paragraph. Example:\n1. Dad (WhatsApp) - Pick up car\n2. Lisa (Signal) - Review contract Provide all information immediately; only ask follow-ups when confirming send/create actions. Call all needed tools upfront.{contacts_info}{events_info}
-
-### Tool Usage:
-- Always use tools to fetch current data. Never answer data questions from conversation history alone - the history may be days old.
-- Use tools to fetch information directly (users may only have a dumbphone).
-- Send/create tools queue content for 60 seconds.{cancel_hint}
-- State only what tool results returned. Note any gaps in data coverage.
-
-### Behavior:
-- 'remind me', 'notify me at X', 'wake me at Y' -> use set_reminder immediately. Never answer these directly.
-- For recurring reminders or complex rules (daily briefings, event triggers, conditional automations), tell the user to set them from the dashboard rule builder.
-
-### Date and Time:
-- User timezone: {} with offset {}. Nearest future occurrence for ambiguous times.
-- Relative times: compute exactly (14:30 + 'in 3 hours' = 17:30).
-- Display: 12-hour AM/PM, 'today'/'tomorrow'/date. Default range: now to 24h ahead.
-- 'Today' = 00:00-23:59 today. 'Tomorrow' = 00:00-23:59 tomorrow. 'This week' = remaining days. 'Next week' = Mon-Sun.
-
-NEVER use emojis - they cost extra in SMS encoding. Respond in plain text only. User information: {}. Use tools to fetch latest information before answering.", formatted_time, timezone_str, offset, user_given_info)),
+        content: chat_completion::Content::Text(system_prompt_text),
         tool_calls: None,
         tool_call_id: None,
     }];
@@ -966,24 +945,9 @@ NEVER use emojis - they cost extra in SMS encoding. Respond in plain text only. 
         });
     }
 
-    // Tools and model from context builder
-    let mut tools = ctx.tools.unwrap_or_default();
+    // Tools via shared agent_core (includes registry + ontology + MCP)
+    let tools = crate::agent_core::build_tools(state, user.id, true).await;
     let model = ctx.model.clone();
-
-    // Inject ontology query tools (dynamically built with user-specific enum values)
-    let ontology_user_data = {
-        let mut dynamic_enums = std::collections::HashMap::new();
-        if let Ok(persons) = state.ontology_repository.get_persons(user.id) {
-            let names: Vec<String> = persons.iter().map(|p| p.name.clone()).collect();
-            dynamic_enums.insert("person_names".to_string(), names);
-        }
-        crate::ontology::registry::OntologyUserData { dynamic_enums }
-    };
-    tools.extend(
-        state
-            .ontology_registry
-            .build_query_tools(&ontology_user_data),
-    );
 
     // Convert ChatMessage vec into ChatCompletionMessage vec
     let completion_messages: Vec<chat_completion::ChatCompletionMessage> = chat_messages
@@ -1174,19 +1138,6 @@ NEVER use emojis - they cost extra in SMS encoding. Respond in plain text only. 
                         }
                     };
 
-                    // Check subscription access
-                    if crate::tool_call_utils::utils::requires_subscription(
-                        name,
-                        user.sub_tier.clone(),
-                    ) {
-                        tracing::info!(
-                            "Attempted to use subscription-only tool {} without proper subscription",
-                            name
-                        );
-                        round_answers.insert(tool_call_id, format!("This feature ({}) requires a subscription. Please visit our website to subscribe.", name));
-                        continue;
-                    }
-
                     let arguments = match &tool_call.function.arguments {
                         Some(args) => args,
                         None => {
@@ -1219,110 +1170,87 @@ NEVER use emojis - they cost extra in SMS encoding. Respond in plain text only. 
                         }
                     }
 
-                    // Ontology query tools (dynamic, per-user)
-                    if name.starts_with("query_") {
-                        tracing::debug!("Executing ontology tool call: {}", name);
-                        let result =
-                            crate::tools::ontology::handle_query(name, arguments, state, user.id)
-                                .await;
-                        let answer = match result {
-                            Ok(answer) => answer,
-                            Err(e) => e,
-                        };
-                        round_answers.insert(tool_call_id, answer);
-                        continue;
-                    }
-
-                    // Handle MCP tool calls (dynamic, per-user)
-                    if crate::tool_call_utils::mcp::is_mcp_tool(name) {
-                        tracing::debug!("Executing MCP tool call: {}", name);
-                        let result = crate::tool_call_utils::mcp::handle_mcp_tool_call(
-                            state, user.id, name, arguments,
-                        )
-                        .await;
-                        round_answers.insert(tool_call_id, result);
-                        continue;
-                    }
-
-                    // Registry dispatch for static tools
-                    let tool_ctx = crate::tools::registry::ToolContext {
-                        state,
-                        user: &user,
-                        user_id: user.id,
-                        arguments,
-                        image_url: image_url.as_deref(),
-                        tool_call_id: tool_call_id.clone(),
-                        user_given_info,
-                        current_time,
-                        client: Some(&ctx.client),
-                        model: Some(&model),
-                        tools: Some(&tools),
-                        completion_messages: Some(&loop_messages),
+                    // Dispatch via shared agent_core
+                    let extras = crate::agent_core::ToolDispatchExtras {
+                        client: &ctx.client,
+                        model: &model,
+                        tools: &tools,
+                        completion_messages: &loop_messages,
                         assistant_content: result.choices[0].message.content.as_deref(),
                         tool_call: Some(tool_call),
+                        image_url: image_url.as_deref(),
                     };
+                    let dispatch_result = crate::agent_core::dispatch_tool(
+                        state,
+                        &user,
+                        name,
+                        arguments,
+                        &tool_call_id,
+                        user_given_info,
+                        current_time,
+                        Some(extras),
+                    )
+                    .await;
 
-                    match state.tool_registry.get(name) {
-                        Some(handler) => match handler.execute(tool_ctx).await {
-                            Ok(crate::tools::registry::ToolResult::Answer(answer)) => {
-                                // Terminal tool: break the loop
-                                if terminal_tools.contains(&name.as_str()) {
-                                    final_response = answer.clone();
-                                    round_answers.insert(tool_call_id, answer);
-                                    tool_answers.extend(round_answers);
-                                    break 'agentic;
-                                }
-                                round_answers.insert(tool_call_id, answer);
-                            }
-                            Ok(crate::tools::registry::ToolResult::AnswerWithTask {
-                                answer,
-                                task_id,
-                            }) => {
-                                created_item_id = Some(task_id);
+                    match dispatch_result {
+                        crate::agent_core::ToolDispatchResult::Answer(answer) => {
+                            if terminal_tools.contains(&name.as_str()) {
                                 final_response = answer.clone();
                                 round_answers.insert(tool_call_id, answer);
                                 tool_answers.extend(round_answers);
                                 break 'agentic;
                             }
-                            Ok(crate::tools::registry::ToolResult::EarlyReturn {
-                                response,
-                                status,
-                            }) => {
-                                let headers =
-                                    [(axum::http::header::CONTENT_TYPE, "application/json")];
-                                return (status, headers, Json(response));
-                            }
-                            Err(e) => {
-                                log_tool_error(user.id, name, "execution", "handler_error", &e);
-                                let error_msg = e.to_string();
-                                let user_facing_msg = if error_msg.contains("plan")
-                                    || error_msg.contains("feature")
-                                    || error_msg.contains("upgrade")
-                                    || error_msg.contains("Autopilot")
-                                {
-                                    error_msg
-                                } else {
-                                    tool_error_messages::INTERNAL_ERROR.to_string()
-                                };
-                                round_answers.insert(tool_call_id, user_facing_msg.clone());
-                                // Terminal tools that error should still break the loop
-                                if terminal_tools.contains(&name.as_str()) {
-                                    final_response = user_facing_msg;
-                                    tool_answers.extend(round_answers);
-                                    break 'agentic;
-                                }
-                            }
-                        },
-                        None => {
+                            round_answers.insert(tool_call_id, answer);
+                        }
+                        crate::agent_core::ToolDispatchResult::AnswerWithTask {
+                            answer,
+                            task_id,
+                        } => {
+                            created_item_id = Some(task_id);
+                            final_response = answer.clone();
+                            round_answers.insert(tool_call_id, answer);
+                            tool_answers.extend(round_answers);
+                            break 'agentic;
+                        }
+                        crate::agent_core::ToolDispatchResult::EarlyReturn { response, status } => {
+                            let headers = [(axum::http::header::CONTENT_TYPE, "application/json")];
+                            return (status, headers, Json(response));
+                        }
+                        crate::agent_core::ToolDispatchResult::SubscriptionRequired(msg) => {
+                            tracing::info!(
+                                "Attempted to use subscription-only tool {} without proper subscription",
+                                name
+                            );
+                            round_answers.insert(tool_call_id, msg);
+                        }
+                        crate::agent_core::ToolDispatchResult::Unknown(msg) => {
                             tracing::error!("Unknown tool called: {}", name);
                             return (
                                 StatusCode::INTERNAL_SERVER_ERROR,
                                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                                 Json(TwilioResponse {
-                                    message: format!("Unknown tool: {}", name),
+                                    message: msg,
                                     created_item_id: None,
                                 }),
                             );
+                        }
+                        crate::agent_core::ToolDispatchResult::Error(e) => {
+                            log_tool_error(user.id, name, "execution", "handler_error", &e);
+                            let user_facing_msg = if e.contains("plan")
+                                || e.contains("feature")
+                                || e.contains("upgrade")
+                                || e.contains("Autopilot")
+                            {
+                                e
+                            } else {
+                                tool_error_messages::INTERNAL_ERROR.to_string()
+                            };
+                            round_answers.insert(tool_call_id, user_facing_msg.clone());
+                            if terminal_tools.contains(&name.as_str()) {
+                                final_response = user_facing_msg;
+                                tool_answers.extend(round_answers);
+                                break 'agentic;
+                            }
                         }
                     }
                 }
