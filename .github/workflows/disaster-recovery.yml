@@ -199,8 +199,10 @@ jobs:
         run: |
           S3_BUCKET=$(aws ssm get-parameter --name /lightfriend/s3-bucket --query Parameter.Value --output text)
           LT_ID=$(aws ssm get-parameter --name /lightfriend/launch-template-id --query Parameter.Value --output text)
+          SUBNET_ID=$(aws ssm get-parameter --name /lightfriend/subnet-id --query Parameter.Value --output text)
           echo "s3_bucket=$S3_BUCKET" >> $GITHUB_OUTPUT
           echo "lt_id=$LT_ID" >> $GITHUB_OUTPUT
+          echo "subnet_id=$SUBNET_ID" >> $GITHUB_OUTPUT
 
       - name: Prepare data source
         id: data
@@ -316,10 +318,12 @@ jobs:
         run: |
           S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
           LT_ID="${{ steps.infra.outputs.lt_id }}"
+          SUBNET_ID="${{ steps.infra.outputs.subnet_id }}"
           EIF_KEY="${{ needs.build-eif.outputs.eif_key }}"
 
           INSTANCE_ID=$(aws ec2 run-instances \
             --launch-template LaunchTemplateId=$LT_ID \
+            --subnet-id "$SUBNET_ID" \
             --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=lightfriend-recovery-${{ github.run_id }}},{Key=deploy,Value=recovery-${{ github.run_id }}}]" \
             --query 'Instances[0].InstanceId' --output text)
 
