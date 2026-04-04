@@ -12,7 +12,7 @@ use std::sync::{atomic::Ordering, Arc};
 use crate::AppState;
 
 /// Validates the X-Maintenance-Secret header against the MAINTENANCE_SECRET env var.
-fn check_secret(headers: &HeaderMap) -> bool {
+pub fn check_secret(headers: &HeaderMap) -> bool {
     let expected = match std::env::var("MAINTENANCE_SECRET") {
         Ok(s) if !s.is_empty() => s,
         _ => return false,
@@ -84,8 +84,8 @@ pub async fn maintenance_guard(
         return next.run(request).await;
     }
 
-    // Always allow maintenance endpoints themselves
-    if path.starts_with("/api/internal/maintenance") {
+    // Always allow internal endpoints (maintenance + recovery)
+    if path.starts_with("/api/internal/") {
         return next.run(request).await;
     }
 

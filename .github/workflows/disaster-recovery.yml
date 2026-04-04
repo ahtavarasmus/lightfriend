@@ -13,8 +13,9 @@ on:
           - 'Restore from Cloudflare R2 backup'
           - 'Restore from seed SQL (fresh database)'
           - 'Fresh start (empty database)'
+          - 'Nuclear: rebuild users from Stripe + Resend (no backup)'
       backup_key:
-        description: 'Specific backup key (optional - leave empty for latest)'
+        description: 'S3 key to restore (optional - leave empty for latest). Format: backups/{hourly,daily,weekly,monthly}/lightfriend-full-backup-YYYYMMDDTHHMMSSZ.tar.gz.enc'
         required: false
         type: string
 
@@ -177,6 +178,12 @@ jobs:
           if [ "$SCENARIO" = "Fresh start (empty database)" ]; then
             echo "mode=fresh" >> $GITHUB_OUTPUT
             echo "No backup - fresh start"
+            exit 0
+          fi
+
+          if echo "$SCENARIO" | grep -q "Nuclear"; then
+            echo "mode=nuclear" >> $GITHUB_OUTPUT
+            echo "Nuclear recovery - will rebuild users from Stripe + Resend after boot"
             exit 0
           fi
 
@@ -362,7 +369,7 @@ jobs:
           MODE="${{ steps.data.outputs.mode }}"
           BACKUP_KEY="${{ steps.data.outputs.backup_key }}"
 
-          if [ "$MODE" = "fresh" ]; then
+          if [ "$MODE" = "fresh" ] || [ "$MODE" = "nuclear" ]; then
             # Write a "success" with no backup - host will skip restore
             echo '{"status":"SUCCESS","backup_key":"","restore_type":"fresh"}' | \
               aws s3 cp - "s3://$S3_BUCKET/deploy/export-complete.json"
@@ -418,6 +425,65 @@ jobs:
             sleep 10
           done
           echo "FATAL: Health check timed out"; exit 1
+
+      - name: Rebuild users from Stripe + Resend
+        if: steps.health.outputs.healthy == 'true' && steps.data.outputs.mode == 'nuclear'
+        run: |
+          S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
+          NEW_INSTANCE="${{ steps.launch.outputs.new_instance }}"
+
+          # Read MAINTENANCE_SECRET from the .env stored in S3
+          MAINTENANCE_SECRET=$(aws s3 cp "s3://$S3_BUCKET/config/.env" - 2>/dev/null | grep MAINTENANCE_SECRET | cut -d= -f2-)
+          if [ -z "$MAINTENANCE_SECRET" ]; then
+            echo "FATAL: MAINTENANCE_SECRET not found in S3 config/.env"
+            exit 1
+          fi
+
+          # Read the domain from .env
+          DOMAIN=$(aws s3 cp "s3://$S3_BUCKET/config/.env" - 2>/dev/null | grep "^DOMAIN=" | cut -d= -f2-)
+          DOMAIN="${DOMAIN:-enclave.lightfriend.ai}"
+
+          echo "Triggering nuclear recovery on $DOMAIN..."
+          echo "This will rebuild all user accounts from Stripe + Resend and send password reset emails."
+
+          # Wait a bit for the backend to fully start accepting requests after health check
+          sleep 10
+
+          # Call the internal recovery endpoint via SSM (host curls through public URL)
+          RECOVERY_CMD=$(aws ssm send-command --instance-ids "$NEW_INSTANCE" \
+            --document-name "AWS-RunShellScript" \
+            --parameters commands=["curl -sf --max-time 300 -X POST -H 'X-Maintenance-Secret: $MAINTENANCE_SECRET' https://$DOMAIN/api/internal/recover-users"] \
+            --timeout-seconds 360 --query 'Command.CommandId' --output text)
+
+          echo "Waiting for user recovery (SSM: $RECOVERY_CMD)..."
+          for i in $(seq 1 72); do
+            SSM_STATUS=$(aws ssm get-command-invocation --command-id "$RECOVERY_CMD" \
+              --instance-id "$NEW_INSTANCE" --query 'Status' --output text 2>/dev/null || echo "Pending")
+            if [ "$SSM_STATUS" = "Success" ]; then
+              RESULT=$(aws ssm get-command-invocation --command-id "$RECOVERY_CMD" \
+                --instance-id "$NEW_INSTANCE" --query 'StandardOutputContent' --output text 2>/dev/null || echo "")
+              echo "Nuclear recovery complete:"
+              echo "$RESULT"
+              echo "## Nuclear Recovery Result" >> $GITHUB_STEP_SUMMARY
+              echo '```json' >> $GITHUB_STEP_SUMMARY
+              echo "$RESULT" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              break
+            fi
+            if [ "$SSM_STATUS" = "Failed" ] || [ "$SSM_STATUS" = "TimedOut" ]; then
+              ERROR=$(aws ssm get-command-invocation --command-id "$RECOVERY_CMD" \
+                --instance-id "$NEW_INSTANCE" --query 'StandardErrorContent' --output text 2>/dev/null || echo "unknown")
+              echo "FATAL: Nuclear recovery failed: $SSM_STATUS"
+              echo "Error: $ERROR"
+              exit 1
+            fi
+            [ $((i % 6)) -eq 0 ] && echo "  Waiting... $((i * 5))s"
+            sleep 5
+          done
+          if [ "$SSM_STATUS" != "Success" ]; then
+            echo "FATAL: Nuclear recovery timed out"
+            exit 1
+          fi
 
       - name: Switch traffic
         if: steps.health.outputs.healthy == 'true'

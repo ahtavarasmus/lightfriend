@@ -1200,9 +1200,19 @@ pub async fn enable_alert_type(
 /// SAFETY: Refuses to run if the database already has users. Only works on an empty database.
 /// After creating accounts, sends each user a password reset link so they can log in.
 /// User ID 1 is always rasmus@ahtava.com (admin).
+///
+/// Only accessible via /api/internal/recover-users with X-Maintenance-Secret header.
+/// Triggered by the disaster-recovery GitHub Actions workflow for nuclear recovery.
 pub async fn recover_users_from_external(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if !crate::handlers::maintenance_handlers::check_secret(&headers) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Invalid recovery secret"})),
+        ));
+    }
     // HARD GUARD: refuse to run if database has any users
     let existing_users = state.user_core.get_all_users().map_err(|e| {
         (

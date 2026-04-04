@@ -735,10 +735,6 @@ async fn main() {
             "/api/admin/resend-sync",
             post(admin_handlers::sync_all_users_to_resend),
         )
-        .route(
-            "/api/admin/recover-users",
-            post(admin_handlers::recover_users_from_external),
-        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             handlers::auth_middleware::require_admin,
@@ -1260,7 +1256,7 @@ async fn main() {
             post(handlers::mcp_handlers::test_url_connection),
         )
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
-    // Internal maintenance endpoints (localhost-only, no auth)
+    // Internal endpoints (secret-authenticated, no JWT)
     let maintenance_routes = Router::new()
         .route(
             "/api/internal/maintenance/enable",
@@ -1273,6 +1269,10 @@ async fn main() {
         .route(
             "/api/internal/maintenance/status",
             get(handlers::maintenance_handlers::maintenance_status),
+        )
+        .route(
+            "/api/internal/recover-users",
+            post(admin_handlers::recover_users_from_external),
         );
 
     let app = Router::new()

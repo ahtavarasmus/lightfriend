@@ -62,7 +62,11 @@ resend-rs = "0.9"
 serde_urlencoded = "0.7.1"
 phonenumber = "0.3"  # Google libphonenumber port for Rust - handles E.164 parsing and country detection
 rubato = "0.16"  # Audio resampling for voice pipeline (8kHz<->16kHz<->24kHz)
-rocksdb = "0.24"
+rocksdb = { version = "0.24", optional = true }
+
+[features]
+default = []
+tuwunel-restore = ["rocksdb"]
 
 [[bin]]
 name = "migrate_to_pg"
@@ -71,6 +75,7 @@ path = "src/bin/migrate_to_pg.rs"
 [[bin]]
 name = "tuwunel_restore"
 path = "src/bin/tuwunel_restore.rs"
+required-features = ["tuwunel-restore"]
 
 [dev-dependencies]
 serial_test = "3.0"  # For tests that modify environment variables

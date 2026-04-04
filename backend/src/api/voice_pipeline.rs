@@ -29,7 +29,7 @@ fn mulaw_decode(encoded: u8) -> i16 {
     let mut magnitude = ((mantissa as i32) << 1) | 1;
     magnitude = (magnitude << (exponent + 2)) - 0x21; // bias removal
                                                       // Clamp to valid i16 range
-    let magnitude = magnitude.max(0).min(i16::MAX as i32);
+    let magnitude = magnitude.clamp(0, i16::MAX as i32);
     if sign != 0 {
         -(magnitude as i16)
     } else {
@@ -152,7 +152,7 @@ fn resample(samples: &[i16], from_rate: usize, to_rate: usize) -> Vec<i16> {
             Ok(result) => {
                 if let Some(ch) = result.first() {
                     for &s in ch {
-                        output.push((s * 32767.0).round().max(-32768.0).min(32767.0) as i16);
+                        output.push((s * 32767.0).round().clamp(-32768.0, 32767.0) as i16);
                     }
                 }
             }
@@ -176,7 +176,7 @@ fn resample(samples: &[i16], from_rate: usize, to_rate: usize) -> Vec<i16> {
                 let expected = original_len * to_rate / from_rate;
                 let take = expected.min(ch.len());
                 for &s in &ch[..take] {
-                    output.push((s * 32767.0).round().max(-32768.0).min(32767.0) as i16);
+                    output.push((s * 32767.0).round().clamp(-32768.0, 32767.0) as i16);
                 }
             }
         }
