@@ -19,6 +19,12 @@ pub struct BroadcastMessageRequest {
 pub struct EmailBroadcastRequest {
     pub subject: String,
     pub message: String,
+    #[serde(default = "default_audience")]
+    pub audience: String,
+}
+
+fn default_audience() -> String {
+    "all".to_string()
 }
 
 #[derive(Serialize)]
@@ -233,6 +239,20 @@ pub async fn broadcast_email(
                 // Still track email to avoid duplicate from waitlist
                 sent_emails.insert(user.email.to_lowercase());
                 continue;
+            }
+
+            // Audience filter
+            let has_sub = user.sub_tier.is_some();
+            match request_clone.audience.as_str() {
+                "only_subs" if !has_sub => {
+                    sent_emails.insert(user.email.to_lowercase());
+                    continue;
+                }
+                "only_non_subs" if has_sub => {
+                    sent_emails.insert(user.email.to_lowercase());
+                    continue;
+                }
+                _ => {} // "all" or matched filter
             }
 
             // Skip users with invalid or empty email addresses
