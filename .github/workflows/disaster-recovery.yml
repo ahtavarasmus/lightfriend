@@ -100,18 +100,37 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: us-east-1
-      - name: Install Nitro CLI
+      - name: Install Nitro CLI build dependencies
         run: |
-          sudo apt-get update && sudo apt-get install -y build-essential cmake libssl-dev
-          git clone --depth 1 https://github.com/aws/aws-nitro-enclaves-cli.git /tmp/nitro-cli
-          cd /tmp/nitro-cli && cargo build --release -p aws-nitro-enclaves-cli
-          sudo cp target/release/nitro-cli /usr/local/bin/
-          sudo mkdir -p /usr/share/nitro_enclaves/blobs
-          for blob in bzImage init linuxkit cmdline; do
-            sudo touch /usr/share/nitro_enclaves/blobs/$blob
-            curl -sL "https://github.com/aws/aws-nitro-enclaves-cli/releases/latest/download/$blob" \
-              -o "/usr/share/nitro_enclaves/blobs/$blob" 2>/dev/null || true
-          done
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang llvm-dev libclang-dev pkg-config libssl-dev protobuf-compiler musl-tools
+      - name: Build Nitro CLI
+        run: |
+          git clone --depth 1 https://github.com/aws/aws-nitro-enclaves-cli /tmp/aws-nitro-enclaves-cli
+          cd /tmp/aws-nitro-enclaves-cli
+          make nitro-cli
+          sudo install -m 0755 "$(find build -type f -name nitro-cli | head -1)" /usr/local/bin/nitro-cli
+          nitro-cli --version
+      - name: Prepare Nitro CLI filesystem layout
+        run: |
+          sudo mkdir -p \
+            /var/log/nitro_enclaves \
+            /usr/share/nitro_enclaves \
+            /usr/share/nitro_enclaves/blobs \
+            /run/nitro_enclaves \
+            /etc/nitro_enclaves
+      - name: Install Nitro CLI build blobs
+        run: |
+          ARCH="$(uname -m)"
+          case "$ARCH" in
+            x86_64|amd64) BLOB_ARCH="x86_64" ;;
+            aarch64|arm64) BLOB_ARCH="aarch64" ;;
+            *) echo "FATAL: unsupported architecture for Nitro blobs: $ARCH"; exit 1 ;;
+          esac
+          [ -d "/tmp/aws-nitro-enclaves-cli/blobs/$BLOB_ARCH" ] || { echo "FATAL: Nitro blobs missing for architecture $BLOB_ARCH"; exit 1; }
+          sudo cp -R "/tmp/aws-nitro-enclaves-cli/blobs/$BLOB_ARCH/." /usr/share/nitro_enclaves/blobs/
+          sudo chmod -R a+rX /usr/share/nitro_enclaves/blobs
+          ls -lah /usr/share/nitro_enclaves/blobs
       - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
