@@ -261,7 +261,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let auto_create_items = use_state(|| (*user_profile).auto_create_items.unwrap_or(false));
     let system_important_notify =
         use_state(|| (*user_profile).system_important_notify.unwrap_or(true));
-    let digest_enabled = use_state(|| (*user_profile).digest_enabled.unwrap_or(true));
+    let digest_enabled = use_state(|| (*user_profile).digest_enabled.unwrap_or(false));
     let digest_time = use_state(|| (*user_profile).digest_time.clone().unwrap_or_default());
     let auto_track_system = use_state(|| (*user_profile).auto_track_items_system.unwrap_or(false));
     let auto_confirm_items = use_state(|| {
@@ -1250,11 +1250,14 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     };
 
     // Digest mode handler - three-way: off / auto / custom
+    let digest_custom_mode = use_state(|| !(*digest_time).is_empty());
     let digest_enabled_for_template = digest_enabled.clone();
     let digest_time_for_template = digest_time.clone();
+    let digest_custom_for_template = digest_custom_mode.clone();
     let on_digest_mode_change = {
         let digest_enabled = digest_enabled.clone();
         let digest_time = digest_time.clone();
+        let digest_custom_mode = digest_custom_mode.clone();
         let save_state = digest_save_state.clone();
         let user_profile = user_profile.clone();
         let on_profile_update = props.on_profile_update.clone();
@@ -1266,10 +1269,12 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             let on_profile_update = on_profile_update.clone();
             let digest_enabled = digest_enabled.clone();
             let digest_time = digest_time.clone();
+            let digest_custom_mode = digest_custom_mode.clone();
 
             match mode.as_str() {
                 "off" => {
                     digest_enabled.set(false);
+                    digest_custom_mode.set(false);
                     save_state.set(FieldSaveState::Saving);
                     spawn_local(async move {
                         let request = PatchFieldRequest {
@@ -1300,6 +1305,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 "auto" => {
                     digest_enabled.set(true);
                     digest_time.set(String::new());
+                    digest_custom_mode.set(false);
                     save_state.set(FieldSaveState::Saving);
                     spawn_local(async move {
                         // Enable + clear custom time
@@ -1338,7 +1344,38 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         }
                     });
                 }
-                _ => {} // "custom" - just show the input, don't save until they type
+                _ => {
+                    // "custom" - enable digest and show the time input
+                    digest_enabled.set(true);
+                    digest_custom_mode.set(true);
+                    // Enable digest if it wasn't already
+                    save_state.set(FieldSaveState::Saving);
+                    spawn_local(async move {
+                        let req = PatchFieldRequest {
+                            field: "digest_enabled".to_string(),
+                            value: serde_json::Value::Bool(true),
+                        };
+                        match Api::patch("/api/profile/field")
+                            .json(&req)
+                            .unwrap()
+                            .send()
+                            .await
+                        {
+                            Ok(response) if response.ok() => {
+                                let mut profile = (*user_profile).clone();
+                                profile.digest_enabled = Some(true);
+                                on_profile_update.emit(profile);
+                                save_state.set(FieldSaveState::Success);
+                                let s = save_state.clone();
+                                spawn_local(async move {
+                                    gloo_timers::future::TimeoutFuture::new(3_000).await;
+                                    s.set(FieldSaveState::Idle);
+                                });
+                            }
+                            _ => save_state.set(FieldSaveState::Error("Failed".to_string())),
+                        }
+                    });
+                }
             }
         })
     };
@@ -2650,10 +2687,10 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         value={
                             if !*digest_enabled_for_template {
                                 "off".to_string()
-                            } else if (*digest_time_for_template).is_empty() {
-                                "auto".to_string()
-                            } else {
+                            } else if *digest_custom_for_template || !(*digest_time_for_template).is_empty() {
                                 "custom".to_string()
+                            } else {
+                                "auto".to_string()
                             }
                         }
                         onchange={on_digest_mode_change.clone()}
@@ -2667,7 +2704,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             </div>
 
             // Digest custom time input (shown when custom mode is selected or has value)
-            if *digest_enabled_for_template && !(*digest_time_for_template).is_empty() {
+            if *digest_enabled_for_template && (*digest_custom_for_template || !(*digest_time_for_template).is_empty()) {
                 <div class="profile-field">
                     <div class="field-label-group">
                         <span class="field-label">{"Digest Times"}</span>
@@ -2717,31 +2754,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             </div>
 
             // Auto-confirm tracked items (only shown when auto-track is enabled)
-            if *auto_track_system {
-                <div class="profile-field" style="padding-left: 1rem;">
-                    <div class="field-label-group">
-                        <span class="field-label">{"Auto-confirm items"}</span>
-                        <div class="tooltip">
-                            <span class="tooltip-icon">{"?"}</span>
-                            <span class="tooltip-text">
-                                {"When on, detected commitments are tracked immediately. When off, they are proposed and need your confirmation from the dashboard."}
-                            </span>
-                        </div>
-                    </div>
-                    <div class="field-input-container">
-                        <label class="custom-checkbox">
-                            <input
-                                type="checkbox"
-                                checked={*auto_confirm_items}
-                                onchange={on_auto_confirm_toggle.clone()}
-                            />
-                            <span class="checkmark"></span>
-                            {if *auto_confirm_items { "Auto-create" } else { "Needs approval" }}
-                        </label>
-                        {render_save_indicator(&*auto_confirm_save_state)}
-                    </div>
-                </div>
-            }
 
             // Feature Updates field
             <div class="profile-field">

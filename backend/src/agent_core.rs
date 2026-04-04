@@ -181,6 +181,8 @@ pub struct ToolDispatchExtras<'a> {
     pub assistant_content: Option<&'a str>,
     pub tool_call: Option<&'a chat_completion::ToolCall>,
     pub image_url: Option<&'a str>,
+    /// When true, skip SMS confirmation sends (web dashboard path)
+    pub skip_sms: bool,
 }
 
 /// Dispatch a single tool call through the correct handler.
@@ -238,6 +240,7 @@ pub async fn dispatch_tool(
         tool_call_id: tool_call_id.to_string(),
         user_given_info,
         current_time,
+        skip_sms: extras.as_ref().map(|e| e.skip_sms).unwrap_or(false),
         client: extras.as_ref().map(|e| e.client),
         model: extras.as_ref().map(|e| e.model),
         tools: extras.as_ref().map(|e| e.tools),

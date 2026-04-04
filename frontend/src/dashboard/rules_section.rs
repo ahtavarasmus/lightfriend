@@ -354,7 +354,7 @@ pub fn rules_section(props: &RulesSectionProps) -> Html {
 
                 if filtered_empty {
                     <div class="rules-empty">
-                        {"No rules yet. Create one above or via chat."}
+                        {"No rules yet. Create one above."}
                     </div>
                 }
 

@@ -158,11 +158,12 @@ impl RequestWrapper {
                     Ok(retry_response)
                 }
                 _ => {
-                    // Token refresh failed - this could mean:
-                    // 1. User was never logged in (no refresh token) - don't redirect
-                    // 2. User's session expired - should redirect
-                    // We can't easily distinguish, so just return the 401 and let the app handle it
-                    gloo_console::log!("Token refresh failed, returning 401 response");
+                    // Token refresh failed - session is expired, redirect to login
+                    gloo_console::log!("Token refresh failed, redirecting to login");
+                    REDIRECTING_TO_LOGIN.store(true, Ordering::Relaxed);
+                    if let Some(window) = web_sys::window() {
+                        let _ = window.location().set_href("/login");
+                    }
                     Ok(response)
                 }
             }

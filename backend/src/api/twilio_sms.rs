@@ -1179,6 +1179,7 @@ pub async fn process_sms(
                         assistant_content: result.choices[0].message.content.as_deref(),
                         tool_call: Some(tool_call),
                         image_url: image_url.as_deref(),
+                        skip_sms: options.skip_twilio_send,
                     };
                     let dispatch_result = crate::agent_core::dispatch_tool(
                         state,

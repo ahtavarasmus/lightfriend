@@ -10,6 +10,7 @@ use yew_router::prelude::*;
 struct EmailBroadcastMessage {
     subject: String,
     message: String,
+    audience: String,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -407,6 +408,7 @@ pub fn admin_dashboard() -> Html {
     let selected_user_id = use_state(|| None::<i32>);
     let email_subject = use_state(|| String::new());
     let email_message = use_state(|| String::new());
+    let email_audience = use_state(|| "all".to_string());
     let delete_modal = use_state(|| DeleteModalState {
         show: false,
         user_id: None,
@@ -599,6 +601,21 @@ pub fn admin_dashboard() -> Html {
                                             placeholder="Enter email subject..."
                                             class="email-subject-input"
                                         />
+                                        <select
+                                            class="email-subject-input"
+                                            value={(*email_audience).clone()}
+                                            onchange={{
+                                                let email_audience = email_audience.clone();
+                                                Callback::from(move |e: Event| {
+                                                    let select: web_sys::HtmlSelectElement = e.target_unchecked_into();
+                                                    email_audience.set(select.value());
+                                                })
+                                            }}
+                                        >
+                                            <option value="all" selected={*email_audience == "all"}>{"All users"}</option>
+                                            <option value="only_subs" selected={*email_audience == "only_subs"}>{"Subscribers only"}</option>
+                                            <option value="only_non_subs" selected={*email_audience == "only_non_subs"}>{"Non-subscribers only"}</option>
+                                        </select>
                                         <textarea
                                             value={(*email_message).clone()}
                                             onchange={{
@@ -615,10 +632,12 @@ pub fn admin_dashboard() -> Html {
                                             onclick={{
                                                 let email_subject = email_subject.clone();
                                                 let email_message = email_message.clone();
+                                                let email_audience = email_audience.clone();
                                                 let error = error.clone();
                                                 Callback::from(move |_| {
                                                     let email_subject = email_subject.clone();
                                                     let email_message = email_message.clone();
+                                                    let email_audience = email_audience.clone();
                                                     let error = error.clone();
 
                                                     if email_subject.is_empty() || email_message.is_empty() {
@@ -626,10 +645,12 @@ pub fn admin_dashboard() -> Html {
                                                         return;
                                                     }
 
+                                                    let audience_val = (*email_audience).clone();
                                                     wasm_bindgen_futures::spawn_local(async move {
                                                         let broadcast_message = EmailBroadcastMessage {
                                                             subject: (*email_subject).clone(),
                                                             message: (*email_message).clone(),
+                                                            audience: audience_val,
                                                         };
 
                                                         match Api::post("/api/admin/broadcast-email")

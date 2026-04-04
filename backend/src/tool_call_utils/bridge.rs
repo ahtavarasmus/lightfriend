@@ -191,6 +191,7 @@ pub async fn handle_send_chat_message(
     args: &str,
     user: &User,
     image_url: Option<&str>,
+    skip_sms: bool,
 ) -> Result<
     (
         StatusCode,
@@ -230,12 +231,14 @@ pub async fn handle_send_chat_message(
             "Failed to find contact. Please make sure you're connected to {} bridge.",
             capitalized_platform
         );
-        if let Err(e) = state
-            .twilio_message_service
-            .send_sms(error_msg.as_str(), None, user)
-            .await
-        {
-            eprintln!("Failed to send error message: {}", e);
+        if !skip_sms {
+            if let Err(e) = state
+                .twilio_message_service
+                .send_sms(error_msg.as_str(), None, user)
+                .await
+            {
+                eprintln!("Failed to send error message: {}", e);
+            }
         }
         return Ok((
             StatusCode::OK,
@@ -328,14 +331,17 @@ pub async fn handle_send_chat_message(
         )
     };
     // Send the queued confirmation SMS (best-effort, don't block the actual send)
-    tracing::info!("SEND_FLOW Sending confirmation SMS (best-effort)...");
-    match state
-        .twilio_message_service
-        .send_sms(&queued_msg, None, user)
-        .await
-    {
-        Ok(_) => tracing::info!("SEND_FLOW Confirmation SMS sent successfully"),
-        Err(e) => tracing::warn!("SEND_FLOW Confirmation SMS failed (non-fatal): {}", e),
+    // Skip when request came from web dashboard - confirmation is returned inline
+    if !skip_sms {
+        tracing::info!("SEND_FLOW Sending confirmation SMS (best-effort)...");
+        match state
+            .twilio_message_service
+            .send_sms(&queued_msg, None, user)
+            .await
+        {
+            Ok(_) => tracing::info!("SEND_FLOW Confirmation SMS sent successfully"),
+            Err(e) => tracing::warn!("SEND_FLOW Confirmation SMS failed (non-fatal): {}", e),
+        }
     }
     // Create cancellation channel
     tracing::info!("SEND_FLOW Creating cancellation channel and preparing delayed send task");
@@ -365,6 +371,7 @@ pub async fn handle_send_chat_message(
     }
 
     let cloned_image_url = image_url.map(|s| s.to_string());
+    let cloned_skip_sms = skip_sms;
     tracing::info!(
         "SEND_FLOW About to tokio::spawn delayed send task for user={}, room_id={}",
         user_id,
@@ -421,12 +428,14 @@ pub async fn handle_send_chat_message(
                         "Failed to send {} message: {}",
                         cloned_capitalized_platform, e
                     );
-                    if let Err(e) = cloned_state
-                        .twilio_message_service
-                        .send_sms(&error_msg, None, &cloned_user)
-                        .await
-                    {
-                        tracing::error!("SEND_FLOW_TASK Also failed to send error SMS: {}", e);
+                    if !cloned_skip_sms {
+                        if let Err(e) = cloned_state
+                            .twilio_message_service
+                            .send_sms(&error_msg, None, &cloned_user)
+                            .await
+                        {
+                            tracing::error!("SEND_FLOW_TASK Also failed to send error SMS: {}", e);
+                        }
                     }
                 }
             }

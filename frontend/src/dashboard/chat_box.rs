@@ -602,7 +602,25 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                     use wasm_bindgen::JsCast;
 
                     // Pre-flight: ensure auth tokens are fresh before SSE connection
-                    let _ = crate::utils::api::Api::get("/api/auth/status").send().await;
+                    match crate::utils::api::Api::get("/api/auth/status").send().await {
+                        Ok(resp) if resp.status() == 401 => {
+                            chat_error.set(Some("Session expired. Redirecting to login...".to_string()));
+                            chat_loading.set(false);
+                            if let Some(window) = web_sys::window() {
+                                let _ = window.location().set_href("/login");
+                            }
+                            return;
+                        }
+                        Err(_) => {
+                            chat_error.set(Some("Session expired. Redirecting to login...".to_string()));
+                            chat_loading.set(false);
+                            if let Some(window) = web_sys::window() {
+                                let _ = window.location().set_href("/login");
+                            }
+                            return;
+                        }
+                        _ => {} // auth OK, proceed
+                    }
 
                     let encoded_msg = js_sys::encode_uri_component(&message)
                         .as_string()

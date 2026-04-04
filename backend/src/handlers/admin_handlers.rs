@@ -19,6 +19,12 @@ pub struct BroadcastMessageRequest {
 pub struct EmailBroadcastRequest {
     pub subject: String,
     pub message: String,
+    #[serde(default = "default_audience")]
+    pub audience: String,
+}
+
+fn default_audience() -> String {
+    "all".to_string()
 }
 
 #[derive(Serialize)]
@@ -235,6 +241,20 @@ pub async fn broadcast_email(
                 continue;
             }
 
+            // Audience filter
+            let has_sub = user.sub_tier.is_some();
+            match request_clone.audience.as_str() {
+                "only_subs" if !has_sub => {
+                    sent_emails.insert(user.email.to_lowercase());
+                    continue;
+                }
+                "only_non_subs" if has_sub => {
+                    sent_emails.insert(user.email.to_lowercase());
+                    continue;
+                }
+                _ => {} // "all" or matched filter
+            }
+
             // Skip users with invalid or empty email addresses
             if user.email.is_empty() || !user.email.contains('@') || !user.email.contains('.') {
                 tracing::warn!("Skipping invalid email address: {}", user.email);
@@ -315,7 +335,14 @@ pub async fn broadcast_email(
         }
 
         // Send to waitlist entries (updates-only subscribers)
+        // Waitlist = non-subscribers, skip when targeting subscribers only
+        if request_clone.audience == "only_subs" {
+            tracing::info!("Skipping waitlist entries for subscribers-only broadcast");
+        }
         for entry in waitlist_entries {
+            if request_clone.audience == "only_subs" {
+                break;
+            }
             // Skip if already sent to this email (user is both registered and on waitlist)
             if sent_emails.contains(&entry.email.to_lowercase()) {
                 tracing::info!(
