@@ -199,6 +199,32 @@ const DASHBOARD_STYLES: &str = r#"
     overflow-y: auto;
     font-family: monospace;
 }
+.digest-schedule-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.4rem;
+}
+.digest-schedule-row label {
+    font-size: 0.72rem;
+    color: #999;
+}
+.digest-schedule-select {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #ccc;
+    font-size: 0.72rem;
+    padding: 0.25rem 0.4rem;
+    border-radius: 4px;
+    cursor: pointer;
+    outline: none;
+}
+.digest-schedule-select:hover {
+    border-color: rgba(255, 255, 255, 0.3);
+}
+.digest-schedule-select:focus {
+    border-color: #7EB2FF;
+}
 .panel-right-activity {
     flex: 1;
     overflow-y: auto;
@@ -845,6 +871,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let custom_rules_open = use_state(|| false);
     let critical_notif_details_open = use_state(|| false);
     let critical_notif_prompt_open = use_state(|| false);
+    let digest_details_open = use_state(|| false);
+    let digest_custom_input = use_state(|| String::new());
+    let digest_show_custom = use_state({
+        let t = (*digest_time_display).clone();
+        move || !t.is_empty()
+    });
 
     // Critical notifications toggle handler
     let on_critical_toggle = {
@@ -901,6 +933,102 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     if r.ok() {
                         let mut p = profile.clone();
                         p.digest_enabled = Some(new_val);
+                        on_update.emit(p);
+                    }
+                }
+            });
+        })
+    };
+
+    // Digest schedule change handler
+    let on_digest_schedule_change = {
+        let digest_time_display = digest_time_display.clone();
+        let digest_show_custom = digest_show_custom.clone();
+        let digest_custom_input = digest_custom_input.clone();
+        let profile = props.user_profile.clone();
+        let on_update = props.on_profile_update.clone();
+        Callback::from(move |e: web_sys::Event| {
+            let target: web_sys::HtmlSelectElement = e.target_unchecked_into();
+            let selected = target.value();
+
+            if selected == "custom" {
+                digest_custom_input.set((*digest_time_display).clone());
+                digest_show_custom.set(true);
+                return;
+            }
+
+            // "auto" selected - clear custom times
+            digest_show_custom.set(false);
+            digest_time_display.set(String::new());
+            let profile = profile.clone();
+            let on_update = on_update.clone();
+            spawn_local(async move {
+                let request = serde_json::json!({
+                    "field": "digest_time",
+                    "value": serde_json::Value::Null
+                });
+                if let Ok(r) = Api::patch("/api/profile/field")
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    if r.ok() {
+                        let mut p = profile.clone();
+                        p.digest_time = None;
+                        on_update.emit(p);
+                    }
+                }
+            });
+        })
+    };
+
+    // Custom digest time input handler
+    let on_digest_custom_input = {
+        let digest_custom_input = digest_custom_input.clone();
+        Callback::from(move |e: web_sys::InputEvent| {
+            let target: web_sys::HtmlInputElement = e.target_unchecked_into();
+            digest_custom_input.set(target.value());
+        })
+    };
+
+    // Save custom digest times
+    let on_digest_custom_save = {
+        let digest_custom_input = digest_custom_input.clone();
+        let digest_time_display = digest_time_display.clone();
+        let profile = props.user_profile.clone();
+        let on_update = props.on_profile_update.clone();
+        Callback::from(move |_: web_sys::MouseEvent| {
+            let raw = (*digest_custom_input).clone();
+            // Validate: comma-separated HH:MM values
+            let times: Vec<&str> = raw.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+            let valid = !times.is_empty() && times.iter().all(|t| {
+                let parts: Vec<&str> = t.split(':').collect();
+                parts.len() == 2
+                    && parts[0].parse::<u32>().map(|h| h < 24).unwrap_or(false)
+                    && parts[1].parse::<u32>().map(|m| m < 60).unwrap_or(false)
+            });
+            if !valid {
+                return;
+            }
+            let cleaned: String = times.join(",");
+            digest_time_display.set(cleaned.clone());
+            let profile = profile.clone();
+            let on_update = on_update.clone();
+            spawn_local(async move {
+                let request = serde_json::json!({
+                    "field": "digest_time",
+                    "value": cleaned
+                });
+                if let Ok(r) = Api::patch("/api/profile/field")
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    if r.ok() {
+                        let mut p = profile.clone();
+                        p.digest_time = Some(cleaned);
                         on_update.emit(p);
                     }
                 }
@@ -1255,6 +1383,13 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         let critical_notif_prompt_open = critical_notif_prompt_open.clone();
         Callback::from(move |_: web_sys::MouseEvent| {
             critical_notif_prompt_open.set(!*critical_notif_prompt_open);
+        })
+    };
+
+    let on_toggle_digest_details = {
+        let digest_details_open = digest_details_open.clone();
+        Callback::from(move |_: web_sys::MouseEvent| {
+            digest_details_open.set(!*digest_details_open);
         })
     };
 
@@ -1669,6 +1804,61 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                         "Medium-priority messages collected and delivered periodically."
                                     }}
                                 </div>
+                                if *digest_enabled {
+                                    <div class="digest-schedule-row">
+                                        <label>{"Schedule:"}</label>
+                                        <select
+                                            class="digest-schedule-select"
+                                            onchange={on_digest_schedule_change.clone()}
+                                        >
+                                            <option value="auto" selected={(*digest_time_display).is_empty()}>
+                                                {"Auto (activity-based)"}
+                                            </option>
+                                            <option value="custom" selected={!(*digest_time_display).is_empty()}>
+                                                {"Custom times"}
+                                            </option>
+                                        </select>
+                                    </div>
+                                    if *digest_show_custom {
+                                        <div class="digest-schedule-row">
+                                            <input
+                                                type="text"
+                                                class="digest-schedule-select"
+                                                style="flex: 1;"
+                                                placeholder="e.g. 08:00,12:30,19:00"
+                                                value={(*digest_custom_input).clone()}
+                                                oninput={on_digest_custom_input.clone()}
+                                            />
+                                            <button
+                                                class="critical-notif-badge active"
+                                                style="font-size: 0.7rem; padding: 0.2rem 0.5rem;"
+                                                onclick={on_digest_custom_save.clone()}
+                                            >
+                                                {"Save"}
+                                            </button>
+                                        </div>
+                                    }
+                                }
+                                <button class="critical-notif-details-toggle" onclick={on_toggle_digest_details}>
+                                    {if *digest_details_open { "Hide info" } else { "More info" }}
+                                </button>
+                                if *digest_details_open {
+                                    <div class="critical-notif-details">
+                                        <p>{"Messages that aren't urgent enough for an immediate SMS notification get collected into a digest. Instead of interrupting you for every routine message, they're bundled and delivered at once."}</p>
+                                        <h4>{"Scheduling"}</h4>
+                                        <ul>
+                                            <li><strong>{"Auto mode: "}</strong>{"The system learns your activity patterns and delivers digests when you're likely checking your phone - no configuration needed."}</li>
+                                            <li><strong>{"Custom times: "}</strong>{"Set specific delivery times in Settings > Digest to override auto-scheduling (e.g., 8:00 AM and 6:00 PM)."}</li>
+                                        </ul>
+                                        <h4>{"What's included"}</h4>
+                                        <ul>
+                                            <li>{"Medium and low urgency messages from all connected platforms"}</li>
+                                            <li>{"Each message summarized with sender, platform, and key content"}</li>
+                                            <li>{"Messages grouped by conversation for easy scanning"}</li>
+                                        </ul>
+                                        <p>{"Digests are delivered via SMS. If no new messages have accumulated since your last digest, no SMS is sent."}</p>
+                                    </div>
+                                }
                             </div>
                             </div>
 

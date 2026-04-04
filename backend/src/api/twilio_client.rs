@@ -191,6 +191,15 @@ pub trait TwilioClient: Send + Sync {
         country_code: &str,
         use_v2: bool,
     ) -> Result<VoicePricingResult, TwilioClientError>;
+
+    /// Initiate an outbound voice call with TwiML.
+    async fn make_call(
+        &self,
+        credentials: &TwilioCredentials,
+        to: &str,
+        from: &str,
+        twiml: &str,
+    ) -> Result<String, TwilioClientError>;
 }
 
 /// Real implementation of TwilioClient that makes actual API calls.
@@ -687,6 +696,45 @@ impl TwilioClient for RealTwilioClient {
             }
         }
     }
+
+    async fn make_call(
+        &self,
+        credentials: &TwilioCredentials,
+        to: &str,
+        from: &str,
+        twiml: &str,
+    ) -> Result<String, TwilioClientError> {
+        let response = self
+            .http_client
+            .post(format!(
+                "https://api.twilio.com/2010-04-01/Accounts/{}/Calls.json",
+                credentials.account_sid
+            ))
+            .basic_auth(&credentials.account_sid, Some(&credentials.auth_token))
+            .form(&[("To", to), ("From", from), ("Twiml", twiml)])
+            .send()
+            .await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(TwilioClientError::ApiError {
+                status: status.as_u16(),
+                message: text,
+            });
+        }
+
+        let body: serde_json::Value =
+            response
+                .json()
+                .await
+                .map_err(|e| TwilioClientError::ApiError {
+                    status: 500,
+                    message: format!("Failed to parse call response: {}", e),
+                })?;
+
+        Ok(body["sid"].as_str().unwrap_or("unknown").to_string())
+    }
 }
 
 /// Mock implementation of TwilioClient for testing.
@@ -1001,6 +1049,16 @@ pub mod mock {
                 .get(country_code)
                 .cloned()
                 .unwrap_or_default())
+        }
+
+        async fn make_call(
+            &self,
+            _credentials: &TwilioCredentials,
+            _to: &str,
+            _from: &str,
+            _twiml: &str,
+        ) -> Result<String, TwilioClientError> {
+            Ok("mock_call_sid".to_string())
         }
     }
 }

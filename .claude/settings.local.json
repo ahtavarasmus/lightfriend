@@ -244,7 +244,8 @@
       "Bash(/opt/homebrew/bin/rg \"white.space\\\\|pre.wrap\\\\|\\\\\\\\\\\\\\\\n\\\\|newline\" /Users/ahtavarasmus/Developer/sites/lightfriend/frontend/src/dashboard/chat_box.rs -n)",
       "Bash(/opt/homebrew/bin/rg \"Agentic loop exhausted\" /Users/ahtavarasmus/Developer/sites/lightfriend/backend/src/api/twilio_sms.rs -n -C 10)",
       "Bash(/opt/homebrew/bin/rg \"chat/web-stream\\\\|web_stream\\\\|chat_stream\" /Users/ahtavarasmus/Developer/sites/lightfriend/backend/src/ -n -l)",
-      "Bash(find /Users/ahtavarasmus/Developer/sites/lightfriend-worktrees/trustless-arch -maxdepth 3 -type f \\\\\\( -name \"Dockerfile*\" -o -name \"docker-compose*\" -o -name \"*.tf\" -o -name \"justfile\" -o -name \".env*\" \\\\\\) 2>/dev/null | head -30)"
+      "Bash(find /Users/ahtavarasmus/Developer/sites/lightfriend-worktrees/trustless-arch -maxdepth 3 -type f \\\\\\( -name \"Dockerfile*\" -o -name \"docker-compose*\" -o -name \"*.tf\" -o -name \"justfile\" -o -name \".env*\" \\\\\\) 2>/dev/null | head -30)",
+      "Skill(browse)"
     ],
     "deny": [
       "Read(.env)",

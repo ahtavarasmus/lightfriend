@@ -27,26 +27,29 @@ pub struct NotificationPricing {
     pub regular_message_price: f32,
     /// Price for digests: raw × 3 × 1.3 (3 segments avg)
     pub digest_price: f32,
-    /// Calculated voice price per minute: raw × 1.3
+    /// Outbound (terminating) voice price per minute: raw × 1.3
     pub calculated_voice_price: f32,
+    /// Inbound (originating) voice price per minute: raw × 1.3
+    pub inbound_voice_price: f32,
     /// Legacy field - same as regular_message_price for backwards compatibility
     pub calculated_sms_price: f32,
 }
 
 impl NotificationPricing {
-    /// Create pricing from raw Twilio prices with segment-based multipliers
-    pub fn from_raw_prices(sms_price: f32, voice_price: f32) -> Self {
+    /// Create pricing from raw Twilio prices with segment-based multipliers.
+    /// `voice_outbound` = terminating price (we call user).
+    /// `voice_inbound` = originating price (user calls us).
+    pub fn from_raw_prices(sms_price: f32, voice_outbound: f32, voice_inbound: f32) -> Self {
         let notification = sms_price * NOTIFICATION_SEGMENT_MULTIPLIER * VAT_MARGIN_MULTIPLIER;
         let regular = sms_price * REGULAR_MSG_SEGMENT_MULTIPLIER * VAT_MARGIN_MULTIPLIER;
         let digest = sms_price * DIGEST_SEGMENT_MULTIPLIER * VAT_MARGIN_MULTIPLIER;
-        let voice = voice_price * VAT_MARGIN_MULTIPLIER;
 
         Self {
             notification_price: notification,
             regular_message_price: regular,
             digest_price: digest,
-            calculated_voice_price: voice,
-            // Legacy: use regular message price as default
+            calculated_voice_price: voice_outbound * VAT_MARGIN_MULTIPLIER,
+            inbound_voice_price: voice_inbound * VAT_MARGIN_MULTIPLIER,
             calculated_sms_price: regular,
         }
     }
@@ -70,9 +73,14 @@ pub async fn get_notification_only_pricing(
 
     // Get raw prices, defaulting to reasonable fallbacks if not available
     let raw_sms = capability.outbound_sms_price.unwrap_or(0.10);
-    let raw_voice = capability.outbound_voice_price_per_min.unwrap_or(0.10);
+    let raw_voice_outbound = capability.outbound_voice_price_per_min.unwrap_or(0.10);
+    let raw_voice_inbound = capability.inbound_voice_price_per_min.unwrap_or(0.02);
 
-    Ok(NotificationPricing::from_raw_prices(raw_sms, raw_voice))
+    Ok(NotificationPricing::from_raw_prices(
+        raw_sms,
+        raw_voice_outbound,
+        raw_voice_inbound,
+    ))
 }
 
 /// Get pricing for any euro plan country (local-number or notification-only).
@@ -126,9 +134,14 @@ pub fn get_cached_notification_pricing_sync(
         .ok()?;
 
     let raw_sms = cached.outbound_sms_price.unwrap_or(0.10);
-    let raw_voice = cached.outbound_voice_price_per_min.unwrap_or(0.10);
+    let raw_voice_outbound = cached.outbound_voice_price_per_min.unwrap_or(0.10);
+    let raw_voice_inbound = cached.inbound_voice_price_per_min.unwrap_or(0.02);
 
-    Some(NotificationPricing::from_raw_prices(raw_sms, raw_voice))
+    Some(NotificationPricing::from_raw_prices(
+        raw_sms,
+        raw_voice_outbound,
+        raw_voice_inbound,
+    ))
 }
 
 #[cfg(test)]
@@ -138,7 +151,7 @@ mod tests {
     #[test]
     fn test_segment_based_pricing() {
         // Test with typical German pricing: $0.08 SMS, $0.04 voice
-        let pricing = NotificationPricing::from_raw_prices(0.08, 0.04);
+        let pricing = NotificationPricing::from_raw_prices(0.08, 0.04, 0.01);
 
         // Notification: 0.08 × 1.5 × 1.3 = 0.156
         assert!((pricing.notification_price - 0.156).abs() < 0.001);
@@ -158,7 +171,7 @@ mod tests {
 
     #[test]
     fn test_pricing_from_raw() {
-        let pricing = NotificationPricing::from_raw_prices(0.10, 0.05);
+        let pricing = NotificationPricing::from_raw_prices(0.10, 0.05, 0.01);
 
         // Notification: 0.10 × 1.5 × 1.3 = 0.195
         assert!((pricing.notification_price - 0.195).abs() < 0.001);
@@ -176,7 +189,7 @@ mod tests {
     #[test]
     fn test_effective_message_counts() {
         // With €15.60 allocation (50 regular messages at 0.312)
-        let pricing = NotificationPricing::from_raw_prices(0.08, 0.04);
+        let pricing = NotificationPricing::from_raw_prices(0.08, 0.04, 0.01);
         let allocation = 50.0 * pricing.regular_message_price; // ~15.6
 
         // How many of each type can you get?

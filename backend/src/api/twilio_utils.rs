@@ -236,9 +236,13 @@ pub async fn validate_twilio_signature(
     };
 
     let url = match std::env::var("SERVER_URL") {
-        Ok(url) => {
-            tracing::info!("✅ Successfully retrieved SERVER_URL");
-            url + "/api/sms/server"
+        Ok(base_url) => {
+            let request_path = parts.uri.path();
+            tracing::info!(
+                "✅ Successfully retrieved SERVER_URL, path: {}",
+                request_path
+            );
+            format!("{}{}", base_url, request_path)
         }
         Err(e) => {
             tracing::error!("❌ Failed to get SERVER_URL: {}", e);

@@ -263,4 +263,14 @@ impl crate::api::twilio_client::TwilioClient for NoOpTwilioClient {
     > {
         Ok(crate::api::twilio_client::VoicePricingResult::default())
     }
+
+    async fn make_call(
+        &self,
+        _credentials: &crate::api::twilio_client::TwilioCredentials,
+        _to: &str,
+        _from: &str,
+        _twiml: &str,
+    ) -> Result<String, crate::api::twilio_client::TwilioClientError> {
+        Ok("noop_call_sid".to_string())
+    }
 }

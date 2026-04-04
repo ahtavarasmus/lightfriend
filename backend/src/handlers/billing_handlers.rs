@@ -1,6 +1,6 @@
 use crate::UserCoreOps;
 use axum::{extract::State, http::StatusCode, Json};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 
@@ -95,6 +95,67 @@ pub async fn increase_credits(
     Ok(Json(json!({
         "message": "credits increased successfully"
     })))
+}
+
+#[derive(Serialize)]
+pub struct UsageLogEntry {
+    pub activity_type: String,
+    pub credits: Option<f32>,
+    pub created_at: i32,
+    pub call_duration: Option<i32>,
+}
+
+pub async fn get_recent_usage(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<Vec<UsageLogEntry>>, (StatusCode, Json<serde_json::Value>)> {
+    // Get billing period start from user's next_billing_date_timestamp
+    let user = state
+        .user_core
+        .find_by_id(auth_user.user_id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "User not found"})),
+        ))?;
+
+    // Calculate billing period start (30 days before next billing, or 30 days ago)
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
+    let billing_period_start = if let Some(next_billing) = user.next_billing_date_timestamp {
+        next_billing - 30 * 86400
+    } else {
+        now - 30 * 86400
+    };
+
+    let logs = state
+        .user_repository
+        .get_recent_usage_logs(auth_user.user_id, billing_period_start, 50)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
+
+    let entries: Vec<UsageLogEntry> = logs
+        .into_iter()
+        .map(|log| UsageLogEntry {
+            activity_type: log.activity_type,
+            credits: log.credits,
+            created_at: log.created_at,
+            call_duration: log.call_duration,
+        })
+        .collect();
+
+    Ok(Json(entries))
 }
 
 pub async fn update_topup(
