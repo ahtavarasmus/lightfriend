@@ -20,6 +20,8 @@ pub struct ToolContext<'a> {
     pub user_given_info: &'a str,
     /// Current timestamp for history entries
     pub current_time: i32,
+    /// Whether to skip Twilio SMS (true when request came from web dashboard)
+    pub skip_sms: bool,
     // Fields needed by create_item which requires the full completion context
     pub client: Option<&'a openai_api_rs::v1::api::OpenAIClient>,
     pub model: Option<&'a str>,

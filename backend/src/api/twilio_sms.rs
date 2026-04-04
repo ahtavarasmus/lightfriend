@@ -1254,6 +1254,7 @@ NEVER use emojis - they cost extra in SMS encoding. Respond in plain text only. 
                         tool_call_id: tool_call_id.clone(),
                         user_given_info,
                         current_time,
+                        skip_sms: options.skip_twilio_send,
                         client: Some(&ctx.client),
                         model: Some(&model),
                         tools: Some(&tools),

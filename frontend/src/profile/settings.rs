@@ -2717,31 +2717,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             </div>
 
             // Auto-confirm tracked items (only shown when auto-track is enabled)
-            if *auto_track_system {
-                <div class="profile-field" style="padding-left: 1rem;">
-                    <div class="field-label-group">
-                        <span class="field-label">{"Auto-confirm items"}</span>
-                        <div class="tooltip">
-                            <span class="tooltip-icon">{"?"}</span>
-                            <span class="tooltip-text">
-                                {"When on, detected commitments are tracked immediately. When off, they are proposed and need your confirmation from the dashboard."}
-                            </span>
-                        </div>
-                    </div>
-                    <div class="field-input-container">
-                        <label class="custom-checkbox">
-                            <input
-                                type="checkbox"
-                                checked={*auto_confirm_items}
-                                onchange={on_auto_confirm_toggle.clone()}
-                            />
-                            <span class="checkmark"></span>
-                            {if *auto_confirm_items { "Auto-create" } else { "Needs approval" }}
-                        </label>
-                        {render_save_indicator(&*auto_confirm_save_state)}
-                    </div>
-                </div>
-            }
 
             // Feature Updates field
             <div class="profile-field">

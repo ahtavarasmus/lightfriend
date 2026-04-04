@@ -40,6 +40,7 @@ impl ToolHandler for SendMessageHandler {
             ctx.arguments,
             ctx.user,
             ctx.image_url,
+            ctx.skip_sms,
         )
         .await
         {

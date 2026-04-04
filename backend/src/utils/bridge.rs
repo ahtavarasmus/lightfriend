@@ -987,13 +987,31 @@ pub async fn send_bridge_message(
             anyhow!("Invalid room ID '{}': {}", rid, e)
         })?;
         let r = client.get_room(&room_id);
+        if r.is_none() {
+            // Room not in cache - sync and retry (happens after deploy when client cache is cold)
+            tracing::info!(
+                "SEND_FLOW_BRIDGE Room not in cache, running sync_once to populate rooms..."
+            );
+            if let Err(e) = client
+                .sync_once(matrix_sdk::config::SyncSettings::new())
+                .await
+            {
+                tracing::error!("SEND_FLOW_BRIDGE sync_once failed: {}", e);
+            } else {
+                tracing::info!("SEND_FLOW_BRIDGE sync_once completed");
+            }
+        }
+        let r = client.get_room(&room_id);
         tracing::info!(
             "SEND_FLOW_BRIDGE client.get_room({}) returned: found={}",
             rid,
             r.is_some()
         );
         r.ok_or_else(|| {
-            tracing::error!("SEND_FLOW_BRIDGE Room {} not found in Matrix client!", rid);
+            tracing::error!(
+                "SEND_FLOW_BRIDGE Room {} not found in Matrix client even after sync!",
+                rid
+            );
             anyhow!("Room {} not found in client", rid)
         })?
     } else {
@@ -1478,6 +1496,32 @@ pub async fn handle_bridge_message(
                         created.id as i32,
                         "created",
                         snapshot,
+                    )
+                    .await;
+
+                    // Auto-resolve: user replied, so clear pending digests and resolve urgency
+                    let now = msg.created_at;
+                    if let Err(e) = state_clone.ontology_repository.mark_room_digest_delivered(
+                        user_id,
+                        &current_room_id,
+                        now,
+                    ) {
+                        tracing::warn!("Failed to mark room digest delivered: {}", e);
+                    }
+                    if let Err(e) = state_clone
+                        .ontology_repository
+                        .resolve_high_urgency_for_room(user_id, &current_room_id, now)
+                    {
+                        tracing::warn!("Failed to resolve high urgency for room: {}", e);
+                    }
+
+                    // Check if outgoing message completes any tracked events
+                    crate::proactive::system_behaviors::check_outgoing_event_resolution(
+                        &state_clone,
+                        user_id,
+                        &current_room_id,
+                        &msg.content,
+                        created.id,
                     )
                     .await;
                 }

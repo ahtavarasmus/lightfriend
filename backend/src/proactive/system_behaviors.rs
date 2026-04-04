@@ -471,8 +471,8 @@ pub async fn run_system_behaviors(
                         .unwrap_or("none");
 
                     if message_type != "none" {
-                        let auto_confirm = settings.auto_confirm_tracked_items;
-                        // Fetch active events only when Pass 2 needs them
+                        let auto_confirm = true; // always auto-create when tracking is enabled
+                                                 // Fetch active events only when Pass 2 needs them
                         let active_events = state
                             .ontology_repository
                             .get_active_and_proposed_events(user_id)
@@ -624,11 +624,180 @@ async fn run_commitment_pass2(
     now: i32,
     auto_confirm: bool,
 ) {
-    // For completion signals, handle directly without Pass 2 LLM call
+    // For completion signals, check if an incoming message indicates a tracked event is done
     if message_type == "completion_signal" && !active_events.is_empty() {
-        // Simple heuristic: find the most recently discussed event
-        // The chat LLM handles explicit "I paid invoice #42" via update_event tool
-        // This catches implicit completions like "done" or "sent it"
+        let conv_lower = conversation.to_lowercase();
+        let mut cs_scored: Vec<(f64, &crate::models::ontology_models::OntEvent)> = active_events
+            .iter()
+            .map(|e| {
+                let score = strsim::jaro_winkler(&conv_lower, &e.description.to_lowercase());
+                (score, e)
+            })
+            .collect();
+        cs_scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        let cs_candidates: Vec<String> = cs_scored
+            .iter()
+            .map(|(_, e)| format!("[id={}] {}", e.id, e.description))
+            .collect();
+        let cs_events_text = cs_candidates.join("\n");
+
+        let cs_system_prompt = format!(
+            "An incoming message suggests a tracked event may be completed.\n\
+            Sender: {}\n\
+            Current time: {}\n\
+            \n\
+            Tracked events:\n{}\n\
+            \n\
+            Rules - be STRICT:\n\
+            - Only mark completed if the sender clearly indicates the action is DONE/FINISHED/PAST TENSE.\n\
+            - \"I sent the report\" -> complete\n\
+            - \"Payment is done\" -> complete\n\
+            - \"I'll send it tomorrow\" -> NOT complete (promise)\n\
+            - \"ok\" -> NOT complete\n\
+            - When in doubt, do NOT mark as completed.\n\
+            \n\
+            Return the IDs of events that are now completed. Return empty array if none.",
+            sender_name, now_formatted, cs_events_text
+        );
+
+        let mut cs_properties = HashMap::new();
+        cs_properties.insert(
+            "completed_ids".to_string(),
+            Box::new(types::JSONSchemaDefine {
+                schema_type: Some(types::JSONSchemaType::Array),
+                description: Some(
+                    "IDs of tracked events that are now completed. Empty array if none."
+                        .to_string(),
+                ),
+                items: Some(Box::new(types::JSONSchemaDefine {
+                    schema_type: Some(types::JSONSchemaType::Number),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            }),
+        );
+
+        let cs_tool = chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
+                name: "event_resolution".to_string(),
+                description: Some("Report which tracked events are completed".to_string()),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: Some(cs_properties),
+                    required: Some(vec!["completed_ids".to_string()]),
+                },
+            },
+        };
+
+        let cs_messages = vec![
+            chat_completion::ChatCompletionMessage {
+                role: chat_completion::MessageRole::system,
+                content: chat_completion::Content::Text(cs_system_prompt),
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+            },
+            chat_completion::ChatCompletionMessage {
+                role: chat_completion::MessageRole::user,
+                content: chat_completion::Content::Text(conversation.to_string()),
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+            },
+        ];
+
+        let cs_request =
+            chat_completion::ChatCompletionRequest::new(ctx.model.clone(), cs_messages)
+                .tools(vec![cs_tool])
+                .tool_choice(chat_completion::ToolChoiceType::Required)
+                .temperature(0.0);
+
+        let cs_result = match ctx.client.chat_completion(cs_request).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("Completion signal LLM call failed: {}", e);
+                return;
+            }
+        };
+
+        crate::ai_config::log_llm_usage(
+            &state.llm_usage_repository,
+            user_id,
+            match ctx.provider {
+                crate::AiProvider::Tinfoil => "tinfoil",
+                crate::AiProvider::OpenRouter => "openrouter",
+            },
+            &ctx.model,
+            "completion_signal_resolution",
+            &cs_result,
+        );
+
+        if let Some(choice) = cs_result.choices.first() {
+            if let Some(ref tool_calls) = choice.message.tool_calls {
+                let valid_ids: std::collections::HashSet<i32> =
+                    active_events.iter().map(|e| e.id).collect();
+
+                for tc in tool_calls {
+                    if tc.function.name.as_deref() != Some("event_resolution") {
+                        continue;
+                    }
+                    let args = tc.function.arguments.as_deref().unwrap_or("{}");
+                    let parsed: serde_json::Value = match serde_json::from_str(args) {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
+
+                    let completed_ids: Vec<i32> = parsed
+                        .get("completed_ids")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_f64().map(|n| n as i32))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    for event_id in completed_ids {
+                        if !valid_ids.contains(&event_id) {
+                            continue;
+                        }
+                        if let Err(e) = state.ontology_repository.update_event_status(
+                            user_id,
+                            event_id,
+                            "completed",
+                        ) {
+                            tracing::warn!(
+                                "Failed to mark event {} completed via completion signal: {}",
+                                event_id,
+                                e
+                            );
+                            continue;
+                        }
+                        if let Some(mid) = message_id {
+                            let _ = state.ontology_repository.create_link(
+                                user_id,
+                                "Event",
+                                event_id,
+                                "Message",
+                                mid as i32,
+                                "resolve_message",
+                                None,
+                            );
+                        }
+                        let desc = active_events
+                            .iter()
+                            .find(|e| e.id == event_id)
+                            .map(|e| e.description.as_str())
+                            .unwrap_or("unknown");
+                        info!(
+                            "Auto-completed event {} for user {} via completion signal: {}",
+                            event_id, user_id, desc
+                        );
+                    }
+                }
+            }
+        }
         return;
     }
 
@@ -906,6 +1075,224 @@ async fn run_commitment_pass2(
                         );
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Check if the user's outgoing message indicates a tracked event is already done.
+/// Only past-tense completions count ("done", "sent it", "paid it") - not promises or acknowledgements.
+pub async fn check_outgoing_event_resolution(
+    state: &Arc<AppState>,
+    user_id: i32,
+    room_id: &str,
+    content: &str,
+    message_id: i64,
+) {
+    // Check setting
+    let settings = match state.user_core.get_user_settings(user_id) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    if !settings.auto_track_items_system {
+        return;
+    }
+
+    // Get active events - return early if none (no LLM cost)
+    let active_events = match state
+        .ontology_repository
+        .get_active_and_proposed_events(user_id)
+    {
+        Ok(events) if !events.is_empty() => events,
+        _ => return,
+    };
+
+    // Fetch conversation context for disambiguation
+    let recent_messages = state
+        .ontology_repository
+        .get_messages_for_room(user_id, room_id, 10)
+        .unwrap_or_default();
+
+    let conversation_lines: Vec<String> = recent_messages
+        .iter()
+        .rev()
+        .map(|m| format!("{}: {}", m.sender_name, m.content))
+        .collect();
+    let conversation_text = conversation_lines.join("\n");
+
+    // Build event list
+    let event_list: Vec<String> = active_events
+        .iter()
+        .map(|e| format!("[id={}] {}", e.id, e.description))
+        .collect();
+    let events_text = event_list.join("\n");
+
+    // Build AgentContext
+    let ctx = match ContextBuilder::for_user(state, user_id).build().await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(
+                "Failed to build context for outgoing event resolution: {}",
+                e
+            );
+            return;
+        }
+    };
+
+    let system_prompt = format!(
+        "You are checking if the user's outgoing message indicates a tracked event is ALREADY DONE.\n\
+        \n\
+        Tracked events:\n{}\n\
+        \n\
+        Recent conversation:\n{}\n\
+        \n\
+        The user just sent: \"{}\"\n\
+        \n\
+        Rules - be STRICT:\n\
+        - Only mark an event completed if the user's message clearly indicates the action is DONE/FINISHED/PAST TENSE.\n\
+        - \"Done, sent the report\" -> complete\n\
+        - \"Paid it\" -> complete\n\
+        - \"I'll do it later\" -> NOT complete (promise, not done)\n\
+        - \"I'll be there at 5\" -> NOT complete (acknowledgement)\n\
+        - \"ok\" -> NOT complete (just engaging)\n\
+        - \"sounds good\" -> NOT complete (just acknowledging)\n\
+        - When in doubt, do NOT mark as completed.\n\
+        \n\
+        Return the IDs of events that are now completed. Return empty array if none.",
+        events_text, conversation_text, content
+    );
+
+    // Build tool
+    let mut properties = HashMap::new();
+    properties.insert(
+        "completed_ids".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Array),
+            description: Some(
+                "IDs of tracked events that are now completed. Empty array if none.".to_string(),
+            ),
+            items: Some(Box::new(types::JSONSchemaDefine {
+                schema_type: Some(types::JSONSchemaType::Number),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }),
+    );
+
+    let tool = chat_completion::Tool {
+        r#type: chat_completion::ToolType::Function,
+        function: types::Function {
+            name: "event_resolution".to_string(),
+            description: Some("Report which tracked events are completed".to_string()),
+            parameters: types::FunctionParameters {
+                schema_type: types::JSONSchemaType::Object,
+                properties: Some(properties),
+                required: Some(vec!["completed_ids".to_string()]),
+            },
+        },
+    };
+
+    let messages = vec![
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::system,
+            content: chat_completion::Content::Text(system_prompt),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::user,
+            content: chat_completion::Content::Text(content.to_string()),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+    ];
+
+    let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages)
+        .tools(vec![tool])
+        .tool_choice(chat_completion::ToolChoiceType::Required)
+        .temperature(0.0);
+
+    let result = match ctx.client.chat_completion(request).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("Outgoing event resolution LLM call failed: {}", e);
+            return;
+        }
+    };
+
+    crate::ai_config::log_llm_usage(
+        &state.llm_usage_repository,
+        user_id,
+        match ctx.provider {
+            crate::AiProvider::Tinfoil => "tinfoil",
+            crate::AiProvider::OpenRouter => "openrouter",
+        },
+        &ctx.model,
+        "outgoing_event_resolution",
+        &result,
+    );
+
+    let choice = match result.choices.first() {
+        Some(c) => c,
+        None => return,
+    };
+
+    if let Some(ref tool_calls) = choice.message.tool_calls {
+        for tc in tool_calls {
+            if tc.function.name.as_deref() != Some("event_resolution") {
+                continue;
+            }
+            let args = tc.function.arguments.as_deref().unwrap_or("{}");
+            let parsed: serde_json::Value = match serde_json::from_str(args) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            let completed_ids: Vec<i32> = parsed
+                .get("completed_ids")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_f64().map(|n| n as i32))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let valid_ids: std::collections::HashSet<i32> =
+                active_events.iter().map(|e| e.id).collect();
+
+            for event_id in completed_ids {
+                if !valid_ids.contains(&event_id) {
+                    continue;
+                }
+                if let Err(e) =
+                    state
+                        .ontology_repository
+                        .update_event_status(user_id, event_id, "completed")
+                {
+                    tracing::warn!("Failed to mark event {} completed: {}", event_id, e);
+                    continue;
+                }
+                let _ = state.ontology_repository.create_link(
+                    user_id,
+                    "Event",
+                    event_id,
+                    "Message",
+                    message_id as i32,
+                    "resolve_message",
+                    None,
+                );
+                let desc = active_events
+                    .iter()
+                    .find(|e| e.id == event_id)
+                    .map(|e| e.description.as_str())
+                    .unwrap_or("unknown");
+                info!(
+                    "Auto-completed event {} for user {} via outgoing message: {}",
+                    event_id, user_id, desc
+                );
             }
         }
     }

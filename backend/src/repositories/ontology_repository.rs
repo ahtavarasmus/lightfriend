@@ -1441,6 +1441,50 @@ impl OntologyRepository {
         Ok(())
     }
 
+    /// Mark medium-urgency messages in a room as digest-delivered (user replied, no need to remind).
+    pub fn mark_room_digest_delivered(
+        &self,
+        user_id: i32,
+        room_id: &str,
+        now: i32,
+    ) -> Result<usize, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(
+            ont_messages::table
+                .filter(ont_messages::user_id.eq(user_id))
+                .filter(ont_messages::room_id.eq(room_id))
+                .filter(ont_messages::urgency.eq("medium"))
+                .filter(ont_messages::digest_delivered_at.is_null())
+                .filter(ont_messages::sender_name.ne("You")),
+        )
+        .set(ont_messages::digest_delivered_at.eq(now))
+        .execute(&mut conn)
+    }
+
+    /// Resolve high/critical urgency messages in a room (user replied, urgency handled).
+    pub fn resolve_high_urgency_for_room(
+        &self,
+        user_id: i32,
+        room_id: &str,
+        now: i32,
+    ) -> Result<usize, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(
+            ont_messages::table
+                .filter(ont_messages::user_id.eq(user_id))
+                .filter(ont_messages::room_id.eq(room_id))
+                .filter(
+                    ont_messages::urgency
+                        .eq("critical")
+                        .or(ont_messages::urgency.eq("high")),
+                )
+                .filter(ont_messages::resolved_at.is_null())
+                .filter(ont_messages::sender_name.ne("You")),
+        )
+        .set(ont_messages::resolved_at.eq(now))
+        .execute(&mut conn)
+    }
+
     /// Get all user IDs that have pending digest messages.
     pub fn get_users_with_pending_digests(&self) -> Result<Vec<i32>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1564,6 +1608,20 @@ impl OntologyRepository {
             .filter(ont_events::status.eq_any(&["active", "proposed"]))
             .filter(ont_events::created_at.ge(since_ts))
             .order(ont_events::created_at.desc())
+            .load(&mut conn)
+    }
+
+    pub fn get_recently_completed_events(
+        &self,
+        user_id: i32,
+        since_ts: i32,
+    ) -> Result<Vec<OntEvent>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_events::table
+            .filter(ont_events::user_id.eq(user_id))
+            .filter(ont_events::status.eq("completed"))
+            .filter(ont_events::updated_at.ge(since_ts))
+            .order(ont_events::updated_at.desc())
             .load(&mut conn)
     }
 

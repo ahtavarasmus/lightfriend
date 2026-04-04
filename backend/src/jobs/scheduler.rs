@@ -947,7 +947,13 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
             event_lines.push(format!("- {}{}{}", prefix, event.description, due_str));
         }
 
-        if lines.is_empty() && event_lines.is_empty() {
+        // Check recently auto-completed events
+        let completed_events = state
+            .ontology_repository
+            .get_recently_completed_events(user_id, six_hours_ago)
+            .unwrap_or_default();
+
+        if lines.is_empty() && event_lines.is_empty() && completed_events.is_empty() {
             continue;
         }
 
@@ -964,6 +970,16 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
         if !event_lines.is_empty() {
             digest_parts.push(format!("Now tracking:\n{}", event_lines.join("\n")));
         }
+
+        if !completed_events.is_empty() {
+            let completed_lines: Vec<String> = completed_events
+                .iter()
+                .take(5)
+                .map(|e| format!("- {}", e.description))
+                .collect();
+            digest_parts.push(format!("Auto-completed:\n{}", completed_lines.join("\n")));
+        }
+
         let digest_text = digest_parts.join("\n\n");
 
         crate::proactive::utils::send_notification(

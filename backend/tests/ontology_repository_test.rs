@@ -303,3 +303,307 @@ fn test_delete_person_cascades() {
 
     // The important thing is the person, channels, and edits are gone.
 }
+
+// =============================================================================
+// Auto-resolve on user reply
+// =============================================================================
+
+#[test]
+#[serial]
+fn test_mark_room_digest_delivered() {
+    use backend::models::ontology_models::NewOntMessage;
+
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let now = 1000000;
+
+    // Insert medium-urgency messages in room A
+    let msg1 = state
+        .ontology_repository
+        .insert_message(&NewOntMessage {
+            user_id: user.id,
+            room_id: "!roomA".to_string(),
+            platform: "whatsapp".to_string(),
+            sender_name: "Alice".to_string(),
+            content: "hey".to_string(),
+            person_id: None,
+            created_at: now,
+        })
+        .unwrap();
+    state
+        .ontology_repository
+        .update_message_classification(msg1.id, "medium", "chat", None, None, None)
+        .unwrap();
+
+    let msg2 = state
+        .ontology_repository
+        .insert_message(&NewOntMessage {
+            user_id: user.id,
+            room_id: "!roomA".to_string(),
+            platform: "whatsapp".to_string(),
+            sender_name: "Alice".to_string(),
+            content: "are you there?".to_string(),
+            person_id: None,
+            created_at: now + 10,
+        })
+        .unwrap();
+    state
+        .ontology_repository
+        .update_message_classification(msg2.id, "medium", "chat", None, None, None)
+        .unwrap();
+
+    // Insert medium-urgency message in room B (should NOT be affected)
+    let msg3 = state
+        .ontology_repository
+        .insert_message(&NewOntMessage {
+            user_id: user.id,
+            room_id: "!roomB".to_string(),
+            platform: "whatsapp".to_string(),
+            sender_name: "Bob".to_string(),
+            content: "hello".to_string(),
+            person_id: None,
+            created_at: now,
+        })
+        .unwrap();
+    state
+        .ontology_repository
+        .update_message_classification(msg3.id, "medium", "chat", None, None, None)
+        .unwrap();
+
+    // Insert high-urgency message in room A (should NOT be affected by digest marking)
+    let msg4 = state
+        .ontology_repository
+        .insert_message(&NewOntMessage {
+            user_id: user.id,
+            room_id: "!roomA".to_string(),
+            platform: "whatsapp".to_string(),
+            sender_name: "Alice".to_string(),
+            content: "urgent!".to_string(),
+            person_id: None,
+            created_at: now + 20,
+        })
+        .unwrap();
+    state
+        .ontology_repository
+        .update_message_classification(msg4.id, "high", "request", None, None, None)
+        .unwrap();
+
+    // Mark room A digest delivered
+    let affected = state
+        .ontology_repository
+        .mark_room_digest_delivered(user.id, "!roomA", now + 100)
+        .unwrap();
+    assert_eq!(affected, 2); // only the two medium messages in room A
+
+    // Room B message should still be pending
+    let pending = state
+        .ontology_repository
+        .get_pending_digest_messages(user.id)
+        .unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].room_id, "!roomB");
+}
+
+#[test]
+#[serial]
+fn test_resolve_high_urgency_for_room() {
+    use backend::models::ontology_models::NewOntMessage;
+
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let now = 1000000;
+
+    // Insert critical message in room A
+    let msg1 = state
+        .ontology_repository
+        .insert_message(&NewOntMessage {
+            user_id: user.id,
+            room_id: "!roomA".to_string(),
+            platform: "whatsapp".to_string(),
+            sender_name: "Alice".to_string(),
+            content: "emergency!".to_string(),
+            person_id: None,
+            created_at: now,
+        })
+        .unwrap();
+    state
+        .ontology_repository
+        .update_message_classification(msg1.id, "critical", "request", None, None, None)
+        .unwrap();
+
+    // Insert high message in room A
+    let msg2 = state
+        .ontology_repository
+        .insert_message(&NewOntMessage {
+            user_id: user.id,
+            room_id: "!roomA".to_string(),
+            platform: "whatsapp".to_string(),
+            sender_name: "Alice".to_string(),
+            content: "need help".to_string(),
+            person_id: None,
+            created_at: now + 10,
+        })
+        .unwrap();
+    state
+        .ontology_repository
+        .update_message_classification(msg2.id, "high", "request", None, None, None)
+        .unwrap();
+
+    // Insert medium message in room A (should NOT be resolved)
+    let msg3 = state
+        .ontology_repository
+        .insert_message(&NewOntMessage {
+            user_id: user.id,
+            room_id: "!roomA".to_string(),
+            platform: "whatsapp".to_string(),
+            sender_name: "Alice".to_string(),
+            content: "btw".to_string(),
+            person_id: None,
+            created_at: now + 20,
+        })
+        .unwrap();
+    state
+        .ontology_repository
+        .update_message_classification(msg3.id, "medium", "chat", None, None, None)
+        .unwrap();
+
+    // Insert high message in room B (should NOT be resolved)
+    let msg4 = state
+        .ontology_repository
+        .insert_message(&NewOntMessage {
+            user_id: user.id,
+            room_id: "!roomB".to_string(),
+            platform: "whatsapp".to_string(),
+            sender_name: "Bob".to_string(),
+            content: "urgent too".to_string(),
+            person_id: None,
+            created_at: now,
+        })
+        .unwrap();
+    state
+        .ontology_repository
+        .update_message_classification(msg4.id, "high", "request", None, None, None)
+        .unwrap();
+
+    // Resolve high urgency for room A
+    let affected = state
+        .ontology_repository
+        .resolve_high_urgency_for_room(user.id, "!roomA", now + 100)
+        .unwrap();
+    assert_eq!(affected, 2); // critical + high in room A
+
+    // Calling again should affect 0 (already resolved)
+    let affected2 = state
+        .ontology_repository
+        .resolve_high_urgency_for_room(user.id, "!roomA", now + 200)
+        .unwrap();
+    assert_eq!(affected2, 0);
+
+    // Room B high message should still be unresolved (pending digest check as proxy)
+    // Medium in room A should still be in pending digests
+    let pending = state
+        .ontology_repository
+        .get_pending_digest_messages(user.id)
+        .unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].id, msg3.id);
+}
+
+// =============================================================================
+// Recently completed events
+// =============================================================================
+
+#[test]
+#[serial]
+fn test_get_recently_completed_events() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
+
+    // Create 3 events: one active, one completed recently, one completed long ago
+    let event1 = state
+        .ontology_repository
+        .create_event(&backend::models::ontology_models::NewOntEvent {
+            user_id: user.id,
+            description: "Send report to boss".to_string(),
+            remind_at: None,
+            due_at: None,
+            status: "active".to_string(),
+            created_at: now - 3600,
+            updated_at: now - 3600,
+        })
+        .unwrap();
+
+    let event2 = state
+        .ontology_repository
+        .create_event(&backend::models::ontology_models::NewOntEvent {
+            user_id: user.id,
+            description: "Pay rent".to_string(),
+            remind_at: None,
+            due_at: None,
+            status: "active".to_string(),
+            created_at: now - 7200,
+            updated_at: now - 7200,
+        })
+        .unwrap();
+
+    let event3 = state
+        .ontology_repository
+        .create_event(&backend::models::ontology_models::NewOntEvent {
+            user_id: user.id,
+            description: "Old task".to_string(),
+            remind_at: None,
+            due_at: None,
+            status: "active".to_string(),
+            created_at: now - 86400,
+            updated_at: now - 86400,
+        })
+        .unwrap();
+
+    // Mark event2 as completed (recently)
+    state
+        .ontology_repository
+        .update_event_status(user.id, event2.id, "completed")
+        .unwrap();
+
+    // Mark event3 as completed (but it was updated long ago - simulate by direct update)
+    // update_event_status sets updated_at to now(), so we need to query after
+    state
+        .ontology_repository
+        .update_event_status(user.id, event3.id, "completed")
+        .unwrap();
+
+    // Query completed events since 2 hours ago
+    let since_ts = now - 7200;
+    let completed = state
+        .ontology_repository
+        .get_recently_completed_events(user.id, since_ts)
+        .unwrap();
+
+    // Both event2 and event3 were completed just now (update_event_status sets updated_at=now)
+    // so both should appear
+    assert_eq!(completed.len(), 2);
+    assert!(completed.iter().all(|e| e.status == "completed"));
+
+    // event1 should NOT appear (still active)
+    assert!(!completed.iter().any(|e| e.id == event1.id));
+
+    // Query with a very recent since_ts - should still get both since they were just updated
+    let very_recent = now - 5;
+    let recent_completed = state
+        .ontology_repository
+        .get_recently_completed_events(user.id, very_recent)
+        .unwrap();
+    assert_eq!(recent_completed.len(), 2);
+
+    // Query with future since_ts - should get none
+    let future_ts = now + 3600;
+    let none_completed = state
+        .ontology_repository
+        .get_recently_completed_events(user.id, future_ts)
+        .unwrap();
+    assert!(none_completed.is_empty());
+}

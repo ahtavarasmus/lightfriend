@@ -161,6 +161,7 @@ pub struct OntMessage {
     pub digest_delivered_at: Option<i32>,
     pub classification_prompt: Option<String>,
     pub classification_result: Option<String>,
+    pub resolved_at: Option<i32>,
 }
 
 #[derive(Insertable, Debug)]

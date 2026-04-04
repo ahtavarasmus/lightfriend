@@ -19,7 +19,7 @@ pub struct DashboardQuery {
 #[derive(Serialize)]
 pub struct DashboardSummaryResponse {
     // Calm dashboard fields
-    pub status: String, // "all_caught_up" | "needs_attention"
+    pub status: String, // "all_caught_up" | "has_digest"
     pub messages_handled_today: i64,
     pub notifications_sent_today: i64,
     pub rules_active: i64,
@@ -111,9 +111,6 @@ pub async fn get_dashboard_summary(
         .map(|dt| dt.timestamp() as i32)
         .unwrap_or(now_ts - 86400);
 
-    // 24h ago for action items
-    let last_24h_ts = now_ts - 86400;
-
     // Use stored lat/lon
     let (latitude, longitude) = match user_info.as_ref() {
         Some(info) => (
@@ -151,14 +148,14 @@ pub async fn get_dashboard_summary(
         .get_persons_with_channels(user_id, 500, 0)
         .unwrap_or_default();
 
-    // Get notifiable messages (from known persons in last 24h)
-    let notifiable_messages = state
+    // Get pending digest messages (medium urgency, not yet delivered)
+    let pending_digest = state
         .ontology_repository
-        .get_notifiable_messages(user_id, last_24h_ts, 20)
+        .get_pending_digest_messages(user_id)
         .unwrap_or_default();
 
-    // Build action items with person name lookups
-    let action_items: Vec<ActionItem> = notifiable_messages
+    // Build action items from pending digest
+    let action_items: Vec<ActionItem> = pending_digest
         .iter()
         .map(|msg| {
             let person_name = msg
@@ -189,7 +186,7 @@ pub async fn get_dashboard_summary(
     let status = if action_items.is_empty() {
         "all_caught_up".to_string()
     } else {
-        "needs_attention".to_string()
+        "has_digest".to_string()
     };
 
     // Get watched contacts

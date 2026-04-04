@@ -205,13 +205,13 @@ const DASHBOARD_STYLES: &str = r#"
     font-size: 1.4rem;
 }
 .status-compact-icon.all-good { color: #4ade80; }
-.status-compact-icon.needs-attention { color: #fbbf24; }
+.status-compact-icon.pending-digest { color: #888; }
 .status-compact-text {
     font-size: 1rem;
     font-weight: 500;
 }
 .status-compact-text.all-good { color: #4ade80; }
-.status-compact-text.needs-attention { color: #fbbf24; }
+.status-compact-text.pending-digest { color: #888; }
 .trust-stats-compact {
     color: #555;
     font-size: 0.75rem;
@@ -666,8 +666,8 @@ const DASHBOARD_STYLES: &str = r#"
     .panel-left { border-right-color: rgba(0,0,0,0.06); }
     .status-compact-text.all-good { color: #16a34a; }
     .status-compact-icon.all-good { color: #16a34a; }
-    .status-compact-text.needs-attention { color: #d97706; }
-    .status-compact-icon.needs-attention { color: #d97706; }
+    .status-compact-text.pending-digest { color: #666; }
+    .status-compact-icon.pending-digest { color: #666; }
     .trust-stats-compact { color: #888; }
     .trust-stat-sep { color: #ccc; }
     .action-card { background: rgba(255,255,255,0.8); border-color: rgba(0,0,0,0.08); }
@@ -1272,19 +1272,19 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                         </div>
                     }
 
-                    // Status (compact) - clickable to expand/collapse action items
+                    // Status (compact) - clickable to expand/collapse digest items
                     if has_action_items {
                         <div class="status-compact" style="cursor: pointer;" onclick={{
                             let expanded = action_items_expanded.clone();
                             Callback::from(move |_: MouseEvent| expanded.set(!*expanded))
                         }}>
-                            <span class="status-compact-icon needs-attention">
-                                <i class="fa-solid fa-bell"></i>
+                            <span class="status-compact-icon pending-digest">
+                                <i class="fa-solid fa-inbox"></i>
                             </span>
-                            <span class="status-compact-text needs-attention">
-                                {format!("{} {} your attention",
+                            <span class="status-compact-text pending-digest">
+                                {format!("{} {} in your next digest",
                                     visible_action_items.len(),
-                                    if visible_action_items.len() == 1 { "message needs" } else { "messages need" }
+                                    if visible_action_items.len() == 1 { "message" } else { "messages" }
                                 )}
                             </span>
                             <span style="margin-left: auto; color: #888; font-size: 0.8rem;">
