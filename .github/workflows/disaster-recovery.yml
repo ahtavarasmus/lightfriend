@@ -119,6 +119,19 @@ jobs:
             /usr/share/nitro_enclaves/blobs \
             /run/nitro_enclaves \
             /etc/nitro_enclaves
+          sudo touch /var/log/nitro_enclaves/nitro_enclaves.log
+          sudo chown -R "$USER":"$USER" \
+            /var/log/nitro_enclaves \
+            /usr/share/nitro_enclaves \
+            /run/nitro_enclaves \
+            /etc/nitro_enclaves
+          sudo chmod 755 \
+            /var/log/nitro_enclaves \
+            /usr/share/nitro_enclaves \
+            /usr/share/nitro_enclaves/blobs \
+            /run/nitro_enclaves \
+            /etc/nitro_enclaves
+          sudo chmod 664 /var/log/nitro_enclaves/nitro_enclaves.log
       - name: Install Nitro CLI build blobs
         run: |
           ARCH="$(uname -m)"
