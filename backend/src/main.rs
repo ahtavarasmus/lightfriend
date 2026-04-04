@@ -534,8 +534,7 @@ async fn main() {
     // Voice pipeline: WebSocket + debug endpoints (no auth - WS handshake)
     let voice_ws_routes = Router::new()
         .route("/api/voice/ws", get(voice_pipeline::voice_ws))
-        .route("/api/voice/ws-debug", get(voice_pipeline::voice_ws_debug))
-        .route("/api/voice/test", get(voice_pipeline::voice_test_page));
+        .route("/api/voice/web-ws", get(voice_pipeline::voice_web_ws));
     // Voice pipeline: authenticated endpoint for web call start
     let voice_auth_routes = Router::new()
         .route("/api/voice/web-start", get(voice_pipeline::voice_web_start))
@@ -890,6 +889,10 @@ async fn main() {
             post(billing_handlers::increase_credits),
         )
         .route("/api/billing/usage", post(billing_handlers::get_usage_data))
+        .route(
+            "/api/billing/recent-usage",
+            get(billing_handlers::get_recent_usage),
+        )
         .route(
             "/api/billing/update-auto-topup/{user_id}",
             post(billing_handlers::update_topup),
