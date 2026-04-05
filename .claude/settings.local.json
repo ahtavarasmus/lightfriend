@@ -245,7 +245,14 @@
       "Bash(/opt/homebrew/bin/rg \"Agentic loop exhausted\" /Users/ahtavarasmus/Developer/sites/lightfriend/backend/src/api/twilio_sms.rs -n -C 10)",
       "Bash(/opt/homebrew/bin/rg \"chat/web-stream\\\\|web_stream\\\\|chat_stream\" /Users/ahtavarasmus/Developer/sites/lightfriend/backend/src/ -n -l)",
       "Bash(find /Users/ahtavarasmus/Developer/sites/lightfriend-worktrees/trustless-arch -maxdepth 3 -type f \\\\\\( -name \"Dockerfile*\" -o -name \"docker-compose*\" -o -name \"*.tf\" -o -name \"justfile\" -o -name \".env*\" \\\\\\) 2>/dev/null | head -30)",
-      "Skill(browse)"
+      "Skill(browse)",
+      "Bash(B=~/.claude/skills/gstack/browse/dist/browse)",
+      "Bash($B goto:*)",
+      "Bash($B text:*)",
+      "Bash(aws logs:*)",
+      "Bash(aws ec2:*)",
+      "Bash(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 ec2-user@13.220.3.110 'docker logs --tail 50 $\\(docker ps -q | head -1\\) 2>&1')",
+      "Bash(timeout 10 npx -y wscat -c 'wss://enclave.lightfriend.ai/api/voice/ws')"
     ],
     "deny": [
       "Read(.env)",
