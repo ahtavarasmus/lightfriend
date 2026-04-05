@@ -183,7 +183,6 @@ jobs:
   recover:
     needs: [build-and-push, build-eif]
     runs-on: ubuntu-latest
-    environment: production
     permissions:
       id-token: write
       contents: read

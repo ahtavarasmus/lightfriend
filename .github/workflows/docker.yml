@@ -322,7 +322,6 @@ jobs:
     needs: [authorize, build-and-push, build-eif]
     if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: production
     permissions:
       id-token: write
       contents: read
