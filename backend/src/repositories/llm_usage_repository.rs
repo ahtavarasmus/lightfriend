@@ -180,6 +180,23 @@ impl LlmUsageRepository {
             .collect())
     }
 
+    /// Get total tokens used by a specific user since a given timestamp.
+    pub fn get_user_tokens_since(
+        &self,
+        user_id: i32,
+        since_timestamp: i32,
+    ) -> Result<i64, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let total: Option<i64> = llm_usage_logs::table
+            .filter(llm_usage_logs::user_id.eq(user_id))
+            .filter(llm_usage_logs::created_at.ge(since_timestamp))
+            .select(diesel::dsl::sum(llm_usage_logs::total_tokens))
+            .first(&mut conn)?;
+
+        Ok(total.unwrap_or(0))
+    }
+
     pub fn get_daily_stats(&self, from_timestamp: i32) -> Result<Vec<DailyLlmStat>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 

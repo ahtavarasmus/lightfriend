@@ -5458,7 +5458,7 @@ fn nested_condition_editor(props: &NestedConditionEditorProps) -> Html {
     };
 
     // --- ELSE section ---
-    let can_add_else = depth < 3 && mode != "always";
+    let can_add_else = depth < 2 && mode != "always";
     let on_add_else = {
         let ou = on_update.clone();
         let p = prompt.clone();

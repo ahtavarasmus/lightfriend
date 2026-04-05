@@ -14,6 +14,11 @@ use openai_api_rs::v1::{chat_completion, types};
 
 const COOLDOWN_SECS: i32 = 1800; // 30 minutes per room
 
+/// Daily token budget per user for proactive AI processing (system_important, rules, etc.)
+/// 5M tokens/month target (~$7.50/user/month at $1.50/M input tokens).
+/// 5M / 30 days = ~166K tokens/day. Normal users use 5-20K/day.
+const DAILY_TOKEN_BUDGET_PER_USER: i64 = 166_000;
+
 pub async fn run_system_behaviors(
     state: &Arc<AppState>,
     user_id: i32,
@@ -21,6 +26,28 @@ pub async fn run_system_behaviors(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let settings = state.user_core.get_user_settings(user_id)?;
     if !settings.system_important_notify {
+        return Ok(());
+    }
+
+    // Check daily token budget before doing any LLM work
+    let day_start = {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+        (now / 86400) * 86400
+    };
+    let used_today = state
+        .llm_usage_repository
+        .get_user_tokens_since(user_id, day_start)
+        .unwrap_or(0);
+    if used_today >= DAILY_TOKEN_BUDGET_PER_USER {
+        tracing::warn!(
+            "User {} exceeded daily token budget ({}/{}), skipping system_important",
+            user_id,
+            used_today,
+            DAILY_TOKEN_BUDGET_PER_USER
+        );
         return Ok(());
     }
 
@@ -392,14 +419,22 @@ pub async fn run_system_behaviors(
         },
     };
 
-    let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages)
-        .tools(vec![tool])
-        .tool_choice(chat_completion::ToolChoiceType::Required)
-        .temperature(0.0);
+    // Use fast non-reasoning model for classification (not kimi-k2-5 which wastes
+    // tokens on reasoning). llama3-3-70b is cheaper and fast enough for urgency classification.
+    let classification_model = state
+        .ai_config
+        .model(ctx.provider, crate::ModelPurpose::Voice)
+        .to_string();
 
-    let result = ctx
-        .client
-        .chat_completion(request)
+    let request =
+        chat_completion::ChatCompletionRequest::new(classification_model.clone(), messages)
+            .tools(vec![tool])
+            .tool_choice(chat_completion::ToolChoiceType::Required)
+            .temperature(0.0);
+
+    let result = state
+        .ai_config
+        .chat_completion(ctx.provider, &request)
         .await
         .map_err(|e| format!("System behavior LLM call failed: {}", e))?;
 
@@ -410,7 +445,7 @@ pub async fn run_system_behaviors(
             crate::AiProvider::Tinfoil => "tinfoil",
             crate::AiProvider::OpenRouter => "openrouter",
         },
-        &ctx.model,
+        &classification_model,
         "system_important",
         &result,
     );
@@ -707,13 +742,20 @@ async fn run_commitment_pass2(
             },
         ];
 
-        let cs_request =
-            chat_completion::ChatCompletionRequest::new(ctx.model.clone(), cs_messages)
-                .tools(vec![cs_tool])
-                .tool_choice(chat_completion::ToolChoiceType::Required)
-                .temperature(0.0);
+        let cs_model = state
+            .ai_config
+            .model(ctx.provider, crate::ModelPurpose::Voice)
+            .to_string();
+        let cs_request = chat_completion::ChatCompletionRequest::new(cs_model.clone(), cs_messages)
+            .tools(vec![cs_tool])
+            .tool_choice(chat_completion::ToolChoiceType::Required)
+            .temperature(0.0);
 
-        let cs_result = match ctx.client.chat_completion(cs_request).await {
+        let cs_result = match state
+            .ai_config
+            .chat_completion(ctx.provider, &cs_request)
+            .await
+        {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!("Completion signal LLM call failed: {}", e);
@@ -728,7 +770,7 @@ async fn run_commitment_pass2(
                 crate::AiProvider::Tinfoil => "tinfoil",
                 crate::AiProvider::OpenRouter => "openrouter",
             },
-            &ctx.model,
+            &cs_model,
             "completion_signal_resolution",
             &cs_result,
         );
@@ -925,12 +967,22 @@ async fn run_commitment_pass2(
         },
     ];
 
-    let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages)
-        .tools(vec![tool])
-        .tool_choice(chat_completion::ToolChoiceType::Required)
-        .temperature(0.0);
+    let classification_model = state
+        .ai_config
+        .model(ctx.provider, crate::ModelPurpose::Voice)
+        .to_string();
 
-    let result = match ctx.client.chat_completion(request).await {
+    let request =
+        chat_completion::ChatCompletionRequest::new(classification_model.clone(), messages)
+            .tools(vec![tool])
+            .tool_choice(chat_completion::ToolChoiceType::Required)
+            .temperature(0.0);
+
+    let result = match state
+        .ai_config
+        .chat_completion(ctx.provider, &request)
+        .await
+    {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!("Pass 2 commitment extraction failed: {}", e);
@@ -945,7 +997,7 @@ async fn run_commitment_pass2(
             crate::AiProvider::Tinfoil => "tinfoil",
             crate::AiProvider::OpenRouter => "openrouter",
         },
-        &ctx.model,
+        &classification_model,
         "commitment_extraction",
         &result,
     );
