@@ -11,8 +11,16 @@ FAILED_CHECKS=()
 CHECK_DETAILS=""
 ALL_CHECKS=()
 
+# Determine restore type early - needed by checks below
+if [ -f /tmp/backup-manifest.json ]; then
+    RESTORE_TYPE="full_restore"
+else
+    RESTORE_TYPE="fresh_start"
+fi
+
 echo "=== Lightfriend Enclave Verification ==="
 echo "Timestamp: ${TIMESTAMP}"
+echo "Restore type: ${RESTORE_TYPE}"
 
 record_check() {
     local name="$1"
@@ -205,14 +213,23 @@ echo "  [DEBUG] files: ${TUWUNEL_FILES}, size: ${TUWUNEL_SIZE}, CURRENT: ${TUWUN
 echo "  [DEBUG] tuwunel log (last 10 lines):"
 tail -10 /var/log/supervisor/tuwunel.log 2>/dev/null || echo "    empty"
 echo "  [DEBUG] tuwunel process: $(supervisorctl status tuwunel 2>&1)"
-# Check if tuwunel created a NEW db vs using restored one
+# Check if tuwunel created a NEW db vs using restored one.
+# During a full_restore this is a FAILURE - it means the restored RocksDB data
+# was ignored and all bridge state (rooms, users, encryption keys) is lost.
+TUWUNEL_CREATED_FRESH=false
 if grep -q "Created new RocksDB database" /var/log/supervisor/tuwunel.log 2>/dev/null; then
+    TUWUNEL_CREATED_FRESH=true
     echo "  WARNING: Tuwunel created a NEW database (did NOT use restored data!)"
     echo "  [DEBUG] This means bridge connections will be lost."
 fi
 if [ "${TUWUNEL_FILES}" -gt 0 ]; then
-    echo "  OK: /var/lib/tuwunel has ${TUWUNEL_FILES} files"
-    record_check "tuwunel_data" "true"
+    if [ "${TUWUNEL_CREATED_FRESH}" = "true" ] && [ "${RESTORE_TYPE}" = "full_restore" ]; then
+        echo "  FAIL: tuwunel created fresh DB during a full restore - bridge state lost"
+        record_check "tuwunel_data" "false" "tuwunel created fresh RocksDB instead of using restored data"
+    else
+        echo "  OK: /var/lib/tuwunel has ${TUWUNEL_FILES} files"
+        record_check "tuwunel_data" "true"
+    fi
 else
     echo "  FAIL: /var/lib/tuwunel is empty"
     record_check "tuwunel_data" "false" "tuwunel data directory is empty"
@@ -245,13 +262,6 @@ for check in "${ALL_CHECKS[@]}"; do
     CHECKS_JSON="${CHECKS_JSON}${check}"
 done
 CHECKS_JSON="${CHECKS_JSON}}"
-
-# Determine restore type
-if [ -f /tmp/backup-manifest.json ]; then
-    RESTORE_TYPE="full_restore"
-else
-    RESTORE_TYPE="fresh_start"
-fi
 
 if [ ${#FAILED_CHECKS[@]} -eq 0 ]; then
     # Use python3 for safe JSON generation (json.loads handles true/false natively)

@@ -8,7 +8,7 @@ on:
 
 concurrency:
   group: deploy-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   REGISTRY: docker.io
@@ -840,6 +840,8 @@ jobs:
           OLD_INSTANCE="${{ steps.infra.outputs.old_instance }}"
           S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
           PCR0="${{ needs.build-eif.outputs.pcr0 }}"
+          PCR1="${{ needs.build-eif.outputs.pcr1 }}"
+          PCR2="${{ needs.build-eif.outputs.pcr2 }}"
 
           echo "ROLLING BACK: terminating new instance $NEW_INSTANCE"
           echo "Old instance $OLD_INSTANCE was never put in maintenance mode - still serving traffic"
@@ -853,8 +855,18 @@ jobs:
           aws ec2 terminate-instances --instance-ids "$NEW_INSTANCE" 2>/dev/null || true
 
           if [ -n "$CONTRACT_ADDRESS" ] && [ -n "$RPC_URL" ] && [ -n "$PRIVATE_KEY" ] && [ -n "$PCR0" ]; then
-            echo "Revoking failed image approval for PCR0 $PCR0"
-            cast send "$CONTRACT_ADDRESS" "revokeImage(bytes32)" "$PCR0" \
+            IMAGE_ID=$(python3 -c "
+          import hashlib, struct
+          bitflags = struct.pack('>I', (1 << 0) | (1 << 1) | (1 << 2) | (1 << 16))
+          pcr0 = bytes.fromhex('${PCR0#0x}')
+          pcr1 = bytes.fromhex('${PCR1#0x}')
+          pcr2 = bytes.fromhex('${PCR2#0x}')
+          pcr16 = b'\x00' * 48
+          image_id = hashlib.sha256(bitflags + pcr0 + pcr1 + pcr2 + pcr16).hexdigest()
+          print('0x' + image_id)
+          ")
+            echo "Revoking failed image approval for image_id $IMAGE_ID"
+            cast send "$CONTRACT_ADDRESS" "revokeImage(bytes32)" "$IMAGE_ID" \
               --rpc-url "$RPC_URL" \
               --private-key "$PRIVATE_KEY" 2>/dev/null || true
           fi
