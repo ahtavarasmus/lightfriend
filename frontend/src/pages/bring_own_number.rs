@@ -748,7 +748,7 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             move |_| {
                 if country.is_none() && selected_country.is_empty() {
                     wasm_bindgen_futures::spawn_local(async move {
-                        if let Ok(response) = Request::get("https://ipapi.co/json/").send().await {
+                        if let Ok(response) = Request::get(&format!("{}/api/geo/country", crate::config::get_backend_url())).send().await {
                             if let Ok(json) = response.json::<serde_json::Value>().await {
                                 if let Some(code) =
                                     json.get("country_code").and_then(|c| c.as_str())

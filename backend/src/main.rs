@@ -1,7 +1,8 @@
 use axum::body::{to_bytes, Body};
 use axum::extract::OriginalUri;
-use axum::http::{HeaderValue, Request, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::Json as AxumJson;
 use axum::{
     extract::DefaultBodyLimit,
     middleware,
@@ -38,6 +39,61 @@ use handlers::{
 
 async fn health_check() -> &'static str {
     "OK"
+}
+
+async fn geo_country(headers: HeaderMap) -> AxumJson<serde_json::Value> {
+    let code = headers
+        .get("CF-IPCountry")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("US");
+    let name = match code {
+        "US" => "United States",
+        "CA" => "Canada",
+        "FI" => "Finland",
+        "GB" => "United Kingdom",
+        "AU" => "Australia",
+        "NL" => "Netherlands",
+        "DE" => "Germany",
+        "FR" => "France",
+        "ES" => "Spain",
+        "IT" => "Italy",
+        "PT" => "Portugal",
+        "BE" => "Belgium",
+        "AT" => "Austria",
+        "CH" => "Switzerland",
+        "PL" => "Poland",
+        "CZ" => "Czech Republic",
+        "SE" => "Sweden",
+        "DK" => "Denmark",
+        "NO" => "Norway",
+        "IE" => "Ireland",
+        "NZ" => "New Zealand",
+        "GR" => "Greece",
+        "HU" => "Hungary",
+        "RO" => "Romania",
+        "SK" => "Slovakia",
+        "BG" => "Bulgaria",
+        "HR" => "Croatia",
+        "SI" => "Slovenia",
+        "LT" => "Lithuania",
+        "LV" => "Latvia",
+        "EE" => "Estonia",
+        "LU" => "Luxembourg",
+        "MT" => "Malta",
+        "CY" => "Cyprus",
+        "IS" => "Iceland",
+        "JP" => "Japan",
+        "KR" => "South Korea",
+        "SG" => "Singapore",
+        "HK" => "Hong Kong",
+        "TW" => "Taiwan",
+        "IL" => "Israel",
+        other => other,
+    };
+    AxumJson(serde_json::json!({
+        "country_code": code,
+        "country_name": name
+    }))
 }
 
 const TELEGRAM_PUBLIC_BASE_URL: &str = "http://127.0.0.1:29317";
@@ -552,6 +608,7 @@ async fn main() {
     // Public routes that don't need authentication. there's ratelimiting though
     let public_routes = Router::new()
         .route("/api/health", get(health_check))
+        .route("/api/geo/country", get(geo_country))
         .route(
             "/.well-known/lightfriend/attestation",
             get(attestation_handlers::attestation_metadata),

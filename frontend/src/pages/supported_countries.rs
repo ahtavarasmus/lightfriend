@@ -170,7 +170,7 @@ pub fn supported_countries() -> Html {
                     opts.set_method("GET");
 
                     let request =
-                        Request::new_with_str_and_init("https://ipapi.co/json/", &opts).unwrap();
+                        Request::new_with_str_and_init(&format!("{}/api/geo/country", crate::config::get_backend_url()), &opts).unwrap();
 
                     let window = window().unwrap();
                     if let Ok(resp_value) =

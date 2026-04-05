@@ -396,7 +396,7 @@ pub fn pricing_wrapper() -> Html {
                     let mut ip_code = "Other".to_string();
                     let mut ip_name = "your country".to_string();
 
-                    if let Ok(resp) = Request::get("https://ipapi.co/json/").send().await {
+                    if let Ok(resp) = Request::get(&format!("{}/api/geo/country", crate::config::get_backend_url())).send().await {
                         if let Ok(json) = resp.json::<Value>().await {
                             if let Some(code) = json.get("country_code").and_then(|v| v.as_str()) {
                                 ip_code = code.to_uppercase();
