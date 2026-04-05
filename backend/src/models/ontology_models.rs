@@ -249,21 +249,52 @@ pub struct NewOntRule {
     pub flow_config: Option<String>,
 }
 
+// -- Bayesian signal primitives --
+
+pub struct BayesianEstimate {
+    pub value: f64,      // posterior estimate in original units (e.g. seconds)
+    pub confidence: f64, // 0.0 to 1.0
+    pub n: i64,          // number of observations
+}
+
+pub struct UserBaseline {
+    pub response_time_secs: f64, // geometric mean across all contacts (90-day window)
+    pub total_replies: i64,      // how many reply observations the baseline is built from
+}
+
+/// Geometric mean of positive values. Returns None if empty.
+pub fn geometric_mean(values: &[f64]) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    let log_sum: f64 = values.iter().map(|v| v.ln()).sum();
+    Some((log_sum / values.len() as f64).exp())
+}
+
+/// Bayesian estimate blended in log-space for log-normal data (response times).
+/// Prior and observed are in original units (seconds). Blending in ln-space
+/// preserves outlier resistance from the geometric mean.
+pub fn bayesian_log_mean(observed_geomean: f64, n: i64, prior: f64, k: f64) -> BayesianEstimate {
+    let n_f = n as f64;
+    let log_est = (k * prior.ln() + n_f * observed_geomean.ln()) / (k + n_f);
+    BayesianEstimate {
+        value: log_est.exp(),
+        confidence: n_f / (n_f + k),
+        n,
+    }
+}
+
 // -- Sender signals for importance evaluation --
 
 pub struct SenderSignals {
     pub message_count_30d: i64,
     pub last_contact_ago_secs: Option<i64>,
-    pub user_reply_rate: f32,
-    pub avg_response_secs: Option<i64>,
+    pub response_time: BayesianEstimate, // Bayesian, blended with user baseline in log-space
+    pub baseline_response_time_secs: f64, // user's baseline for computing delta
     pub temporal_anomaly: Option<String>,
-    // Relationship depth signals
-    pub user_message_count_30d: i64,
-    pub bidirectional_ratio: f32, // user_msgs / sender_msgs, >1 means user engages more
-    pub platform_count: i32,      // how many platforms this person contacts user on
-    pub recency_trend: Option<String>, // "increasing", "decreasing", or None
+    pub platform_count: i32,
     pub is_first_contact: bool,
-    pub has_custom_settings: bool, // user configured notification preferences for this person
+    pub has_custom_settings: bool,
 }
 
 impl SenderSignals {
@@ -271,13 +302,14 @@ impl SenderSignals {
         Self {
             message_count_30d: 0,
             last_contact_ago_secs: None,
-            user_reply_rate: 0.0,
-            avg_response_secs: None,
+            response_time: BayesianEstimate {
+                value: 0.0,
+                confidence: 0.0,
+                n: 0,
+            },
+            baseline_response_time_secs: 0.0,
             temporal_anomaly: None,
-            user_message_count_30d: 0,
-            bidirectional_ratio: 0.0,
             platform_count: 0,
-            recency_trend: None,
             is_first_contact: true,
             has_custom_settings: false,
         }
@@ -293,19 +325,11 @@ impl SenderSignals {
 
         let mut parts = Vec::new();
 
-        // Frequency description
-        let freq = if self.message_count_30d >= 100 {
-            "very frequently (multiple times per day)".to_string()
-        } else if self.message_count_30d >= 30 {
-            "about once per day".to_string()
-        } else if self.message_count_30d >= 8 {
-            format!("about {} times per week", self.message_count_30d / 4)
-        } else if self.message_count_30d >= 2 {
-            format!("about {} times per month", self.message_count_30d)
-        } else {
-            "rarely (once in the last 30 days)".to_string()
-        };
-        parts.push(format!("{} messages you {}.", sender_name, freq));
+        // Message count (raw observation, not bucketed)
+        parts.push(format!(
+            "{} has sent {} messages in the last 30 days.",
+            sender_name, self.message_count_30d
+        ));
 
         // Last contact
         if let Some(ago) = self.last_contact_ago_secs {
@@ -319,53 +343,28 @@ impl SenderSignals {
             parts.push(format!("Their previous message was {}.", desc));
         }
 
-        // Reply pattern
-        if self.message_count_30d >= 3 {
-            let pct = (self.user_reply_rate * 100.0) as i32;
-            if pct >= 80 {
-                parts.push(format!("You reply to {}% of their messages.", pct));
-            } else if pct >= 30 {
-                parts.push(format!("You reply to about {}% of their messages.", pct));
+        // Response time relative to baseline (confidence-gated)
+        if self.response_time.confidence >= 0.2 && self.baseline_response_time_secs > 0.0 {
+            let ratio = self.baseline_response_time_secs / self.response_time.value;
+            let qualifier = if self.response_time.confidence < 0.5 {
+                "Early pattern (limited data): "
             } else {
-                parts.push("You rarely reply to their messages.".to_string());
+                ""
+            };
+
+            if ratio >= 1.5 {
+                parts.push(format!(
+                    "{}You respond to this person ~{:.1}x faster than your average contact.",
+                    qualifier, ratio
+                ));
+            } else if ratio <= 0.67 {
+                let inverse = 1.0 / ratio;
+                parts.push(format!(
+                    "{}You respond to this person ~{:.1}x slower than your average contact.",
+                    qualifier, inverse
+                ));
             }
-
-            if let Some(avg) = self.avg_response_secs {
-                let resp_desc = if avg < 120 {
-                    "within a couple minutes".to_string()
-                } else if avg < 900 {
-                    format!("within about {} minutes", avg / 60)
-                } else if avg < 3600 {
-                    "within an hour".to_string()
-                } else {
-                    format!("within about {} hours", avg / 3600)
-                };
-                parts.push(format!("You typically respond {}.", resp_desc));
-            }
-        }
-
-        // Bidirectional engagement
-        if self.message_count_30d >= 3 && self.user_message_count_30d > 0 {
-            if self.bidirectional_ratio >= 1.5 {
-                parts.push("You engage with this person more than they message you.".to_string());
-            } else if self.bidirectional_ratio < 0.2 && self.message_count_30d >= 5 {
-                parts.push("You rarely engage with this person's messages.".to_string());
-            }
-        }
-
-        // Multi-platform presence
-        if self.platform_count >= 3 {
-            parts.push(format!(
-                "This person contacts you on {} different platforms.",
-                self.platform_count
-            ));
-        } else if self.platform_count == 2 {
-            parts.push("This person contacts you on 2 platforms.".to_string());
-        }
-
-        // Recency trend
-        if let Some(ref trend) = self.recency_trend {
-            parts.push(trend.clone());
+            // ratio between 0.67-1.5: roughly average, don't surface
         }
 
         // First contact
@@ -381,6 +380,14 @@ impl SenderSignals {
             parts.push(
                 "You have configured custom notification settings for this person.".to_string(),
             );
+        }
+
+        // Multi-platform presence
+        if self.platform_count >= 2 {
+            parts.push(format!(
+                "This person contacts you on {} platforms.",
+                self.platform_count
+            ));
         }
 
         // Temporal anomaly

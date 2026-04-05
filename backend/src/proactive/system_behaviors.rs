@@ -72,7 +72,12 @@ pub async fn run_system_behaviors(
         .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).unwrap());
     let tz_offset_secs = tz_offset.local_minus_utc();
 
-    // Compute sender signals from message history (includes temporal anomaly detection)
+    // Compute user baseline response time (90-day window, geometric mean)
+    let baseline = state
+        .ontology_repository
+        .compute_user_baseline(user_id, now);
+
+    // Compute sender signals with Bayesian response time blended against baseline
     let signals = state.ontology_repository.compute_sender_signals(
         user_id,
         room_id,
@@ -80,6 +85,7 @@ pub async fn run_system_behaviors(
         now,
         tz_offset_secs,
         person_id,
+        &baseline,
     );
     let sender_context = signals.format_for_prompt(sender_name);
 
@@ -235,7 +241,9 @@ pub async fn run_system_behaviors(
         - none: spam, automated messages, irrelevant\n\
         \n\
         Set should_notify=true only for critical or high urgency.\n\
-        Use the signal report to calibrate - sender relationship, timing patterns, and content signals all matter.\n\
+        Use the signal report to calibrate - sender relationship, timing patterns, and content signals all matter. \
+        When behavioral signals show limited data or are absent, rely primarily on message content and timing \
+        to assess urgency. Early patterns are weak hints, not established facts.\n\
         \n\
         If should_notify=false, set notification_message to empty string.\n\
         If should_notify=true, write a concise notification (max 480 chars, second person).{}",
