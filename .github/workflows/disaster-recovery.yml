@@ -459,13 +459,13 @@ jobs:
             R2_ACCESS=$(echo "$ENV_FILE" | grep R2_ACCESS_KEY_ID | cut -d= -f2)
             R2_SECRET=$(echo "$ENV_FILE" | grep R2_SECRET_ACCESS_KEY | cut -d= -f2)
 
-            R2_KEY=$(AWS_ACCESS_KEY_ID="$R2_ACCESS" AWS_SECRET_ACCESS_KEY="$R2_SECRET" \
-              aws s3 ls "s3://$R2_BUCKET/" --recursive --endpoint-url "$R2_ENDPOINT" 2>/dev/null | \
+            R2_KEY=$(AWS_ACCESS_KEY_ID="$R2_ACCESS" AWS_SECRET_ACCESS_KEY="$R2_SECRET" AWS_SESSION_TOKEN="" \
+              aws s3 ls "s3://$R2_BUCKET/" --recursive --endpoint-url "$R2_ENDPOINT" 2>&1 | \
               grep '\.tar\.gz\.enc$' | sort -k1,2 | tail -1 | awk '{print $4}')
             [ -n "$R2_KEY" ] || { echo "FATAL: No backups in R2"; exit 1; }
 
             TMP=$(mktemp /tmp/r2-backup.XXXXXX.enc)
-            AWS_ACCESS_KEY_ID="$R2_ACCESS" AWS_SECRET_ACCESS_KEY="$R2_SECRET" \
+            AWS_ACCESS_KEY_ID="$R2_ACCESS" AWS_SECRET_ACCESS_KEY="$R2_SECRET" AWS_SESSION_TOKEN="" \
               aws s3 cp "s3://$R2_BUCKET/$R2_KEY" "$TMP" --endpoint-url "$R2_ENDPOINT"
             BACKUP_KEY="backups/recovery/$(basename $R2_KEY)"
             aws s3 cp "$TMP" "s3://$S3_BUCKET/$BACKUP_KEY"
