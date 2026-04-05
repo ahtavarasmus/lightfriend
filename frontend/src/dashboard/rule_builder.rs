@@ -2616,7 +2616,6 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                 <div class="rb-field-label">{"Frequency"}</div>
                                                 <div class="rb-toggle-group">
                                                     {for [
-                                                        (RecurringFreq::Hourly, "Hourly"),
                                                         (RecurringFreq::Daily, "Daily"),
                                                         (RecurringFreq::Weekdays, "Weekdays"),
                                                         (RecurringFreq::Weekly, "Weekly"),
