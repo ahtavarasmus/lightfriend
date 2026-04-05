@@ -99,6 +99,46 @@ fn active_hour_range(hour_buckets: &[u32; 24], total: u32) -> Option<(usize, usi
     Some((active[0], active[active.len() - 1]))
 }
 
+/// Compute response time deltas from a set of messages.
+/// For each non-"You" message, finds the earliest "You" reply in the same room
+/// within 24h (86400s). Returns the deltas in seconds as f64.
+fn compute_response_deltas(messages: &[OntMessage]) -> Vec<f64> {
+    use std::collections::HashMap;
+
+    // Group messages by room_id
+    let mut by_room: HashMap<&str, Vec<&OntMessage>> = HashMap::new();
+    for msg in messages {
+        by_room.entry(&msg.room_id).or_default().push(msg);
+    }
+
+    let mut deltas = Vec::new();
+
+    for (_room, room_msgs) in &by_room {
+        let received: Vec<&&OntMessage> = room_msgs
+            .iter()
+            .filter(|m| m.sender_name != "You")
+            .collect();
+        let sent: Vec<&&OntMessage> = room_msgs
+            .iter()
+            .filter(|m| m.sender_name == "You")
+            .collect();
+
+        for recv_msg in &received {
+            // Find earliest "You" message after this received message within 24h
+            if let Some(reply) = sent.iter().find(|u| {
+                u.created_at > recv_msg.created_at && u.created_at <= recv_msg.created_at + 86400
+            }) {
+                let delta = (reply.created_at - recv_msg.created_at) as f64;
+                if delta > 0.0 {
+                    deltas.push(delta);
+                }
+            }
+        }
+    }
+
+    deltas
+}
+
 pub struct OntologyRepository {
     pub pool: PgDbPool,
 }
@@ -1095,6 +1135,55 @@ impl OntologyRepository {
 
     /// Compute sender signals from message history for importance evaluation.
     /// Returns empty signals on any error - never fails.
+    /// Compute user baseline response time across ALL contacts (90-day window).
+    /// Uses geometric mean to resist outliers. Falls back to neutral default
+    /// (1200s / 20 min) if fewer than 10 reply observations.
+    pub fn compute_user_baseline(
+        &self,
+        user_id: i32,
+        now: i32,
+    ) -> crate::models::ontology_models::UserBaseline {
+        use crate::models::ontology_models::{geometric_mean, UserBaseline};
+        use crate::pg_schema::ont_messages;
+
+        let neutral = UserBaseline {
+            response_time_secs: 1200.0,
+            total_replies: 0,
+        };
+
+        let mut conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return neutral,
+        };
+
+        let ninety_days_ago = now - 90 * 86400;
+
+        let all_messages: Vec<OntMessage> = ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::created_at.ge(ninety_days_ago))
+            .select(OntMessage::as_select())
+            .load(&mut conn)
+            .unwrap_or_default();
+
+        if all_messages.is_empty() {
+            return neutral;
+        }
+
+        let deltas = compute_response_deltas(&all_messages);
+
+        if deltas.len() < 10 {
+            return neutral;
+        }
+
+        match geometric_mean(&deltas) {
+            Some(geomean) => UserBaseline {
+                response_time_secs: geomean,
+                total_replies: deltas.len() as i64,
+            },
+            None => neutral,
+        }
+    }
+
     pub fn compute_sender_signals(
         &self,
         user_id: i32,
@@ -1103,8 +1192,11 @@ impl OntologyRepository {
         now: i32,
         tz_offset_secs: i32,
         person_id: Option<i32>,
+        baseline: &crate::models::ontology_models::UserBaseline,
     ) -> crate::models::ontology_models::SenderSignals {
-        use crate::models::ontology_models::SenderSignals;
+        use crate::models::ontology_models::{
+            bayesian_log_mean, geometric_mean, BayesianEstimate, SenderSignals,
+        };
 
         let messages = match self.get_messages_for_room(user_id, room_id, 500) {
             Ok(msgs) => msgs,
@@ -1119,7 +1211,6 @@ impl OntologyRepository {
             .filter(|m| m.created_at >= thirty_days_ago)
             .collect();
 
-        // Separate sender messages and user replies
         let sender_msgs: Vec<_> = recent
             .iter()
             .filter(|m| m.sender_name == sender_name)
@@ -1131,66 +1222,42 @@ impl OntologyRepository {
             return SenderSignals::empty();
         }
 
-        let user_message_count_30d = user_msgs.len() as i64;
-
-        // Last contact: second-most-recent sender message (since newest is the current one)
-        // Messages are DESC so index 1 is second-most-recent
+        // Last contact: second-most-recent sender message (newest is current)
         let last_contact_ago_secs = sender_msgs.get(1).map(|m| (now - m.created_at) as i64);
 
-        // Reply analysis: for each sender message, check if user replied within 2 hours
-        let mut replied_count = 0i64;
-        let mut total_response_secs = 0i64;
-
+        // Response time: find user replies within 24h, compute geometric mean,
+        // then blend with user baseline via Bayesian log-mean (K=10)
+        let mut response_deltas: Vec<f64> = Vec::new();
         for sender_msg in &sender_msgs {
-            // Find earliest "You" message after this sender message within 7200s
             if let Some(reply) = user_msgs.iter().find(|u| {
-                u.created_at > sender_msg.created_at && u.created_at <= sender_msg.created_at + 7200
+                u.created_at > sender_msg.created_at
+                    && u.created_at <= sender_msg.created_at + 86400
             }) {
-                replied_count += 1;
-                total_response_secs += (reply.created_at - sender_msg.created_at) as i64;
+                response_deltas.push((reply.created_at - sender_msg.created_at) as f64);
             }
         }
 
-        let user_reply_rate = if message_count_30d > 0 {
-            replied_count as f32 / message_count_30d as f32
-        } else {
-            0.0
-        };
-
-        let avg_response_secs = if replied_count > 0 {
-            Some(total_response_secs / replied_count)
-        } else {
-            None
-        };
-
-        // Bidirectional ratio: how much does the user engage vs receive
-        let bidirectional_ratio = if message_count_30d > 0 {
-            user_message_count_30d as f32 / message_count_30d as f32
-        } else {
-            0.0
-        };
-
-        // Recency trend: compare last 7 days to 30-day average
-        let seven_days_ago = now - 7 * 86400;
-        let msgs_7d = sender_msgs
-            .iter()
-            .filter(|m| m.created_at >= seven_days_ago)
-            .count() as f32;
-        let expected_7d = (message_count_30d as f32 / 30.0) * 7.0;
-        let recency_trend = if message_count_30d >= 5 && expected_7d > 0.5 {
-            let ratio = msgs_7d / expected_7d;
-            if ratio >= 2.0 {
-                Some("Contact frequency from this person has increased significantly in the last week.".to_string())
-            } else if ratio <= 0.3 && msgs_7d < 1.0 {
-                Some("This person has been unusually quiet in the last week compared to their normal pattern.".to_string())
-            } else {
-                None
+        let n_replies = response_deltas.len() as i64;
+        let response_time = if n_replies > 0 && baseline.response_time_secs > 0.0 {
+            match geometric_mean(&response_deltas) {
+                Some(sender_geomean) => {
+                    bayesian_log_mean(sender_geomean, n_replies, baseline.response_time_secs, 10.0)
+                }
+                None => BayesianEstimate {
+                    value: baseline.response_time_secs,
+                    confidence: 0.0,
+                    n: 0,
+                },
             }
         } else {
-            None
+            BayesianEstimate {
+                value: baseline.response_time_secs,
+                confidence: 0.0,
+                n: 0,
+            }
         };
 
-        // Multi-platform count: how many platforms does this person use to reach the user
+        // Multi-platform count
         let platform_count = if let Some(pid) = person_id {
             self.get_person_platform_count(user_id, pid).unwrap_or(1)
         } else {
@@ -1200,14 +1267,14 @@ impl OntologyRepository {
         // First contact detection
         let is_first_contact = message_count_30d <= 1 && last_contact_ago_secs.is_none();
 
-        // Check if user has custom notification settings for this person
+        // Custom notification settings
         let has_custom_settings = if let Some(pid) = person_id {
             self.person_has_custom_settings(user_id, pid)
         } else {
             false
         };
 
-        // Temporal anomaly: Laplace-smoothed surprisal with confidence gating.
+        // Temporal anomaly: Laplace-smoothed surprisal with confidence gating
         let temporal_anomaly = {
             let timestamps: Vec<i32> = sender_msgs.iter().map(|m| m.created_at).collect();
             let hour_buckets = bucket_by_hour(&timestamps, tz_offset_secs);
@@ -1250,13 +1317,10 @@ impl OntologyRepository {
         SenderSignals {
             message_count_30d,
             last_contact_ago_secs,
-            user_reply_rate,
-            avg_response_secs,
+            response_time,
+            baseline_response_time_secs: baseline.response_time_secs,
             temporal_anomaly,
-            user_message_count_30d,
-            bidirectional_ratio,
             platform_count,
-            recency_trend,
             is_first_contact,
             has_custom_settings,
         }
