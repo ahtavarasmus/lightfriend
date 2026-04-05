@@ -281,14 +281,11 @@ struct TwilioStart {
     stream_sid: String,
     call_sid: String,
     custom_parameters: Option<serde_json::Value>,
-    tracks: Option<Vec<String>>,
-    media_format: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize, Debug)]
 struct TwilioMedia {
     payload: String,
-    track: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -334,7 +331,6 @@ struct CallSession {
     call_start: Instant,
     mark_counter: u32,
     is_outbound: bool,
-    media_count: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -381,13 +377,11 @@ pub async fn voice_incoming(State(state): State<Arc<AppState>>, body: String) ->
     let twiml = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Start>
-    <Stream url="{}/api/voice/ws" track="both_tracks">
+  <Connect>
+    <Stream url="{}/api/voice/ws">
       <Parameter name="user_id" value="{}" />
     </Stream>
-  </Start>
-  <Say>Please speak now, I am listening for audio debug.</Say>
-  <Pause length="30"/>
+  </Connect>
 </Response>"#,
         ws_url, user.id
     );
@@ -798,11 +792,9 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
             "start" => {
                 if let Some(start) = twilio_msg.start {
                     tracing::info!(
-                        "Stream started: streamSid={}, callSid={}, tracks={:?}, mediaFormat={:?}",
+                        "Stream started: streamSid={}, callSid={}",
                         start.stream_sid,
-                        start.call_sid,
-                        start.tracks,
-                        start.media_format
+                        start.call_sid
                     );
 
                     let user_id = start
@@ -914,47 +906,12 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
                     // Energy-based VAD
                     let rms = compute_rms(&pcm_16k);
 
-                    // Log audio debug info
-                    sess.media_count += 1;
-                    if sess.media_count == 1 {
-                        // Log first media event in detail
-                        let raw_hex: String = mulaw_bytes
-                            .iter()
-                            .take(20)
-                            .map(|b| format!("{:02x}", b))
-                            .collect::<Vec<_>>()
-                            .join(" ");
-                        tracing::info!(
-                            "FIRST media: track={:?}, mulaw_len={}, raw_hex=[{}], pcm8k_range=[{}, {}], rms={:.0}",
-                            media.track,
-                            mulaw_bytes.len(),
-                            raw_hex,
-                            pcm_8k.iter().min().unwrap_or(&0),
-                            pcm_8k.iter().max().unwrap_or(&0),
-                            rms
-                        );
-                    } else if sess.media_count % 25 == 0 {
-                        let non_silent = mulaw_bytes
-                            .iter()
-                            .filter(|&&b| b != 0xFE && b != 0xFF && b != 0x7F && b != 0x7E)
-                            .count();
-                        tracing::info!(
-                            "[media #{}] track={:?}, RMS={:.0}, non_silent_bytes={}/{}, state={:?}",
-                            sess.media_count,
-                            media.track,
-                            rms,
-                            non_silent,
-                            mulaw_bytes.len(),
-                            sess.state
-                        );
-                    }
-
                     if rms > SPEECH_RMS_THRESHOLD {
                         if !sess.is_speaking {
                             sess.is_speaking = true;
                             sess.speech_start = Some(Instant::now());
                             sess.silence_start = None;
-                            tracing::info!(">>> SPEECH DETECTED (RMS={:.0})", rms);
+                            tracing::debug!("Speech detected (RMS={:.0})", rms);
                         }
                         sess.speech_audio.extend_from_slice(&pcm_16k);
                         sess.silence_start = None;
@@ -1059,11 +1016,7 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
             }
 
             other => {
-                tracing::info!(
-                    "Twilio event: {} (raw: {})",
-                    other,
-                    &text[..text.len().min(200)]
-                );
+                tracing::debug!("Unhandled Twilio event: {}", other);
             }
         }
     }
@@ -1154,7 +1107,6 @@ async fn init_session(
         call_start: Instant::now(),
         mark_counter: 0,
         is_outbound,
-        media_count: 0,
     })
 }
 
