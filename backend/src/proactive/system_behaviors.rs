@@ -1261,12 +1261,21 @@ pub async fn check_outgoing_event_resolution(
         },
     ];
 
-    let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages)
+    let fast_model = state
+        .ai_config
+        .model(ctx.provider, crate::ModelPurpose::Voice)
+        .to_string();
+
+    let request = chat_completion::ChatCompletionRequest::new(fast_model.clone(), messages)
         .tools(vec![tool])
         .tool_choice(chat_completion::ToolChoiceType::Required)
         .temperature(0.0);
 
-    let result = match ctx.client.chat_completion(request).await {
+    let result = match state
+        .ai_config
+        .chat_completion(ctx.provider, &request)
+        .await
+    {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!("Outgoing event resolution LLM call failed: {}", e);
@@ -1281,7 +1290,7 @@ pub async fn check_outgoing_event_resolution(
             crate::AiProvider::Tinfoil => "tinfoil",
             crate::AiProvider::OpenRouter => "openrouter",
         },
-        &ctx.model,
+        &fast_model,
         "outgoing_event_resolution",
         &result,
     );
