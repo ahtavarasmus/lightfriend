@@ -1473,8 +1473,8 @@ pub async fn recover_users_from_external(
     // Step 4: Send password reset links to all created users
     let all_users = state.user_core.get_all_users().unwrap_or_default();
     let mut reset_sent = 0;
-    let frontend_url = std::env::var("FRONTEND_URL")
-        .unwrap_or_else(|_| "https://enclave.lightfriend.ai".to_string());
+    let frontend_url =
+        std::env::var("FRONTEND_URL").unwrap_or_else(|_| "https://lightfriend.ai".to_string());
 
     for user in &all_users {
         let token: String = rand::thread_rng()

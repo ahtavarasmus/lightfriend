@@ -578,8 +578,8 @@ rm -f /tmp/diag-proxy-test
 
 echo ""
 echo "--- 8. Public Endpoint ---"
-HTTP_CODE=$(curl -sf --max-time 10 -o /dev/null -w '%%{http_code}' https://enclave.lightfriend.ai 2>/dev/null || echo "timeout")
-echo "  https://enclave.lightfriend.ai -> HTTP $HTTP_CODE"
+HTTP_CODE=$(curl -sf --max-time 10 -o /dev/null -w '%%{http_code}' https://lightfriend.ai 2>/dev/null || echo "timeout")
+echo "  https://lightfriend.ai -> HTTP $HTTP_CODE"
 
 echo ""
 echo "--- 9. Enclave Internal Diagnostics (VSOCK 9008) ---"

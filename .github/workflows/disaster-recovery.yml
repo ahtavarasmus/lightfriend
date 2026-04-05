@@ -600,7 +600,7 @@ jobs:
           fi
 
           DOMAIN=$(aws s3 cp "s3://$S3_BUCKET/config/.env" - 2>/dev/null | grep "^DOMAIN=" | cut -d= -f2-)
-          DOMAIN="${DOMAIN:-enclave.lightfriend.ai}"
+          DOMAIN="${DOMAIN:-lightfriend.ai}"
 
           echo "Triggering nuclear recovery on $DOMAIN..."
           sleep 10
