@@ -266,17 +266,33 @@ pub async fn evaluate_and_execute(
     trigger_snapshot: Option<&serde_json::Value>,
 ) {
     // Check expiry FIRST (before marking as triggered)
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i32;
     if let Some(expires) = rule.expires_at {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i32;
         if now > expires {
             let _ = state
                 .ontology_repository
                 .update_rule_status(rule.id, "expired");
             return;
         }
+    }
+
+    // Check daily token budget per user (166K tokens/day ~ 5M/month)
+    let day_start = (now / 86400) * 86400;
+    let used_today = state
+        .llm_usage_repository
+        .get_user_tokens_since(rule.user_id, day_start)
+        .unwrap_or(0);
+    if used_today >= 166_000 {
+        tracing::warn!(
+            "User {} exceeded daily token budget ({}/166000), skipping rule {}",
+            rule.user_id,
+            used_today,
+            rule.id
+        );
+        return;
     }
 
     // Mark as triggered (only if not expired)
@@ -806,14 +822,20 @@ pub(crate) async fn call_llm_condition(
         },
     };
 
-    let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages)
+    // Use fast non-reasoning model for rule evaluation (no need for kimi-k2-5 reasoning)
+    let eval_model = state
+        .ai_config
+        .model(ctx.provider, crate::ModelPurpose::Voice)
+        .to_string();
+
+    let request = chat_completion::ChatCompletionRequest::new(eval_model.clone(), messages)
         .tools(vec![tool])
         .tool_choice(chat_completion::ToolChoiceType::Required)
         .temperature(0.0);
 
-    let result = ctx
-        .client
-        .chat_completion(request)
+    let result = state
+        .ai_config
+        .chat_completion(ctx.provider, &request)
         .await
         .map_err(|e| format!("LLM call failed: {}", e))?;
 
@@ -824,7 +846,7 @@ pub(crate) async fn call_llm_condition(
             crate::AiProvider::Tinfoil => "tinfoil",
             crate::AiProvider::OpenRouter => "openrouter",
         },
-        &ctx.model,
+        &eval_model,
         "rule_eval",
         &result,
     );
