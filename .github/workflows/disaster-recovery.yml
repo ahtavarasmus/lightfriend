@@ -349,7 +349,7 @@ jobs:
           S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
           NEW_INSTANCE="${{ steps.launch.outputs.new_instance }}"
           PRE_WARM_OK=false
-          for i in $(seq 1 120); do
+          for i in $(seq 1 240); do
             RESULT=$(aws s3 cp "s3://$S3_BUCKET/deploy/pre-warm-$NEW_INSTANCE.json" - 2>/dev/null || echo "")
             if [ -n "$RESULT" ]; then
               STATUS=$(echo "$RESULT" | jq -r '.status // "UNKNOWN"')
@@ -358,14 +358,16 @@ jobs:
                 PRE_WARM_OK=true
                 break
               else
-                echo "FATAL: Pre-warm failed: $STATUS"; exit 1
+                echo "FATAL: Pre-warm failed: $STATUS"
+                echo "$RESULT" | jq .
+                exit 1
               fi
             fi
-            [ $((i % 12)) -eq 0 ] && echo "Waiting for pre-warm ($i/120)..."
+            [ $((i % 12)) -eq 0 ] && echo "Waiting for pre-warm ($i/240)..."
             sleep 10
           done
           if [ "$PRE_WARM_OK" != "true" ]; then
-            echo "FATAL: Pre-warm timed out after 20 minutes"; exit 1
+            echo "FATAL: Pre-warm timed out after 40 minutes"; exit 1
           fi
 
       - name: Approve image for Marlin KMS
