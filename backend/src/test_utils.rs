@@ -655,8 +655,6 @@ pub mod mock_user_core {
         pub user_info: Mutex<HashMap<i32, PgUserInfo>>,
         pub byot_users: Mutex<Vec<i32>>,
         pub phone_service_active: Mutex<HashMap<i32, bool>>,
-        pub quiet_mode: Mutex<HashMap<i32, Option<i32>>>,
-        pub quiet_rules: Mutex<HashMap<i32, Vec<String>>>,
         pub llm_provider: Mutex<HashMap<i32, String>>,
 
         // Error injection
@@ -681,8 +679,6 @@ pub mod mock_user_core {
                 user_info: Mutex::new(HashMap::new()),
                 byot_users: Mutex::new(Vec::new()),
                 phone_service_active: Mutex::new(HashMap::new()),
-                quiet_mode: Mutex::new(HashMap::new()),
-                quiet_rules: Mutex::new(HashMap::new()),
                 llm_provider: Mutex::new(HashMap::new()),
                 find_by_id_error: Mutex::new(None),
                 find_by_phone_error: Mutex::new(None),
@@ -1222,49 +1218,6 @@ pub mod mock_user_core {
 
         fn set_magic_token(&self, _user_id: i32, _token: &str) -> Result<(), DieselError> {
             Ok(())
-        }
-
-        fn set_quiet_mode(&self, user_id: i32, until: Option<i32>) -> Result<(), DieselError> {
-            self.quiet_rules.lock().unwrap().remove(&user_id);
-            self.quiet_mode.lock().unwrap().insert(user_id, until);
-            Ok(())
-        }
-
-        fn get_quiet_mode(&self, user_id: i32) -> Result<Option<i32>, DieselError> {
-            Ok(self
-                .quiet_mode
-                .lock()
-                .unwrap()
-                .get(&user_id)
-                .copied()
-                .flatten())
-        }
-
-        fn add_quiet_rule(
-            &self,
-            _user_id: i32,
-            _until: i32,
-            _rule_type: &str,
-            _platform: Option<&str>,
-            _sender: Option<&str>,
-            _topic: Option<&str>,
-            _description: &str,
-        ) -> Result<i32, DieselError> {
-            Ok(0)
-        }
-
-        fn get_quiet_rules(&self, _user_id: i32) -> Result<Vec<String>, DieselError> {
-            Ok(Vec::new())
-        }
-
-        fn check_quiet_with_context(
-            &self,
-            _user_id: i32,
-            _platform: Option<&str>,
-            _sender: Option<&str>,
-            _content: Option<&str>,
-        ) -> Result<bool, DieselError> {
-            Ok(false)
         }
     }
 }

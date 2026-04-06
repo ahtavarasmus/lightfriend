@@ -717,7 +717,6 @@ struct DashboardSummaryResponse {
     #[serde(default)]
     events: Vec<EventResponse>,
     watched_contacts: Vec<WatchedContactResponse>,
-    quiet_mode: QuietModeResponse,
     sunrise_hour: Option<f32>,
     sunset_hour: Option<f32>,
 }
@@ -758,15 +757,6 @@ struct ActionItemResponse {
     preview: String,
     timestamp: i32,
     person_id: Option<i32>,
-}
-
-#[derive(Clone, PartialEq, Deserialize, Default)]
-struct QuietModeResponse {
-    is_quiet: bool,
-    until: Option<i32>,
-    until_display: Option<String>,
-    #[serde(default)]
-    rule_count: i32,
 }
 
 #[derive(Clone, PartialEq, Deserialize)]

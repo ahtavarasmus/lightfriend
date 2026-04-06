@@ -151,28 +151,6 @@ pub trait UserCoreOps: Send + Sync {
     fn get_call_notify(&self, user_id: i32) -> Result<bool, DieselError>;
     fn update_call_notify(&self, user_id: i32, notify: bool) -> Result<(), DieselError>;
 
-    // Quiet mode
-    fn set_quiet_mode(&self, user_id: i32, until: Option<i32>) -> Result<(), DieselError>;
-    fn get_quiet_mode(&self, user_id: i32) -> Result<Option<i32>, DieselError>;
-    #[allow(clippy::too_many_arguments)]
-    fn add_quiet_rule(
-        &self,
-        user_id: i32,
-        until: i32,
-        rule_type: &str,
-        platform: Option<&str>,
-        sender: Option<&str>,
-        topic: Option<&str>,
-        description: &str,
-    ) -> Result<i32, DieselError>;
-    fn get_quiet_rules(&self, user_id: i32) -> Result<Vec<String>, DieselError>;
-    fn check_quiet_with_context(
-        &self,
-        user_id: i32,
-        platform: Option<&str>,
-        sender: Option<&str>,
-        content: Option<&str>,
-    ) -> Result<bool, DieselError>;
     fn update_critical_enabled(
         &self,
         user_id: i32,
@@ -1131,58 +1109,6 @@ impl UserCoreOps for UserCore {
             .set(users::last_credits_notification.eq(None::<i32>))
             .execute(&mut pg_conn)?;
         Ok(())
-    }
-
-    fn set_quiet_mode(&self, _user_id: i32, _until: Option<i32>) -> Result<(), DieselError> {
-        // TODO: Quiet mode needs to be reimplemented using ont_rules
-        Ok(())
-    }
-
-    fn get_quiet_mode(&self, user_id: i32) -> Result<Option<i32>, DieselError> {
-        // TODO: Quiet mode needs to be reimplemented using ont_rules
-        let _ = user_id;
-        Ok(None)
-    }
-
-    fn add_quiet_rule(
-        &self,
-        user_id: i32,
-        until: i32,
-        rule_type: &str,
-        platform: Option<&str>,
-        sender: Option<&str>,
-        topic: Option<&str>,
-        description: &str,
-    ) -> Result<i32, DieselError> {
-        // TODO: Quiet rules need to be reimplemented using ont_rules
-        let _ = (
-            user_id,
-            until,
-            rule_type,
-            platform,
-            sender,
-            topic,
-            description,
-        );
-        Ok(0)
-    }
-
-    fn get_quiet_rules(&self, user_id: i32) -> Result<Vec<String>, DieselError> {
-        // TODO: Quiet rules need to be reimplemented using ont_rules
-        let _ = user_id;
-        Ok(Vec::new())
-    }
-
-    fn check_quiet_with_context(
-        &self,
-        user_id: i32,
-        platform: Option<&str>,
-        sender: Option<&str>,
-        content: Option<&str>,
-    ) -> Result<bool, DieselError> {
-        // TODO: Quiet mode needs to be reimplemented using ont_rules
-        let _ = (user_id, platform, sender, content);
-        Ok(false)
     }
 
     fn update_critical_enabled(

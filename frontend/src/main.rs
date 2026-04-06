@@ -59,7 +59,6 @@ mod dashboard {
     pub mod items_status;
     pub mod media_panel;
     pub mod people_list;
-    pub mod quiet_mode;
     pub mod rule_builder;
     pub mod rules_section;
     pub mod settings_panel;

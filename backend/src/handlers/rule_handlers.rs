@@ -102,12 +102,13 @@ pub async fn create_rule(
         .as_secs() as i32;
 
     // Compute next_fire_at for schedule rules
+    let tz_offset = crate::proactive::utils::user_tz_offset_secs(&state, user_id);
     let next_fire_at = if req.trigger_type == "schedule" {
         match trigger.schedule.as_deref() {
             Some("once") => trigger
                 .at
                 .as_ref()
-                .and_then(|at| crate::proactive::utils::parse_iso_to_timestamp(at)),
+                .and_then(|at| crate::proactive::utils::parse_iso_to_timestamp(at, tz_offset)),
             Some("recurring") => {
                 if let Some(ref pattern) = trigger.pattern {
                     let user_tz = state
@@ -253,12 +254,13 @@ pub async fn update_rule(
     })?;
 
     // Recompute next_fire_at for schedule rules
+    let tz_offset = crate::proactive::utils::user_tz_offset_secs(&state, user_id);
     let next_fire_at = if req.trigger_type == "schedule" {
         match trigger.schedule.as_deref() {
             Some("once") => trigger
                 .at
                 .as_ref()
-                .and_then(|at| crate::proactive::utils::parse_iso_to_timestamp(at)),
+                .and_then(|at| crate::proactive::utils::parse_iso_to_timestamp(at, tz_offset)),
             Some("recurring") => {
                 if let Some(ref pattern) = trigger.pattern {
                     let user_tz = state

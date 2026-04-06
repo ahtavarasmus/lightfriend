@@ -3,42 +3,79 @@ use crate::AppState;
 use crate::UserCoreOps;
 use std::sync::Arc;
 
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{NaiveDate, NaiveDateTime, Offset};
+
+/// Get the user's timezone offset in seconds from their stored timezone name.
+pub fn user_tz_offset_secs(state: &AppState, user_id: i32) -> i32 {
+    state
+        .user_core
+        .get_user_info(user_id)
+        .ok()
+        .and_then(|info| {
+            let tz_name = info.timezone.as_deref().unwrap_or("UTC");
+            tz_name.parse::<chrono_tz::Tz>().ok().map(|tz| {
+                chrono::Utc::now()
+                    .with_timezone(&tz)
+                    .offset()
+                    .fix()
+                    .local_minus_utc()
+            })
+        })
+        .unwrap_or(0)
+}
 
 /// Parse an ISO datetime string to a unix timestamp (seconds).
 ///
+/// `tz_offset_secs`: the user's timezone offset in seconds (e.g. 10800 for UTC+3).
+/// Naive datetimes (no Z or offset) are interpreted as the user's local time.
+/// Datetimes with an explicit offset or Z are converted directly.
+///
 /// Handles:
-/// - `2026-02-28T09:00:00Z` (full datetime with Z)
-/// - `2026-02-28T09:00:00` (full datetime, assumed UTC)
-/// - `2026-02-28` (date only, noon UTC)
+/// - `2026-02-28T09:00:00+03:00` (explicit offset - used as-is)
+/// - `2026-02-28T09:00:00Z` (UTC - used as-is)
+/// - `2026-02-28T09:00:00` (naive - interpreted as user's local time)
+/// - `2026-02-28T09:00` (naive short form)
+/// - `2026-02-28` (date only, noon in user's local time)
 ///
 /// Returns `None` on parse failure.
-pub fn parse_iso_to_timestamp(s: &str) -> Option<i32> {
+pub fn parse_iso_to_timestamp(s: &str, tz_offset_secs: i32) -> Option<i32> {
     let s = s.trim();
+    // Explicit offset or Z - use as-is
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
         return Some(dt.timestamp() as i32);
     }
     if s.contains('T') && !s.ends_with('Z') {
-        let with_z = format!("{}Z", s);
-        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&with_z) {
-            return Some(dt.timestamp() as i32);
+        // Try appending Z for RFC3339 compat, but only if it has an offset already
+        // (e.g. "2026-02-28T09:00+03:00" missing seconds)
+        if s.contains('+') || s.matches('-').count() > 2 {
+            let with_z = format!("{}:00{}", &s[..16], &s[16..]);
+            if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&with_z) {
+                return Some(dt.timestamp() as i32);
+            }
         }
+        // Naive datetime - interpret in user's timezone
         if let Ok(ndt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
-            return Some(ndt.and_utc().timestamp() as i32);
+            return Some(ndt.and_utc().timestamp() as i32 - tz_offset_secs);
         }
         if let Ok(ndt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M") {
-            return Some(ndt.and_utc().timestamp() as i32);
+            return Some(ndt.and_utc().timestamp() as i32 - tz_offset_secs);
+        }
+    }
+    if s.ends_with('Z') {
+        let with_z = s.to_string();
+        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&with_z) {
+            return Some(dt.timestamp() as i32);
         }
     }
     if let Ok(nd) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
         return nd
             .and_hms_opt(12, 0, 0)
-            .map(|ndt| ndt.and_utc().timestamp() as i32);
+            .map(|ndt| ndt.and_utc().timestamp() as i32 - tz_offset_secs);
     }
     None
 }
 
-/// Metadata for contextual quiet-mode rule matching.
+/// Metadata for notification context.
 pub struct NotificationMeta {
     pub platform: Option<String>,
     pub sender: Option<String>,
@@ -105,40 +142,6 @@ pub async fn send_notification_with_context(
             return;
         }
     };
-
-    // Check quiet mode
-    let inferred_platform = extract_platform_from_content_type(&content_type);
-    let check_platform = meta
-        .as_ref()
-        .and_then(|m| m.platform.as_deref())
-        .or(inferred_platform.as_deref());
-    let check_sender = meta.as_ref().and_then(|m| m.sender.as_deref());
-    let check_content = meta.as_ref().and_then(|m| m.content.as_deref());
-
-    match state.user_core.check_quiet_with_context(
-        user_id,
-        check_platform,
-        check_sender,
-        check_content,
-    ) {
-        Ok(true) => {
-            tracing::debug!(
-                "Suppressed notification for user {} by quiet rule (platform={:?}, sender={:?})",
-                user_id,
-                check_platform,
-                check_sender,
-            );
-            return;
-        }
-        Ok(false) => {}
-        Err(e) => {
-            tracing::error!(
-                "Quiet mode check failed for user {}: {} - proceeding with notification",
-                user_id,
-                e
-            );
-        }
-    }
 
     let _user_info = match state.user_core.get_user_info(user_id) {
         Ok(info) => info,

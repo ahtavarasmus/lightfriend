@@ -28,8 +28,6 @@ pub struct DashboardSummaryResponse {
     pub action_items: Vec<ActionItem>,
     pub filtered_count: i64,
     pub events: Vec<EventItem>,
-    // Existing fields kept for compatibility
-    pub quiet_mode: QuietModeInfo,
     pub sunrise_hour: Option<f32>,
     pub sunset_hour: Option<f32>,
     pub watched_contacts: Vec<WatchedContact>,
@@ -69,14 +67,6 @@ pub struct ActionItem {
     pub preview: String,
     pub timestamp: i32,
     pub person_id: Option<i32>,
-}
-
-#[derive(Serialize)]
-pub struct QuietModeInfo {
-    pub is_quiet: bool,
-    pub until: Option<i32>,
-    pub until_display: Option<String>,
-    pub rule_count: i32,
 }
 
 #[derive(Serialize)]
@@ -210,9 +200,6 @@ pub async fn get_dashboard_summary(
         })
         .collect();
 
-    // Get quiet mode status
-    let quiet_mode = get_quiet_mode_info(&state, user_id, now_ts, &tz);
-
     // Get active events
     let events: Vec<EventItem> = state
         .ontology_repository
@@ -237,7 +224,6 @@ pub async fn get_dashboard_summary(
         action_items,
         filtered_count,
         events,
-        quiet_mode,
         sunrise_hour,
         sunset_hour,
         watched_contacts,
@@ -347,55 +333,6 @@ pub fn format_relative_days(timestamp: i32, now_ts: i32, tz: &chrono_tz::Tz) -> 
             }
         }
         _ => "".to_string(),
-    }
-}
-
-fn get_quiet_mode_info(
-    state: &Arc<AppState>,
-    user_id: i32,
-    now_ts: i32,
-    tz: &chrono_tz::Tz,
-) -> QuietModeInfo {
-    let quiet_until = state.user_core.get_quiet_mode(user_id).ok().flatten();
-
-    let rule_count = state
-        .ontology_repository
-        .get_active_rules(user_id)
-        .map(|r| r.len() as i32)
-        .unwrap_or(0);
-
-    match quiet_until {
-        None => QuietModeInfo {
-            is_quiet: false, // only quiet if explicitly set via quiet_until
-            until: None,
-            until_display: None,
-            rule_count,
-        },
-        Some(0) => QuietModeInfo {
-            is_quiet: true,
-            until: Some(0),
-            until_display: Some("indefinitely".to_string()),
-            rule_count,
-        },
-        Some(ts) => {
-            if ts <= now_ts {
-                let _ = state.user_core.set_quiet_mode(user_id, None);
-                QuietModeInfo {
-                    is_quiet: false,
-                    until: None,
-                    until_display: None,
-                    rule_count,
-                }
-            } else {
-                let until_display = format_relative_time(ts, now_ts, tz);
-                QuietModeInfo {
-                    is_quiet: true,
-                    until: Some(ts),
-                    until_display: Some(until_display),
-                    rule_count,
-                }
-            }
-        }
     }
 }
 

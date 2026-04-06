@@ -208,7 +208,12 @@ pub async fn create_unified_subscription_checkout(
     let existing_subscription = stripe::Subscription::list(
         &client,
         &stripe::ListSubscriptions {
-            customer: Some(customer_id.parse().unwrap()),
+            customer: Some(customer_id.parse().map_err(|_| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "Invalid customer ID"})),
+                )
+            })?),
             status: Some(stripe::SubscriptionStatusFilter::Active),
             limit: Some(1),
             ..Default::default()
@@ -261,7 +266,12 @@ pub async fn create_unified_subscription_checkout(
         cancel_url: Some(&cancel_url),
         mode: Some(stripe::CheckoutSessionMode::Subscription),
         line_items: Some(line_items),
-        customer: Some(customer_id.parse().unwrap()),
+        customer: Some(customer_id.parse().map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Invalid customer ID"})),
+            )
+        })?),
         allow_promotion_codes: Some(true),
         billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
         automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
@@ -514,7 +524,13 @@ pub async fn create_customer_portal_session(
     tracing::debug!("Found Stripe customer ID: {}", customer_id);
     // Create a Billing Portal Session
     // Create a Billing Portal Session
-    let mut create_session = CreateBillingPortalSession::new(customer_id.parse().unwrap());
+    let mut create_session =
+        CreateBillingPortalSession::new(customer_id.parse().map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Invalid customer ID"})),
+            )
+        })?);
     // Store the formatted URL in a variable first
     let return_url = format!(
         "{}/billing",
