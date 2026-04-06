@@ -330,6 +330,7 @@ struct CallSession {
     call_start: Instant,
     mark_counter: u32,
     is_outbound: bool,
+    media_count: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -377,12 +378,18 @@ pub async fn voice_incoming(State(state): State<Arc<AppState>>, body: String) ->
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="{}/api/voice/ws">
+    <Stream url="{}/api/voice/ws" track="inbound_track">
       <Parameter name="user_id" value="{}" />
     </Stream>
   </Connect>
 </Response>"#,
         ws_url, user.id
+    );
+
+    tracing::info!(
+        "Voice incoming TwiML: WS={}/api/voice/ws, user={}",
+        ws_url,
+        user.id
     );
 
     (
@@ -443,7 +450,7 @@ pub async fn make_notification_call(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="{}/api/voice/ws">
+    <Stream url="{}/api/voice/ws" track="inbound_track">
       <Parameter name="user_id" value="{}" />
       <Parameter name="greeting" value="{}" />
     </Stream>
@@ -910,12 +917,42 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
                     // Energy-based VAD
                     let rms = compute_rms(&pcm_16k);
 
+                    sess.media_count += 1;
+                    if sess.media_count == 1 {
+                        let raw_hex: String = mulaw_bytes
+                            .iter()
+                            .take(20)
+                            .map(|b| format!("{:02x}", b))
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        tracing::info!(
+                            "First media: mulaw_len={}, raw_hex=[{}], pcm_range=[{}, {}], rms={:.0}",
+                            mulaw_bytes.len(),
+                            raw_hex,
+                            pcm_8k.iter().min().unwrap_or(&0),
+                            pcm_8k.iter().max().unwrap_or(&0),
+                            rms
+                        );
+                    } else if sess.media_count % 50 == 0 {
+                        tracing::info!(
+                            "[media #{}] RMS={:.0}, state={:?}, speaking={}",
+                            sess.media_count,
+                            rms,
+                            sess.state,
+                            sess.is_speaking
+                        );
+                    }
+
                     if rms > SPEECH_RMS_THRESHOLD {
                         if !sess.is_speaking {
                             sess.is_speaking = true;
                             sess.speech_start = Some(Instant::now());
                             sess.silence_start = None;
-                            tracing::debug!("Speech detected (RMS={:.0})", rms);
+                            tracing::info!(
+                                "Speech detected (RMS={:.0}, media#{})",
+                                rms,
+                                sess.media_count
+                            );
                         }
                         sess.speech_audio.extend_from_slice(&pcm_16k);
                         sess.silence_start = None;
@@ -1111,6 +1148,7 @@ async fn init_session(
         call_start: Instant::now(),
         mark_counter: 0,
         is_outbound,
+        media_count: 0,
     })
 }
 

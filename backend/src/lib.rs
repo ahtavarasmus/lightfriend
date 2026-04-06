@@ -38,7 +38,6 @@ pub mod handlers {
 pub mod utils {
     pub mod bridge;
     pub mod country;
-    pub mod elevenlabs_prompts;
     pub mod email;
     pub mod encryption;
     pub mod matrix_auth;
@@ -68,8 +67,6 @@ pub mod tool_call_utils {
 }
 pub mod cli;
 pub mod api {
-    pub mod elevenlabs;
-    pub mod elevenlabs_webhook;
     pub mod matrix_client;
     pub mod tesla;
     pub mod tesla_client;

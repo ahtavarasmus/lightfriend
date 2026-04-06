@@ -224,15 +224,40 @@ pub fn matches_trigger(
     // Check filters against entity snapshot
     if let Some(ref filters) = config.filters {
         for (key, expected_value) in filters {
-            let actual = entity_snapshot
-                .get(key)
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            if !actual
-                .to_lowercase()
-                .contains(&expected_value.to_lowercase())
-            {
-                return false;
+            if key == "sender" {
+                // Sender matching: try person_name first (canonical), then
+                // sender_name (room display name, already suffix-stripped).
+                // Both use case-insensitive exact match.
+                let expected_lower = expected_value.trim().to_lowercase();
+                let person_name = entity_snapshot
+                    .get("person_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let sender_name = entity_snapshot
+                    .get("sender_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+
+                let matched = (!person_name.is_empty()
+                    && person_name.trim().to_lowercase() == expected_lower)
+                    || (!sender_name.is_empty()
+                        && sender_name.trim().to_lowercase() == expected_lower);
+
+                if !matched {
+                    return false;
+                }
+            } else {
+                // Other filters: substring match (content, platform, etc.)
+                let actual = entity_snapshot
+                    .get(key)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if !actual
+                    .to_lowercase()
+                    .contains(&expected_value.to_lowercase())
+                {
+                    return false;
+                }
             }
         }
     }

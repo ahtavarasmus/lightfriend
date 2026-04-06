@@ -174,10 +174,6 @@ pub trait UserCoreOps: Send + Sync {
     // BYOT check
     fn is_byot_user(&self, user_id: i32) -> bool;
 
-    // ElevenLabs
-    fn get_elevenlabs_phone_number_id(&self, user_id: i32) -> Result<Option<String>, DieselError>;
-    fn set_elevenlabs_phone_number_id(&self, user_id: i32, id: &str) -> Result<(), DieselError>;
-
     // Subscription & billing
     fn update_subscription_tier(&self, user_id: i32, tier: Option<&str>)
         -> Result<(), DieselError>;
@@ -1329,38 +1325,5 @@ impl UserCoreOps for UserCore {
             .first::<Option<String>>(&mut pg_conn)
             .map(|pt| pt.as_deref() == Some("byot"))
             .unwrap_or(false)
-    }
-
-    fn get_elevenlabs_phone_number_id(&self, user_id: i32) -> Result<Option<String>, DieselError> {
-        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
-
-        // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
-
-        // Get the elevenlabs_phone_number_id setting
-        let number = user_settings::table
-            .filter(user_settings::user_id.eq(user_id))
-            .select(user_settings::elevenlabs_phone_number_id)
-            .first::<Option<String>>(&mut pg_conn)?;
-
-        Ok(number)
-    }
-
-    fn set_elevenlabs_phone_number_id(
-        &self,
-        user_id: i32,
-        phone_number_id: &str,
-    ) -> Result<(), DieselError> {
-        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
-
-        // Ensure user settings exist
-        self.ensure_user_settings_exist(user_id)?;
-
-        // Update the elevenlabs_phone_number_id
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-            .set(user_settings::elevenlabs_phone_number_id.eq(Some(phone_number_id)))
-            .execute(&mut pg_conn)?;
-
-        Ok(())
     }
 }

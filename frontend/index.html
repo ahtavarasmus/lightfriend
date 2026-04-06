@@ -109,7 +109,7 @@
         <link rel="preload" href="/assets/fontawesome/webfonts/fa-brands-400.woff2" as="font" type="font/woff2" crossorigin>
         <link rel="preload" href="/assets/inter-400-latin.woff2" as="font" type="font/woff2" crossorigin>
 
-        <!-- Voice Pipeline (replaces ElevenLabs SDK) -->
+        <!-- Voice Pipeline -->
         <script>
             console.log('Voice pipeline JS loaded');
 
@@ -122,10 +122,8 @@
             window._voicePlaybackQueue = [];
             window._voiceCurrentSampleRate = 24000;
 
-            // Keep old function names so Yew frontend works unchanged
-            window.startElevenLabsCall = async function(signedUrl, overrides) {
-                // signedUrl is now the WS URL with user_id param
-                console.log('startElevenLabsCall (voice pipeline) called');
+            window.startVoiceCall = async function(signedUrl, overrides) {
+                console.log('startVoiceCall called');
                 try {
                     console.log('Requesting microphone...');
                     window._voiceMicStream = await navigator.mediaDevices.getUserMedia({
@@ -254,33 +252,33 @@
                 if (window._voiceAudioCtx) { window._voiceAudioCtx.close().catch(()=>{}); window._voiceAudioCtx = null; }
             };
 
-            window.endElevenLabsCall = async function() {
-                console.log('endElevenLabsCall (voice pipeline) called');
+            window.endVoiceCall = async function() {
+                console.log('endVoiceCall called');
                 if (window._voiceWs) {
                     window._voiceWs.close();
                     window._voiceWs = null;
                 }
                 window._voiceCleanup();
-                const duration = window.getElevenLabsCallDuration();
+                const duration = window.getVoiceCallDuration();
                 window._voiceCallStartTime = null;
                 window._voiceCallStatus = 'disconnected';
                 return duration;
             };
 
-            window.getElevenLabsCallDuration = function() {
+            window.getVoiceCallDuration = function() {
                 if (!window._voiceCallStartTime) return 0;
                 return Math.floor((Date.now() - window._voiceCallStartTime) / 1000);
             };
 
-            window.isElevenLabsCallActive = function() {
+            window.isVoiceCallActive = function() {
                 return window._voiceCallStatus === 'connected' || window._voiceCallStatus === 'connecting';
             };
 
-            window.getElevenLabsCallStatus = function() {
+            window.getVoiceCallStatus = function() {
                 return window._voiceCallStatus;
             };
 
-            window.setElevenLabsStatusCallback = function(callback) {
+            window.setVoiceStatusCallback = function(callback) {
                 // Not used in new pipeline but keep for compatibility
             };
         </script>

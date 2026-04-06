@@ -11,6 +11,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Fast check - no compilation, runs in seconds
   format:
     name: Format Check
     runs-on: ubuntu-latest
@@ -26,29 +27,10 @@ jobs:
         working-directory: backend
         run: cargo fmt --check
 
-  clippy:
-    name: Clippy Linting
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: backend
-          cache-on-failure: true
-
-      - name: Run Clippy
-        working-directory: backend
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-
-  test:
-    name: Backend Tests
+  # Single backend job: clippy + tests + migration test
+  # Avoids compiling the backend 3 times in separate jobs
+  backend:
+    name: Backend (clippy + tests)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -74,6 +56,8 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
@@ -81,52 +65,23 @@ jobs:
           workspaces: backend
           cache-on-failure: true
 
-      - name: Run tests
+      - name: Clippy
+        working-directory: backend
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Tests
         working-directory: backend
         env:
           TEST_PG_DATABASE_URL: postgres://lightfriend:test@localhost:5432/lightfriend_test
         run: cargo test --workspace
 
-  migration:
-    name: Migration Safety
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: lightfriend
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: lightfriend_migration_test
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
-          sudo apt-get clean
-
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: backend
-          cache-on-failure: true
-
-      - name: Run migration tests
+      - name: Migration tests
         working-directory: backend
         env:
-          TEST_PG_DATABASE_URL: postgres://lightfriend:test@localhost:5433/lightfriend_migration_test
+          TEST_PG_DATABASE_URL: postgres://lightfriend:test@localhost:5432/lightfriend_test
         run: cargo test --test migration_test
 
+  # Frontend WASM check - runs in parallel with backend
   wasm-check:
     name: Frontend WASM Check
     runs-on: ubuntu-latest
