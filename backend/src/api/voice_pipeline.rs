@@ -745,7 +745,12 @@ async fn handle_web_ws(state: Arc<AppState>, socket: WebSocket, user_id: i32) {
 // ---------------------------------------------------------------------------
 
 pub async fn voice_ws(State(state): State<Arc<AppState>>, ws: WebSocketUpgrade) -> Response {
-    ws.on_upgrade(move |socket| handle_voice_ws(state, socket))
+    let mut response = ws.on_upgrade(move |socket| handle_voice_ws(state, socket));
+    response.headers_mut().insert(
+        axum::http::header::CONTENT_ENCODING,
+        axum::http::HeaderValue::from_static("identity"),
+    );
+    response
 }
 
 async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
