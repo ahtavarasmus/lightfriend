@@ -298,18 +298,29 @@ fn detect_provider_from_domain(domain: &str) -> Option<DetectedProvider> {
 
 /// Look up MX records for a domain and try to match against known providers.
 async fn detect_provider_from_mx(domain: &str) -> Option<DetectedProvider> {
-    let output = tokio::process::Command::new("dig")
-        .args(["MX", domain, "+short"])
-        .output()
-        .await
-        .ok()?;
+    use hickory_resolver::TokioResolver;
 
-    if !output.status.success() {
-        return None;
-    }
+    let resolver = match TokioResolver::builder_tokio() {
+        Ok(builder) => builder.build(),
+        Err(e) => {
+            tracing::debug!("Failed to create DNS resolver: {}", e);
+            return None;
+        }
+    };
+    let mx_records = match resolver.mx_lookup(domain).await {
+        Ok(records) => records,
+        Err(e) => {
+            tracing::debug!("MX lookup failed for {}: {}", domain, e);
+            return None;
+        }
+    };
 
-    let mx_output = String::from_utf8_lossy(&output.stdout).to_lowercase();
-    tracing::debug!("MX lookup for {}: {}", domain, mx_output.trim());
+    let mx_output: String = mx_records
+        .iter()
+        .map(|mx| mx.exchange().to_lowercase().to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    tracing::debug!("MX lookup for {}: {}", domain, mx_output);
 
     // Match MX records to known providers
     if mx_output.contains("google.com") || mx_output.contains("googlemail.com") {

@@ -136,7 +136,7 @@ fn details(props: &DetailsProps) -> Html {
 pub fn trust_chain_page() -> Html {
     use_seo(SeoMeta {
         title: "Trust Chain - Lightfriend",
-        description: "Visual map of how Lightfriend keeps your data private. Follow the chain from source code to running enclave.",
+        description: "Follow the cryptographic proof chain from open source code to running enclave to blockchain attestation. Verify Lightfriend's privacy yourself - no trust required.",
         canonical: "https://lightfriend.ai/trust-chain",
         og_type: "website",
     });

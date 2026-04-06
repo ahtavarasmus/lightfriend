@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::json;
 use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::JsCast;
-use web_sys::HtmlInputElement;
+use web_sys::{HtmlInputElement, MouseEvent};
 use yew::prelude::*;
 use yew_router::components::Link;
 
@@ -19,8 +19,8 @@ struct SmartphoneFreeDaysResponse {
 #[function_component(Landing)]
 pub fn landing() -> Html {
     use_seo(SeoMeta {
-        title: "Lightfriend: Private Proactive AI Assistant for Any Phone - Open Source",
-        description: "Private AI assistant for any phone - flip phones, dumbphones, and smartphones. Fully open source, zero prompt injection risk. AI processing in cryptographically verified secure enclaves. WhatsApp, email, web search via SMS and voice calls.",
+        title: "Lightfriend: Mute Everything. Miss Nothing. AI Assistant for Dumbphones",
+        description: "AI watches your WhatsApp, Telegram, Signal, and email - and only interrupts you when something actually matters. Works with any phone including dumbphones and Light Phone via SMS and voice calls. Privacy verifiable on blockchain - no trust required.",
         canonical: "https://lightfriend.ai",
         og_type: "website",
     });
@@ -80,6 +80,12 @@ pub fn landing() -> Html {
         }
         result
     };
+
+    // State for expanded integration (-1 = none, 0-5 = which one)
+    let expanded_integration = use_state(|| -1i32);
+
+    // State for expanded FAQ item (-1 = none, 0+ = which one)
+    let expanded_faq = use_state(|| -1i32);
 
     // SMS demo scenarios: (label, icon_class, messages)
     // is_user=false means Lightfriend sends it proactively
@@ -174,6 +180,122 @@ pub fn landing() -> Html {
         );
     }
 
+    // Integration data: (icon_class, label, description)
+    let integration_data = vec![
+        ("fab fa-whatsapp", "WhatsApp", "Receive and reply to WhatsApp messages via SMS or voice call. AI filters noise and only forwards what matters."),
+        ("fab fa-telegram", "Telegram", "Access your Telegram chats from any phone. Get notified about important messages, reply directly."),
+        ("fab fa-signal-messenger", "Signal", "Stay on Signal without a smartphone. Messages are bridged securely to your phone via SMS."),
+        ("fas fa-envelope", "Email", "Read and respond to emails via text or voice. AI summarizes long threads and flags urgent ones."),
+        ("fas fa-car", "Tesla", "Lock, unlock, preheat, and check battery status of your Tesla via SMS commands."),
+        ("fas fa-plug", "MCP / Custom", "Connect any external tool or service via MCP (Model Context Protocol). Extend what Lightfriend can do."),
+    ];
+
+    let integration_buttons_html: Vec<Html> = integration_data.iter().enumerate().map(|(idx, (icon, label, _))| {
+        let expanded = expanded_integration.clone();
+        let i = idx as i32;
+        let is_active = *expanded == i;
+        let onclick = {
+            let expanded = expanded.clone();
+            Callback::from(move |e: MouseEvent| {
+                e.prevent_default();
+                if *expanded == i {
+                    expanded.set(-1);
+                } else {
+                    expanded.set(i);
+                }
+            })
+        };
+        html! {
+            <button class={classes!("integration-btn", if is_active { "active" } else { "" })} onclick={onclick} title={*label}>
+                <i class={*icon}></i>
+                <span class="integration-label">{label}</span>
+            </button>
+        }
+    }).collect();
+
+    let integration_detail_html = if *expanded_integration >= 0 {
+        let idx = *expanded_integration as usize;
+        let (_, label, desc) = &integration_data[idx];
+        html! {
+            <div class={classes!("integration-detail", "visible")}>
+                <div class="integration-detail-content">
+                    <h3>{label}</h3>
+                    <p>{desc}</p>
+                </div>
+            </div>
+        }
+    } else {
+        html! { <div class="integration-detail"></div> }
+    };
+
+    // FAQ data: (question, answer_html)
+    let faq_data: Vec<(&str, Html)> = vec![
+        ("Do I need a phone with internet?", html! {
+            <p>{"No. Lightfriend works through normal voice calls and SMS. Any phone that can call and text will work."}</p>
+        }),
+        ("Can I send and receive messages?", html! {
+            <p>{"Yes. You can reply to WhatsApp, Telegram, Signal, and email directly via SMS or voice call. Lightfriend forwards your reply to the right place."}</p>
+        }),
+        ("What can Lightfriend actually do?", html! {
+            <ul>
+                <li><strong>{"Message bridges:"}</strong>{" WhatsApp, Telegram, Signal - receive and reply from any phone."}</li>
+                <li><strong>{"Email:"}</strong>{" Read and respond to emails via text."}</li>
+                <li><strong>{"Critical notifications:"}</strong>{" AI screens messages and only alerts you about urgent ones."}</li>
+                <li><strong>{"Smart digests:"}</strong>{" Get a summary of what happened, delivered when you want."}</li>
+                <li><strong>{"Web search:"}</strong>{" Ask any question, get a concise answer."}</li>
+                <li><strong>{"Image understanding:"}</strong>{" Send a photo of a menu, sign, or QR code."}</li>
+                <li><strong>{"Tesla control:"}</strong>{" Lock, unlock, preheat via SMS."}</li>
+                <li><strong>{"Rule builder:"}</strong>{" Create custom automations with triggers and conditions."}</li>
+                <li><strong>{"MCP integrations:"}</strong>{" Connect external tools and services."}</li>
+                <li><strong>{"Learns over time:"}</strong>{" Lightfriend builds context about who matters to you and what's urgent. The longer you use it, the better it gets at surfacing the right things."}</li>
+            </ul>
+        }),
+        ("Which countries are supported?", html! {
+            <>
+                <p><strong>{"Full service:"}</strong>{" US, Canada, UK, Finland, Netherlands, Australia."}</p>
+                <p><strong>{"Notification-only:"}</strong>{" 30+ countries across Europe and Asia-Pacific."}</p>
+                <p><strong>{"Elsewhere:"}</strong>{" Bring your own Twilio number."}</p>
+            </>
+        }),
+        ("How does it protect my data?", html! {
+            <>
+                <p>{"Lightfriend runs in its own hardware-isolated enclave, and all AI requests are processed through Tinfoil's verified enclaves. No one - not even the developer - can access your data. Period. Fully open source, with privacy cryptographically verifiable on blockchain."}</p>
+                <p><a href="/trustless" style="color: #7EB2FF;">{"See exactly how it works"}</a></p>
+            </>
+        }),
+        ("How do critical notifications work?", html! {
+            <p>{"When a message arrives on WhatsApp, Telegram, Signal, or email, AI evaluates whether it needs your immediate attention. Urgent messages get forwarded instantly via SMS or phone call. Everything else goes into your digest."}</p>
+        }),
+    ];
+
+    let faq_items_html: Vec<Html> = faq_data.into_iter().enumerate().map(|(idx, (question, answer))| {
+        let expanded = expanded_faq.clone();
+        let i = idx as i32;
+        let is_open = *expanded == i;
+        let onclick = {
+            let expanded = expanded.clone();
+            Callback::from(move |e: MouseEvent| {
+                e.prevent_default();
+                if *expanded == i {
+                    expanded.set(-1);
+                } else {
+                    expanded.set(i);
+                }
+            })
+        };
+        html! {
+            <div class={classes!("landing-faq-item", if is_open { "open" } else { "" })}>
+                <button class="landing-faq-question" onclick={onclick}>
+                    <span class="question-text">{question}</span>
+                    <span class="toggle-icon">{if is_open { "\u{2212}" } else { "+" }}</span>
+                </button>
+                <div class="landing-faq-answer">
+                    {answer}
+                </div>
+            </div>
+        }
+    }).collect();
+
     // Generate particle elements for hero background
     let particles_html: Vec<Html> = (0..25).map(|i| {
         let left = ((i * 17 + 5) % 100) as f64;
@@ -229,12 +351,10 @@ pub fn landing() -> Html {
                     <AnimationComponent />
                 </div>
                 <div class="integrations-row">
-                    <i class="fab fa-whatsapp"></i>
-                    <i class="fab fa-telegram"></i>
-                    <i class="fab fa-signal-messenger"></i>
-                    <i class="fas fa-envelope"></i>
-                    <i class="fas fa-car"></i>
-                    <i class="fas fa-plug"></i>
+                    <div class="integration-buttons">
+                        { for integration_buttons_html }
+                    </div>
+                    { integration_detail_html }
                 </div>
             </div>
 
@@ -304,13 +424,9 @@ pub fn landing() -> Html {
                 <div class="filter-content">
                     <div class="faq-in-filter scroll-animate">
                         <h2>{"Frequently Asked Questions"}</h2>
-                        <div class="faq-item">
-                            <h3>{"Do I need a phone with internet connection?"}</h3>
-                            <p>{"No, Lightfriend works through normal voice calling and text messaging (SMS)."}</p>
-                        </div>
-                        <div class="faq-item">
-                            <h3>{"Can Lightfriend also send messages?"}</h3>
-                            <p>{"Yes, it can send messages and fetch them when you call or text it."}</p>
+                        { for faq_items_html }
+                        <div class="faq-more-link">
+                            <a href="mailto:rasmus@lightfriend.ai" class="privacy-link">{"More questions? Email rasmus@lightfriend.ai"}</a>
                         </div>
                     </div>
                 </div>
@@ -415,8 +531,6 @@ pub fn landing() -> Html {
                             {" | "}
                             <Link<Route> to={Route::Trustless}>{"Verifiably Private"}</Link<Route>>
                             {" | "}
-                            <Link<Route> to={Route::Faq}>{"FAQ"}</Link<Route>>
-                            {" | "}
                             <Link<Route> to={Route::TrustChain}>{"Trust Chain"}</Link<Route>>
                         </div>
                     </div>
@@ -466,20 +580,85 @@ pub fn landing() -> Html {
         margin: 0 auto 2rem;
     }
     .integrations-row {
-        display: flex;
-        justify-content: center;
-        gap: 2.5rem;
         margin-top: 3rem;
         padding-top: 2rem;
         border-top: 1px solid rgba(255, 255, 255, 0.06);
     }
-    .integrations-row i {
-        font-size: 1.8rem;
-        color: rgba(255, 255, 255, 0.35);
-        transition: color 0.3s ease;
+    .integration-buttons {
+        display: flex;
+        justify-content: center;
+        gap: 1rem;
+        flex-wrap: wrap;
     }
-    .integrations-row i:hover {
-        color: rgba(255, 255, 255, 0.6);
+    .integration-btn {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.8rem 1.2rem;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        color: rgba(255, 255, 255, 0.5);
+    }
+    .integration-btn:hover {
+        border-color: rgba(255, 255, 255, 0.25);
+        color: rgba(255, 255, 255, 0.8);
+        background: rgba(255, 255, 255, 0.07);
+    }
+    .integration-btn.active {
+        border-color: rgba(126, 178, 255, 0.5);
+        color: #7EB2FF;
+        background: rgba(126, 178, 255, 0.08);
+    }
+    .integration-btn i {
+        font-size: 1.6rem;
+    }
+    .integration-label {
+        font-size: 0.75rem;
+        font-weight: 500;
+        letter-spacing: 0.02em;
+    }
+    .integration-detail {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.4s ease, padding 0.4s ease;
+        padding: 0 1rem;
+    }
+    .integration-detail.visible {
+        max-height: 200px;
+        padding: 1.5rem 1rem 0.5rem;
+    }
+    .integration-detail-content {
+        text-align: center;
+        max-width: 500px;
+        margin: 0 auto;
+    }
+    .integration-detail-content h3 {
+        font-size: 1.2rem;
+        color: #fff;
+        margin-bottom: 0.5rem;
+    }
+    .integration-detail-content p {
+        font-size: 1rem;
+        color: #999;
+        line-height: 1.6;
+    }
+    @media (max-width: 768px) {
+        .integration-buttons {
+            gap: 0.6rem;
+        }
+        .integration-btn {
+            padding: 0.6rem 0.8rem;
+        }
+        .integration-btn i {
+            font-size: 1.3rem;
+        }
+        .integration-label {
+            font-size: 0.65rem;
+        }
     }
     .filter-content {
         display: flex;
@@ -548,26 +727,93 @@ pub fn landing() -> Html {
             font-size: 1.1rem;
         }
     }
-    .faq-item {
-        margin-bottom: 1.5rem;
+    .landing-faq-item {
+        margin-bottom: 0.75rem;
         background: rgba(255, 255, 255, 0.03);
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 12px;
-        padding: 1.5rem;
+        overflow: hidden;
         transition: all 0.3s ease;
     }
-    .faq-item:hover {
+    .landing-faq-item:hover {
         border-color: rgba(255, 255, 255, 0.25);
     }
-    .faq-item h3 {
-        font-size: 1.4rem;
-        margin-bottom: 0.75rem;
+    .landing-faq-question {
+        width: 100%;
+        padding: 1.2rem 1.5rem;
+        background: none;
+        border: none;
         color: #fff;
+        font-size: 1.15rem;
+        text-align: left;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        transition: color 0.3s ease;
     }
-    .faq-item p {
-        font-size: 1.1rem;
-        color: #bbb;
+    .landing-faq-question:hover {
+        color: #7EB2FF;
+    }
+    .landing-faq-question .toggle-icon {
+        font-size: 1.5rem;
+        color: #7EB2FF;
+        flex-shrink: 0;
+        margin-left: 1rem;
+    }
+    .landing-faq-answer {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.5s ease;
+        padding: 0 1.5rem;
+    }
+    .landing-faq-item.open .landing-faq-answer {
+        max-height: 1000px;
+        padding: 0 1.5rem 1.2rem;
+    }
+    .landing-faq-answer p {
+        font-size: 1rem;
+        color: #999;
         line-height: 1.6;
+        margin-bottom: 0.75rem;
+    }
+    .landing-faq-answer ul {
+        list-style: none;
+        padding: 0;
+        margin: 0.5rem 0;
+    }
+    .landing-faq-answer li {
+        color: #999;
+        padding: 0.4rem 0;
+        padding-left: 1.2rem;
+        position: relative;
+        font-size: 0.95rem;
+        line-height: 1.5;
+    }
+    .landing-faq-answer li::before {
+        content: '\2022';
+        position: absolute;
+        left: 0.3rem;
+        color: #7EB2FF;
+    }
+    .landing-faq-answer a {
+        color: #7EB2FF;
+        text-decoration: none;
+    }
+    .landing-faq-answer a:hover {
+        color: #a8ccff;
+    }
+    .faq-more-link {
+        margin-top: 1.5rem;
+        text-align: center;
+    }
+    .faq-more-link a {
+        color: #7EB2FF;
+        text-decoration: none;
+        font-size: 1rem;
+    }
+    .faq-more-link a:hover {
+        color: #a8ccff;
     }
     @media (max-width: 768px) {
         .filter-concept {
@@ -592,11 +838,15 @@ pub fn landing() -> Html {
         .faq-in-filter h2 {
             font-size: 2rem;
         }
-        .faq-item h3 {
-            font-size: 1.2rem;
-        }
-        .faq-item p {
+        .landing-faq-question {
             font-size: 1rem;
+            padding: 1rem 1.2rem;
+        }
+        .landing-faq-answer {
+            padding: 0 1.2rem;
+        }
+        .landing-faq-item.open .landing-faq-answer {
+            padding: 0 1.2rem 1rem;
         }
     }
     .dual-section {

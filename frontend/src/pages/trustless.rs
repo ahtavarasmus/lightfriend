@@ -8,7 +8,7 @@ pub fn trustless_verification() -> Html {
     use_seo(SeoMeta {
         title: "Verifiably Private - Lightfriend",
         description:
-            "How Lightfriend keeps your data private - even from us - and how anyone can verify it.",
+            "How Lightfriend keeps your data private and how you can verify it yourself. Hardware-isolated enclaves, open source code, privacy verifiable on blockchain. No one can access your data, not even the developer.",
         canonical: "https://lightfriend.ai/trustless",
         og_type: "website",
     });
