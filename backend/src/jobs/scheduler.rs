@@ -976,10 +976,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");
-
-    // TODO we should add another scheduled call that just checks if there are items that are 'done' or not found in the elevenlabs
-    // but are still 'ongoing' in our db. we don't want to be accidentally charging users.
-    // and if that happens make error visible
 }
 
 /// Deliver smart digests: check which users have pending medium-urgency messages

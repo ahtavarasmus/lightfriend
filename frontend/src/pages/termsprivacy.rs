@@ -60,7 +60,6 @@ pub fn privacy_policy() -> Html {
                     <li><strong>{"Marlin: "}</strong>{"Key custody. Runs inside its own enclave. Open source."}</li>
                     <li><strong>{"Tinfoil: "}</strong>{"AI inference inside sealed environments with cryptographic attestation."}</li>
                     <li><strong>{"Twilio: "}</strong>{"SMS delivery. Message content is designed to be deleted from Twilio after delivery."}</li>
-                    <li><strong>{"ElevenLabs: "}</strong>{"Voice call audio. Does not provide cryptographic privacy guarantees. This is the one area relying on trust. We intend to replace this when a verifiable alternative is available."}</li>
                 </ul>
             </section>
 

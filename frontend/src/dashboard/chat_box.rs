@@ -428,7 +428,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                 let call_duration = call_duration.clone();
                 let interval_handle: Option<gloo_timers::callback::Interval> = if *is_active {
                     Some(gloo_timers::callback::Interval::new(1000, move || {
-                        let duration = crate::utils::elevenlabs_web::get_elevenlabs_call_duration();
+                        let duration = crate::utils::voice_web::get_voice_call_duration();
                         call_duration.set(duration);
                     }))
                 } else {
@@ -1027,7 +1027,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                             .replace("http://", "ws://")
                                             + ws_path;
                                         let result =
-                                            crate::utils::elevenlabs_web::start_elevenlabs_call(
+                                            crate::utils::voice_web::start_voice_call(
                                                 &full_ws_url, wasm_bindgen::JsValue::NULL,
                                             )
                                             .await;
@@ -1083,7 +1083,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
             let refetch_usage = refetch_usage.clone();
 
             spawn_local(async move {
-                let _duration = crate::utils::elevenlabs_web::end_elevenlabs_call().await;
+                let _duration = crate::utils::voice_web::end_voice_call().await;
                 call_active.set(false);
                 if let Some(window) = web_sys::window() {
                     let event = web_sys::CustomEvent::new("lightfriend-chat-sent").unwrap();

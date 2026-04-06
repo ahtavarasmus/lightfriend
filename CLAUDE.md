@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Lightfriend is a full-stack AI assistant SaaS with Rust on both backend (Axum web framework) and frontend (Yew WebAssembly framework). Integrates with Matrix homeserver for multi-platform messaging, Twilio for SMS/voice, ElevenLabs for voice AI, Stripe for payments, and OAuth services.
+Lightfriend is a full-stack AI assistant SaaS with Rust on both backend (Axum web framework) and frontend (Yew WebAssembly framework). Integrates with Matrix homeserver for multi-platform messaging, Twilio for SMS/voice, Tinfoil for verifiable AI inference, Stripe for payments, and OAuth services.
 
 ## Development Commands
 

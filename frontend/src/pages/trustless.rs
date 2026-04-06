@@ -82,7 +82,6 @@ pub fn trustless_verification() -> Html {
                 <ul>
                     <li><strong>{"AI (Tinfoil): "}</strong>{"When Lightfriend needs to think (run AI models), it sends requests to "}<a href="https://tinfoil.sh" target="_blank" rel="noopener noreferrer">{"Tinfoil"}</a>{", which runs AI workloads inside the same kind of sealed rooms (TEEs) with the same cryptographic guarantees as Nitro Enclaves. Verifiable, not trust-based."}</li>
                     <li><strong>{"SMS (Twilio): "}</strong>{"Twilio carries text messages back and forth, but Lightfriend's code is designed to automatically delete message bodies from Twilio's logs as soon as each message is delivered."}</li>
-                    <li><strong>{"Voice calls (ElevenLabs): "}</strong>{"This is the one area where we currently rely on trust. ElevenLabs handles voice call audio and does not provide cryptographic privacy guarantees. We are moving voice calls in-house as soon as Tinfoil provides a verifiable text-to-speech model, which will bring voice calls under the same sealed room protections as everything else."}</li>
                 </ul>
             </section>
 

@@ -15,7 +15,7 @@ pub enum AuthState {
 mod config;
 mod utils {
     pub mod api;
-    pub mod elevenlabs_web;
+    pub mod voice_web;
     pub mod seo;
     pub mod webauthn;
 }
@@ -35,13 +35,11 @@ mod blog {
 mod pages {
     pub mod blog;
     pub mod bring_own_number;
-    pub mod change_log;
     pub mod home;
     pub mod landing;
     pub mod lightphone3_whatsapp_guide;
     pub mod money;
     pub mod subscription_success;
-    pub mod supported_countries;
     pub mod termsprivacy;
     pub mod trust_chain;
     pub mod trustless;
@@ -103,12 +101,10 @@ use gloo_net::http::Request;
 use pages::{
     blog::Blog,
     bring_own_number::TwilioHostedInstructions,
-    change_log::Changelog,
     home::Home,
     lightphone3_whatsapp_guide::LightPhone3WhatsappGuide,
     money::UnifiedPricing,
     subscription_success::SubscriptionSuccess,
-    supported_countries::SupportedCountries,
     termsprivacy::{PrivacyPolicy, TermsAndConditions},
     trust_chain::TrustChainPage,
     trustless::TrustlessVerification,
@@ -122,10 +118,6 @@ pub enum Route {
     PasswordResetWithToken { token: String },
     #[at("/blog")]
     Blog,
-    #[at("/updates")]
-    Changelog,
-    #[at("/supported-countries")]
-    SupportedCountries,
     #[at("/bring-own-number")]
     TwilioHostedInstructions,
     #[at("/")]
@@ -172,14 +164,6 @@ fn switch(routes: Route) -> Html {
         Route::Blog => {
             info!("Rendering Blog page");
             html! { <Blog /> }
-        }
-        Route::Changelog => {
-            info!("Rendering Changelog page");
-            html! { <Changelog /> }
-        }
-        Route::SupportedCountries => {
-            info!("Rendering SupportedCountries page");
-            html! { <SupportedCountries/> }
         }
         Route::TwilioHostedInstructions => {
             info!("Rendering TwilioHostedInstructions page");

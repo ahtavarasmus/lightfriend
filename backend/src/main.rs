@@ -24,7 +24,7 @@ use tower_sessions::{MemoryStore, SessionManagerLayer};
 use tracing::Level;
 
 // Import modules and types from library crate
-use api::{elevenlabs, elevenlabs_webhook, twilio_sms, voice_pipeline};
+use api::{twilio_sms, voice_pipeline};
 use backend::{
     api, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState, LlmUsageRepository,
     TotpRepository, UserCore, UserCoreOps, UserRepository, WebauthnRepository,
@@ -209,8 +209,6 @@ pub fn validate_env() {
             // SMS/Voice (Twilio)
             "TWILIO_ACCOUNT_SID",
             "TWILIO_AUTH_TOKEN",
-            // Voice AI (ElevenLabs)
-            "ELEVENLABS_SERVER_URL_SECRET",
             // Regional phone numbers
             "FIN_PHONE",
             "USA_PHONE",
@@ -516,71 +514,6 @@ async fn main() {
         "/api/sms/textbee-server",
         post(twilio_sms::handle_textbee_sms),
     );
-    // textbee requests are validated using device_id and phone number combo
-    let elevenlabs_free_routes = Router::new()
-        .route("/api/call/assistant", post(elevenlabs::fetch_assistant))
-        .route(
-            "/api/call/weather",
-            post(elevenlabs::handle_weather_tool_call),
-        )
-        .route(
-            "/api/call/perplexity",
-            post(elevenlabs::handle_perplexity_tool_call),
-        )
-        .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
-    let elevenlabs_routes = Router::new()
-        .route("/api/call/sms", post(elevenlabs::handle_send_sms_tool_call))
-        .route(
-            "/api/call/email",
-            get(elevenlabs::handle_email_fetch_tool_call),
-        )
-        .route(
-            "/api/call/email/specific",
-            post(elevenlabs::handle_email_search_tool_call),
-        )
-        .route(
-            "/api/call/email/respond",
-            post(elevenlabs::handle_respond_to_email),
-        )
-        .route("/api/call/email/send", post(elevenlabs::handle_email_send))
-        .route(
-            "/api/call/cancel-message",
-            get(elevenlabs::handle_cancel_pending_message_tool_call),
-        )
-        .route(
-            "/api/call/fetch-recent-messages",
-            get(elevenlabs::handle_fetch_recent_messages_tool_call),
-        )
-        .route(
-            "/api/call/fetch-chat-messages",
-            get(elevenlabs::handle_fetch_specific_chat_messages_tool_call),
-        )
-        .route(
-            "/api/call/search-chat-contacts",
-            post(elevenlabs::handle_search_chat_contacts_tool_call),
-        )
-        .route(
-            "/api/call/send-chat-message",
-            post(elevenlabs::handle_send_chat_message),
-        )
-        .route(
-            "/api/call/firecrawl",
-            post(elevenlabs::handle_firecrawl_tool_call),
-        )
-        .layer(middleware::from_fn_with_state(
-            state.clone(),
-            handlers::auth_middleware::check_subscription_access,
-        ))
-        .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
-    let elevenlabs_webhook_routes = Router::new()
-        .route(
-            "/api/webhook/elevenlabs",
-            post(elevenlabs_webhook::elevenlabs_webhook),
-        )
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            elevenlabs_webhook::validate_elevenlabs_hmac,
-        ));
     // Voice pipeline: TwiML endpoint validated by Twilio signature
     let voice_twiml_routes = Router::new()
         .route("/api/voice/incoming", post(voice_pipeline::voice_incoming))
@@ -1270,16 +1203,6 @@ async fn main() {
             "/api/rules/{id}/status",
             patch(rule_handlers::update_rule_status),
         )
-        // Web-based voice call routes (browser to ElevenLabs)
-        .route(
-            "/api/call/web-signed-url",
-            get(elevenlabs::get_web_signed_url),
-        )
-        .route("/api/call/web-end", post(elevenlabs::end_web_call))
-        .route(
-            "/api/call/web-check-credits",
-            get(elevenlabs::check_web_call_credits),
-        )
         // MCP Server routes (custom tool integrations)
         .route(
             "/api/mcp/servers",
@@ -1338,9 +1261,6 @@ async fn main() {
         )
         .merge(textbee_routes)
         .merge(twilio_routes)
-        .merge(elevenlabs_routes)
-        .merge(elevenlabs_free_routes)
-        .merge(elevenlabs_webhook_routes)
         .merge(voice_routes)
         .route("/public/{*path}", any(proxy_telegram_public))
         .route("/public", any(proxy_telegram_public))
