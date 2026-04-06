@@ -911,11 +911,9 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
 
                     let pcm_8k: Vec<i16> = mulaw_bytes.iter().map(|&b| mulaw_decode(b)).collect();
 
-                    // Resample 8kHz -> 16kHz for STT
-                    let pcm_16k = resample(&pcm_8k, 8000, 16000);
-
-                    // Energy-based VAD
-                    let rms = compute_rms(&pcm_16k);
+                    // VAD on raw 8kHz PCM (don't resample per-packet - rubato
+                    // needs 1024+ samples but each Twilio packet is only 160)
+                    let rms = compute_rms(&pcm_8k);
 
                     sess.media_count += 1;
                     if sess.media_count == 1 {
@@ -954,11 +952,12 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
                                 sess.media_count
                             );
                         }
-                        sess.speech_audio.extend_from_slice(&pcm_16k);
+                        // Accumulate 8kHz samples; resample to 16kHz in bulk for STT
+                        sess.speech_audio.extend_from_slice(&pcm_8k);
                         sess.silence_start = None;
                     } else if sess.is_speaking {
                         // Still accumulate audio during brief silence
-                        sess.speech_audio.extend_from_slice(&pcm_16k);
+                        sess.speech_audio.extend_from_slice(&pcm_8k);
 
                         if sess.silence_start.is_none() {
                             sess.silence_start = Some(Instant::now());
@@ -1179,8 +1178,9 @@ async fn process_utterance(
 ) -> Result<(), String> {
     use crate::api::tinfoil_client::CompletionResult;
 
-    // 1. Encode speech as WAV at 16kHz
-    let wav = encode_wav_16bit_mono(speech_samples, 16000);
+    // 1. Resample accumulated 8kHz speech to 16kHz for Whisper, then encode as WAV
+    let speech_16k = resample(speech_samples, 8000, 16000);
+    let wav = encode_wav_16bit_mono(&speech_16k, 16000);
 
     // 2. Transcribe
     let transcript = session.tinfoil.transcribe(&wav).await?;
