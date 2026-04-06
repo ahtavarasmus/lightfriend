@@ -983,6 +983,23 @@ impl OntologyRepository {
     /// Insert a message into ont_messages, returning the created row.
     pub fn insert_message(&self, msg: &NewOntMessage) -> Result<OntMessage, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Dedup: skip if an identical message exists within a 5-minute window.
+        // Matrix can deliver the same event multiple times on reconnect/sync.
+        let window = 300; // 5 minutes
+        let existing = ont_messages::table
+            .filter(ont_messages::user_id.eq(msg.user_id))
+            .filter(ont_messages::room_id.eq(&msg.room_id))
+            .filter(ont_messages::sender_name.eq(&msg.sender_name))
+            .filter(ont_messages::content.eq(&msg.content))
+            .filter(ont_messages::created_at.ge(msg.created_at - window))
+            .filter(ont_messages::created_at.le(msg.created_at + window))
+            .first::<OntMessage>(&mut conn);
+
+        if let Ok(dup) = existing {
+            return Ok(dup);
+        }
+
         diesel::insert_into(ont_messages::table)
             .values(msg)
             .get_result(&mut conn)
