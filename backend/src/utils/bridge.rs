@@ -466,7 +466,7 @@ pub fn search_best_match(bridge_rooms: &[BridgeRoom], search_term: &str) -> Opti
             )
         })
         .filter(|(score, _)| *score >= 0.7)
-        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     if let Some((score, room)) = best_match {
         tracing::info!("Found similar match with score {}", score);
         Some(room.clone())
@@ -489,7 +489,7 @@ pub fn get_best_matches(bridge_rooms: &[BridgeRoom], search_term: &str) -> Vec<S
         })
         .filter(|(score, _)| *score >= 0.7)
         .collect();
-    matches.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+    matches.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     matches.into_iter().take(5).map(|(_, name)| name).collect()
 }
 
@@ -1232,7 +1232,13 @@ pub async fn handle_bridge_message(
     }
 
     // Find the user ID for this Matrix client
-    let matrix_user_id = client.user_id().unwrap().to_owned(); // Clone to OwnedUserId
+    let matrix_user_id = match client.user_id() {
+        Some(id) => id.to_owned(),
+        None => {
+            tracing::error!("Matrix client has no user ID, skipping message");
+            return;
+        }
+    };
     let client_user_id = matrix_user_id.to_string();
     // Extract the local part of the Matrix user ID (before the domain)
     let local_user_id = client_user_id
