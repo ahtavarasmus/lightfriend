@@ -190,27 +190,63 @@ pub async fn get_service_rooms(client: &MatrixClient, service: &str) -> Result<V
         let skip_terms = skip_terms.clone();
         let service = service.to_string();
         futures.push(async move {
+            let room_id_str = room.room_id().to_string();
             let display_name = match room.display_name().await {
                 Ok(name) => name.to_string(),
-                Err(_) => return None,
+                Err(e) => {
+                    tracing::warn!(
+                        "get_service_rooms: room {} display_name() failed: {}",
+                        room_id_str,
+                        e
+                    );
+                    return None;
+                }
             };
             if skip_terms.iter().any(|t| display_name.contains(t)) {
+                tracing::info!(
+                    "get_service_rooms: SKIP-BOT '{}' (room {})",
+                    display_name,
+                    room_id_str
+                );
                 return None;
             }
             // Check membership instead of last message sender
             let members = match room.members(RoomMemberships::JOIN).await {
                 Ok(m) => m,
-                Err(_) => return None,
+                Err(e) => {
+                    tracing::warn!(
+                        "get_service_rooms: room {} '{}' members() failed: {}",
+                        room_id_str,
+                        display_name,
+                        e
+                    );
+                    return None;
+                }
             };
             let member_localparts: Vec<String> = members
                 .iter()
                 .map(|member| member.user_id().localpart().to_string())
                 .collect();
-            if !room_name_matches_service(&display_name, &service)
-                && !has_service_member(&service, &member_localparts)
-            {
+            let name_match = room_name_matches_service(&display_name, &service);
+            let member_match = has_service_member(&service, &member_localparts);
+            if !name_match && !member_match {
+                tracing::info!(
+                    "get_service_rooms: SKIP '{}' for '{}' (room {}, members={:?})",
+                    display_name,
+                    service,
+                    room_id_str,
+                    member_localparts
+                );
                 return None;
             }
+            tracing::info!(
+                "get_service_rooms: MATCH '{}' for '{}' (room {}, name_match={}, member_match={})",
+                display_name,
+                service,
+                room_id_str,
+                name_match,
+                member_match
+            );
             let is_group = is_group_room(&service, &member_localparts);
             // Get last activity from most recent message, regardless of sender
             let mut options = matrix_sdk::room::MessagesOptions::backward();
