@@ -88,7 +88,6 @@ pub mod tools {
     pub mod email;
     pub mod messaging;
     pub mod ontology;
-    pub mod quiet_mode;
     pub mod registry;
     pub mod rules;
     pub mod search;
@@ -281,9 +280,6 @@ pub fn build_tool_registry() -> tools::registry::ToolRegistry {
 
     // YouTube
     registry.register(Arc::new(tools::youtube::YouTubeHandler));
-
-    // Quiet mode
-    registry.register(Arc::new(tools::quiet_mode::QuietModeHandler));
 
     registry
 }

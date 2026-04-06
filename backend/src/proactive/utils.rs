@@ -75,7 +75,7 @@ pub fn parse_iso_to_timestamp(s: &str, tz_offset_secs: i32) -> Option<i32> {
     None
 }
 
-/// Metadata for contextual quiet-mode rule matching.
+/// Metadata for notification context.
 pub struct NotificationMeta {
     pub platform: Option<String>,
     pub sender: Option<String>,
@@ -142,40 +142,6 @@ pub async fn send_notification_with_context(
             return;
         }
     };
-
-    // Check quiet mode
-    let inferred_platform = extract_platform_from_content_type(&content_type);
-    let check_platform = meta
-        .as_ref()
-        .and_then(|m| m.platform.as_deref())
-        .or(inferred_platform.as_deref());
-    let check_sender = meta.as_ref().and_then(|m| m.sender.as_deref());
-    let check_content = meta.as_ref().and_then(|m| m.content.as_deref());
-
-    match state.user_core.check_quiet_with_context(
-        user_id,
-        check_platform,
-        check_sender,
-        check_content,
-    ) {
-        Ok(true) => {
-            tracing::debug!(
-                "Suppressed notification for user {} by quiet rule (platform={:?}, sender={:?})",
-                user_id,
-                check_platform,
-                check_sender,
-            );
-            return;
-        }
-        Ok(false) => {}
-        Err(e) => {
-            tracing::error!(
-                "Quiet mode check failed for user {}: {} - proceeding with notification",
-                user_id,
-                e
-            );
-        }
-    }
 
     let _user_info = match state.user_core.get_user_info(user_id) {
         Ok(info) => info,

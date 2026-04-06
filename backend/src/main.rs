@@ -910,22 +910,6 @@ async fn main() {
             get(profile_handlers::get_critical_settings),
         )
         .route(
-            "/api/profile/quiet-mode",
-            get(profile_handlers::get_quiet_mode),
-        )
-        .route(
-            "/api/profile/quiet-mode",
-            post(profile_handlers::set_quiet_mode),
-        )
-        .route(
-            "/api/profile/quiet-rules",
-            post(profile_handlers::add_quiet_rule),
-        )
-        .route(
-            "/api/profile/quiet-rules",
-            delete(profile_handlers::delete_quiet_rules),
-        )
-        .route(
             "/api/profile/get_nearby_places",
             get(profile_handlers::get_nearby_places),
         )
