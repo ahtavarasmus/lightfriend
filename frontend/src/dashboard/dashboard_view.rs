@@ -1701,7 +1701,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                         <p>{"You get notified only for critical or high urgency. The AI also considers sender relationship, messaging patterns, time of day, and cross-platform escalation (e.g., someone messaging you on both WhatsApp and Signal)."}</p>
                                         <p style="margin-top: 0.5rem; font-size: 0.85rem;">
                                             <a
-                                                href="https://github.com/ahtavarasmus/lightfriend/blob/master/backend/src/proactive/system_behaviors.rs"
+                                                href="https://github.com/ahtavarasmus/lightfriend/blob/master/backend/src/proactive/system_behaviors.rs#L249"
                                                 target="_blank"
                                                 rel="noopener noreferrer"
                                                 style="color: #60a5fa; text-decoration: none;"
