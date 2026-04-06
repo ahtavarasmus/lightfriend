@@ -271,7 +271,7 @@ async fn connect_signal(client: &MatrixClient, bridge_bot: &str) -> Result<(Owne
                                         &image_content.source
                                     {
                                         qr_code_url = Some(url.to_string());
-                                        tracing::info!("🔑 Found QR code URL: {:#?}", qr_code_url);
+                                        tracing::info!("Found Signal QR code URL for linking");
                                         break;
                                     } else {
                                         // Handle unexpected encrypted case, e.g., log an error and continue

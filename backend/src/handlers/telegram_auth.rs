@@ -242,7 +242,7 @@ async fn connect_telegram(
                                 }
                             };
 
-                            tracing::info!("Telegram login response: {}", message_body);
+                            tracing::info!("Received Telegram login response from bot");
 
                             // More efficient login url extraction
                             if let Some(url) = extract_login_url(&message_body) {
