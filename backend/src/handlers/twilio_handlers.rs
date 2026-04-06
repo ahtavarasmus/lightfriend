@@ -157,12 +157,25 @@ pub async fn twilio_status_callback(
                         user_info.user_id,
                         price,
                     ) {
-                        Ok(cost) => tracing::info!(
-                            "Deducted {:.4} credits for user {} (sid: {})",
-                            cost,
-                            user_info.user_id,
-                            payload.MessageSid
-                        ),
+                        Ok(cost) => {
+                            tracing::info!(
+                                "Deducted {:.4} credits for user {} (sid: {})",
+                                cost,
+                                user_info.user_id,
+                                payload.MessageSid
+                            );
+                            // Update the usage log entry with the actual cost
+                            if let Err(e) = state
+                                .user_repository
+                                .update_usage_log_credits(&payload.MessageSid, cost as f32)
+                            {
+                                tracing::error!(
+                                    "Failed to update usage log credits for sid {}: {}",
+                                    payload.MessageSid,
+                                    e
+                                );
+                            }
+                        }
                         Err(e) => tracing::error!(
                             "Failed to deduct credits for user {}: {}",
                             user_info.user_id,
