@@ -88,7 +88,7 @@ pub async fn fetch_imap_previews(
         auth_user.user_id,
         params.limit
     );
-    match fetch_emails_imap(&state, auth_user.user_id, true, params.limit, false, false).await {
+    match fetch_emails_imap(&state, auth_user.user_id, params.limit, false, false).await {
         Ok(previews) => {
             tracing::info!("Fetched {} IMAP previews", previews.len());
 
@@ -140,7 +140,7 @@ pub async fn fetch_full_imap_emails(
     if limit.is_none() {
         limit = Some(5);
     }
-    match fetch_emails_imap(&state, auth_user.user_id, false, limit, false, false).await {
+    match fetch_emails_imap(&state, auth_user.user_id, limit, false, false).await {
         Ok(previews) => {
             tracing::info!("Fetched {} IMAP full emails", previews.len());
 
@@ -568,13 +568,16 @@ pub async fn fetch_single_imap_email(
 pub async fn fetch_emails_imap(
     state: &AppState,
     user_id: i32,
-    preview_only: bool,
     limit: Option<u32>,
     unprocessed: bool,
     unread_only: bool,
 ) -> Result<Vec<ImapEmailPreview>, ImapError> {
-    tracing::debug!("Starting fetch_emails_imap for user {} with preview_only: {}, limit: {:?}, unprocessed: {}",
-        user_id, preview_only, limit, unprocessed);
+    tracing::debug!(
+        "Starting fetch_emails_imap for user {} with limit: {:?}, unprocessed: {}",
+        user_id,
+        limit,
+        unprocessed
+    );
 
     // Fetch from all connected accounts and merge results
     let accounts = state
@@ -595,7 +598,6 @@ pub async fn fetch_emails_imap(
             &account.password,
             account.imap_server.as_deref(),
             account.imap_port,
-            preview_only,
             limit,
             unprocessed,
             unread_only,
@@ -635,6 +637,7 @@ pub async fn fetch_emails_imap(
 }
 
 /// Fetch emails from a single IMAP account
+#[allow(clippy::too_many_arguments)]
 async fn fetch_emails_imap_for_account(
     state: &AppState,
     user_id: i32,
@@ -642,7 +645,6 @@ async fn fetch_emails_imap_for_account(
     password: &str,
     imap_server: Option<&str>,
     imap_port: Option<i32>,
-    preview_only: bool,
     limit: Option<u32>,
     unprocessed: bool,
     unread_only: bool,
