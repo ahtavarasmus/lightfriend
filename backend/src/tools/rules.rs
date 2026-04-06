@@ -90,8 +90,9 @@ impl ToolHandler for SetReminderHandler {
             .unwrap_or_default()
             .as_secs() as i32;
 
-        let remind_at =
-            crate::proactive::utils::parse_iso_to_timestamp(&when).ok_or_else(|| {
+        let tz_offset = crate::proactive::utils::user_tz_offset_secs(ctx.state, ctx.user_id);
+        let remind_at = crate::proactive::utils::parse_iso_to_timestamp(&when, tz_offset)
+            .ok_or_else(|| {
                 format!(
                     "Invalid reminder timestamp '{}'. Use an ISO datetime like '2026-03-19T14:30'.",
                     when
@@ -364,17 +365,18 @@ impl ToolHandler for UpdateEventHandler {
             .ok_or_else(|| "event_id is required".to_string())? as i32;
         let append_description = args["append_description"].as_str();
         let status = args["status"].as_str();
+        let tz_offset = crate::proactive::utils::user_tz_offset_secs(ctx.state, ctx.user_id);
         let remind_at = args["remind_at"]
             .as_str()
             .map(|s| {
-                crate::proactive::utils::parse_iso_to_timestamp(s)
+                crate::proactive::utils::parse_iso_to_timestamp(s, tz_offset)
                     .ok_or_else(|| "Invalid remind_at timestamp".to_string())
             })
             .transpose()?;
         let due_at = args["due_at"]
             .as_str()
             .map(|s| {
-                crate::proactive::utils::parse_iso_to_timestamp(s)
+                crate::proactive::utils::parse_iso_to_timestamp(s, tz_offset)
                     .ok_or_else(|| "Invalid due_at timestamp".to_string())
             })
             .transpose()?;
