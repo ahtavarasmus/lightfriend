@@ -1778,9 +1778,9 @@ pub async fn search_bridge_rooms(
 
     let mut results: Vec<BridgeRoom> = matching_rooms.into_iter().map(|(_, room)| room).collect();
 
-    // Search Synapse Admin API for bridge ghost users (contacts without rooms).
-    // The user directory API excludes appservice users by design, so we use the
-    // admin API which searches the users table directly.
+    // Search Matrix user directory for bridge ghost users (contacts without rooms).
+    // Uses the standard Matrix user directory search API which, unlike Synapse,
+    // may include appservice-managed users on Tuwunel/Conduit-based homeservers.
     if search_term.trim().len() >= 2 {
         let homeserver_url = std::env::var("MATRIX_HOMESERVER").unwrap_or_default();
         let access_token = client
@@ -1790,15 +1790,18 @@ pub async fn search_bridge_rooms(
             .unwrap_or_default();
 
         if !homeserver_url.is_empty() && !access_token.is_empty() {
-            let admin_url = format!(
-                "{}/_synapse/admin/v2/users?from=0&limit=50&name={}",
-                homeserver_url.trim_end_matches('/'),
-                urlencoding::encode(search_term.trim())
+            let search_url = format!(
+                "{}/_matrix/client/v3/user_directory/search",
+                homeserver_url.trim_end_matches('/')
             );
             let http_client = reqwest::Client::new();
             match http_client
-                .get(&admin_url)
+                .post(&search_url)
                 .header("Authorization", format!("Bearer {}", access_token))
+                .json(&serde_json::json!({
+                    "search_term": search_term.trim(),
+                    "limit": 50
+                }))
                 .send()
                 .await
             {
@@ -1813,16 +1816,16 @@ pub async fn search_bridge_rooms(
                             .map(|r| remove_bridge_suffix(&r.display_name).to_lowercase())
                             .collect();
 
-                        if let Some(users) = body["users"].as_array() {
+                        if let Some(users) = body["results"].as_array() {
                             tracing::info!(
-                                "Admin API returned {} users for '{}'",
+                                "User directory returned {} users for '{}'",
                                 users.len(),
                                 search_term
                             );
                             for user in users {
-                                let name = user["name"].as_str().unwrap_or_default();
+                                let user_id = user["user_id"].as_str().unwrap_or_default();
                                 // Extract localpart from @localpart:server
-                                let localpart = name
+                                let localpart = user_id
                                     .trim_start_matches('@')
                                     .split(':')
                                     .next()
@@ -1835,7 +1838,7 @@ pub async fn search_bridge_rooms(
                                     continue;
                                 }
 
-                                let raw_display = user["displayname"].as_str().unwrap_or_default();
+                                let raw_display = user["display_name"].as_str().unwrap_or_default();
                                 let display_name = if !raw_display.is_empty() {
                                     remove_bridge_suffix(raw_display)
                                 } else {
@@ -1871,17 +1874,17 @@ pub async fn search_bridge_rooms(
                             }
                         }
                         tracing::info!(
-                            "Total results after admin search: {} for {}",
+                            "Total results after directory search: {} for {}",
                             results.len(),
                             capitalize(service)
                         );
                     }
                 }
                 Ok(resp) => {
-                    tracing::warn!("Admin API returned status {}", resp.status());
+                    tracing::warn!("User directory search returned status {}", resp.status());
                 }
                 Err(e) => {
-                    tracing::warn!("Admin API search failed: {:?}", e);
+                    tracing::warn!("User directory search failed: {:?}", e);
                 }
             }
         }
