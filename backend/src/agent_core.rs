@@ -74,8 +74,12 @@ pub fn build_system_prompt(ctx: &AgentContext, mode: ChannelMode) -> String {
         }
     };
 
+    let tool_integrity_rule = "CRITICAL: When the user asks you to send, create, update, or delete something, you MUST call the actual tool. NEVER use direct_response to describe an action you did not perform. Saying 'Sending to X' or 'Message queued' in direct_response without calling send_chat_message is FORBIDDEN - it misleads the user into thinking the action happened.";
+
     format!(
         r#"You are lightfriend, a concise AI assistant.
+
+{tool_integrity_rule}
 
 Current date: {formatted_time}
 User timezone: {timezone_str} ({offset} from UTC)

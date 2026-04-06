@@ -720,13 +720,13 @@ pub fn is_disconnection_message(content: &str) -> bool {
         "logged out",
         "authentication failed",
         "login failed",
-        "timeout",
-        "invalid",
         "bad_credentials",
         "wa-logged-out",
         "wa-not-logged-in",
         "device_removed",
         "relogin to continue",
+        "not logged in",
+        "session expired",
     ];
 
     let lower = content.to_lowercase();

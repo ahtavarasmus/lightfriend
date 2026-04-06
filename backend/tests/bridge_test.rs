@@ -86,8 +86,8 @@ mod pure_function_tests {
         assert!(is_disconnection_message("You have been logged out"));
         assert!(is_disconnection_message("Authentication failed"));
         assert!(is_disconnection_message("Login failed: bad_credentials"));
-        assert!(is_disconnection_message("Session timeout occurred"));
-        assert!(is_disconnection_message("Invalid token"));
+        assert!(is_disconnection_message("Session expired"));
+        assert!(is_disconnection_message("User is not logged in"));
         assert!(is_disconnection_message("wa-logged-out event received"));
         assert!(is_disconnection_message("wa-not-logged-in state"));
         assert!(is_disconnection_message(

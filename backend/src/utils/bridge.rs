@@ -1249,17 +1249,13 @@ pub async fn handle_bridge_message(
     };
     let user_id = user.id;
 
-    // Early exit: Skip ALL message processing if any bridge is in "connecting" state
-    // This prevents blocking the connection flow with long waits
-    let connecting_bridge_types = vec!["signal", "telegram", "whatsapp"];
-    for bridge_type in &connecting_bridge_types {
+    // Track which bridges are currently connecting (used below to skip
+    // management-room processing for those bridges only).
+    let mut connecting_bridges: Vec<String> = Vec::new();
+    for bridge_type in &["signal", "telegram", "whatsapp"] {
         if let Ok(Some(bridge)) = state.user_repository.get_bridge(user_id, bridge_type) {
             if bridge.status == "connecting" {
-                tracing::debug!(
-                    "⏳ Skipping message processing - {} bridge is connecting",
-                    bridge_type
-                );
-                return;
+                connecting_bridges.push(bridge_type.to_string());
             }
         }
     }
@@ -1439,6 +1435,17 @@ pub async fn handle_bridge_message(
             }
         }
     };
+
+    // Skip portal messages for a service that is currently connecting
+    // (the connection monitor handles those). Only skip the connecting service,
+    // not all services.
+    if connecting_bridges.contains(&service) {
+        tracing::info!(
+            "⏳ Skipping {} portal message - bridge is connecting",
+            service
+        );
+        return;
+    }
 
     // Check if sender is a bridge ghost or the user themselves
     let sender_prefix = get_sender_prefix(&service);

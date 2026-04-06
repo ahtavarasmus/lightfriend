@@ -1556,3 +1556,37 @@ pub async fn sync_all_users_to_resend(
         "synced": total,
     })))
 }
+
+/// Reinitialize all Matrix clients and sync tasks.
+/// Use this to recover from dead sync tasks without restarting the server.
+pub async fn reinit_matrix(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    tracing::info!("Admin: reinitializing all Matrix clients and sync tasks");
+
+    // Check how many sync tasks are currently dead
+    let (total, dead) = {
+        let sync_tasks = state.matrix_sync_tasks.lock().await;
+        let total = sync_tasks.len();
+        let dead = sync_tasks.values().filter(|h| h.is_finished()).count();
+        (total, dead)
+    };
+
+    crate::jobs::scheduler::initialize_matrix_clients(Arc::clone(&state)).await;
+
+    let new_total = state.matrix_sync_tasks.lock().await.len();
+
+    tracing::info!(
+        "Matrix reinit complete: {} tasks before ({} dead), {} tasks after",
+        total,
+        dead,
+        new_total
+    );
+
+    Ok(Json(json!({
+        "message": "Matrix clients reinitialized",
+        "previous_tasks": total,
+        "dead_tasks": dead,
+        "new_tasks": new_total,
+    })))
+}

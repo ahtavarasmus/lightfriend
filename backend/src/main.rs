@@ -793,6 +793,10 @@ async fn main() {
             "/api/admin/resend-sync",
             post(admin_handlers::sync_all_users_to_resend),
         )
+        .route(
+            "/api/admin/reinit-matrix",
+            post(admin_handlers::reinit_matrix),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             handlers::auth_middleware::require_admin,
