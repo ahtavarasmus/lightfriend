@@ -104,7 +104,7 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
 
                 <h2>{"Common Questions"}</h2>
                 <p>{"Q: Does this work with Light Phone 3's international versions? A: Yes, as long as SMS/voice is available."}</p>
-                <p>{"Q: How private is my WhatsApp data? A: Your data’s safe with Lightfriend. We run on a secure EU server with no logging of your chats, searches, or personal info. All credentials are encrypted, and optional conversation history gets deleted automatically as you go—my server would fill up fast otherwise. Messaging app chats (like WhatsApp) are temporary too: they’re only accessible for 2 days after receiving them, then gone. I’m a solo dev, not some data-hungry corp. The code’s open-source on GitHub, so anyone can check it’s legit. It’s a hosted app, so some trust is needed, but you own your data and can delete it anytime, no questions asked."}</p>
+                <p>{"Q: How private is my WhatsApp data? A: No trust required. Lightfriend runs in a hardware-isolated enclave - no one, not even the developer, can see your data. The codebase is fully open source and privacy is cryptographically verifiable."}</p>
 
                 <div class="blog-cta">
                     <h3>{"Ready to Add WhatsApp to Your Light Phone 3?"}</h3>
@@ -153,10 +153,9 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
                 .blog-hero {
                     text-align: center;
                     padding: 6rem 2rem;
-                    background: rgba(26, 26, 26, 0.75);
-                    backdrop-filter: blur(5px);
+                    background: var(--surface-card);
                     margin-top: 2rem;
-                    border: 1px solid rgba(30, 144, 255, 0.1);
+                    border: 1px solid var(--border-card);
                     margin-bottom: 2rem;
                 }
                 .blog-hero h1 {
@@ -168,7 +167,7 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
                 }
                 .blog-hero p {
                     font-size: 1.2rem;
-                    color: #999;
+                    color: var(--text-body);
                     max-width: 600px;
                     margin: 0 auto;
                 }
@@ -185,12 +184,12 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
                     -webkit-text-fill-color: transparent;
                 }
                 .blog-content p {
-                    color: #999;
+                    color: var(--text-body);
                     line-height: 1.6;
                     margin-bottom: 1.5rem;
                 }
                 .blog-content ul, .blog-content ol {
-                    color: #999;
+                    color: var(--text-body);
                     padding-left: 1.5rem;
                     margin-bottom: 1.5rem;
                 }
@@ -212,7 +211,7 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
                 }
                 .comparison-table th, .comparison-table td {
                     padding: 1rem;
-                    border: 1px solid rgba(126, 178, 255, 0.2);
+                    border: 1px solid var(--border-card);
                     text-align: left;
                 }
                 .comparison-table th {
@@ -223,7 +222,8 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
                     text-align: center;
                     margin: 4rem 0 2rem;
                     padding: 2rem;
-                    background: rgba(30, 144, 255, 0.1);
+                    background: var(--surface-subtle);
+                    border: 1px solid var(--border-card);
                     border-radius: 12px;
                 }
                 .blog-cta h3 {

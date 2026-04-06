@@ -1,0 +1,482 @@
+/* ============================================
+   Lightfriend Design System
+   Extracted from the landing page aesthetic.
+   Use ds-* classes when building new pages
+   or migrating existing ones.
+   ============================================ */
+
+:root {
+    /* Surfaces - clean dark, no glassmorphism */
+    --surface-card: rgba(0, 0, 0, 0.3);
+    --surface-card-hover: rgba(0, 0, 0, 0.4);
+    --surface-subtle: rgba(255, 255, 255, 0.03);
+
+    /* Borders - white-based, not blue-tinted */
+    --border-card: rgba(255, 255, 255, 0.12);
+    --border-card-hover: rgba(255, 255, 255, 0.25);
+    --border-section: rgba(255, 255, 255, 0.06);
+
+    /* Typography */
+    --text-heading: #ffffff;
+    --text-body: #bbbbbb;
+    --text-muted: #888888;
+    --text-dim: #666666;
+
+    /* Layout */
+    --section-max-width: 1200px;
+    --content-max-width: 800px;
+
+    /* Card */
+    --card-radius: 16px;
+    --card-radius-sm: 12px;
+    --card-padding: 2rem;
+    --card-padding-sm: 1.5rem;
+}
+
+/* ============================================
+   Section Layouts
+   ============================================ */
+
+.ds-section {
+    max-width: var(--section-max-width);
+    margin: 0 auto;
+    padding: 4rem 2rem;
+    position: relative;
+}
+
+.ds-section--narrow {
+    max-width: var(--content-max-width);
+    margin: 0 auto;
+    padding: 4rem 2rem;
+    position: relative;
+}
+
+@media (max-width: 768px) {
+    .ds-section,
+    .ds-section--narrow {
+        padding: 2rem 1rem;
+    }
+}
+
+/* ============================================
+   Cards
+   ============================================ */
+
+.ds-card {
+    background: var(--surface-card);
+    border: 1px solid var(--border-card);
+    border-radius: var(--card-radius);
+    padding: var(--card-padding);
+    transition: border-color 0.3s ease;
+}
+
+.ds-card:hover {
+    border-color: var(--border-card-hover);
+}
+
+.ds-card--subtle {
+    background: var(--surface-subtle);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--card-radius-sm);
+    padding: var(--card-padding-sm);
+    transition: border-color 0.3s ease;
+}
+
+.ds-card--subtle:hover {
+    border-color: var(--border-card-hover);
+}
+
+@media (max-width: 768px) {
+    .ds-card {
+        padding: var(--card-padding-sm);
+    }
+}
+
+/* ============================================
+   Typography
+   ============================================ */
+
+.ds-page-header {
+    font-size: 2.5rem;
+    font-weight: 700;
+    background: linear-gradient(45deg, #fff, #7EB2FF);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 1.5rem;
+}
+
+.ds-heading-xl {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--text-heading);
+    margin-bottom: 1rem;
+}
+
+.ds-heading-lg {
+    font-size: 1.8rem;
+    font-weight: 600;
+    color: var(--text-heading);
+    margin-bottom: 1rem;
+}
+
+.ds-heading-md {
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: var(--text-heading);
+    margin-bottom: 0.75rem;
+}
+
+.ds-heading-sm {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: var(--text-heading);
+    margin-bottom: 0.5rem;
+}
+
+.ds-subtitle {
+    font-size: 1.2rem;
+    color: var(--text-body);
+    line-height: 1.6;
+    max-width: 700px;
+}
+
+.ds-body {
+    font-size: 1rem;
+    color: var(--text-body);
+    line-height: 1.6;
+}
+
+.ds-body-lg {
+    font-size: 1.1rem;
+    color: var(--text-body);
+    line-height: 1.7;
+}
+
+.ds-text-muted {
+    color: var(--text-muted);
+}
+
+.ds-text-dim {
+    color: var(--text-dim);
+}
+
+.ds-highlight {
+    font-weight: 700;
+    color: #7EB2FF;
+}
+
+@media (max-width: 768px) {
+    .ds-page-header {
+        font-size: 2rem;
+    }
+
+    .ds-heading-xl {
+        font-size: 2rem;
+    }
+
+    .ds-heading-lg {
+        font-size: 1.5rem;
+    }
+
+    .ds-subtitle {
+        font-size: 1.05rem;
+    }
+}
+
+/* ============================================
+   Buttons
+   ============================================ */
+
+.ds-btn-primary {
+    background: linear-gradient(135deg, #d4d4d4, #a8a8a8 30%, #e8e8e8 50%, #a8a8a8 70%, #c0c0c0);
+    color: #1a1a2e;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    padding: 1rem 2.5rem;
+    border-radius: 8px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    text-decoration: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    font-family: inherit;
+}
+
+.ds-btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(255, 255, 255, 0.2), 0 0 30px rgba(200, 200, 200, 0.15);
+}
+
+.ds-btn-primary::after {
+    content: '\2192';
+    transition: transform 0.3s ease;
+}
+
+.ds-btn-primary:hover::after {
+    transform: translateX(5px);
+}
+
+.ds-btn-accent {
+    background: linear-gradient(45deg, #7EB2FF, #4169E1);
+    color: white;
+    border: none;
+    padding: 0.8rem 1.5rem;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    text-decoration: none;
+    font-family: inherit;
+}
+
+.ds-btn-accent:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(126, 178, 255, 0.3);
+}
+
+.ds-btn-secondary {
+    background: rgba(180, 180, 180, 0.12);
+    color: rgba(255, 255, 255, 0.75);
+    border: 1px solid rgba(200, 200, 200, 0.25);
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    text-decoration: none;
+    font-family: inherit;
+}
+
+.ds-btn-secondary:hover {
+    background: rgba(200, 200, 200, 0.2);
+    transform: translateY(-2px);
+    color: #fff;
+}
+
+@media (max-width: 768px) {
+    .ds-btn-primary {
+        padding: 0.8rem 1.5rem;
+        font-size: 1rem;
+    }
+}
+
+/* ============================================
+   Links
+   ============================================ */
+
+.ds-link {
+    color: #1E90FF;
+    text-decoration: none;
+    transition: color 0.3s ease;
+}
+
+.ds-link:hover {
+    color: #7EB2FF;
+    text-decoration: underline;
+}
+
+/* ============================================
+   Grid Layouts
+   ============================================ */
+
+.ds-grid-2 {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 2rem;
+}
+
+.ds-grid-3 {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2rem;
+}
+
+@media (max-width: 968px) {
+    .ds-grid-3 {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 768px) {
+    .ds-grid-2,
+    .ds-grid-3 {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ============================================
+   FAQ / Accordion Items
+   ============================================ */
+
+.ds-faq-item {
+    margin-bottom: 1.5rem;
+    background: var(--surface-subtle);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--card-radius-sm);
+    padding: var(--card-padding-sm);
+    transition: border-color 0.3s ease;
+}
+
+.ds-faq-item:hover {
+    border-color: var(--border-card-hover);
+}
+
+.ds-faq-item h3 {
+    font-size: 1.4rem;
+    margin-bottom: 0.75rem;
+    color: var(--text-heading);
+}
+
+.ds-faq-item p {
+    font-size: 1.1rem;
+    color: var(--text-body);
+    line-height: 1.6;
+}
+
+@media (max-width: 768px) {
+    .ds-faq-item h3 {
+        font-size: 1.2rem;
+    }
+
+    .ds-faq-item p {
+        font-size: 1rem;
+    }
+}
+
+/* ============================================
+   Scroll Animation
+   ============================================ */
+
+.ds-scroll-animate {
+    opacity: 0;
+    transform: translateY(30px);
+    transition: opacity 0.7s ease, transform 0.7s ease;
+}
+
+.ds-scroll-animate.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* ============================================
+   Dividers
+   ============================================ */
+
+.ds-divider {
+    border: none;
+    border-top: 1px solid var(--border-section);
+    margin: 0;
+}
+
+/* ============================================
+   Form Elements
+   ============================================ */
+
+.ds-input {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border-card);
+    border-radius: 8px;
+    padding: 1rem;
+    color: #ffffff;
+    font-size: 1rem;
+    font-family: inherit;
+    transition: all 0.3s ease;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.ds-input:focus {
+    outline: none;
+    border-color: var(--border-card-hover);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.05);
+    background: rgba(0, 0, 0, 0.3);
+}
+
+.ds-input::placeholder {
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.ds-select {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border-card);
+    border-radius: 8px;
+    padding: 1rem;
+    color: #ffffff;
+    font-size: 1rem;
+    font-family: inherit;
+    transition: all 0.3s ease;
+    cursor: pointer;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.ds-select:focus {
+    outline: none;
+    border-color: var(--border-card-hover);
+}
+
+/* ============================================
+   Status Messages
+   ============================================ */
+
+.ds-error {
+    background: rgba(255, 0, 0, 0.1);
+    border: 1px solid rgba(255, 0, 0, 0.2);
+    color: #ff6b6b;
+    padding: 1rem;
+    border-radius: var(--card-radius-sm);
+    text-align: center;
+}
+
+.ds-success {
+    background: rgba(0, 255, 0, 0.1);
+    border: 1px solid rgba(0, 255, 0, 0.2);
+    color: #69f0ae;
+    padding: 1rem;
+    border-radius: var(--card-radius-sm);
+    text-align: center;
+}
+
+.ds-warning {
+    background: rgba(255, 193, 7, 0.1);
+    border: 1px solid rgba(255, 193, 7, 0.2);
+    color: #FFC107;
+    padding: 1rem;
+    border-radius: var(--card-radius-sm);
+    text-align: center;
+}
+
+/* ============================================
+   Utility: Reduced Motion
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+    .ds-scroll-animate {
+        opacity: 1;
+        transform: none;
+        transition: none;
+    }
+
+    .ds-btn-primary:hover,
+    .ds-btn-accent:hover,
+    .ds-btn-secondary:hover {
+        transform: none;
+    }
+
+    .ds-card,
+    .ds-card--subtle,
+    .ds-faq-item {
+        transition: none;
+    }
+}

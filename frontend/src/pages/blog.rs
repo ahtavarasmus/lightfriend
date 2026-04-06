@@ -97,10 +97,9 @@ pub fn blog() -> Html {
                 .blog-list-hero {
                     text-align: center;
                     padding: 6rem 2rem;
-                    background: rgba(26, 26, 26, 0.75);
-                    backdrop-filter: blur(5px);
+                    background: var(--surface-card);
                     margin-top: 2rem;
-                    border: 1px solid rgba(30, 144, 255, 0.1);
+                    border: 1px solid var(--border-card);
                     margin-bottom: 2rem;
                 }
                 .blog-list-hero h1 {
@@ -112,7 +111,7 @@ pub fn blog() -> Html {
                 }
                 .blog-list-hero p {
                     font-size: 1.2rem;
-                    color: #999;
+                    color: var(--text-body);
                     max-width: 600px;
                     margin: 0 auto;
                 }
@@ -122,16 +121,15 @@ pub fn blog() -> Html {
                     padding: 2rem;
                 }
                 .blog-post-preview {
-                    background: rgba(26, 26, 26, 0.85);
-                    backdrop-filter: blur(10px);
-                    border: 1px solid rgba(30, 144, 255, 0.1);
+                    background: var(--surface-card);
+                    border: 1px solid var(--border-card);
                     border-radius: 12px;
                     margin-bottom: 2rem;
                     overflow: hidden;
                     transition: all 0.3s ease;
                 }
                 .blog-post-preview:hover {
-                    border-color: rgba(30, 144, 255, 0.3);
+                    border-color: var(--border-card-hover);
                     transform: translateY(-5px);
                 }
                 .blog-post-preview a {
@@ -152,7 +150,7 @@ pub fn blog() -> Html {
                     -webkit-text-fill-color: transparent;
                 }
                 .blog-post-preview p {
-                    color: #999;
+                    color: var(--text-body);
                     padding: 0 1.5rem;
                     margin: 1rem 0;
                 }
