@@ -1072,6 +1072,7 @@ async fn main() {
         )
         .route("/api/auth/imap/login", post(imap_auth::imap_login))
         .route("/api/auth/imap/status", get(imap_auth::imap_status))
+        .route("/api/auth/imap/detect", post(imap_auth::detect_provider))
         .route(
             "/api/auth/imap/disconnect",
             delete(imap_auth::delete_imap_connection),

@@ -19,6 +19,16 @@ use crate::{
 /// Type alias for IMAP credentials: (description, password, server, port)
 pub type ImapCredentials = (String, String, Option<String>, Option<i32>);
 
+/// Structured IMAP connection info (replaces raw tuples for multi-email support)
+#[derive(Debug, Clone)]
+pub struct ImapConnectionInfo {
+    pub id: i32,
+    pub email: String,
+    pub password: String,
+    pub imap_server: Option<String>,
+    pub imap_port: Option<i32>,
+}
+
 /// Parameters for logging usage
 pub struct LogUsageParams {
     pub user_id: i32,
@@ -199,30 +209,51 @@ impl UserRepository {
             .unwrap()
             .as_secs() as i32;
 
-        // First, delete any existing connections for this user
-        diesel::delete(imap_connection::table)
+        // Check if this email already exists for this user
+        let existing = imap_connection::table
             .filter(imap_connection::user_id.eq(user_id))
-            .execute(&mut conn)?;
+            .filter(imap_connection::description.eq(email))
+            .first::<crate::pg_models::PgImapConnection>(&mut conn)
+            .optional()?;
 
-        // Create new connection
-        let new_connection = NewPgImapConnection {
-            user_id,
-            method: imap_server
-                .map(|s| s.to_string())
-                .unwrap_or("gmail".to_string()),
-            encrypted_password,
-            status: "active".to_string(),
-            last_update: current_time,
-            created_on: current_time,
-            description: email.to_string(),
-            imap_server: imap_server.map(|s| s.to_string()),
-            imap_port: imap_port.map(|p| p as i32),
-        };
-
-        // Insert the new connection
-        diesel::insert_into(imap_connection::table)
-            .values(&new_connection)
+        if existing.is_some() {
+            // Update existing connection
+            diesel::update(
+                imap_connection::table
+                    .filter(imap_connection::user_id.eq(user_id))
+                    .filter(imap_connection::description.eq(email)),
+            )
+            .set((
+                imap_connection::encrypted_password.eq(&encrypted_password),
+                imap_connection::status.eq("active"),
+                imap_connection::last_update.eq(current_time),
+                imap_connection::imap_server.eq(imap_server),
+                imap_connection::imap_port.eq(imap_port.map(|p| p as i32)),
+                imap_connection::method.eq(imap_server
+                    .map(|s| s.to_string())
+                    .unwrap_or("gmail".to_string())),
+            ))
             .execute(&mut conn)?;
+        } else {
+            // Insert new connection
+            let new_connection = NewPgImapConnection {
+                user_id,
+                method: imap_server
+                    .map(|s| s.to_string())
+                    .unwrap_or("gmail".to_string()),
+                encrypted_password,
+                status: "active".to_string(),
+                last_update: current_time,
+                created_on: current_time,
+                description: email.to_string(),
+                imap_server: imap_server.map(|s| s.to_string()),
+                imap_port: imap_port.map(|p| p as i32),
+            };
+
+            diesel::insert_into(imap_connection::table)
+                .values(&new_connection)
+                .execute(&mut conn)?;
+        }
 
         Ok(())
     }
@@ -257,12 +288,95 @@ impl UserRepository {
         }
     }
 
+    /// Get all active IMAP connections for a user
+    pub fn get_all_imap_credentials(
+        &self,
+        user_id: i32,
+    ) -> Result<Vec<ImapConnectionInfo>, diesel::result::Error> {
+        use crate::pg_schema::imap_connection;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let connections = imap_connection::table
+            .filter(imap_connection::user_id.eq(user_id))
+            .filter(imap_connection::status.eq("active"))
+            .load::<crate::pg_models::PgImapConnection>(&mut conn)?;
+
+        let mut result = Vec::new();
+        for c in connections {
+            match decrypt(&c.encrypted_password) {
+                Ok(password) => result.push(ImapConnectionInfo {
+                    id: c.id,
+                    email: c.description,
+                    password,
+                    imap_server: c.imap_server,
+                    imap_port: c.imap_port,
+                }),
+                Err(_) => {
+                    tracing::error!("Failed to decrypt password for imap_connection id={}", c.id);
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    /// Get IMAP credentials for a specific email address
+    pub fn get_imap_credentials_by_email(
+        &self,
+        user_id: i32,
+        email: &str,
+    ) -> Result<Option<ImapConnectionInfo>, diesel::result::Error> {
+        use crate::pg_schema::imap_connection;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let imap_conn = imap_connection::table
+            .filter(imap_connection::user_id.eq(user_id))
+            .filter(imap_connection::description.eq(email))
+            .filter(imap_connection::status.eq("active"))
+            .first::<crate::pg_models::PgImapConnection>(&mut conn)
+            .optional()?;
+
+        if let Some(c) = imap_conn {
+            match decrypt(&c.encrypted_password) {
+                Ok(password) => Ok(Some(ImapConnectionInfo {
+                    id: c.id,
+                    email: c.description,
+                    password,
+                    imap_server: c.imap_server,
+                    imap_port: c.imap_port,
+                })),
+                Err(_) => Err(diesel::result::Error::RollbackTransaction),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Delete all IMAP connections for a user
     pub fn delete_imap_credentials(&self, user_id: i32) -> Result<(), diesel::result::Error> {
         use crate::pg_schema::imap_connection;
         let connection = &mut self.pool.get().unwrap();
 
         diesel::delete(imap_connection::table.filter(imap_connection::user_id.eq(user_id)))
             .execute(connection)?;
+
+        Ok(())
+    }
+
+    /// Delete a specific IMAP connection by email address
+    pub fn delete_imap_connection_by_email(
+        &self,
+        user_id: i32,
+        email: &str,
+    ) -> Result<(), diesel::result::Error> {
+        use crate::pg_schema::imap_connection;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::delete(
+            imap_connection::table
+                .filter(imap_connection::user_id.eq(user_id))
+                .filter(imap_connection::description.eq(email)),
+        )
+        .execute(&mut conn)?;
 
         Ok(())
     }
@@ -670,6 +784,7 @@ impl UserRepository {
         let user_ids = imap_connection::table
             .filter(imap_connection::status.eq("active"))
             .select(imap_connection::user_id)
+            .distinct()
             .load::<i32>(&mut conn)?;
 
         Ok(user_ids)
@@ -1428,12 +1543,13 @@ impl UserRepository {
         &self,
         user_id: i32,
         email_uid: &str,
+        imap_connection_id: Option<i32>,
     ) -> Result<(), DieselError> {
         use crate::pg_schema::processed_emails;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // First check if the email is already processed
-        let already_processed = self.is_email_processed(user_id, email_uid)?;
+        let already_processed = self.is_email_processed(user_id, email_uid, imap_connection_id)?;
         if already_processed {
             tracing::debug!(
                 "Email {} for user {} is already marked as processed",
@@ -1452,6 +1568,7 @@ impl UserRepository {
             user_id,
             email_uid: email_uid.to_string(),
             processed_at: current_time,
+            imap_connection_id,
         };
 
         match diesel::insert_into(processed_emails::table)
@@ -1479,13 +1596,25 @@ impl UserRepository {
     }
 
     // Check if an email is processed
-    pub fn is_email_processed(&self, user_id: i32, email_uid: &str) -> Result<bool, DieselError> {
+    pub fn is_email_processed(
+        &self,
+        user_id: i32,
+        email_uid: &str,
+        imap_connection_id: Option<i32>,
+    ) -> Result<bool, DieselError> {
         use crate::pg_schema::processed_emails;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
-        let processed = processed_emails::table
+        let mut query = processed_emails::table
             .filter(processed_emails::user_id.eq(user_id))
             .filter(processed_emails::email_uid.eq(email_uid))
+            .into_boxed();
+
+        if let Some(conn_id) = imap_connection_id {
+            query = query.filter(processed_emails::imap_connection_id.eq(conn_id));
+        }
+
+        let processed = query
             .first::<crate::pg_models::PgProcessedEmail>(&mut conn)
             .optional()?;
 

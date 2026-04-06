@@ -5,6 +5,7 @@ use crate::api::twilio_sms::TwilioResponse;
 use crate::tools::registry::{
     write_outgoing_error_history, write_outgoing_history, ToolContext, ToolHandler, ToolResult,
 };
+use crate::AppState;
 
 // ─── send_email (outgoing) ───────────────────────────────────────────────────
 
@@ -18,6 +19,17 @@ impl ToolHandler for SendEmailHandler {
 
     fn definition(&self) -> chat_completion::Tool {
         crate::tool_call_utils::email::get_send_email_tool()
+    }
+
+    fn definition_for_user(&self, state: &AppState, user_id: i32) -> chat_completion::Tool {
+        let emails: Vec<String> = state
+            .user_repository
+            .get_all_imap_credentials(user_id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|c| c.email)
+            .collect();
+        crate::tool_call_utils::email::get_send_email_tool_for_user(&emails)
     }
 
     fn is_outgoing(&self) -> bool {
@@ -87,6 +99,17 @@ impl ToolHandler for RespondEmailHandler {
 
     fn definition(&self) -> chat_completion::Tool {
         crate::tool_call_utils::email::get_respond_to_email_tool()
+    }
+
+    fn definition_for_user(&self, state: &AppState, user_id: i32) -> chat_completion::Tool {
+        let emails: Vec<String> = state
+            .user_repository
+            .get_all_imap_credentials(user_id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|c| c.email)
+            .collect();
+        crate::tool_call_utils::email::get_respond_to_email_tool_for_user(&emails)
     }
 
     fn auto_injected_params(&self) -> Vec<&'static str> {

@@ -189,10 +189,10 @@ pub async fn get_profile(
             // Check if user has any connected services (for onboarding modal)
             let has_any_connection = state
                 .user_repository
-                .get_imap_credentials(auth_user.user_id)
+                .get_all_imap_credentials(auth_user.user_id)
                 .ok()
-                .flatten()
-                .is_some()
+                .map(|v| !v.is_empty())
+                .unwrap_or(false)
                 || state
                     .user_repository
                     .get_bridge(auth_user.user_id, "whatsapp")

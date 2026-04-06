@@ -892,10 +892,10 @@ pub async fn get_rule_sources(
     // Email: available if user has IMAP credentials
     let has_email = state
         .user_repository
-        .get_imap_credentials(user_id)
+        .get_all_imap_credentials(user_id)
         .ok()
-        .flatten()
-        .is_some();
+        .map(|v| !v.is_empty())
+        .unwrap_or(false);
     sources.push(RuleSourceOption {
         source_type: "email".to_string(),
         label: "Email".to_string(),

@@ -207,6 +207,7 @@ diesel::table! {
         user_id -> Int4,
         email_uid -> Text,
         processed_at -> Int4,
+        imap_connection_id -> Nullable<Int4>,
     }
 }
 
