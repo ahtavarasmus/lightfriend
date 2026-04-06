@@ -36,7 +36,6 @@ mod pages {
     pub mod blog;
     pub mod bring_own_number;
     pub mod change_log;
-    pub mod faq;
     pub mod home;
     pub mod landing;
     pub mod lightphone3_whatsapp_guide;
@@ -106,7 +105,6 @@ use pages::{
     blog::Blog,
     bring_own_number::TwilioHostedInstructions,
     change_log::Changelog,
-    faq::Faq,
     home::Home,
     lightphone3_whatsapp_guide::LightPhone3WhatsappGuide,
     money::UnifiedPricing,
@@ -123,8 +121,6 @@ pub enum Route {
     PasswordReset,
     #[at("/password-reset/:token")]
     PasswordResetWithToken { token: String },
-    #[at("/faq")]
-    Faq,
     #[at("/blog")]
     Blog,
     #[at("/updates")]
@@ -173,10 +169,6 @@ fn switch(routes: Route) -> Html {
         Route::PasswordResetWithToken { token } => {
             info!("Rendering Password Reset page with token");
             html! { <PasswordResetWithToken token={token.clone()} /> }
-        }
-        Route::Faq => {
-            info!("Rendering FAQ page");
-            html! { <Faq /> }
         }
         Route::Blog => {
             info!("Rendering Blog page");
@@ -317,7 +309,7 @@ use std::collections::HashMap;
 pub fn pricing_wrapper() -> Html {
     use_seo(SeoMeta {
         title: "Pricing \u{2013} Lightfriend AI Assistant for Dumbphones",
-        description: "Lightfriend pricing plans starting at $9/month. SMS, voice calls, WhatsApp, Telegram, Signal, email, and more. Available in 40+ countries.",
+        description: "Lightfriend pricing plans. AI that watches your WhatsApp, Telegram, Signal, and email - only interrupts when it matters. Works with any phone including dumbphones. Privacy verifiable on blockchain.",
         canonical: "https://lightfriend.ai/pricing",
         og_type: "website",
     });

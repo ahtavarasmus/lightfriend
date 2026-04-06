@@ -1840,8 +1840,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                         <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer">{"GitHub"}</a>
                     </div>
                     <div class="sidebar-footer-links">
-                        <a href="/faq">{"FAQ"}</a>
-                        {" | "}
                         <a href="/blog">{"Blog"}</a>
                         {" | "}
                         <a href="mailto:support@lightfriend.ai">{"Support"}</a>

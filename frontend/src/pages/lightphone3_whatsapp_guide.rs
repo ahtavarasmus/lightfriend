@@ -7,7 +7,7 @@ use yew_router::components::Link;
 pub fn light_phone_3_whatsapp_guide() -> Html {
     use_seo(SeoMeta {
         title: "Light Phone 3 WhatsApp Guide \u{2013} How to Get WhatsApp on Light Phone",
-        description: "How to add WhatsApp to your Light Phone 3 without apps. Send and receive WhatsApp messages via SMS and voice calls using Lightfriend AI assistant.",
+        description: "How to add WhatsApp to your Light Phone 3 without apps. AI monitors your WhatsApp and alerts you when something matters - send and receive messages via SMS and voice calls. Privacy verifiable on blockchain.",
         canonical: "https://lightfriend.ai/light-phone-3-whatsapp-guide",
         og_type: "article",
     });
@@ -104,7 +104,7 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
 
                 <h2>{"Common Questions"}</h2>
                 <p>{"Q: Does this work with Light Phone 3's international versions? A: Yes, as long as SMS/voice is available."}</p>
-                <p>{"Q: How private is my WhatsApp data? A: Your data’s safe with Lightfriend. We run on a secure EU server with no logging of your chats, searches, or personal info. All credentials are encrypted, and optional conversation history gets deleted automatically as you go—my server would fill up fast otherwise. Messaging app chats (like WhatsApp) are temporary too: they’re only accessible for 2 days after receiving them, then gone. I’m a solo dev, not some data-hungry corp. The code’s open-source on GitHub, so anyone can check it’s legit. It’s a hosted app, so some trust is needed, but you own your data and can delete it anytime, no questions asked."}</p>
+                <p>{"Q: How private is my WhatsApp data? A: No trust required. Lightfriend runs in its own hardware-isolated enclave, and all AI requests go through Tinfoil’s verified enclaves. No data leaves the enclave unencrypted, and no one - not even the developer - can see what’s inside. The entire codebase is open source, and privacy is cryptographically verifiable on blockchain. This is a unique innovation: you can prove your data is private, not just take someone’s word for it."}</p>
 
                 <div class="blog-cta">
                     <h3>{"Ready to Add WhatsApp to Your Light Phone 3?"}</h3>
