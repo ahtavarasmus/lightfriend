@@ -1025,6 +1025,10 @@ async fn monitor_whatsapp_connection(
                                     }
                                 });
 
+                                // Abort old sync task to prevent duplicate message processing
+                                if let Some(old_task) = sync_tasks.remove(&user_id) {
+                                    old_task.abort();
+                                }
                                 sync_tasks.insert(user_id, handle);
 
                                 // Send sync commands

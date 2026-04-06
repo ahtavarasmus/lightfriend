@@ -303,9 +303,25 @@ pub async fn start_scheduler(state: Arc<AppState>) {
             }) {
 
                 // Check IMAP service
+                // Wrapped in catch_unwind via spawned task to prevent imap crate
+                // panics (e.g. invalid encoding) from killing the scheduler loop.
                 if let Ok(imap_users) = state.user_repository.get_active_imap_connection_users() {
                     if imap_users.contains(&user.id) {
-                        match imap_handlers::fetch_emails_imap(&state, user.id, Some(10), true, true).await {
+                        let fetch_result = {
+                            let state_ref = state.clone();
+                            let uid = user.id;
+                            tokio::spawn(async move {
+                                imap_handlers::fetch_emails_imap(&state_ref, uid, Some(10), true, true).await
+                            }).await
+                        };
+                        let fetch_emails = match fetch_result {
+                            Ok(inner) => inner,
+                            Err(e) => {
+                                error!("IMAP fetch task panicked for user {}: {}", user.id, e);
+                                continue;
+                            }
+                        };
+                        match fetch_emails {
                             Ok(emails) => {
                                 match state.user_repository.get_processed_emails(user.id) {
                                     Ok(mut processed_emails) => {

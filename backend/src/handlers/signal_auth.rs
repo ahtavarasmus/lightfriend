@@ -789,6 +789,10 @@ async fn monitor_signal_connection(
                                         }
                                     }
                                 });
+                                // Abort old sync task to prevent duplicate message processing
+                                if let Some(old_task) = sync_tasks.remove(&user_id) {
+                                    old_task.abort();
+                                }
                                 sync_tasks.insert(user_id, handle);
                                 // No specific sync commands for Signal, as portals are created on message receipt
                                 return Ok(());

@@ -437,6 +437,7 @@ pub struct ImapAccountStatus {
 
 #[derive(Serialize)]
 pub struct ImapStatusMulti {
+    pub connected: bool,
     pub connections: Vec<ImapAccountStatus>,
 }
 
@@ -590,7 +591,9 @@ pub async fn imap_status(
         })
         .collect();
 
+    let connected = !accounts.is_empty();
     Ok(Json(ImapStatusMulti {
+        connected,
         connections: accounts,
     }))
 }
