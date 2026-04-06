@@ -53,6 +53,13 @@ pub trait ToolHandler: Send + Sync {
     /// OpenAI-format tool definition
     fn definition(&self) -> chat_completion::Tool;
 
+    /// User-aware tool definition. Override for tools that need to inject
+    /// per-user data (e.g. email tools listing connected accounts).
+    /// Default falls back to the static definition().
+    fn definition_for_user(&self, _state: &AppState, _user_id: i32) -> chat_completion::Tool {
+        self.definition()
+    }
+
     /// Whether this tool sends data externally (requires user confirmation)
     fn is_outgoing(&self) -> bool {
         false
@@ -99,6 +106,17 @@ impl ToolRegistry {
 
     pub fn definitions(&self) -> Vec<chat_completion::Tool> {
         self.handlers.values().map(|h| h.definition()).collect()
+    }
+
+    pub fn definitions_for_user(
+        &self,
+        state: &AppState,
+        user_id: i32,
+    ) -> Vec<chat_completion::Tool> {
+        self.handlers
+            .values()
+            .map(|h| h.definition_for_user(state, user_id))
+            .collect()
     }
 
     pub fn get(&self, name: &str) -> Option<&Arc<dyn ToolHandler>> {

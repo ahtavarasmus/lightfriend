@@ -2,6 +2,10 @@ use crate::AppState;
 use std::sync::Arc;
 
 pub fn get_send_email_tool() -> openai_api_rs::v1::chat_completion::Tool {
+    get_send_email_tool_for_user(&[])
+}
+
+pub fn get_send_email_tool_for_user(emails: &[String]) -> openai_api_rs::v1::chat_completion::Tool {
     use openai_api_rs::v1::{chat_completion, types};
     use std::collections::HashMap;
     let mut properties = HashMap::new();
@@ -29,6 +33,21 @@ pub fn get_send_email_tool() -> openai_api_rs::v1::chat_completion::Tool {
             ..Default::default()
         }),
     );
+    if !emails.is_empty() {
+        let desc = format!(
+            "The sender email address to use. Connected accounts: {}",
+            emails.join(", ")
+        );
+        properties.insert(
+            "from".to_string(),
+            Box::new(types::JSONSchemaDefine {
+                schema_type: Some(types::JSONSchemaType::String),
+                description: Some(desc),
+                enum_values: Some(emails.to_vec()),
+                ..Default::default()
+            }),
+        );
+    }
     chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
@@ -50,6 +69,12 @@ pub fn get_send_email_tool() -> openai_api_rs::v1::chat_completion::Tool {
 }
 
 pub fn get_respond_to_email_tool() -> openai_api_rs::v1::chat_completion::Tool {
+    get_respond_to_email_tool_for_user(&[])
+}
+
+pub fn get_respond_to_email_tool_for_user(
+    emails: &[String],
+) -> openai_api_rs::v1::chat_completion::Tool {
     use openai_api_rs::v1::{chat_completion, types};
     use std::collections::HashMap;
     let mut properties = HashMap::new();
@@ -69,6 +94,21 @@ pub fn get_respond_to_email_tool() -> openai_api_rs::v1::chat_completion::Tool {
             ..Default::default()
         }),
     );
+    if !emails.is_empty() {
+        let desc = format!(
+            "The sender email address to use for the reply. Connected accounts: {}",
+            emails.join(", ")
+        );
+        properties.insert(
+            "from".to_string(),
+            Box::new(types::JSONSchemaDefine {
+                schema_type: Some(types::JSONSchemaType::String),
+                description: Some(desc),
+                enum_values: Some(emails.to_vec()),
+                ..Default::default()
+            }),
+        );
+    }
     chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
@@ -83,13 +123,49 @@ pub fn get_respond_to_email_tool() -> openai_api_rs::v1::chat_completion::Tool {
     }
 }
 
+use crate::repositories::user_repository::ImapConnectionInfo;
 use serde::Deserialize;
+
+/// Resolve which email account to use based on the `from` parameter.
+/// - If `from` is specified, look up that specific account.
+/// - If only one account exists, use it.
+/// - If multiple accounts exist and `from` is not specified, return an error message.
+fn resolve_email_account(
+    state: &Arc<AppState>,
+    user_id: i32,
+    from: &Option<String>,
+) -> Result<ImapConnectionInfo, String> {
+    if let Some(from_email) = from {
+        state
+            .user_repository
+            .get_imap_credentials_by_email(user_id, from_email)
+            .map_err(|e| format!("Failed to look up email account: {}", e))?
+            .ok_or_else(|| format!("No connected email account found for '{}'", from_email))
+    } else {
+        let accounts = state
+            .user_repository
+            .get_all_imap_credentials(user_id)
+            .map_err(|e| format!("Failed to fetch email accounts: {}", e))?;
+        match accounts.len() {
+            0 => Err("No email account connected.".to_string()),
+            1 => Ok(accounts.into_iter().next().unwrap()),
+            _ => {
+                let emails: Vec<String> = accounts.iter().map(|a| a.email.clone()).collect();
+                Err(format!(
+                    "Multiple email accounts connected ({}). Please specify which one to use.",
+                    emails.join(", ")
+                ))
+            }
+        }
+    }
+}
 
 #[derive(Deserialize, Debug)]
 pub struct SendEmailArgs {
     pub to: String,
     pub subject: String,
     pub body: String,
+    pub from: Option<String>,
 }
 pub async fn handle_send_email(
     state: &Arc<AppState>,
@@ -106,6 +182,22 @@ pub async fn handle_send_email(
     Box<dyn std::error::Error>,
 > {
     let args: SendEmailArgs = serde_json::from_str(args)?;
+
+    // Resolve which email account to send from
+    let sender_account = match resolve_email_account(state, user_id, &args.from) {
+        Ok(account) => account,
+        Err(msg) => {
+            return Ok((
+                axum::http::StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                axum::Json(crate::api::twilio_sms::TwilioResponse {
+                    message: msg,
+                    created_item_id: None,
+                }),
+            ));
+        }
+    };
+    let from_email = sender_account.email.clone();
 
     // Check if 'to' is a contact name and resolve to email address
     let recipient_email = if args.to.contains('@') {
@@ -184,6 +276,7 @@ pub async fn handle_send_email(
     let cloned_to = recipient_email.clone();
     let cloned_subject = args.subject.clone();
     let cloned_body = args.body.clone();
+    let cloned_from = Some(from_email);
     let cloned_skip_sms = skip_sms;
     tokio::spawn(async move {
         let reason = tokio::select! {
@@ -195,6 +288,7 @@ pub async fn handle_send_email(
                 to: cloned_to,
                 subject: cloned_subject,
                 body: cloned_body,
+                from: cloned_from,
             };
             match crate::handlers::imap_handlers::send_email(
                 axum::extract::State(cloned_state.clone()),
@@ -256,6 +350,7 @@ use axum::extract::{Json, State};
 pub struct RespondToEmailArgs {
     pub email_id: String,
     pub response_text: String,
+    pub from: Option<String>,
 }
 pub async fn handle_respond_to_email(
     state: &Arc<AppState>,
@@ -272,6 +367,23 @@ pub async fn handle_respond_to_email(
     Box<dyn std::error::Error>,
 > {
     let args: RespondToEmailArgs = serde_json::from_str(args)?;
+
+    // Resolve which email account to send from
+    let sender_account = match resolve_email_account(state, user_id, &args.from) {
+        Ok(account) => account,
+        Err(msg) => {
+            return Ok((
+                axum::http::StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                axum::Json(crate::api::twilio_sms::TwilioResponse {
+                    message: msg,
+                    created_item_id: None,
+                }),
+            ));
+        }
+    };
+    let from_email = sender_account.email.clone();
+
     // Fetch the email details to get the subject
     let email_details = match crate::handlers::imap_handlers::fetch_single_imap_email(
         State(state.clone()),
@@ -355,6 +467,7 @@ pub async fn handle_respond_to_email(
     let cloned_user = user.clone();
     let cloned_email_id = args.email_id.clone();
     let cloned_response_text = args.response_text.clone();
+    let cloned_from = Some(from_email);
     let cloned_skip_sms = skip_sms;
     tokio::spawn(async move {
         let reason = tokio::select! {
@@ -365,6 +478,7 @@ pub async fn handle_respond_to_email(
             let request = crate::handlers::imap_handlers::EmailResponseRequest {
                 email_id: cloned_email_id,
                 response_text: cloned_response_text,
+                from: cloned_from,
             };
             match crate::handlers::imap_handlers::respond_to_email(
                 State(cloned_state.clone()),

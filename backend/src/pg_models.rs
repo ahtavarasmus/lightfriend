@@ -401,6 +401,7 @@ pub struct PgProcessedEmail {
     pub user_id: i32,
     pub email_uid: String,
     pub processed_at: i32,
+    pub imap_connection_id: Option<i32>,
 }
 
 #[derive(Insertable)]
@@ -409,6 +410,7 @@ pub struct NewPgProcessedEmail {
     pub user_id: i32,
     pub email_uid: String,
     pub processed_at: i32,
+    pub imap_connection_id: Option<i32>,
 }
 
 // -- refund_info --

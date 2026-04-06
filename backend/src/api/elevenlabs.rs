@@ -1374,6 +1374,7 @@ pub async fn handle_email_send(
                 to: cloned_to,
                 subject: cloned_subject,
                 body: cloned_body,
+                from: None,
             };
             match crate::handlers::imap_handlers::send_email(
                 State(cloned_state.clone()),
@@ -1524,6 +1525,7 @@ pub async fn handle_respond_to_email(
             let request = crate::handlers::imap_handlers::EmailResponseRequest {
                 email_id: cloned_email_id,
                 response_text: cloned_response_text,
+                from: None,
             };
             match crate::handlers::imap_handlers::respond_to_email(
                 State(cloned_state.clone()),
