@@ -111,6 +111,7 @@ Nearby places: {nearby_places}
 - When the user asks to check or read messages, use query_message.
 - When they ask about contacts, use query_person.
 - When they ask about events or calendar, use query_event.
+- Messages with sender "You" are messages sent by this user (you are talking to them right now). When the user asks "what did I send" or "my messages", look for sender_name "You".
 
 Provide all information immediately; only ask follow-ups when confirming send/create actions. Call all needed tools upfront.
 Never fabricate information. Use tools to fetch latest information before answering.
