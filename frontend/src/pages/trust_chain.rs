@@ -197,6 +197,7 @@ pub fn trust_chain_page() -> Html {
             } else if let Some(ref d) = d {
                 {render_diagram(d)}
                 {render_verify_section(d)}
+                {render_source_audit_section(d)}
             } else {
                 <div class="tc-loading">
                     {"Could not load trust chain data. This page works best when connected to a live Lightfriend instance."}
@@ -782,6 +783,102 @@ fn render_verify_section(d: &TrustChainData) -> Html {
 }
 
 // =============================================
+// SOURCE AUDIT
+// =============================================
+
+fn render_source_audit_section(d: &TrustChainData) -> Html {
+    let commit = d.commit_sha.as_deref().unwrap_or("unknown");
+    let tree = format!("https://github.com/ahtavarasmus/lightfriend/tree/{}", commit);
+
+    // (label, icon, path, description)
+    let sections: &[(&str, &str, &[(&str, &str)])] = &[
+        (
+            "Encryption & key management",
+            "fa-solid fa-lock",
+            &[
+                ("backend/src/utils/encryption.rs", "AES-256-GCM encryption for all stored credentials"),
+            ],
+        ),
+        (
+            "Email (IMAP) connection",
+            "fa-solid fa-envelope",
+            &[
+                ("backend/src/handlers/imap_auth.rs", "IMAP login flow and credential storage"),
+                ("backend/src/handlers/imap_handlers.rs", "Email fetching and polling"),
+            ],
+        ),
+        (
+            "Messaging bridges",
+            "fa-solid fa-bridge",
+            &[
+                ("backend/src/handlers/whatsapp_auth.rs", "WhatsApp bridge authentication"),
+                ("backend/src/handlers/signal_auth.rs", "Signal bridge authentication"),
+                ("backend/src/handlers/telegram_auth.rs", "Telegram bridge authentication"),
+                ("backend/src/utils/bridge.rs", "Bridge message handling and room management"),
+            ],
+        ),
+        (
+            "AI classification & prompts",
+            "fa-solid fa-brain",
+            &[
+                ("backend/src/proactive/system_behaviors.rs", "Message classification prompts and logic"),
+                ("backend/src/proactive/signal_extraction.rs", "Sender signal analysis and urgency scoring"),
+            ],
+        ),
+        (
+            "Authentication & sessions",
+            "fa-solid fa-user-shield",
+            &[
+                ("backend/src/handlers/auth_handlers.rs", "Login, registration, JWT tokens"),
+                ("backend/src/handlers/auth_middleware.rs", "Request authentication middleware"),
+            ],
+        ),
+        (
+            "Enclave attestation",
+            "fa-solid fa-certificate",
+            &[
+                ("backend/src/handlers/attestation_handlers.rs", "Live attestation endpoint"),
+                ("tools/attestation-verifier/src/main.rs", "Independent verification tool"),
+            ],
+        ),
+    ];
+
+    html! {
+        <div class="tc-source-audit">
+            <h2><i class="fa-solid fa-code"></i>{" Browse Verified Source Code"}</h2>
+            <p class="source-audit-desc">
+                {"These links point to the exact commit ("}
+                <code>{short_hash(commit, 8)}</code>
+                {") running in the attested enclave. Read the code to verify how your data is handled."}
+            </p>
+            <div class="source-audit-grid">
+                { for sections.iter().map(|(label, icon, files)| {
+                    html! {
+                        <div class="source-audit-card">
+                            <div class="source-audit-card-header">
+                                <i class={*icon}></i>
+                                <span>{*label}</span>
+                            </div>
+                            <div class="source-audit-files">
+                                { for files.iter().map(|(path, desc)| {
+                                    let url = format!("{}/{}", tree, path);
+                                    html! {
+                                        <a href={url} target="_blank" rel="noopener noreferrer" class="source-audit-file">
+                                            <span class="source-audit-filename">{path.rsplit('/').next().unwrap_or(path)}</span>
+                                            <span class="source-audit-filedesc">{*desc}</span>
+                                        </a>
+                                    }
+                                })}
+                            </div>
+                        </div>
+                    }
+                })}
+            </div>
+        </div>
+    }
+}
+
+// =============================================
 // STYLES
 // =============================================
 
@@ -1152,6 +1249,53 @@ const STYLES: &str = r#"
 .tc-page .legal-links a { color: rgba(255,255,255,0.35); text-decoration: none; }
 .tc-page .legal-links a:hover { color: #1E90FF; }
 
+/* ---- Source Audit ---- */
+.tc-source-audit {
+    margin-top: 3rem;
+    padding: 2rem;
+    background: rgba(30, 144, 255, 0.04);
+    border: 1px solid rgba(30, 144, 255, 0.12);
+    border-radius: 12px;
+}
+.tc-source-audit h2 {
+    font-size: 1.15rem; color: #e0e0e0; margin: 0 0 0.5rem;
+}
+.tc-source-audit h2 i { color: #1E90FF; margin-right: 0.4rem; }
+.source-audit-desc {
+    font-size: 0.85rem; color: #888; margin-bottom: 1.5rem; line-height: 1.5;
+}
+.source-audit-desc code {
+    background: rgba(255,255,255,0.08); padding: 0.15rem 0.4rem; border-radius: 3px;
+    font-size: 0.8rem; color: #aaa;
+}
+.source-audit-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1rem;
+}
+.source-audit-card {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 8px; padding: 1rem; display: flex; flex-direction: column; gap: 0.6rem;
+}
+.source-audit-card-header {
+    display: flex; align-items: center; gap: 0.5rem;
+    font-size: 0.85rem; color: #ccc; font-weight: 500;
+}
+.source-audit-card-header i { color: #1E90FF; font-size: 0.8rem; width: 1rem; text-align: center; }
+.source-audit-files { display: flex; flex-direction: column; gap: 0.35rem; }
+.source-audit-file {
+    display: flex; flex-direction: column; gap: 0.1rem;
+    padding: 0.4rem 0.6rem; border-radius: 5px;
+    background: rgba(255,255,255,0.02); text-decoration: none;
+    transition: background 0.15s;
+}
+.source-audit-file:hover { background: rgba(30, 144, 255, 0.08); }
+.source-audit-filename {
+    font-size: 0.78rem; color: #60a5fa; font-family: monospace;
+}
+.source-audit-filedesc {
+    font-size: 0.72rem; color: #666;
+}
+
 @media (max-width: 768px) {
     .tc-page { padding: 3rem 1rem 2rem; }
     .tc-header h1 { font-size: 1.4rem; }
@@ -1159,5 +1303,6 @@ const STYLES: &str = r#"
     .att-row { flex-direction: column; gap: 0.05rem; align-items: flex-start; }
     .att-label { min-width: auto; text-align: left; }
     .inter-flow-cols { flex-direction: column; gap: 0.3rem; }
+    .source-audit-grid { grid-template-columns: 1fr; }
 }
 "#;
