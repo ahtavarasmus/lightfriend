@@ -1,5 +1,7 @@
+use crate::config;
 use crate::utils::api::Api;
 use serde::Deserialize;
+use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
@@ -230,29 +232,64 @@ pub fn activity_feed(props: &ActivityFeedProps) -> Html {
         );
     }
 
-    // Auto-refresh every 30 seconds
+    // SSE: subscribe to server-sent activity feed events for real-time updates
     {
         let refresh_trigger = refresh_trigger.clone();
+        let es_handle = use_state(|| None::<web_sys::EventSource>);
+        let es_handle_clone = es_handle.clone();
         use_effect_with_deps(
             move |_| {
-                let refresh_trigger = refresh_trigger.clone();
-                let interval = gloo_timers::callback::Interval::new(30_000, move || {
-                    refresh_trigger.set(js_sys::Date::now() as u32);
-                });
-                move || drop(interval)
+                let rt = refresh_trigger.clone();
+
+                let url = format!(
+                    "{}/api/dashboard/activity-feed/stream",
+                    config::get_backend_url()
+                );
+                let mut init = web_sys::EventSourceInit::new();
+                init.with_credentials(true);
+                if let Ok(es) =
+                    web_sys::EventSource::new_with_event_source_init_dict(&url, &init)
+                {
+                    let cb = Closure::wrap(Box::new(move |_: web_sys::MessageEvent| {
+                        rt.set(js_sys::Date::now() as u32);
+                    })
+                        as Box<dyn Fn(web_sys::MessageEvent)>);
+
+                    let _ =
+                        es.add_event_listener_with_callback("refresh", cb.as_ref().unchecked_ref());
+                    cb.forget();
+
+                    es_handle_clone.set(Some(es));
+                }
+
+                move || {
+                    // Cleanup handled by drop
+                }
             },
             (),
         );
+
+        // Close EventSource on unmount
+        {
+            let es_handle = es_handle.clone();
+            use_effect_with_deps(
+                move |_| {
+                    move || {
+                        if let Some(es) = &*es_handle {
+                            es.close();
+                        }
+                    }
+                },
+                (),
+            );
+        }
     }
 
-    // Listen for chat-sent and rules-changed events
+    // Listen for chat-sent and rules-changed events (user-initiated, no SSE)
     {
         let refresh_trigger = refresh_trigger.clone();
         use_effect_with_deps(
             move |_| {
-                use wasm_bindgen::closure::Closure;
-                use wasm_bindgen::JsCast;
-
                 let rt1 = refresh_trigger.clone();
                 let rt2 = refresh_trigger.clone();
 
