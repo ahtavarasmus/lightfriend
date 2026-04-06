@@ -113,7 +113,7 @@ fn compute_response_deltas(messages: &[OntMessage]) -> Vec<f64> {
 
     let mut deltas = Vec::new();
 
-    for (_room, room_msgs) in &by_room {
+    for room_msgs in by_room.values() {
         let received: Vec<&&OntMessage> = room_msgs
             .iter()
             .filter(|m| m.sender_name != "You")
@@ -1184,6 +1184,7 @@ impl OntologyRepository {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn compute_sender_signals(
         &self,
         user_id: i32,

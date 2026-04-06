@@ -853,7 +853,7 @@ if shared_secret:
         text = re.sub(login_secret_pattern, login_secret_block, text, count=1)
 
 # Patch proxy fields from current .env (config may have stale values from backup)
-proxy_type = os.environ.get("TELEGRAM_PROXY_TYPE", "disabled")
+proxy_type = os.environ.get("TELEGRAM_PROXY_TYPE", "socks5")
 proxy_fields = {
     "type": proxy_type,
     "address": os.environ.get("TELEGRAM_PROXY_ADDRESS", ""),
@@ -873,11 +873,6 @@ if proxy_fields["address"] and proxy_fields["port"] and proxy_type != "disabled"
     print(f"  Patched proxy: {proxy_type} {proxy_fields['address']}:{proxy_fields['port']}", flush=True)
 else:
     print(f"  Proxy: {proxy_type} (direct connection via tap0)", flush=True)
-
-# Patch device_info to look like a real device (reduces Telegram detection)
-text = re.sub(r"(?m)^(        device_model:).*$", r"\1 Samsung Galaxy S24", text, count=1)
-text = re.sub(r"(?m)^(        system_version:).*$", r"\1 SDK 34", text, count=1)
-text = re.sub(r"(?m)^(        app_version:).*$", r"\1 11.4.2", text, count=1)
 
 path.write_text(text)
 PY

@@ -62,8 +62,7 @@ fn mulaw_encode(sample: i16) -> u8 {
     }
 
     let mantissa = ((magnitude >> (exponent + 3)) & 0x0F) as u8;
-    let byte = !(sign | (exponent << 4) | mantissa);
-    byte
+    !(sign | (exponent << 4) | mantissa)
 }
 
 /// Encode raw PCM samples as a WAV file (16-bit mono).
