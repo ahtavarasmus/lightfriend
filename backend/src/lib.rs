@@ -238,6 +238,16 @@ pub struct AppState {
     pub system_notify_cooldowns: DashMap<(i32, String), i32>,
     // user_id -> unix timestamp of last digest delivery
     pub digest_cooldowns: DashMap<i32, i32>,
+    // Broadcast channel: signals activity feed subscribers that new data is available for a user_id
+    pub activity_feed_tx: tokio::sync::broadcast::Sender<i32>,
+}
+
+impl AppState {
+    /// Signal that the activity feed has new data for a user.
+    /// Subscribers (SSE connections) will notify the frontend to re-fetch.
+    pub fn notify_activity_feed(&self, user_id: i32) {
+        let _ = self.activity_feed_tx.send(user_id);
+    }
 }
 
 /// Build the tool registry with all static tool handlers.

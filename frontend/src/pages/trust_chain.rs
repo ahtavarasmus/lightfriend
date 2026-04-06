@@ -345,6 +345,52 @@ fn render_live_enclave(d: &TrustChainData) -> Html {
                         </div>
                     </Details>
 
+                    <Details summary="Audit source code">
+                        <div class="source-audit-intro">
+                            {"Read the exact code running in this enclave. Every file links to commit "}
+                            <code>{&commit_short}</code>
+                            {"."}
+                        </div>
+                        <div class="source-audit-list">
+                            <div class="source-audit-group">
+                                <span class="source-audit-group-label">{"Email (IMAP)"}</span>
+                                <a href={format!("https://github.com/ahtavarasmus/lightfriend/blob/{}/backend/src/handlers/imap_auth.rs", commit)} target="_blank" rel="noopener noreferrer">
+                                    {"imap_auth.rs"}<span class="source-audit-hint">{" - login, credential storage"}</span>
+                                </a>
+                                <a href={format!("https://github.com/ahtavarasmus/lightfriend/blob/{}/backend/src/handlers/imap_handlers.rs", commit)} target="_blank" rel="noopener noreferrer">
+                                    {"imap_handlers.rs"}<span class="source-audit-hint">{" - fetching, sending"}</span>
+                                </a>
+                                <a href={format!("https://github.com/ahtavarasmus/lightfriend/blob/{}/backend/src/repositories/user_repository.rs#L182", commit)} target="_blank" rel="noopener noreferrer">
+                                    {"user_repository.rs"}<span class="source-audit-hint">{" - encrypt/store/delete credentials"}</span>
+                                </a>
+                            </div>
+                            <div class="source-audit-group">
+                                <span class="source-audit-group-label">{"AI classification"}</span>
+                                <a href={format!("https://github.com/ahtavarasmus/lightfriend/blob/{}/backend/src/proactive/system_behaviors.rs#L249", commit)} target="_blank" rel="noopener noreferrer">
+                                    {"system_behaviors.rs"}<span class="source-audit-hint">{" - notification prompts"}</span>
+                                </a>
+                                <a href={format!("https://github.com/ahtavarasmus/lightfriend/blob/{}/backend/src/proactive/signal_extraction.rs", commit)} target="_blank" rel="noopener noreferrer">
+                                    {"signal_extraction.rs"}<span class="source-audit-hint">{" - urgency scoring"}</span>
+                                </a>
+                            </div>
+                            <div class="source-audit-group">
+                                <span class="source-audit-group-label">{"Messaging bridges"}</span>
+                                <a href={format!("https://github.com/ahtavarasmus/lightfriend/blob/{}/backend/src/utils/bridge.rs", commit)} target="_blank" rel="noopener noreferrer">
+                                    {"bridge.rs"}<span class="source-audit-hint">{" - message handling"}</span>
+                                </a>
+                                <a href={format!("https://github.com/ahtavarasmus/lightfriend/blob/{}/backend/src/handlers/whatsapp_auth.rs", commit)} target="_blank" rel="noopener noreferrer">
+                                    {"whatsapp_auth.rs"}
+                                </a>
+                                <a href={format!("https://github.com/ahtavarasmus/lightfriend/blob/{}/backend/src/handlers/signal_auth.rs", commit)} target="_blank" rel="noopener noreferrer">
+                                    {"signal_auth.rs"}
+                                </a>
+                                <a href={format!("https://github.com/ahtavarasmus/lightfriend/blob/{}/backend/src/handlers/telegram_auth.rs", commit)} target="_blank" rel="noopener noreferrer">
+                                    {"telegram_auth.rs"}
+                                </a>
+                            </div>
+                        </div>
+                    </Details>
+
                     <div class="pathway-label">{"import"}</div>
                     <div class="vert-flow">
                         <div class="eq-item">
@@ -947,6 +993,34 @@ const STYLES: &str = r#"
     font-size: 0.78rem; color: #1E90FF; text-decoration: none;
 }
 .cloud-links a:hover { text-decoration: underline; }
+
+/* Source audit */
+.source-audit-intro {
+    font-size: 0.78rem; color: #888; margin-bottom: 0.6rem; line-height: 1.4;
+}
+.source-audit-intro code {
+    background: rgba(255,255,255,0.08); padding: 0.1rem 0.3rem; border-radius: 3px;
+    font-size: 0.75rem; color: #aaa;
+}
+.source-audit-list {
+    display: flex; flex-direction: column; gap: 0.5rem;
+}
+.source-audit-group {
+    display: flex; flex-direction: column; gap: 0.15rem;
+}
+.source-audit-group-label {
+    font-size: 0.7rem; color: #666; text-transform: uppercase; letter-spacing: 0.05em;
+    margin-bottom: 0.1rem;
+}
+.source-audit-list a {
+    font-size: 0.78rem; color: #60a5fa; text-decoration: none; font-family: monospace;
+    padding: 0.15rem 0;
+}
+.source-audit-list a:hover { text-decoration: underline; }
+.source-audit-hint {
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    color: #555; font-size: 0.72rem;
+}
 
 /* Past enclave details */
 .past-details-links {

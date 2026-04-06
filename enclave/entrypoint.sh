@@ -114,6 +114,36 @@ export TELEGRAM_BRIDGE_BOT="${TELEGRAM_BRIDGE_BOT:-@telegrambot:localhost}"
 export PORT="${PORT:-3100}"
 export SKIP_BACKEND="${SKIP_BACKEND:-false}"
 export RESTORE_MODE="${RESTORE_MODE:-none}"
+export TESLA_HTTP_PROXY_URL="${TESLA_HTTP_PROXY_URL:-https://localhost:4443}"
+
+# ── 0b2. Fetch Tesla private key from host seed server ──────────────────────
+# The key is served by the host's HTTP seed server (port 9080) after being
+# downloaded from S3. Without it, the Tesla proxy (and vehicle commands) won't work.
+if [ ! -f /app/tesla_private_key.pem ]; then
+    echo "Fetching Tesla private key from host seed server..."
+    if curl -sf --max-time 10 http://127.0.0.1:9080/tesla_private_key.pem -o /app/tesla_private_key.pem 2>/dev/null; then
+        chmod 600 /app/tesla_private_key.pem
+        echo "  Tesla private key fetched successfully"
+    else
+        echo "  Tesla private key not available (Tesla integration will be disabled)"
+        rm -f /app/tesla_private_key.pem
+    fi
+fi
+
+# ── 0b3. Generate Tesla proxy TLS certs (self-signed, localhost only) ────────
+if [ ! -f /etc/tesla-proxy-tls/cert.pem ]; then
+    echo "Generating Tesla proxy TLS certificates..."
+    openssl req -x509 -nodes -newkey ec \
+        -pkeyopt ec_paramgen_curve:secp521r1 \
+        -pkeyopt ec_param_enc:named_curve \
+        -subj '/CN=localhost' \
+        -keyout /etc/tesla-proxy-tls/key.pem \
+        -out /etc/tesla-proxy-tls/cert.pem \
+        -sha256 -days 3650 \
+        -addext 'extendedKeyUsage = serverAuth' \
+        -addext 'keyUsage = digitalSignature, keyCertSign, keyAgreement' \
+        2>/dev/null && echo "  Tesla proxy TLS certs generated" || echo "  WARNING: failed to generate Tesla proxy TLS certs"
+fi
 
 # ── 0c. Start VSOCK outbound proxy bridge ────────────────────────────────────
 echo ""
@@ -823,19 +853,26 @@ if shared_secret:
         text = re.sub(login_secret_pattern, login_secret_block, text, count=1)
 
 # Patch proxy fields from current .env (config may have stale values from backup)
+proxy_type = os.environ.get("TELEGRAM_PROXY_TYPE", "socks5")
 proxy_fields = {
-    "type": os.environ.get("TELEGRAM_PROXY_TYPE", "socks5"),
+    "type": proxy_type,
     "address": os.environ.get("TELEGRAM_PROXY_ADDRESS", ""),
     "port": os.environ.get("TELEGRAM_PROXY_PORT", ""),
     "username": os.environ.get("TELEGRAM_PROXY_USERNAME", ""),
     "password": os.environ.get("TELEGRAM_PROXY_PASSWORD", ""),
 }
-if proxy_fields["address"] and proxy_fields["port"]:
+# Always patch proxy type (to allow disabling proxy on existing configs)
+text = re.sub(r"(?m)^(        type:).*$", rf"\1 {proxy_type}", text, count=1)
+if proxy_fields["address"] and proxy_fields["port"] and proxy_type != "disabled":
     for field, value in proxy_fields.items():
+        if field == "type":
+            continue
         pattern = rf"(?m)^(        {field}:).*$"
         replacement = rf"\1 {value}"
         text = re.sub(pattern, replacement, text, count=1)
-    print(f"  Patched proxy: {proxy_fields['address']}:{proxy_fields['port']}", flush=True)
+    print(f"  Patched proxy: {proxy_type} {proxy_fields['address']}:{proxy_fields['port']}", flush=True)
+else:
+    print(f"  Proxy: {proxy_type} (direct connection via tap0)", flush=True)
 
 path.write_text(text)
 PY

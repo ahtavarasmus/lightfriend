@@ -157,11 +157,281 @@ pub fn detect_imap_server(email: &str) -> (&'static str, u16) {
     }
 }
 
-// Struct to serialize the IMAP status response
+// ─── Provider auto-detection ────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct DetectProviderRequest {
+    pub email: String,
+}
+
+#[derive(Serialize)]
+pub struct DetectedProvider {
+    /// Provider key (e.g. "gmail", "outlook", "privateemail", "unknown")
+    pub provider: String,
+    /// Human-readable label
+    pub label: String,
+    /// IMAP server (empty if unknown)
+    pub imap_server: String,
+    /// IMAP port
+    pub imap_port: u16,
+    /// Instructions for the user (e.g. "Create an App Password")
+    pub instructions: Option<String>,
+    /// Link for creating app password
+    pub instructions_url: Option<String>,
+}
+
+/// Detect email provider from the email address using domain matching and MX record lookup.
+pub async fn detect_provider(
+    _auth_user: AuthUser,
+    Json(payload): Json<DetectProviderRequest>,
+) -> Result<AxumJson<DetectedProvider>, (StatusCode, AxumJson<serde_json::Value>)> {
+    let email = payload.email.trim().to_lowercase();
+
+    if !is_valid_email(&email) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            AxumJson(json!({"error": "Invalid email address"})),
+        ));
+    }
+
+    let domain = extract_email_domain(&email).unwrap_or("");
+
+    // Step 1: Try direct domain match
+    if let Some(provider) = detect_provider_from_domain(domain) {
+        return Ok(AxumJson(provider));
+    }
+
+    // Step 2: MX record lookup for custom domains
+    if let Some(provider) = detect_provider_from_mx(domain).await {
+        return Ok(AxumJson(provider));
+    }
+
+    // Step 3: Unknown - user will need to pick manually
+    Ok(AxumJson(DetectedProvider {
+        provider: "unknown".to_string(),
+        label: "Unknown Provider".to_string(),
+        imap_server: String::new(),
+        imap_port: 993,
+        instructions: None,
+        instructions_url: None,
+    }))
+}
+
+fn detect_provider_from_domain(domain: &str) -> Option<DetectedProvider> {
+    let domain = domain.to_lowercase();
+    match domain.as_str() {
+        "gmail.com" | "googlemail.com" => Some(DetectedProvider {
+            provider: "gmail".to_string(),
+            label: "Gmail".to_string(),
+            imap_server: "imap.gmail.com".to_string(),
+            imap_port: 993,
+            instructions: Some("Gmail requires an App Password (2FA must be enabled).".to_string()),
+            instructions_url: Some("https://myaccount.google.com/apppasswords".to_string()),
+        }),
+        "icloud.com" | "me.com" | "mac.com" => Some(DetectedProvider {
+            provider: "icloud".to_string(),
+            label: "iCloud".to_string(),
+            imap_server: "imap.mail.me.com".to_string(),
+            imap_port: 993,
+            instructions: Some("iCloud requires an App-Specific Password. Go to Apple ID Settings > Sign-In and Security > App-Specific Passwords.".to_string()),
+            instructions_url: Some("https://appleid.apple.com/account/manage".to_string()),
+        }),
+        "outlook.com" | "hotmail.com" | "live.com" | "msn.com" => Some(DetectedProvider {
+            provider: "outlook".to_string(),
+            label: "Outlook / Hotmail".to_string(),
+            imap_server: "outlook.office365.com".to_string(),
+            imap_port: 993,
+            instructions: Some("Use your regular password, or create an app password if 2FA is enabled.".to_string()),
+            instructions_url: Some("https://account.microsoft.com/security".to_string()),
+        }),
+        "yahoo.com" | "yahoo.co.uk" | "yahoo.fr" | "yahoo.de" => Some(DetectedProvider {
+            provider: "yahoo".to_string(),
+            label: "Yahoo Mail".to_string(),
+            imap_server: "imap.mail.yahoo.com".to_string(),
+            imap_port: 993,
+            instructions: Some("Yahoo requires an App Password (2FA must be enabled).".to_string()),
+            instructions_url: Some("https://login.yahoo.com/myaccount/security/app-password".to_string()),
+        }),
+        "aol.com" => Some(DetectedProvider {
+            provider: "aol".to_string(),
+            label: "AOL".to_string(),
+            imap_server: "imap.aol.com".to_string(),
+            imap_port: 993,
+            instructions: Some("AOL requires an App Password (2FA must be enabled).".to_string()),
+            instructions_url: Some("https://login.aol.com/myaccount/security/app-password".to_string()),
+        }),
+        "zoho.com" | "zohomail.com" => Some(DetectedProvider {
+            provider: "zoho".to_string(),
+            label: "Zoho Mail".to_string(),
+            imap_server: "imap.zoho.com".to_string(),
+            imap_port: 993,
+            instructions: Some("Make sure IMAP is enabled in your Zoho settings.".to_string()),
+            instructions_url: None,
+        }),
+        "fastmail.com" | "fastmail.fm" => Some(DetectedProvider {
+            provider: "fastmail".to_string(),
+            label: "Fastmail".to_string(),
+            imap_server: "imap.fastmail.com".to_string(),
+            imap_port: 993,
+            instructions: Some("Fastmail recommends using an App Password.".to_string()),
+            instructions_url: Some("https://www.fastmail.com/settings/security/devicekeys".to_string()),
+        }),
+        "yandex.com" | "yandex.ru" => Some(DetectedProvider {
+            provider: "yandex".to_string(),
+            label: "Yandex".to_string(),
+            imap_server: "imap.yandex.com".to_string(),
+            imap_port: 993,
+            instructions: None,
+            instructions_url: None,
+        }),
+        "gmx.com" | "gmx.net" => Some(DetectedProvider {
+            provider: "gmx".to_string(),
+            label: "GMX".to_string(),
+            imap_server: "imap.gmx.com".to_string(),
+            imap_port: 993,
+            instructions: None,
+            instructions_url: None,
+        }),
+        _ => None,
+    }
+}
+
+/// Look up MX records for a domain and try to match against known providers.
+async fn detect_provider_from_mx(domain: &str) -> Option<DetectedProvider> {
+    let output = tokio::process::Command::new("dig")
+        .args(["MX", domain, "+short"])
+        .output()
+        .await
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let mx_output = String::from_utf8_lossy(&output.stdout).to_lowercase();
+    tracing::debug!("MX lookup for {}: {}", domain, mx_output.trim());
+
+    // Match MX records to known providers
+    if mx_output.contains("google.com") || mx_output.contains("googlemail.com") {
+        Some(DetectedProvider {
+            provider: "gmail".to_string(),
+            label: "Google Workspace".to_string(),
+            imap_server: "imap.gmail.com".to_string(),
+            imap_port: 993,
+            instructions: Some(
+                "Google Workspace requires an App Password (2FA must be enabled).".to_string(),
+            ),
+            instructions_url: Some("https://myaccount.google.com/apppasswords".to_string()),
+        })
+    } else if mx_output.contains("outlook.com")
+        || mx_output.contains("protection.outlook.com")
+        || mx_output.contains("microsoft.com")
+    {
+        Some(DetectedProvider {
+            provider: "outlook".to_string(),
+            label: "Microsoft 365".to_string(),
+            imap_server: "outlook.office365.com".to_string(),
+            imap_port: 993,
+            instructions: Some(
+                "Use your regular password, or create an app password if 2FA is enabled."
+                    .to_string(),
+            ),
+            instructions_url: Some("https://account.microsoft.com/security".to_string()),
+        })
+    } else if mx_output.contains("zoho.com") {
+        Some(DetectedProvider {
+            provider: "zoho".to_string(),
+            label: "Zoho Mail".to_string(),
+            imap_server: "imap.zoho.com".to_string(),
+            imap_port: 993,
+            instructions: Some("Make sure IMAP is enabled in your Zoho settings.".to_string()),
+            instructions_url: None,
+        })
+    } else if mx_output.contains("yahoodns.net") || mx_output.contains("yahoo.com") {
+        Some(DetectedProvider {
+            provider: "yahoo".to_string(),
+            label: "Yahoo Mail".to_string(),
+            imap_server: "imap.mail.yahoo.com".to_string(),
+            imap_port: 993,
+            instructions: Some("Yahoo requires an App Password (2FA must be enabled).".to_string()),
+            instructions_url: Some(
+                "https://login.yahoo.com/myaccount/security/app-password".to_string(),
+            ),
+        })
+    } else if mx_output.contains("icloud.com") || mx_output.contains("apple.com") {
+        Some(DetectedProvider {
+            provider: "icloud".to_string(),
+            label: "iCloud".to_string(),
+            imap_server: "imap.mail.me.com".to_string(),
+            imap_port: 993,
+            instructions: Some("iCloud requires an App-Specific Password.".to_string()),
+            instructions_url: Some("https://appleid.apple.com/account/manage".to_string()),
+        })
+    } else if mx_output.contains("fastmail.com") || mx_output.contains("messagingengine.com") {
+        Some(DetectedProvider {
+            provider: "fastmail".to_string(),
+            label: "Fastmail".to_string(),
+            imap_server: "imap.fastmail.com".to_string(),
+            imap_port: 993,
+            instructions: Some("Fastmail recommends using an App Password.".to_string()),
+            instructions_url: Some(
+                "https://www.fastmail.com/settings/security/devicekeys".to_string(),
+            ),
+        })
+    } else if mx_output.contains("privateemail.com") {
+        Some(DetectedProvider {
+            provider: "privateemail".to_string(),
+            label: "PrivateEmail (Namecheap)".to_string(),
+            imap_server: "mail.privateemail.com".to_string(),
+            imap_port: 993,
+            instructions: Some("Use your email password.".to_string()),
+            instructions_url: None,
+        })
+    } else if mx_output.contains("secureserver.net") {
+        Some(DetectedProvider {
+            provider: "godaddy".to_string(),
+            label: "GoDaddy".to_string(),
+            imap_server: "imap.secureserver.net".to_string(),
+            imap_port: 993,
+            instructions: Some("Use your email password.".to_string()),
+            instructions_url: None,
+        })
+    } else if mx_output.contains("hostinger.com") {
+        Some(DetectedProvider {
+            provider: "hostinger".to_string(),
+            label: "Hostinger".to_string(),
+            imap_server: "imap.hostinger.com".to_string(),
+            imap_port: 993,
+            instructions: Some("Use your email password.".to_string()),
+            instructions_url: None,
+        })
+    } else {
+        None
+    }
+}
+
+// Struct to serialize the IMAP status response (single - kept for backwards compat)
 #[derive(Serialize)]
 pub struct ImapStatus {
     connected: bool,
     email: Option<String>,
+}
+
+// Multi-account status response
+#[derive(Serialize)]
+pub struct ImapAccountStatus {
+    pub email: String,
+    pub connected: bool,
+}
+
+#[derive(Serialize)]
+pub struct ImapStatusMulti {
+    pub connections: Vec<ImapAccountStatus>,
+}
+
+#[derive(Deserialize)]
+pub struct DeleteImapRequest {
+    pub email: String,
 }
 
 use native_tls::TlsStream;
@@ -282,16 +552,16 @@ pub async fn imap_login(
     }
 }
 
-// Handler to check the IMAP connection status
+// Handler to check the IMAP connection status (returns all connections)
 pub async fn imap_status(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
-) -> Result<AxumJson<ImapStatus>, (StatusCode, AxumJson<serde_json::Value>)> {
+) -> Result<AxumJson<ImapStatusMulti>, (StatusCode, AxumJson<serde_json::Value>)> {
     tracing::info!("Checking IMAP status for user {}", auth_user.user_id);
 
-    let credentials = state
+    let connections = state
         .user_repository
-        .get_imap_credentials(auth_user.user_id)
+        .get_all_imap_credentials(auth_user.user_id)
         .map_err(|e| {
             tracing::error!("Failed to fetch IMAP credentials: {}", e);
             (
@@ -300,68 +570,35 @@ pub async fn imap_status(
             )
         })?;
 
-    match credentials {
-        Some((email, password, imap_server, imap_port)) => {
-            // Actually test the connection instead of just checking if credentials exist
-            tracing::debug!("Testing IMAP connection for user {}", auth_user.user_id);
+    // Return status based on DB state (no live IMAP testing to avoid N connections per page load)
+    let accounts: Vec<ImapAccountStatus> = connections
+        .into_iter()
+        .map(|c| ImapAccountStatus {
+            email: c.email,
+            connected: true, // active in DB = connected
+        })
+        .collect();
 
-            match connect_imap(
-                &email,
-                &password,
-                imap_server.as_deref(),
-                imap_port.map(|val| val as u16),
-            )
-            .await
-            {
-                Ok(mut session) => {
-                    // Logout immediately after verification
-                    if let Err(e) = session.logout() {
-                        tracing::warn!("Failed to logout IMAP session during status check: {}", e);
-                    }
-
-                    tracing::info!(
-                        "IMAP connection test successful for user {}",
-                        auth_user.user_id
-                    );
-                    Ok(Json(ImapStatus {
-                        connected: true,
-                        email: Some(email),
-                    }))
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "IMAP connection test failed for user {}: {}",
-                        auth_user.user_id,
-                        e
-                    );
-                    // Return connected: false if test fails, so frontend shows accurate status
-                    Ok(Json(ImapStatus {
-                        connected: false,
-                        email: Some(email),
-                    }))
-                }
-            }
-        }
-        None => Ok(Json(ImapStatus {
-            connected: false,
-            email: None,
-        })),
-    }
+    Ok(Json(ImapStatusMulti {
+        connections: accounts,
+    }))
 }
 
-// Handler to delete the IMAP connection
+// Handler to delete a specific IMAP connection by email address
 pub async fn delete_imap_connection(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
+    Json(payload): Json<DeleteImapRequest>,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
     tracing::info!(
-        "Received request to delete IMAP connection for user {}",
+        "Received request to delete IMAP connection {} for user {}",
+        payload.email,
         auth_user.user_id
     );
 
     if let Err(e) = state
         .user_repository
-        .delete_imap_credentials(auth_user.user_id)
+        .delete_imap_connection_by_email(auth_user.user_id, &payload.email)
     {
         tracing::error!("Failed to delete IMAP credentials: {}", e);
         return Err((
@@ -371,7 +608,8 @@ pub async fn delete_imap_connection(
     }
 
     tracing::info!(
-        "Successfully deleted IMAP connection for user {}",
+        "Successfully deleted IMAP connection {} for user {}",
+        payload.email,
         auth_user.user_id
     );
     Ok(AxumJson(

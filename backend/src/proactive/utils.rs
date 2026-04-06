@@ -310,4 +310,7 @@ pub async fn send_notification_with_context(
             }
         }
     }
+
+    // Notify activity feed SSE subscribers after any notification attempt
+    state.notify_activity_feed(user_id);
 }

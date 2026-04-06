@@ -456,15 +456,8 @@ pub async fn handle_email_fetch_tool_call(
     };
     tracing::debug!("Received email fetch request for user: {}", user_id);
 
-    match crate::handlers::imap_handlers::fetch_emails_imap(
-        &state,
-        user_id,
-        true,
-        Some(10),
-        false,
-        false,
-    )
-    .await
+    match crate::handlers::imap_handlers::fetch_emails_imap(&state, user_id, Some(10), false, false)
+        .await
     {
         Ok(emails) => {
             if emails.is_empty() {
@@ -776,7 +769,7 @@ pub async fn handle_email_search_tool_call(
     };
 
     // First fetch recent emails with increased limit
-    match fetch_emails_imap(&state, user_id, true, Some(50), false, false).await {
+    match fetch_emails_imap(&state, user_id, Some(50), false, false).await {
         Ok(emails) => {
             let search_term = payload.search_term.to_lowercase();
             let search_type = payload.search_type.as_deref().unwrap_or("all");
@@ -1374,6 +1367,7 @@ pub async fn handle_email_send(
                 to: cloned_to,
                 subject: cloned_subject,
                 body: cloned_body,
+                from: None,
             };
             match crate::handlers::imap_handlers::send_email(
                 State(cloned_state.clone()),
@@ -1524,6 +1518,7 @@ pub async fn handle_respond_to_email(
             let request = crate::handlers::imap_handlers::EmailResponseRequest {
                 email_id: cloned_email_id,
                 response_text: cloned_response_text,
+                from: None,
             };
             match crate::handlers::imap_handlers::respond_to_email(
                 State(cloned_state.clone()),

@@ -493,6 +493,7 @@ async fn main() {
         maintenance_mode: Arc::new(AtomicBool::new(false)),
         system_notify_cooldowns: DashMap::new(),
         digest_cooldowns: DashMap::new(),
+        activity_feed_tx: tokio::sync::broadcast::channel(64).0,
     });
     // SMS server route - validates signature using user lookup
     let twilio_sms_routes = Router::new()
@@ -1072,6 +1073,7 @@ async fn main() {
         )
         .route("/api/auth/imap/login", post(imap_auth::imap_login))
         .route("/api/auth/imap/status", get(imap_auth::imap_status))
+        .route("/api/auth/imap/detect", post(imap_auth::detect_provider))
         .route(
             "/api/auth/imap/disconnect",
             delete(imap_auth::delete_imap_connection),
@@ -1204,6 +1206,10 @@ async fn main() {
         .route(
             "/api/dashboard/activity-feed",
             get(dashboard_handlers::get_activity_feed),
+        )
+        .route(
+            "/api/dashboard/activity-feed/stream",
+            get(dashboard_handlers::activity_feed_stream),
         )
         .route(
             "/api/dashboard/senders",

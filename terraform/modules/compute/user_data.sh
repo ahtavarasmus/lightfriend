@@ -892,6 +892,13 @@ if [ -n "$BUCKET" ] && aws s3 ls "s3://$BUCKET/config/.env" 2>/dev/null; then
     aws s3 cp "s3://$BUCKET/config/.env" /opt/lightfriend/.env
     chmod 600 /opt/lightfriend/.env
 
+    # Download Tesla private key (for vehicle command signing proxy)
+    if aws s3 ls "s3://$BUCKET/config/tesla_private_key.pem" 2>/dev/null; then
+        aws s3 cp "s3://$BUCKET/config/tesla_private_key.pem" /opt/lightfriend/seed/tesla_private_key.pem
+        chmod 600 /opt/lightfriend/seed/tesla_private_key.pem
+        echo "Tesla private key downloaded to seed directory"
+    fi
+
     EIF_MANIFEST_KEY="deploy/eif-$INSTANCE_ID.json"
     EIF_MANIFEST=""
     echo "Polling s3://$BUCKET/$EIF_MANIFEST_KEY for CI-built EIF metadata..."
@@ -997,6 +1004,12 @@ EOF
     # Re-download .env
     aws s3 cp "s3://$BUCKET/config/.env" /opt/lightfriend/.env
     chmod 600 /opt/lightfriend/.env
+
+    # Re-download Tesla private key
+    if aws s3 ls "s3://$BUCKET/config/tesla_private_key.pem" 2>/dev/null; then
+        aws s3 cp "s3://$BUCKET/config/tesla_private_key.pem" /opt/lightfriend/seed/tesla_private_key.pem
+        chmod 600 /opt/lightfriend/seed/tesla_private_key.pem
+    fi
 
     if [ "$RESTORE_TYPE" = "seed" ]; then
         # Seed mode: seed SQL should already be at /opt/lightfriend/seed/lightfriend_db.sql

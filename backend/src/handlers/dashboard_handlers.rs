@@ -1,9 +1,11 @@
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
+    response::sse::{Event, KeepAlive, Sse},
     Json,
 };
 use chrono::Datelike;
+use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -892,10 +894,10 @@ pub async fn get_rule_sources(
     // Email: available if user has IMAP credentials
     let has_email = state
         .user_repository
-        .get_imap_credentials(user_id)
+        .get_all_imap_credentials(user_id)
         .ok()
-        .flatten()
-        .is_some();
+        .map(|v| !v.is_empty())
+        .unwrap_or(false);
     sources.push(RuleSourceOption {
         source_type: "email".to_string(),
         label: "Email".to_string(),
@@ -1301,4 +1303,37 @@ pub async fn confirm_event(
             )
         })?;
     Ok(Json(serde_json::json!({"confirmed": event_id})))
+}
+
+/// GET /api/dashboard/activity-feed/stream
+/// SSE endpoint that pushes a refresh signal whenever new activity occurs for the user.
+pub async fn activity_feed_stream(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>> {
+    let user_id = auth_user.user_id;
+    let mut rx = state.activity_feed_tx.subscribe();
+
+    let stream = async_stream::stream! {
+        loop {
+            match rx.recv().await {
+                Ok(changed_user_id) if changed_user_id == user_id => {
+                    yield Ok(Event::default().event("refresh").data("{}"));
+                }
+                Ok(_) => {
+                    // Different user, ignore
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::debug!("Activity feed SSE lagged {} messages for user {}", n, user_id);
+                    // Send a refresh anyway since we missed events
+                    yield Ok(Event::default().event("refresh").data("{}"));
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    break;
+                }
+            }
+        }
+    };
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }

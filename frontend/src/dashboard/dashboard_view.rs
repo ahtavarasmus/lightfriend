@@ -175,30 +175,6 @@ const DASHBOARD_STYLES: &str = r#"
     padding-left: 1.2rem;
 }
 .critical-notif-details li { margin-bottom: 0.15rem; }
-.critical-notif-prompt-toggle {
-    background: none;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: #888;
-    font-size: 0.65rem;
-    cursor: pointer;
-    padding: 0.2rem 0.5rem;
-    border-radius: 4px;
-    margin-top: 0.4rem;
-}
-.critical-notif-prompt-toggle:hover { color: #aaa; border-color: rgba(255, 255, 255, 0.2); }
-.critical-notif-prompt {
-    margin-top: 0.3rem;
-    padding: 0.5rem;
-    background: rgba(0, 0, 0, 0.3);
-    border-radius: 6px;
-    font-size: 0.65rem;
-    color: #888;
-    line-height: 1.4;
-    white-space: pre-wrap;
-    max-height: 300px;
-    overflow-y: auto;
-    font-family: monospace;
-}
 .digest-schedule-row {
     display: flex;
     align-items: center;
@@ -870,7 +846,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     });
     let custom_rules_open = use_state(|| false);
     let critical_notif_details_open = use_state(|| false);
-    let critical_notif_prompt_open = use_state(|| false);
     let digest_details_open = use_state(|| false);
     let digest_custom_input = use_state(|| String::new());
     let digest_show_custom = use_state({
@@ -1379,12 +1354,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
-    let on_toggle_critical_prompt = {
-        let critical_notif_prompt_open = critical_notif_prompt_open.clone();
-        Callback::from(move |_: web_sys::MouseEvent| {
-            critical_notif_prompt_open.set(!*critical_notif_prompt_open);
-        })
-    };
 
     let on_toggle_digest_details = {
         let digest_details_open = digest_details_open.clone();
@@ -1730,51 +1699,17 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                             <li><strong>{"None: "}</strong>{"spam, automated messages"}</li>
                                         </ul>
                                         <p>{"You get notified only for critical or high urgency. The AI also considers sender relationship, messaging patterns, time of day, and cross-platform escalation (e.g., someone messaging you on both WhatsApp and Signal)."}</p>
-                                        <button class="critical-notif-prompt-toggle" onclick={on_toggle_critical_prompt}>
-                                            {if *critical_notif_prompt_open { "Hide classification prompt" } else { "View classification prompt" }}
-                                        </button>
-                                        if *critical_notif_prompt_open {
-                                            <div class="critical-notif-prompt">
-                                                {"You are evaluating whether an incoming message requires the user's immediate attention.\n\
-                                                The user has muted all phone notifications and relies on you to catch time-critical messages. \
-                                                If you miss something important, they won't see it for hours.\n\
-                                                \n\
-                                                Current time: [current time]\n\
-                                                \n\
-                                                SIGNAL REPORT\n\
-                                                Sender: [sender name]\n\
-                                                Relationship: [sender context - how often they message, typical hours, response patterns]\n\
-                                                Cross-platform: [if sender messaged on multiple platforms recently]\n\
-                                                User state: [if user is likely sleeping based on activity patterns]\n\
-                                                Content signals: [detected keywords, question marks, urgency indicators]\n\
-                                                Thread context: [if this is a reply to user's earlier message or question]\n\
-                                                \n\
-                                                The last message in the conversation is being evaluated. Each message is marked [seen] or \
-                                                [unseen]. Use the conversation history, timestamps, and seen status to understand context \
-                                                and urgency. Compare mentioned times against the current time.\n\
-                                                \n\
-                                                Classify the urgency level:\n\
-                                                - critical: immediate danger, medical emergency, security breach\n\
-                                                - high: 2-hour delay would cause real consequences (missed meeting, financial loss, time-sensitive decision)\n\
-                                                - medium: important but can wait a few hours (friend asking to meet later today, non-urgent work question)\n\
-                                                - low: routine updates, casual conversation\n\
-                                                - none: spam, automated messages, irrelevant\n\
-                                                \n\
-                                                Set should_notify=true only for critical or high urgency.\n\
-                                                Use the signal report to calibrate - sender relationship, timing patterns, and content signals all matter.\n\
-                                                \n\
-                                                If should_notify=false, set notification_message to empty string.\n\
-                                                If should_notify=true, write a concise notification (max 480 chars, second person).\n\
-                                                \n\
-                                                COMMITMENT TRACKING (when enabled):\n\
-                                                Also detect if this message contains a concrete commitment or obligation that the user \
-                                                could forget and would benefit from being reminded about. Examples: paying a bill, booking \
-                                                something, confirming attendance, sending a document, following up by a date.\n\
-                                                - Set contains_commitment=true only for specific, actionable obligations with a timeframe.\n\
-                                                - Do NOT track vague intentions or past-tense actions already done.\n\
-                                                - Detect commitments both TO the user and BY the user."}
-                                            </div>
-                                        }
+                                        <p style="margin-top: 0.5rem; font-size: 0.85rem;">
+                                            <a
+                                                href="https://github.com/ahtavarasmus/lightfriend/blob/master/backend/src/proactive/system_behaviors.rs#L249"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                style="color: #60a5fa; text-decoration: none;"
+                                            >
+                                                {"View the classification prompt on GitHub"}
+                                                <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.7rem; margin-left: 0.3rem;"></i>
+                                            </a>
+                                        </p>
                                     </div>
                                 }
                             </div>

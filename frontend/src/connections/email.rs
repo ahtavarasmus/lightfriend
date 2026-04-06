@@ -13,68 +13,55 @@ pub struct EmailProps {
 pub fn email_connect(props: &EmailProps) -> Html {
     let error = use_state(|| None::<String>);
     let success_message = use_state(|| None::<String>);
-    let imap_connected = use_state(|| false);
+    let connected_accounts = use_state(|| Vec::<String>::new());
     let imap_email = use_state(|| String::new());
     let imap_password = use_state(|| String::new());
-    let imap_provider = use_state(|| "gmail".to_string()); // Default to Gmail
-    let imap_server = use_state(|| String::new()); // For custom provider
-    let imap_port = use_state(|| String::new()); // For custom provider
-    let connected_email = use_state(|| None::<String>);
-    // Predefined providers - sorted alphabetically for easy lookup, with Custom at the end
+    let imap_server = use_state(|| String::new());
+    let imap_port = use_state(|| String::new());
+    let detecting = use_state(|| false);
+    let manual_override = use_state(|| false); // true = show provider dropdown instead of auto-detect
+    let manual_provider = use_state(|| "gmail".to_string());
+    // Detection result: (provider_key, label, imap_server, imap_port, instructions, instructions_url)
+    let detected = use_state(|| None::<(String, String, String, u16, Option<String>, Option<String>)>);
+    let detected_reset = detected.clone();
+    // Provider list for manual override
     let providers = vec![
+        ("gmail", "Gmail", "imap.gmail.com", "993"),
+        ("icloud", "iCloud", "imap.mail.me.com", "993"),
+        ("outlook", "Outlook / Hotmail", "outlook.office365.com", "993"),
+        ("yahoo", "Yahoo Mail", "imap.mail.yahoo.com", "993"),
         ("aol", "AOL", "imap.aol.com", "993"),
         ("fastmail", "Fastmail", "imap.fastmail.com", "993"),
-        ("gmail", "Gmail", "imap.gmail.com", "993"),
-        ("gmx", "GMX", "imap.gmx.com", "993"),
-        ("icloud", "iCloud", "imap.mail.me.com", "993"),
-        (
-            "outlook",
-            "Outlook / Hotmail",
-            "outlook.office365.com",
-            "993",
-        ),
-        (
-            "privateemail",
-            "PrivateEmail (Namecheap)",
-            "mail.privateemail.com",
-            "993",
-        ),
-        ("yahoo", "Yahoo Mail", "imap.mail.yahoo.com", "993"),
-        ("yandex", "Yandex", "imap.yandex.com", "993"),
         ("zoho", "Zoho Mail", "imap.zoho.com", "993"),
-        // Hosting providers for users with custom domain emails
-        ("bluehost", "Bluehost", "imap.oxcs.bluehost.com", "993"),
-        ("dreamhost", "DreamHost", "imap.dreamhost.com", "993"),
+        ("yandex", "Yandex", "imap.yandex.com", "993"),
+        ("gmx", "GMX", "imap.gmx.com", "993"),
+        ("privateemail", "PrivateEmail (Namecheap)", "mail.privateemail.com", "993"),
         ("godaddy", "GoDaddy", "imap.secureserver.net", "993"),
         ("hostinger", "Hostinger", "imap.hostinger.com", "993"),
-        ("ionos", "IONOS (1&1)", "imap.ionos.com", "993"),
-        ("custom", "Other / Custom", "", ""), // Custom option with empty defaults
+        ("custom", "Other / Custom", "", ""),
     ];
     // Check connection status on component mount
     {
-        let imap_connected = imap_connected.clone();
-        let connected_email = connected_email.clone();
+        let connected_accounts = connected_accounts.clone();
         use_effect_with_deps(
             move |_| {
-                // Auth handled by cookies
                 spawn_local(async move {
                     let request = Api::get("/api/auth/imap/status").send().await;
                     if let Ok(response) = request {
                         if response.ok() {
                             if let Ok(data) = response.json::<serde_json::Value>().await {
-                                if let Some(connected) =
-                                    data.get("connected").and_then(|v| v.as_bool())
+                                if let Some(connections) =
+                                    data.get("connections").and_then(|v| v.as_array())
                                 {
-                                    imap_connected.set(connected);
-                                    if connected {
-                                        connected_email.set(
-                                            data.get("email")
+                                    let emails: Vec<String> = connections
+                                        .iter()
+                                        .filter_map(|c| {
+                                            c.get("email")
                                                 .and_then(|e| e.as_str())
-                                                .map(String::from),
-                                        );
-                                    } else {
-                                        connected_email.set(None);
-                                    }
+                                                .map(String::from)
+                                        })
+                                        .collect();
+                                    connected_accounts.set(emails);
                                 }
                             }
                         }
@@ -88,9 +75,14 @@ pub fn email_connect(props: &EmailProps) -> Html {
     // Handlers for input changes
     let onchange_imap_email = {
         let imap_email = imap_email.clone();
+        let detected = detected.clone();
+        let manual_override = manual_override.clone();
         Callback::from(move |e: Event| {
             let input: HtmlInputElement = e.target_unchecked_into();
             imap_email.set(input.value());
+            // Reset detection and manual override when email changes
+            detected.set(None);
+            manual_override.set(false);
         })
     };
     let onchange_imap_password = {
@@ -98,26 +90,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
         Callback::from(move |e: Event| {
             let input: HtmlInputElement = e.target_unchecked_into();
             imap_password.set(input.value());
-        })
-    };
-    let onchange_imap_provider = {
-        let imap_provider = imap_provider.clone();
-        let imap_server = imap_server.clone();
-        let imap_port = imap_port.clone();
-        let providers = providers.clone();
-        Callback::from(move |e: Event| {
-            let select: web_sys::HtmlSelectElement = e.target_unchecked_into();
-            let value = select.value();
-            imap_provider.set(value.clone());
-            // Auto-fill server and port for predefined providers
-            if let Some((_, _, server, port)) = providers.iter().find(|(id, _, _, _)| *id == value)
-            {
-                imap_server.set(server.to_string());
-                imap_port.set(port.to_string());
-            } else {
-                imap_server.set(String::new());
-                imap_port.set(String::new());
-            }
         })
     };
     let onchange_imap_server = {
@@ -134,38 +106,88 @@ pub fn email_connect(props: &EmailProps) -> Html {
             imap_port.set(input.value());
         })
     };
+    // Step 1: Detect provider from email
+    let onclick_detect = {
+        let imap_email = imap_email.clone();
+        let detected = detected.clone();
+        let detecting = detecting.clone();
+        let imap_server = imap_server.clone();
+        let imap_port = imap_port.clone();
+        let error = error.clone();
+        Callback::from(move |_: MouseEvent| {
+            let email = (*imap_email).clone();
+            let detected = detected.clone();
+            let detecting = detecting.clone();
+            let imap_server = imap_server.clone();
+            let imap_port = imap_port.clone();
+            let error = error.clone();
+            if email.is_empty() || !email.contains('@') {
+                error.set(Some("Please enter a valid email address.".to_string()));
+                return;
+            }
+            error.set(None);
+            detecting.set(true);
+            spawn_local(async move {
+                let payload = json!({"email": email});
+                let request = Api::post("/api/auth/imap/detect")
+                    .header("Content-Type", "application/json")
+                    .json(&payload)
+                    .unwrap();
+                match request.send().await {
+                    Ok(response) => {
+                        detecting.set(false);
+                        if response.ok() {
+                            if let Ok(data) = response.json::<serde_json::Value>().await {
+                                let provider = data.get("provider").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                                let label = data.get("label").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string();
+                                let server = data.get("imap_server").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                let port = data.get("imap_port").and_then(|v| v.as_u64()).unwrap_or(993) as u16;
+                                let instructions = data.get("instructions").and_then(|v| v.as_str()).map(String::from);
+                                let instructions_url = data.get("instructions_url").and_then(|v| v.as_str()).map(String::from);
+                                imap_server.set(server.clone());
+                                imap_port.set(port.to_string());
+                                detected.set(Some((provider, label, server, port, instructions, instructions_url)));
+                            }
+                        } else {
+                            error.set(Some("Failed to detect email provider.".to_string()));
+                        }
+                    }
+                    Err(e) => {
+                        detecting.set(false);
+                        error.set(Some(format!("Network error: {}", e)));
+                    }
+                }
+            });
+        })
+    };
     let onclick_imap_connect = {
         let imap_email_value = imap_email.clone();
         let imap_password_value = imap_password.clone();
-        let imap_provider_value = imap_provider.clone();
         let imap_server_value = imap_server.clone();
         let imap_port_value = imap_port.clone();
-        let imap_connected = imap_connected.clone();
+        let connected_accounts = connected_accounts.clone();
         let error = error.clone();
         let success_message = success_message.clone();
         let imap_email_setter = imap_email.clone();
         let imap_password_setter = imap_password.clone();
-        let connected_email = connected_email.clone();
+        let detected_setter = detected.clone();
         Callback::from(move |_: MouseEvent| {
             let email = (*imap_email_value).clone();
             let password = (*imap_password_value).clone();
-            let provider = (*imap_provider_value).clone();
             let server = (*imap_server_value).clone();
             let port = (*imap_port_value).clone();
-            let imap_connected = imap_connected.clone();
+            let connected_accounts = connected_accounts.clone();
             let error = error.clone();
             let success_message = success_message.clone();
             let imap_email_setter = imap_email_setter.clone();
             let imap_password_setter = imap_password_setter.clone();
-            let connected_email = connected_email.clone();
-            // Auth handled by cookies
+            let detected_setter = detected_setter.clone();
             spawn_local(async move {
                 let mut payload = json!({
                     "email": email,
                     "password": password,
                 });
-                // Include server and port only for custom provider or if overridden
-                if provider == "custom" || (!server.is_empty() && !port.is_empty()) {
+                if !server.is_empty() && !port.is_empty() {
                     payload["imap_server"] = json!(server);
                     payload["imap_port"] = json!(port.parse::<u16>().unwrap_or(993));
                 }
@@ -176,13 +198,17 @@ pub fn email_connect(props: &EmailProps) -> Html {
                 match request.send().await {
                     Ok(response) => {
                         if response.ok() {
-                            imap_connected.set(true);
+                            // Add to connected accounts list
+                            let mut accounts = (*connected_accounts).clone();
+                            if !accounts.contains(&email) {
+                                accounts.push(email);
+                            }
+                            connected_accounts.set(accounts);
                             imap_email_setter.set(String::new());
                             imap_password_setter.set(String::new());
+                            detected_setter.set(None);
                             error.set(None);
-                            connected_email.set(Some(email));
                             success_message.set(Some("Email connected successfully!".to_string()));
-                            // Auto-hide success message after 3 seconds
                             let success_message_clone = success_message.clone();
                             spawn_local(async move {
                                 TimeoutFuture::new(3_000).await;
@@ -197,45 +223,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
                                 } else {
                                     error.set(Some(format!(
                                         "Failed to connect: {}",
-                                        response.status()
-                                    )));
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error.set(Some(format!("Network error: {}", e)));
-                    }
-                }
-            });
-        })
-    };
-    let onclick_imap_disconnect = {
-        let imap_connected = imap_connected.clone();
-        let error = error.clone();
-        let connected_email = connected_email.clone();
-        Callback::from(move |_: MouseEvent| {
-            let imap_connected = imap_connected.clone();
-            let error = error.clone();
-            let connected_email = connected_email.clone();
-            // Auth handled by cookies
-            spawn_local(async move {
-                let request = Api::delete("/api/auth/imap/disconnect").send().await;
-                match request {
-                    Ok(response) => {
-                        if response.ok() {
-                            imap_connected.set(false);
-                            connected_email.set(None);
-                            error.set(None);
-                        } else {
-                            if let Ok(error_data) = response.json::<serde_json::Value>().await {
-                                if let Some(error_msg) =
-                                    error_data.get("error").and_then(|e| e.as_str())
-                                {
-                                    error.set(Some(error_msg.to_string()));
-                                } else {
-                                    error.set(Some(format!(
-                                        "Failed to disconnect: {}",
                                         response.status()
                                     )));
                                 }
@@ -278,17 +265,10 @@ pub fn email_connect(props: &EmailProps) -> Html {
                 })}>
                     {"ⓘ"}
                 </button>
-                if *imap_connected {
+                if !connected_accounts.is_empty() {
                     <div class="service-status-container">
-                        <span class="service-status">{"Connected ✓"}</span>
-                        <span class="connected-email">
-                            {
-                                if let Some(email) = &*connected_email {
-                                    format!(" ({})", email)
-                                } else {
-                                    "".to_string()
-                                }
-                            }
+                        <span class="service-status">
+                            {format!("{} connected", connected_accounts.len())}
                         </span>
                     </div>
                 }
@@ -332,274 +312,27 @@ pub fn email_connect(props: &EmailProps) -> Html {
             <p class="service-description">
                 {"Connect your email account using IMAP to access your emails through SMS or voice calls."}
             </p>
-            {
-                if *imap_provider == "gmail" {
-                    html! {
-                        <p class="provider-hint">
-                            {"Gmail requires an App Password (2FA must be enabled). "}
-                            <a class="nice-link" href="https://myaccount.google.com/apppasswords" target="_blank">{"Create App Password"}</a>
-                        </p>
-                    }
-                } else if *imap_provider == "icloud" {
-                    html! {
-                        <p class="provider-hint">
-                            {"iCloud requires an App-Specific Password. Go to "}
-                            <a class="nice-link" href="https://appleid.apple.com/account/manage" target="_blank">{"Apple ID Settings"}</a>
-                            {" > Sign-In and Security > App-Specific Passwords to create one."}
-                        </p>
-                    }
-                } else if *imap_provider == "yahoo" {
-                    html! {
-                        <p class="provider-hint">
-                            {"Yahoo requires an App Password (2FA must be enabled). "}
-                            <a class="nice-link" href="https://login.yahoo.com/myaccount/security/app-password" target="_blank">{"Create App Password"}</a>
-                        </p>
-                    }
-                } else if *imap_provider == "aol" {
-                    html! {
-                        <p class="provider-hint">
-                            {"AOL requires an App Password (2FA must be enabled). "}
-                            <a class="nice-link" href="https://login.aol.com/myaccount/security/app-password" target="_blank">{"Create App Password"}</a>
-                        </p>
-                    }
-                } else if *imap_provider == "outlook" {
-                    html! {
-                        <p class="provider-hint">
-                            {"Use your regular Outlook/Hotmail password. If you have 2FA enabled, "}
-                            <a class="nice-link" href="https://account.microsoft.com/security" target="_blank">{"create an app password"}</a>
-                            {"."}
-                        </p>
-                    }
-                } else if *imap_provider == "zoho" {
-                    html! {
-                        <p class="provider-hint">
-                            {"Make sure IMAP is enabled in your Zoho settings. Use your regular password or "}
-                            <a class="nice-link" href="https://accounts.zoho.com/home#security/security_pwd" target="_blank">{"create an app password"}</a>
-                            {" if 2FA is enabled."}
-                        </p>
-                    }
-                } else if *imap_provider == "fastmail" {
-                    html! {
-                        <p class="provider-hint">
-                            {"Fastmail recommends using an App Password. "}
-                            <a class="nice-link" href="https://www.fastmail.com/settings/security/devicekeys" target="_blank">{"Create App Password"}</a>
-                        </p>
-                    }
-                } else if *imap_provider == "custom" {
-                    html! {
-                        <p class="provider-hint">
-                            {"Enter your email provider's IMAP server and port. Most providers use port 993 with SSL/TLS."}
-                        </p>
-                    }
-                } else {
-                    html! {
-                        <p class="provider-hint">
-                            {"Use your email password. If you have 2FA enabled, you may need to create an app-specific password in your account settings."}
-                        </p>
-                    }
-                }
-            }
             if props.sub_tier.is_some() {
-                if *imap_connected {
-                    <div class="imap-controls">
-                        <button
-                            onclick={onclick_imap_disconnect}
-                            class="disconnect-button"
-                        >
-                            {"Disconnect"}
-                        </button>
-                        // Test buttons for admin
-                        if props.user_id == 1 {
-                            <>
-                                <button
-                                    onclick={
-                                        let error = error.clone();
-                                        Callback::from(move |_: MouseEvent| {
-                                            let error = error.clone();
-                                            // Auth handled by cookies
+                // List connected accounts with per-account disconnect
+                if !connected_accounts.is_empty() {
+                    <div class="connected-accounts-list">
+                        { for connected_accounts.iter().map(|account_email| {
+                            let email_for_display = account_email.clone();
+                            let email_for_disconnect = account_email.clone();
+                            let connected_accounts_clone = connected_accounts.clone();
+                            let error_clone = error.clone();
+                            html! {
+                                <div class="connected-account-row">
+                                    <span class="connected-account-email">{&email_for_display}</span>
+                                    <button
+                                        class="disconnect-button-small"
+                                        onclick={Callback::from(move |_: MouseEvent| {
+                                            let email = email_for_disconnect.clone();
+                                            let connected_accounts = connected_accounts_clone.clone();
+                                            let error = error_clone.clone();
                                             spawn_local(async move {
-                                                let request = Api::get("/api/imap/previews")
-                                                    .send()
-                                                    .await;
-                                                match request {
-                                                    Ok(response) => {
-                                                        if response.status() == 200 {
-                                                            if let Ok(data) = response.json::<serde_json::Value>().await {
-                                                                web_sys::console::log_1(&format!("IMAP previews: {:?}", data).into());
-                                                            }
-                                                        } else {
-                                                            error.set(Some("Failed to fetch IMAP previews".to_string()));
-                                                        }
-                                                    }
-                                                    Err(e) => {
-                                                        error.set(Some(format!("Network error: {}", e)));
-                                                    }
-                                                }
-                                            });
-                                        })
-                                    }
-                                    class="test-button"
-                                >
-                                    {"Test IMAP Previews"}
-                                </button>
-                                <button
-                                    onclick={
-                                        let error = error.clone();
-                                        Callback::from(move |_: MouseEvent| {
-                                            let error = error.clone();
-                                            // Auth handled by cookies
-                                            spawn_local(async move {
-                                                let request = Api::get("/api/imap/full_emails")
-                                                    .send()
-                                                    .await;
-                                                match request {
-                                                    Ok(response) => {
-                                                        if response.status() == 200 {
-                                                            if let Ok(data) = response.json::<serde_json::Value>().await {
-                                                                web_sys::console::log_1(&format!("IMAP full emails: {:?}", data).into());
-                                                            }
-                                                        } else {
-                                                            error.set(Some("Failed to fetch full IMAP emails".to_string()));
-                                                        }
-                                                    }
-                                                    Err(e) => {
-                                                        error.set(Some(format!("Network error: {}", e)));
-                                                    }
-                                                }
-                                            });
-                                        })
-                                    }
-                                    class="test-button"
-                                >
-                                    {"Test Full Emails"}
-                                </button>
-                                <button
-                                    onclick={
-                                        let error = error.clone();
-                                        Callback::from(move |_: MouseEvent| {
-                                            let error = error.clone();
-                                            // Auth handled by cookies
-                                            spawn_local(async move {
-                                                let previews_request = Api::get("/api/imap/previews")
-                                                    .send()
-                                                    .await;
-                                                match previews_request {
-                                                    Ok(response) => {
-                                                        if response.status() == 200 {
-                                                            if let Ok(data) = response.json::<serde_json::Value>().await {
-                                                                if let Some(previews) = data.get("previews").and_then(|p| p.as_array()) {
-                                                                    if let Some(first_message) = previews.first() {
-                                                                        if let Some(id) = first_message.get("id").and_then(|i| i.as_str()) {
-                                                                            let message_request = Api::get(&format!("/api/imap/message/{}", id))
-                                                                                .send()
-                                                                                .await;
-                                                                            match message_request {
-                                                                                Ok(msg_response) => {
-                                                                                    if msg_response.status() == 200 {
-                                                                                        if let Ok(msg_data) = msg_response.json::<serde_json::Value>().await {
-                                                                                            web_sys::console::log_1(&format!("IMAP single message: {:?}", msg_data).into());
-                                                                                        }
-                                                                                    } else {
-                                                                                        error.set(Some("Failed to fetch single IMAP message".to_string()));
-                                                                                    }
-                                                                                }
-                                                                                Err(e) => {
-                                                                                    error.set(Some(format!("Network error: {}", e)));
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                    Err(e) => {
-                                                        error.set(Some(format!("Network error: {}", e)));
-                                                    }
-                                                }
-                                            });
-                                        })
-                                    }
-                                    class="test-button"
-                                >
-                                    {"Test Single Message"}
-                                </button>
-                                <button
-                                    onclick={
-                                        let error = error.clone();
-                                        Callback::from(move |_: MouseEvent| {
-                                            let error = error.clone();
-                                            // Auth handled by cookies
-                                            spawn_local(async move {
-                                                // First fetch previews to get the latest email ID
-                                                let previews_request = Api::get("/api/imap/previews?limit=1")
-                                                    .send()
-                                                    .await;
-                                                match previews_request {
-                                                    Ok(response) => {
-                                                        if response.status() == 200 {
-                                                            if let Ok(data) = response.json::<serde_json::Value>().await {
-                                                                if let Some(previews) = data.get("previews").and_then(|p| p.as_array()) {
-                                                                    if let Some(latest_email) = previews.first() {
-                                                                        if let Some(id) = latest_email.get("id").and_then(|i| i.as_str()) {
-                                                                            // Now send a test reply
-                                                                            let reply_payload = json!({
-                                                                                "email_id": id,
-                                                                                "response_text": "This is a test reply from LightFriend!"
-                                                                            });
-                                                                            let reply_request = Api::post("/api/imap/reply")
-                                                                                .header("Content-Type", "application/json")
-                                                                                .json(&reply_payload)
-                                                                                .unwrap()
-                                                                                .send()
-                                                                                .await;
-                                                                            match reply_request {
-                                                                                Ok(reply_response) => {
-                                                                                    if reply_response.status() == 200 {
-                                                                                        web_sys::console::log_1(&"Successfully sent test reply".into());
-                                                                                    } else {
-                                                                                        if let Ok(error_data) = reply_response.json::<serde_json::Value>().await {
-                                                                                            error.set(Some(format!("Failed to send reply: {}",
-                                                                                                error_data.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error"))));
-                                                                                        }
-                                                                                    }
-                                                                                }
-                                                                                Err(e) => {
-                                                                                    error.set(Some(format!("Network error while sending reply: {}", e)));
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        } else {
-                                                            error.set(Some("Failed to fetch latest email".to_string()));
-                                                        }
-                                                    }
-                                                    Err(e) => {
-                                                        error.set(Some(format!("Network error: {}", e)));
-                                                    }
-                                                }
-                                            });
-                                        })
-                                    }
-                                    class="test-button"
-                                >
-                                    {"Test Reply to Latest"}
-                                </button>
-                                <button
-                                    onclick={
-                                        let error = error.clone();
-                                        Callback::from(move |_: MouseEvent| {
-                                            let error = error.clone();
-                                            // Auth handled by cookies
-                                            spawn_local(async move {
-                                                let payload = json!({
-                                                    "to": "rasmus@ahtava.com",
-                                                    "subject": "test email subject",
-                                                    "body": "testing body here"
-                                                });
-                                                let request = Api::post("/api/imap/send")
+                                                let payload = json!({"email": email});
+                                                let request = Api::delete("/api/auth/imap/disconnect")
                                                     .header("Content-Type", "application/json")
                                                     .json(&payload)
                                                     .unwrap()
@@ -607,12 +340,19 @@ pub fn email_connect(props: &EmailProps) -> Html {
                                                     .await;
                                                 match request {
                                                     Ok(response) => {
-                                                        if response.status() == 200 {
-                                                            web_sys::console::log_1(&"Successfully sent test email".into());
+                                                        if response.ok() {
+                                                            let mut accounts = (*connected_accounts).clone();
+                                                            accounts.retain(|e| e != &email);
+                                                            connected_accounts.set(accounts);
+                                                            error.set(None);
                                                         } else {
                                                             if let Ok(error_data) = response.json::<serde_json::Value>().await {
-                                                                error.set(Some(format!("Failed to send email: {}",
-                                                                    error_data.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error"))));
+                                                                error.set(Some(
+                                                                    error_data.get("error")
+                                                                        .and_then(|e| e.as_str())
+                                                                        .unwrap_or("Failed to disconnect")
+                                                                        .to_string()
+                                                                ));
                                                             }
                                                         }
                                                     }
@@ -621,69 +361,180 @@ pub fn email_connect(props: &EmailProps) -> Html {
                                                     }
                                                 }
                                             });
-                                        })
-                                    }
-                                    class="test-button"
-                                >
-                                    {"Test Send Email"}
-                                </button>
-                            </>
-                        }
+                                        })}
+                                    >
+                                        {"Disconnect"}
+                                    </button>
+                                </div>
+                            }
+                        })}
                     </div>
-                } else {
-                    <div class="imap-form" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
-                        <select
-                            onchange={onchange_imap_provider}
-                            style="flex: 1 1 100px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444; appearance: none;"
-                        >
-                            { for providers.iter().map(|(id, name, _, _)| {
-                                html! {
-                                    <option value={id.to_string()} selected={*imap_provider == *id}>
-                                        {name}
-                                    </option>
-                                }
-                            })}
-                        </select>
+                }
+                // Two-step connect flow
+                if detected.is_none() {
+                    // Step 1: Enter email and detect provider
+                    <div class="imap-form" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px;">
                         <input
                             type="email"
                             placeholder="Email address"
                             value={(*imap_email).clone()}
                             onchange={onchange_imap_email}
-                            style="flex: 2 1 200px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
+                            style="flex: 2 1 250px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
                         />
-                        <input
-                            type="password"
-                            placeholder="Password or App Password"
-                            value={(*imap_password).clone()}
-                            onchange={onchange_imap_password}
-                            style="flex: 2 1 200px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
-                        />
-                        if *imap_provider == "custom" {
-                            <>
-                                <input
-                                    type="text"
-                                    placeholder="IMAP Server (e.g., mail.privateemail.com)"
-                                    value={(*imap_server).clone()}
-                                    onchange={onchange_imap_server}
-                                    style="flex: 2 1 200px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
-                                />
-                                <input
-                                    type="number"
-                                    placeholder="IMAP Port (e.g., 993)"
-                                    value={(*imap_port).clone()}
-                                    onchange={onchange_imap_port}
-                                    style="flex: 1 1 100px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
-                                />
-                            </>
-                        }
+                        <button
+                            onclick={onclick_detect}
+                            class="connect-button"
+                            disabled={*detecting}
+                            style="padding: 8px 16px; background-color: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;"
+                        >
+                            {if *detecting { "Detecting..." } else { "Next" }}
+                        </button>
                     </div>
-                    <button
-                        onclick={onclick_imap_connect}
-                        class="connect-button"
-                        style="margin-top: 10px; padding: 8px 16px; background-color: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;"
-                    >
-                        {"Connect"}
-                    </button>
+                } else {
+                    // Step 2: Show detected provider + password input
+                    {
+                        if let Some((ref provider, ref label, ref _server, _port, ref instructions, ref instructions_url)) = *detected {
+                            html! {
+                                <>
+                                    if !*manual_override {
+                                        // Show auto-detected provider
+                                        <div class="provider-detected" style="margin-top: 10px; padding: 10px 14px; background: rgba(76, 175, 80, 0.1); border: 1px solid rgba(76, 175, 80, 0.25); border-radius: 8px;">
+                                            <span style="color: #4CAF50; font-weight: 500;">
+                                                {format!("Detected: {}", label)}
+                                            </span>
+                                            <span style="color: #888; margin-left: 8px; font-size: 0.9rem;">
+                                                {format!("({})", (*imap_email).clone())}
+                                            </span>
+                                            <button
+                                                onclick={{
+                                                    let manual_override = manual_override.clone();
+                                                    Callback::from(move |_: MouseEvent| manual_override.set(true))
+                                                }}
+                                                style="float: right; background: none; border: none; color: #888; cursor: pointer; font-size: 0.85rem;"
+                                            >
+                                                {"Change"}
+                                            </button>
+                                        </div>
+                                        if let Some(instr) = instructions {
+                                            <p class="provider-hint">
+                                                {instr.clone()}
+                                                {" "}
+                                                if let Some(url) = instructions_url {
+                                                    <a class="nice-link" href={url.clone()} target="_blank">{"Get App Password"}</a>
+                                                }
+                                            </p>
+                                        }
+                                        if provider == "unknown" {
+                                            <p class="provider-hint">
+                                                {"Provider not detected. Enter your IMAP server details, or click Change to select your provider."}
+                                            </p>
+                                            <div class="imap-form" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 6px;">
+                                                <input
+                                                    type="text"
+                                                    placeholder="IMAP Server (e.g., imap.example.com)"
+                                                    value={(*imap_server).clone()}
+                                                    onchange={onchange_imap_server.clone()}
+                                                    style="flex: 2 1 200px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
+                                                />
+                                                <input
+                                                    type="number"
+                                                    placeholder="Port (993)"
+                                                    value={(*imap_port).clone()}
+                                                    onchange={onchange_imap_port.clone()}
+                                                    style="flex: 1 1 80px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
+                                                />
+                                            </div>
+                                        }
+                                    } else {
+                                        // Manual provider override
+                                        <div style="margin-top: 10px;">
+                                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                                <span style="color: #888; font-size: 0.9rem;">
+                                                    {format!("({})", (*imap_email).clone())}
+                                                </span>
+                                                <button
+                                                    onclick={{
+                                                        let manual_override = manual_override.clone();
+                                                        Callback::from(move |_: MouseEvent| manual_override.set(false))
+                                                    }}
+                                                    style="background: none; border: none; color: #3b82f6; cursor: pointer; font-size: 0.85rem;"
+                                                >
+                                                    {"Use auto-detected"}
+                                                </button>
+                                            </div>
+                                            <div class="imap-form" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+                                                <select
+                                                    onchange={{
+                                                        let manual_provider = manual_provider.clone();
+                                                        let imap_server = imap_server.clone();
+                                                        let imap_port = imap_port.clone();
+                                                        let providers = providers.clone();
+                                                        Callback::from(move |e: Event| {
+                                                            let select: web_sys::HtmlSelectElement = e.target_unchecked_into();
+                                                            let value = select.value();
+                                                            manual_provider.set(value.clone());
+                                                            if let Some((_, _, server, port)) = providers.iter().find(|(id, _, _, _)| *id == value) {
+                                                                imap_server.set(server.to_string());
+                                                                imap_port.set(port.to_string());
+                                                            } else {
+                                                                imap_server.set(String::new());
+                                                                imap_port.set(String::new());
+                                                            }
+                                                        })
+                                                    }}
+                                                    style="flex: 1 1 150px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444; appearance: none;"
+                                                >
+                                                    { for providers.iter().map(|(id, name, _, _)| {
+                                                        html! {
+                                                            <option value={id.to_string()} selected={*manual_provider == *id}>
+                                                                {name}
+                                                            </option>
+                                                        }
+                                                    })}
+                                                </select>
+                                            </div>
+                                            if *manual_provider == "custom" {
+                                                <div class="imap-form" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 6px;">
+                                                    <input
+                                                        type="text"
+                                                        placeholder="IMAP Server (e.g., imap.example.com)"
+                                                        value={(*imap_server).clone()}
+                                                        onchange={onchange_imap_server.clone()}
+                                                        style="flex: 2 1 200px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
+                                                    />
+                                                    <input
+                                                        type="number"
+                                                        placeholder="Port (993)"
+                                                        value={(*imap_port).clone()}
+                                                        onchange={onchange_imap_port.clone()}
+                                                        style="flex: 1 1 80px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
+                                                    />
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                    <div class="imap-form" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px;">
+                                        <input
+                                            type="password"
+                                            placeholder="Password or App Password"
+                                            value={(*imap_password).clone()}
+                                            onchange={onchange_imap_password}
+                                            style="flex: 2 1 250px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
+                                        />
+                                        <button
+                                            onclick={onclick_imap_connect}
+                                            class="connect-button"
+                                            style="padding: 8px 16px; background-color: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;"
+                                        >
+                                            {"Connect"}
+                                        </button>
+                                    </div>
+                                </>
+                            }
+                        } else {
+                            html! {}
+                        }
+                    }
                 }
             if let Some(err) = (*error).as_ref() {
                 <div class="error-message">
@@ -699,26 +550,43 @@ pub fn email_connect(props: &EmailProps) -> Html {
                     </a>
                 </div>
             </div>
-            {
-                if *imap_connected {
-                    html! {
-                    <div class="imap-controls">
-                        <button
-                            onclick={onclick_imap_disconnect}
-                            class="disconnect-button"
-                        >
-                            {"Disconnect previous connection"}
-                        </button>
-                    </div>
-                    }
-                } else {
-                    html! {}
-                }
-            }
         }
             <style>
 
                 {r#"
+                    .connected-accounts-list {
+                        display: flex;
+                        flex-direction: column;
+                        gap: 8px;
+                        margin: 10px 0;
+                    }
+                    .connected-account-row {
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        padding: 8px 12px;
+                        background: rgba(0, 136, 204, 0.08);
+                        border: 1px solid rgba(0, 136, 204, 0.15);
+                        border-radius: 8px;
+                    }
+                    .connected-account-email {
+                        color: #ccc;
+                        font-size: 0.95rem;
+                    }
+                    .disconnect-button-small {
+                        background: transparent;
+                        border: 1px solid rgba(255, 99, 71, 0.3);
+                        color: #FF6347;
+                        padding: 4px 12px;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        font-size: 0.85rem;
+                        transition: all 0.3s ease;
+                    }
+                    .disconnect-button-small:hover {
+                        background: rgba(255, 99, 71, 0.1);
+                        border-color: rgba(255, 99, 71, 0.5);
+                    }
                     .service-item {
                         background: rgba(0, 0, 0, 0.2);
                         border: 1px solid rgba(0, 136, 204, 0.2);

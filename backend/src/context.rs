@@ -340,7 +340,10 @@ impl ContextBuilder {
 
         // 4. Tools (opt-in)
         let tools = if self.want_tools {
-            let mut tool_defs = self.state.tool_registry.definitions();
+            let mut tool_defs = self
+                .state
+                .tool_registry
+                .definitions_for_user(&self.state, user_id);
             if self.want_mcp_tools {
                 let mcp =
                     crate::tool_call_utils::mcp::get_mcp_tools_for_user(&self.state, user_id).await;

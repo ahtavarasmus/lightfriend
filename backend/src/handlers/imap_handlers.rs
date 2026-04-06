@@ -88,7 +88,7 @@ pub async fn fetch_imap_previews(
         auth_user.user_id,
         params.limit
     );
-    match fetch_emails_imap(&state, auth_user.user_id, true, params.limit, false, false).await {
+    match fetch_emails_imap(&state, auth_user.user_id, params.limit, false, false).await {
         Ok(previews) => {
             tracing::info!("Fetched {} IMAP previews", previews.len());
 
@@ -140,7 +140,7 @@ pub async fn fetch_full_imap_emails(
     if limit.is_none() {
         limit = Some(5);
     }
-    match fetch_emails_imap(&state, auth_user.user_id, false, limit, false, false).await {
+    match fetch_emails_imap(&state, auth_user.user_id, limit, false, false).await {
         Ok(previews) => {
             tracing::info!("Fetched {} IMAP full emails", previews.len());
 
@@ -183,6 +183,8 @@ pub async fn fetch_full_imap_emails(
 pub struct EmailResponseRequest {
     pub email_id: String,
     pub response_text: String,
+    #[serde(default)]
+    pub from: Option<String>,
 }
 // this is not used yet since it didn't work and not my priority rn
 pub async fn respond_to_email(
@@ -203,25 +205,60 @@ pub async fn respond_to_email(
             AxumJson(json!({ "error": "Invalid email ID format" })),
         ));
     }
-    // Get IMAP credentials
-    let (email, password, imap_server, imap_port) = match state
-        .user_repository
-        .get_imap_credentials(auth_user.user_id)
-    {
-        Ok(Some(creds)) => creds,
-        Ok(None) => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                AxumJson(json!({ "error": "No IMAP connection found" })),
-            ))
+    // Resolve which email account to use
+    let cred = if let Some(ref from_email) = request.from {
+        match state
+            .user_repository
+            .get_imap_credentials_by_email(auth_user.user_id, from_email)
+        {
+            Ok(Some(c)) => c,
+            Ok(None) => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    AxumJson(
+                        json!({ "error": format!("No connected email account for '{}'", from_email) }),
+                    ),
+                ))
+            }
+            Err(e) => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    AxumJson(json!({ "error": format!("Failed to get IMAP credentials: {}", e) })),
+                ))
+            }
         }
-        Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({ "error": format!("Failed to get IMAP credentials: {}", e) })),
-            ))
+    } else {
+        match state
+            .user_repository
+            .get_imap_credentials(auth_user.user_id)
+        {
+            Ok(Some((email, password, imap_server, imap_port))) => {
+                crate::repositories::user_repository::ImapConnectionInfo {
+                    id: 0,
+                    email,
+                    password,
+                    imap_server,
+                    imap_port,
+                }
+            }
+            Ok(None) => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    AxumJson(json!({ "error": "No IMAP connection found" })),
+                ))
+            }
+            Err(e) => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    AxumJson(json!({ "error": format!("Failed to get IMAP credentials: {}", e) })),
+                ))
+            }
         }
     };
+    let email = cred.email;
+    let password = cred.password;
+    let imap_server = cred.imap_server;
+    let imap_port = cred.imap_port;
     tracing::info!("setting up tls");
     // Set up TLS
     let tls = match TlsConnector::builder().build() {
@@ -531,19 +568,89 @@ pub async fn fetch_single_imap_email(
 pub async fn fetch_emails_imap(
     state: &AppState,
     user_id: i32,
-    preview_only: bool,
     limit: Option<u32>,
     unprocessed: bool,
     unread_only: bool,
 ) -> Result<Vec<ImapEmailPreview>, ImapError> {
-    tracing::debug!("Starting fetch_emails_imap for user {} with preview_only: {}, limit: {:?}, unprocessed: {}",
-        user_id, preview_only, limit, unprocessed);
-    // Get IMAP credentials
-    let (email, password, imap_server, imap_port) = state
+    tracing::debug!(
+        "Starting fetch_emails_imap for user {} with limit: {:?}, unprocessed: {}",
+        user_id,
+        limit,
+        unprocessed
+    );
+
+    // Fetch from all connected accounts and merge results
+    let accounts = state
         .user_repository
-        .get_imap_credentials(user_id)
-        .map_err(|e| ImapError::CredentialsError(e.to_string()))?
-        .ok_or(ImapError::NoConnection)?;
+        .get_all_imap_credentials(user_id)
+        .map_err(|e| ImapError::CredentialsError(e.to_string()))?;
+
+    if accounts.is_empty() {
+        return Err(ImapError::NoConnection);
+    }
+
+    let mut all_previews = Vec::new();
+    for account in &accounts {
+        match fetch_emails_imap_for_account(
+            state,
+            user_id,
+            &account.email,
+            &account.password,
+            account.imap_server.as_deref(),
+            account.imap_port,
+            limit,
+            unprocessed,
+            unread_only,
+        )
+        .await
+        {
+            Ok(mut previews) => {
+                // Tag each preview's account source in the from field
+                for p in &mut previews {
+                    if p.from.is_none() || p.from.as_deref() == Some("") {
+                        p.from = Some(account.email.clone());
+                    }
+                }
+                all_previews.extend(previews);
+            }
+            Err(e) => {
+                tracing::error!(
+                    "Failed to fetch emails from {} for user {}: {:?}",
+                    account.email,
+                    user_id,
+                    e
+                );
+                // Continue with other accounts
+            }
+        }
+    }
+
+    // Sort by date descending (newest first)
+    all_previews.sort_by(|a, b| b.date.cmp(&a.date));
+
+    // Apply limit across all accounts
+    if let Some(lim) = limit {
+        all_previews.truncate(lim as usize);
+    }
+
+    Ok(all_previews)
+}
+
+/// Fetch emails from a single IMAP account
+#[allow(clippy::too_many_arguments)]
+async fn fetch_emails_imap_for_account(
+    state: &AppState,
+    user_id: i32,
+    email: &str,
+    password: &str,
+    imap_server: Option<&str>,
+    imap_port: Option<i32>,
+    limit: Option<u32>,
+    unprocessed: bool,
+    unread_only: bool,
+) -> Result<Vec<ImapEmailPreview>, ImapError> {
+    let email = email.to_string();
+    let password = password.to_string();
     // Add logging for debugging (remove in production)
     tracing::debug!(
         "Fetching IMAP emails for user {} with email {}",
@@ -554,10 +661,7 @@ pub async fn fetch_emails_imap(
     let tls = TlsConnector::builder().build().map_err(|e| {
         ImapError::ConnectionError(format!("Failed to create TLS connector: {}", e))
     })?;
-    let server = imap_server
-        .as_deref()
-        .unwrap_or("imap.gmail.com")
-        .to_string();
+    let server = imap_server.unwrap_or("imap.gmail.com").to_string();
     let port = imap_port.unwrap_or(993);
     // Connect to IMAP server using spawn_blocking with timeout to prevent blocking Tokio runtime
     let server_clone = server.clone();
@@ -603,7 +707,7 @@ pub async fn fetch_emails_imap(
         // Check if email is already processed using repository method
         let is_processed = state
             .user_repository
-            .is_email_processed(user_id, &uid)
+            .is_email_processed(user_id, &uid, None)
             .map_err(|e| {
                 ImapError::FetchError(format!("Failed to check email processed status: {}", e))
             })?;
@@ -745,7 +849,10 @@ pub async fn fetch_emails_imap(
         });
         // Mark email as processed if unprocessed is true
         if unprocessed {
-            match state.user_repository.mark_email_as_processed(user_id, &uid) {
+            match state
+                .user_repository
+                .mark_email_as_processed(user_id, &uid, None)
+            {
                 Ok(_) => {}
                 Err(e) => {
                     tracing::error!("Failed to mark email {} as processed: {}", uid, e);
@@ -767,20 +874,61 @@ pub async fn fetch_single_email_imap(
     user_id: i32,
     email_id: &str,
 ) -> Result<ImapEmail, ImapError> {
-    // Get IMAP credentials
-    let (email, password, imap_server, imap_port) = state
+    // Try all connected accounts to find the email
+    let accounts = state
         .user_repository
-        .get_imap_credentials(user_id)
-        .map_err(|e| ImapError::CredentialsError(e.to_string()))?
-        .ok_or(ImapError::NoConnection)?;
+        .get_all_imap_credentials(user_id)
+        .map_err(|e| ImapError::CredentialsError(e.to_string()))?;
+
+    if accounts.is_empty() {
+        return Err(ImapError::NoConnection);
+    }
+
+    // Try each account - return first success
+    let mut last_err = ImapError::NoConnection;
+    for account in &accounts {
+        match fetch_single_email_from_account(
+            state,
+            user_id,
+            email_id,
+            &account.email,
+            &account.password,
+            account.imap_server.as_deref(),
+            account.imap_port,
+        )
+        .await
+        {
+            Ok(email) => return Ok(email),
+            Err(e) => {
+                tracing::debug!(
+                    "Email {} not found in account {} for user {}",
+                    email_id,
+                    account.email,
+                    user_id
+                );
+                last_err = e;
+            }
+        }
+    }
+    Err(last_err)
+}
+
+async fn fetch_single_email_from_account(
+    state: &AppState,
+    user_id: i32,
+    email_id: &str,
+    email: &str,
+    password: &str,
+    imap_server: Option<&str>,
+    imap_port: Option<i32>,
+) -> Result<ImapEmail, ImapError> {
+    let email = email.to_string();
+    let password = password.to_string();
     // Set up TLS
     let tls = TlsConnector::builder().build().map_err(|e| {
         ImapError::ConnectionError(format!("Failed to create TLS connector: {}", e))
     })?;
-    let server = imap_server
-        .as_deref()
-        .unwrap_or("imap.gmail.com")
-        .to_string();
+    let server = imap_server.unwrap_or("imap.gmail.com").to_string();
     let port = imap_port.unwrap_or(993);
     // Connect to IMAP server using spawn_blocking with timeout
     let server_clone = server.clone();
@@ -974,6 +1122,8 @@ pub struct SendEmailRequest {
     pub to: String,
     pub subject: String,
     pub body: String,
+    #[serde(default)]
+    pub from: Option<String>,
 }
 pub async fn send_email(
     State(state): State<Arc<AppState>>,
@@ -985,25 +1135,61 @@ pub async fn send_email(
         request.to,
         auth_user.user_id
     );
-    // Get user's email credentials (assuming same as IMAP for SMTP)
-    let (email, password, imap_server, _) = match state
-        .user_repository
-        .get_imap_credentials(auth_user.user_id)
-    {
-        Ok(Some(creds)) => creds,
-        Ok(None) => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                AxumJson(json!({ "error": "No email credentials found" })),
-            ))
+    // Resolve which email account to use
+    let cred = if let Some(ref from_email) = request.from {
+        // Use specific account
+        match state
+            .user_repository
+            .get_imap_credentials_by_email(auth_user.user_id, from_email)
+        {
+            Ok(Some(c)) => c,
+            Ok(None) => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    AxumJson(
+                        json!({ "error": format!("No connected email account for '{}'", from_email) }),
+                    ),
+                ))
+            }
+            Err(e) => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    AxumJson(json!({ "error": format!("Failed to get email credentials: {}", e) })),
+                ))
+            }
         }
-        Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({ "error": format!("Failed to get email credentials: {}", e) })),
-            ))
+    } else {
+        // Fall back to first active account
+        match state
+            .user_repository
+            .get_imap_credentials(auth_user.user_id)
+        {
+            Ok(Some((email, password, imap_server, imap_port))) => {
+                crate::repositories::user_repository::ImapConnectionInfo {
+                    id: 0,
+                    email,
+                    password,
+                    imap_server,
+                    imap_port,
+                }
+            }
+            Ok(None) => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    AxumJson(json!({ "error": "No email credentials found" })),
+                ))
+            }
+            Err(e) => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    AxumJson(json!({ "error": format!("Failed to get email credentials: {}", e) })),
+                ))
+            }
         }
     };
+    let email = cred.email;
+    let password = cred.password;
+    let imap_server = cred.imap_server;
     // Derive SMTP server from IMAP server (common pattern, e.g., imap.gmail.com -> smtp.gmail.com)
     let smtp_server = imap_server
         .as_deref()

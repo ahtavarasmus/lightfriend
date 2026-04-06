@@ -44,7 +44,7 @@ telegram:
         use_ipv6: false
 
     device_info:
-        device_model: lightfriend
+        device_model: Lightfriend
         system_version: auto
         app_version: auto
         lang_code: en
@@ -55,8 +55,8 @@ telegram:
 
     proxy:
         type: ${TELEGRAM_PROXY_TYPE:-socks5}
-        address: ${TELEGRAM_PROXY_ADDRESS:-gw.dataimpulse.com}
-        port: ${TELEGRAM_PROXY_PORT:-10000}
+        address: ${TELEGRAM_PROXY_ADDRESS:-}
+        port: ${TELEGRAM_PROXY_PORT:-}
         rdns: true
         username: ${TELEGRAM_PROXY_USERNAME:-}
         password: ${TELEGRAM_PROXY_PASSWORD:-}

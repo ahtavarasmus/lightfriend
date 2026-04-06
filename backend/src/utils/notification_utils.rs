@@ -336,6 +336,7 @@ pub async fn send_tinfoil_renewal_notification(
         to: "rasmus@ahtava.com".to_string(),
         subject: format!("Tinfoil Key Renewal - User {}", user_id),
         body: body.replace("\n", "\r\n"), // CRLF for email
+        from: None,
     };
 
     // Create a fake auth user for sending (admin context)
@@ -485,6 +486,7 @@ pub async fn send_admin_alert(
         to: admin_email.clone(),
         subject: subject.to_string(),
         body: enhanced_message,
+        from: None,
     };
 
     // Create admin auth context

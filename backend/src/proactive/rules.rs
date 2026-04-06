@@ -1222,6 +1222,9 @@ pub async fn emit_ontology_change(
     change_type: &str,
     entity_snapshot: serde_json::Value,
 ) {
+    // Notify activity feed SSE subscribers
+    state.notify_activity_feed(user_id);
+
     // Skip completed messages early (before evaluating any rules)
     if entity_type == "Message" {
         if let Some(status) = entity_snapshot.get("status").and_then(|v| v.as_str()) {

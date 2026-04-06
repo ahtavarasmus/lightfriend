@@ -121,7 +121,7 @@ pub async fn build_tools(
     user_id: i32,
     include_mcp: bool,
 ) -> Vec<chat_completion::Tool> {
-    let mut tools = state.tool_registry.definitions();
+    let mut tools = state.tool_registry.definitions_for_user(state, user_id);
 
     // Ontology query tools (dynamically built with user-specific enum values)
     let ontology_user_data = {
