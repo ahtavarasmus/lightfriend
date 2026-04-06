@@ -167,7 +167,7 @@ pub async fn twilio_status_callback(
                             // Update the usage log entry with the actual cost
                             if let Err(e) = state
                                 .user_repository
-                                .update_usage_log_credits(&payload.MessageSid, cost as f32)
+                                .update_usage_log_credits(&payload.MessageSid, cost)
                             {
                                 tracing::error!(
                                     "Failed to update usage log credits for sid {}: {}",
