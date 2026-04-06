@@ -1490,6 +1490,7 @@ pub async fn handle_bridge_message(
                     let snapshot = serde_json::json!({
                         "message_id": created.id,
                         "platform": msg.platform,
+                        "sender": "You",
                         "sender_name": "You",
                         "content": msg.content,
                         "room_id": msg.room_id,
@@ -1685,6 +1686,9 @@ pub async fn handle_bridge_message(
     // Store message in ont_messages + emit ontology change.
     // Rules handle all notification logic from here.
     let person_id = matching_person.as_ref().map(|p| p.person.id);
+    let person_name: Option<String> = matching_person
+        .as_ref()
+        .map(|p| p.display_name().to_string());
     let msg = crate::models::ontology_models::NewOntMessage {
         user_id,
         room_id: current_room_id.clone(),
@@ -1701,14 +1705,18 @@ pub async fn handle_bridge_message(
     tokio::spawn(async move {
         match state_clone.ontology_repository.insert_message(&msg) {
             Ok(created) => {
-                let snapshot = serde_json::json!({
+                let mut snapshot = serde_json::json!({
                     "message_id": created.id,
                     "platform": msg.platform,
+                    "sender": msg.sender_name,
                     "sender_name": msg.sender_name,
                     "content": msg.content,
                     "room_id": msg.room_id,
                     "is_group": is_group,
                 });
+                if let Some(ref pn) = person_name {
+                    snapshot["person_name"] = serde_json::Value::String(pn.clone());
+                }
                 crate::proactive::rules::emit_ontology_change(
                     &state_clone,
                     user_id,

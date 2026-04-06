@@ -584,6 +584,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                     let snapshot = serde_json::json!({
                                                         "message_id": created.id,
                                                         "platform": "email",
+                                                        "sender": msg.sender_name,
                                                         "sender_name": msg.sender_name,
                                                         "content": msg.content,
                                                         "room_id": msg.room_id,

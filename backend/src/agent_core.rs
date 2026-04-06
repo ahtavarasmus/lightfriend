@@ -74,7 +74,11 @@ pub fn build_system_prompt(ctx: &AgentContext, mode: ChannelMode) -> String {
         }
     };
 
-    let tool_integrity_rule = "CRITICAL: When the user asks you to send, create, update, or delete something, you MUST call the actual tool. NEVER use direct_response to describe an action you did not perform. Saying 'Sending to X' or 'Message queued' in direct_response without calling send_chat_message is FORBIDDEN - it misleads the user into thinking the action happened.";
+    let tool_integrity_rule = "CRITICAL RULE - TOOL INTEGRITY:\n\
+        When the user asks to send, create, update, delete, or schedule something, you MUST call the actual tool. \
+        NEVER respond with text describing an action without calling the tool - even if conversation history shows a similar action was done before. \
+        Each request is independent. If the user says 'send X to Y', call send_chat_message. Every time. No exceptions. \
+        Responding with text like 'Sending to...' or 'Message queued' without actually calling the tool is the worst possible failure mode.";
 
     format!(
         r#"You are lightfriend, a concise AI assistant.
@@ -90,6 +94,7 @@ Nearby places: {nearby_places}
 
 ### Tool Usage:
 - Always use tools to fetch current data. Never answer data questions from conversation history alone - the history may be days old.
+- Always use tools to perform actions. Never describe an action as done without calling the tool. Treat every 'send/create/remind' request as new regardless of history.
 - Use tools to fetch information directly (users may only have a dumbphone).
 - State only what tool results returned. Note any gaps in data coverage.
 
