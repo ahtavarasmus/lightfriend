@@ -111,6 +111,18 @@ RUN cargo build --release --target-dir /src/oyster/target --manifest-path initia
     cargo build --release --target-dir /src/oyster/target --manifest-path kms/derive-server/Cargo.toml && \
     ls -la /src/oyster/target/release/keygen-x25519 /src/oyster/target/release/oyster-attestation-server-custom /src/oyster/target/release/kms-derive-server
 
+# ── Stage 2c: Build Tesla HTTP proxy (Go) ─────────────────────────────────────
+
+FROM golang:1.23-bookworm AS tesla-proxy-builder
+
+ARG VEHICLE_COMMAND_COMMIT=main
+
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+RUN git clone https://github.com/teslamotors/vehicle-command.git /src/vehicle-command && \
+    cd /src/vehicle-command && git checkout "${VEHICLE_COMMAND_COMMIT}"
+WORKDIR /src/vehicle-command/cmd/tesla-http-proxy
+RUN CGO_ENABLED=0 go build -o /tesla-http-proxy
+
 # ── Stage 3: Collect bridge binaries from official images ───────────────────
 
 FROM jevolk/tuwunel:latest AS tuwunel-src
@@ -180,6 +192,9 @@ RUN mkdir -p /opt/mautrix-telegram && \
     /opt/mautrix-telegram-venv/bin/pip install --upgrade pip && \
     /opt/mautrix-telegram-venv/bin/pip install "mautrix-telegram[all]==${MAUTRIX_TELEGRAM_VERSION}"
 
+# ── Copy Tesla HTTP proxy binary ────────────────────────────────────────────
+COPY --from=tesla-proxy-builder /tesla-http-proxy /usr/local/bin/tesla-http-proxy
+
 # ── Copy Lightfriend backend ──────────────────────────────────────────────
 WORKDIR /app
 COPY --from=builder /backend ./backend
@@ -212,6 +227,7 @@ RUN mkdir -p \
     /data/bridges/signal \
     /data/bridges/telegram \
     /data/seed \
+    /etc/tesla-proxy-tls \
     /var/lib/tuwunel \
     /var/lib/tuwunel-backup \
     /etc/tuwunel \
