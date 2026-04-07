@@ -814,6 +814,10 @@ async fn main() {
             delete(self_host_handlers::clear_twilio_creds),
         )
         .route(
+            "/api/profile/byot-verify",
+            get(self_host_handlers::verify_byot_setup),
+        )
+        .route(
             "/api/profile/timezone",
             post(profile_handlers::update_timezone),
         )

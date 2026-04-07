@@ -821,6 +821,9 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let dismissed_ids = use_state(get_dismissed_ids);
     let action_items_expanded = use_state(|| false);
     let chat_prefill = use_state(|| None::<String>);
+    // BYOT verification state: None = not checked, Some(Ok(msg)) = success, Some(Err(msg)) = fail
+    let byot_verify_status = use_state(|| None::<Result<String, String>>);
+    let byot_verify_loading = use_state(|| false);
     let activity_refresh_seq = use_state(|| 0u32);
     let critical_notis_enabled = use_state(|| {
         props
@@ -1323,6 +1326,17 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let is_setup_mode =
         !*has_any_bridge && !*has_email && !props.user_profile.has_any_connection;
 
+    // BYOT plan setup detection
+    let is_byot = props.user_profile.plan_type.as_deref() == Some("byot");
+    let byot_has_creds = props.user_profile.twilio_sid.is_some()
+        && props.user_profile.twilio_token.is_some();
+    let byot_number = props.user_profile.preferred_number.clone();
+    let byot_setup_complete = byot_has_creds && byot_number.is_some();
+    let byot_active_message = byot_number
+        .as_deref()
+        .map(|n| format!("BYOT plan active using {}. ", n))
+        .unwrap_or_else(|| "BYOT plan active. ".to_string());
+
     let format_event_time = |timestamp: i32| {
         let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(timestamp as f64 * 1000.0));
         date.to_locale_string("en-GB", &js_sys::Object::new())
@@ -1349,6 +1363,71 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         let digest_details_open = digest_details_open.clone();
         Callback::from(move |_: web_sys::MouseEvent| {
             digest_details_open.set(!*digest_details_open);
+        })
+    };
+
+    let on_verify_byot = {
+        let status = byot_verify_status.clone();
+        let loading = byot_verify_loading.clone();
+        Callback::from(move |_: web_sys::MouseEvent| {
+            let status = status.clone();
+            let loading = loading.clone();
+            status.set(None);
+            loading.set(true);
+            spawn_local(async move {
+                match Api::get("/api/profile/byot-verify").send().await {
+                    Ok(resp) if resp.ok() => match resp.json::<serde_json::Value>().await {
+                        Ok(data) => {
+                            let ok = data["ok"].as_bool().unwrap_or(false);
+                            if ok {
+                                let num = data["phone_number"].as_str().unwrap_or("");
+                                status.set(Some(Ok(format!(
+                                    "All good. {} is ready to receive messages and calls.",
+                                    num
+                                ))));
+                            } else if let Some(err) = data["error"].as_str() {
+                                status.set(Some(Err(err.to_string())));
+                            } else {
+                                // Build detailed message from sms_webhook / voice_webhook
+                                let mut problems = Vec::new();
+                                if !data["sms_webhook"]["ok"].as_bool().unwrap_or(true) {
+                                    let actual = data["sms_webhook"]["actual"]
+                                        .as_str()
+                                        .unwrap_or("(none)");
+                                    problems.push(format!(
+                                        "SMS webhook not pointing at lightfriend (currently: {})",
+                                        if actual.is_empty() { "(empty)" } else { actual }
+                                    ));
+                                }
+                                if !data["voice_webhook"]["ok"].as_bool().unwrap_or(true) {
+                                    let actual = data["voice_webhook"]["actual"]
+                                        .as_str()
+                                        .unwrap_or("(none)");
+                                    problems.push(format!(
+                                        "Voice webhook not pointing at lightfriend (currently: {})",
+                                        if actual.is_empty() { "(empty)" } else { actual }
+                                    ));
+                                }
+                                if problems.is_empty() {
+                                    status.set(Some(Err("Verification failed".to_string())));
+                                } else {
+                                    status.set(Some(Err(problems.join("; "))));
+                                }
+                            }
+                        }
+                        Err(e) => status.set(Some(Err(format!(
+                            "Failed to parse response: {}",
+                            e
+                        )))),
+                    },
+                    Ok(resp) => status.set(Some(Err(format!(
+                        "Verification endpoint returned {}",
+                        resp.status()
+                    )))),
+                    Err(e) => status.set(Some(Err(format!("Network error: {}", e)))),
+                }
+                loading.set(false);
+            });
         })
     };
 
@@ -1393,7 +1472,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                             {"Connect your first app"}
                         </button>
                         <div class="setup-chat-hint">{"Or chat with your assistant directly"}</div>
-                        if props.user_profile.plan_type.as_deref() == Some("byot") {
+                        if is_byot && !byot_setup_complete {
                             <div class="assistant-plan-note" style="margin-top: 1rem;">
                                 {"BYOT plan: you also need to set up your own Twilio number. "}
                                 <a href="/bring-own-number">{"Setup guide"}</a>
@@ -1421,20 +1500,38 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     }
 
                     // BYOT setup note
-                    if props.user_profile.plan_type.as_deref() == Some("byot") {
-                        if props.user_profile.twilio_sid.is_none()
-                            || props.user_profile.twilio_token.is_none()
-                        {
-                            <div class="assistant-plan-note">
-                                {"You're on the BYOT plan. Set up your own Twilio number to start receiving messages and calls. "}
-                                <a href="/bring-own-number">{"Setup guide"}</a>
-                            </div>
-                        } else {
-                            <div class="assistant-plan-note">
-                                {"BYOT plan active with your Twilio number. "}
-                                <a href="/bring-own-number">{"View setup guide"}</a>
-                            </div>
-                        }
+                    if is_byot && !byot_setup_complete {
+                        <div class="assistant-plan-note">
+                            {"You're on the BYOT plan. Set up your own Twilio number to start receiving messages and calls. "}
+                            <a href="/bring-own-number">{"Setup guide"}</a>
+                        </div>
+                    } else if is_byot {
+                        <div class="assistant-plan-note">
+                            {byot_active_message.clone()}
+                            <a href="/bring-own-number">{"View setup guide"}</a>
+                            {" "}
+                            <button
+                                onclick={on_verify_byot.clone()}
+                                disabled={*byot_verify_loading}
+                                style="margin-left: 0.5rem; padding: 0.25rem 0.6rem; font-size: 0.85rem; cursor: pointer; border: 1px solid #7EB2FF; background: transparent; color: #7EB2FF; border-radius: 4px;">
+                                { if *byot_verify_loading { "Checking..." } else { "Verify setup" } }
+                            </button>
+                            {
+                                match (*byot_verify_status).as_ref() {
+                                    Some(Ok(msg)) => html! {
+                                        <div style="margin-top: 0.5rem; color: #4CAF50; font-size: 0.9rem;">
+                                            {"\u{2713} "}{msg}
+                                        </div>
+                                    },
+                                    Some(Err(msg)) => html! {
+                                        <div style="margin-top: 0.5rem; color: #ff6b6b; font-size: 0.9rem;">
+                                            {"\u{2717} "}{msg}
+                                        </div>
+                                    },
+                                    None => html! {},
+                                }
+                            }
+                        </div>
                     }
 
                     // Status (compact) - clickable to expand/collapse digest items
