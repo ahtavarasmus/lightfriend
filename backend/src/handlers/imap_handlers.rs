@@ -148,7 +148,7 @@ pub struct FetchEmailsQuery {
 /// `ImapEmailPreview`. No DB access, no ontology interaction. Extracted
 /// from the old inline body of `fetch_emails_imap_for_account` so the
 /// same parsing is used by the cron and IDLE code paths.
-pub(crate) fn parse_imap_message(
+pub fn parse_imap_message(
     message: &async_imap::types::Fetch,
     user_timezone: Option<String>,
 ) -> Result<ImapEmailPreview, ImapError> {
@@ -266,7 +266,7 @@ pub(crate) fn parse_imap_message(
 /// Returns `Ok(Some(id))` on successful insert or discovered duplicate,
 /// `Err` on DB failure. The caller should only mark the email as
 /// processed after this returns `Ok`.
-pub(crate) async fn insert_email_into_ontology(
+pub async fn insert_email_into_ontology(
     state: &Arc<AppState>,
     user_id: i32,
     preview: &ImapEmailPreview,
@@ -381,7 +381,7 @@ pub(crate) async fn insert_email_into_ontology(
 /// `insert_email_into_ontology` returns `Ok`. If insertion fails, the
 /// email stays unprocessed and will be retried on the next IDLE wake.
 /// This fixes the old mark-before-insert ordering bug.
-pub(crate) async fn process_new_emails(
+pub async fn process_new_emails(
     state: &Arc<AppState>,
     user_id: i32,
     imap_connection_id: i32,

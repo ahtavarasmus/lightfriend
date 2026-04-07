@@ -46,3 +46,4 @@ cache/
 contracts/out/
 .gstack/
 .env.local
+scripts/__pycache__/
