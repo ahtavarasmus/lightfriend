@@ -254,43 +254,6 @@ pub fn format_time_display(timestamp: i32, tz: &chrono_tz::Tz) -> String {
     }
 }
 
-fn format_relative_time(timestamp: i32, now_ts: i32, tz: &chrono_tz::Tz) -> String {
-    use chrono::TimeZone;
-
-    let now_local = chrono::Utc
-        .timestamp_opt(now_ts as i64, 0)
-        .single()
-        .map(|t| t.with_timezone(tz));
-
-    let target_local = chrono::Utc
-        .timestamp_opt(timestamp as i64, 0)
-        .single()
-        .map(|t| t.with_timezone(tz));
-
-    match (now_local, target_local) {
-        (Some(now), Some(target)) => {
-            let time_part = format_time_display(timestamp, tz);
-
-            let now_date = now.date_naive();
-            let target_date = target.date_naive();
-            let days_diff = (target_date - now_date).num_days();
-
-            if days_diff == 0 {
-                format!("{} today", time_part)
-            } else if days_diff == 1 {
-                format!("{} tomorrow", time_part)
-            } else if days_diff < 7 {
-                let day_name = target.format("%A").to_string();
-                format!("{} {}", time_part, day_name)
-            } else {
-                let date_part = target.format("%b %d").to_string();
-                format!("{} {}", time_part, date_part)
-            }
-        }
-        _ => "unknown".to_string(),
-    }
-}
-
 pub fn format_date_display(timestamp: i32, tz: &chrono_tz::Tz) -> String {
     use chrono::TimeZone;
 

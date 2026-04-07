@@ -38,7 +38,6 @@ pub mod handlers {
 pub mod utils {
     pub mod bridge;
     pub mod country;
-    pub mod elevenlabs_prompts;
     pub mod email;
     pub mod encryption;
     pub mod matrix_auth;
@@ -60,7 +59,6 @@ pub mod tool_call_utils {
     pub mod bridge;
     pub mod email;
     pub mod internet;
-    pub mod management;
     pub mod mcp;
     pub mod tesla;
     pub mod utils;
@@ -83,7 +81,6 @@ pub mod api {
 }
 pub mod agent_core;
 pub mod context;
-pub mod error;
 pub mod tools {
     pub mod email;
     pub mod messaging;

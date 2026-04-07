@@ -98,11 +98,6 @@ impl MockSignupRepository {
         *self.fail_on_find_email.lock().unwrap() = fail;
     }
 
-    /// Configure to fail on find_by_stripe_customer_id calls.
-    pub fn set_fail_on_find_stripe(&self, fail: bool) {
-        *self.fail_on_find_stripe.lock().unwrap() = fail;
-    }
-
     /// Get count of registered users.
     pub fn user_count(&self) -> usize {
         self.users.lock().unwrap().len()

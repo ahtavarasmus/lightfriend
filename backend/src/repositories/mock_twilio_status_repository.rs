@@ -59,11 +59,6 @@ impl MockTwilioStatusRepository {
         *self.fail_on_update.lock().unwrap() = fail;
     }
 
-    /// Configure to fail on get_message_user_info calls.
-    pub fn set_fail_on_get_user_info(&self, fail: bool) {
-        *self.fail_on_get_user_info.lock().unwrap() = fail;
-    }
-
     /// Get a message from the mock repository.
     pub fn get_message(&self, message_sid: &str) -> Option<MockMessage> {
         let messages = self.messages.lock().unwrap();

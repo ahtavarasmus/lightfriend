@@ -154,7 +154,17 @@ async fn check_contract_approval(
     contract: &str,
     image_id: &str,
 ) -> Option<bool> {
-    let call_data = encode_verify_call(image_id)?;
+    let call_data = match encode_verify_call(image_id) {
+        Some(d) => d,
+        None => {
+            tracing::warn!(
+                "trust_chain: failed to encode verify call for image_id={}",
+                image_id
+            );
+            return None;
+        }
+    };
+
     let payload = serde_json::json!({
         "jsonrpc": "2.0",
         "method": "eth_call",
@@ -162,18 +172,67 @@ async fn check_contract_approval(
         "id": 1
     });
 
-    let resp: RpcResponse = client
+    tracing::info!(
+        "trust_chain: calling oysterKMSVerify rpc={} contract={} image_id={}",
+        rpc_url,
+        contract,
+        image_id
+    );
+
+    let response = match client
         .post(rpc_url)
         .json(&payload)
         .timeout(RPC_TIMEOUT)
         .send()
         .await
-        .ok()?
-        .json()
-        .await
-        .ok()?;
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(
+                "trust_chain: RPC POST failed for {}: {} (is ARBITRUM_RPC_URL reachable through HTTP_PROXY?)",
+                rpc_url,
+                e
+            );
+            return None;
+        }
+    };
 
-    let result_str = resp.result?.as_str()?.to_string();
+    let status = response.status();
+    let raw = match response.text().await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!("trust_chain: failed to read RPC response body: {}", e);
+            return None;
+        }
+    };
+
+    if !status.is_success() {
+        tracing::warn!(
+            "trust_chain: RPC returned non-2xx status={} body={}",
+            status,
+            raw
+        );
+        return None;
+    }
+
+    let parsed: RpcResponse = match serde_json::from_str(&raw) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(
+                "trust_chain: failed to parse RPC response: {} body={}",
+                e,
+                raw
+            );
+            return None;
+        }
+    };
+
+    let result_str = parsed.result?.as_str()?.to_string();
+    tracing::info!(
+        "trust_chain: oysterKMSVerify returned raw={} for image_id={}",
+        result_str,
+        image_id
+    );
     Some(result_str.ends_with('1'))
 }
 
@@ -448,6 +507,12 @@ pub async fn get_trust_chain() -> Json<TrustChainResponse> {
     {
         fetch_blockchain_data(&client, rpc, contract, img_id).await
     } else {
+        tracing::warn!(
+            "trust_chain: skipping blockchain fetch - ARBITRUM_RPC_URL set={}, MARLIN_KMS_CONTRACT_ADDRESS set={}, image_id set={} (all three required)",
+            rpc_url.is_some(),
+            kms_contract_address.is_some(),
+            image_id.is_some()
+        );
         (None, vec![])
     };
 
