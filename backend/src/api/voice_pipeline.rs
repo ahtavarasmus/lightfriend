@@ -346,17 +346,17 @@ pub async fn voice_incoming(State(state): State<Arc<AppState>>, body: String) ->
             .collect();
 
     let caller = params.get("From").cloned().unwrap_or_default();
-    tracing::info!("Voice incoming from: {}", caller);
+    tracing::info!("Voice incoming call received");
 
     // Look up user by phone
     let user = match state.user_core.find_by_phone_number(&caller) {
         Ok(Some(u)) => u,
         Ok(None) => {
-            tracing::warn!("Voice call from unknown number: {}", caller);
+            tracing::warn!("Voice call from unregistered number");
             return twiml_say("Sorry, this number is not registered with Lightfriend.");
         }
         Err(e) => {
-            tracing::error!("DB error looking up caller {}: {}", caller, e);
+            tracing::error!("DB error looking up caller: {}", e);
             return twiml_say("An error occurred. Please try again later.");
         }
     };
@@ -386,11 +386,7 @@ pub async fn voice_incoming(State(state): State<Arc<AppState>>, body: String) ->
         ws_url, user.id
     );
 
-    tracing::info!(
-        "Voice incoming TwiML: WS={}/api/voice/ws, user={}",
-        ws_url,
-        user.id
-    );
+    tracing::info!("Voice incoming TwiML returned for user {}", user.id);
 
     (
         axum::http::StatusCode::OK,
@@ -478,11 +474,7 @@ pub async fn make_notification_call(
         .await
         .map_err(|e| format!("Twilio call failed: {}", e))?;
 
-    tracing::info!(
-        "Outbound notification call initiated for user {}: SID {}",
-        user.id,
-        call_sid
-    );
+    tracing::info!("Outbound notification call initiated for user {}", user.id);
 
     Ok(call_sid)
 }
@@ -850,7 +842,10 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
                             let tts_voice = s.tts_voice.clone();
                             let send_tx_clone = send_tx.clone();
                             tokio::spawn(async move {
-                                tracing::info!("TTS requesting for: \"{}\"", greeting);
+                                tracing::info!(
+                                    "TTS requesting greeting ({} chars)",
+                                    greeting.len()
+                                );
                                 match tinfoil.text_to_speech(&greeting, &tts_voice).await {
                                     Ok(tts_wav) => {
                                         tracing::info!("TTS returned {} bytes", tts_wav.len());
@@ -917,18 +912,9 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
 
                     sess.media_count += 1;
                     if sess.media_count == 1 {
-                        let raw_hex: String = mulaw_bytes
-                            .iter()
-                            .take(20)
-                            .map(|b| format!("{:02x}", b))
-                            .collect::<Vec<_>>()
-                            .join(" ");
                         tracing::info!(
-                            "First media: mulaw_len={}, raw_hex=[{}], pcm_range=[{}, {}], rms={:.0}",
+                            "First media packet: mulaw_len={}, rms={:.0}",
                             mulaw_bytes.len(),
-                            raw_hex,
-                            pcm_8k.iter().min().unwrap_or(&0),
-                            pcm_8k.iter().max().unwrap_or(&0),
                             rms
                         );
                     } else if sess.media_count % 50 == 0 {
@@ -1193,11 +1179,11 @@ async fn process_utterance(
 
     // 3. Filter Whisper hallucinations
     if is_hallucination(&transcript) {
-        tracing::debug!("Filtered hallucination: \"{}\"", transcript);
+        tracing::debug!("Filtered hallucination ({} chars)", transcript.len());
         return Ok(());
     }
 
-    tracing::info!("STT transcript: \"{}\"", transcript);
+    tracing::info!("STT transcript received ({} chars)", transcript.len());
 
     // 4. Immediate feedback - say "just a moment" while we process
     send_tts_response(session, "Just a moment.", send_tx).await?;
@@ -1229,7 +1215,7 @@ async fn process_utterance(
 
         match result {
             CompletionResult::Text(text) => {
-                tracing::info!("LLM response: \"{}\"", text);
+                tracing::info!("LLM response received ({} chars)", text.len());
                 session.history.push(ChatMessage::assistant(&text));
                 final_response = text;
                 break;
@@ -1359,7 +1345,7 @@ async fn process_utterance(
         return Ok(());
     }
 
-    tracing::info!("Final response to speak: \"{}\"", final_response);
+    tracing::info!("Final response to speak ({} chars)", final_response.len());
 
     // 6. TTS and send audio
     send_tts_response(session, &final_response, send_tx).await
@@ -1373,7 +1359,7 @@ async fn send_tts_response(
     session.state = CallState::Speaking;
 
     // Generate TTS audio
-    tracing::info!("TTS requesting for: \"{}\"", text);
+    tracing::info!("TTS requesting ({} chars)", text.len());
     let tts_wav = session
         .tinfoil
         .text_to_speech(text, &session.tts_voice)
