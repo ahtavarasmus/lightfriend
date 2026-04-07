@@ -1,5 +1,7 @@
 use crate::UserCoreOps;
 use crate::{handlers::auth_middleware::AuthUser, AppState};
+use async_imap::Session;
+use async_native_tls::TlsStream;
 use axum::{
     extract::{Json, State},
     http::StatusCode,
@@ -7,14 +9,76 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
-use imap;
+use futures_util::TryStreamExt;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{Message, Transport};
 use mail_parser;
-use native_tls::TlsConnector;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
+use tokio::net::TcpStream;
+
+/// Type alias for the async IMAP session we use throughout this module.
+pub(crate) type ImapSession = Session<TlsStream<TcpStream>>;
+
+/// Open an authenticated IMAP session over TLS.
+///
+/// This is the canonical async path used by all IMAP entry points in this
+/// crate. Layered timeouts:
+///   * `tokio::time::timeout` (15s) on the TCP connect
+///   * `tokio::time::timeout` (15s) on the TLS handshake
+///   * `tokio::time::timeout` (15s) on the LOGIN command
+/// Callers should add their own outer wall-clock `tokio::time::timeout` around
+/// the full fetch flow as a last-resort guard.
+pub(crate) async fn open_imap_session(
+    server: &str,
+    port: u16,
+    email: &str,
+    password: &str,
+) -> Result<ImapSession, ImapError> {
+    use std::time::Duration;
+
+    // 1. TCP connect (uses tokio's async resolver internally)
+    let tcp = tokio::time::timeout(Duration::from_secs(15), TcpStream::connect((server, port)))
+        .await
+        .map_err(|_| {
+            ImapError::ConnectionError(format!(
+                "TCP connect timed out (15s) for {}:{}",
+                server, port
+            ))
+        })?
+        .map_err(|e| {
+            ImapError::ConnectionError(format!(
+                "Failed to TCP connect to {}:{}: {}",
+                server, port, e
+            ))
+        })?;
+
+    // 2. TLS handshake
+    let tls_stream = tokio::time::timeout(
+        Duration::from_secs(15),
+        async_native_tls::TlsConnector::new().connect(server, tcp),
+    )
+    .await
+    .map_err(|_| ImapError::ConnectionError("TLS handshake timed out (15s)".to_string()))?
+    .map_err(|e| ImapError::ConnectionError(format!("TLS handshake failed: {}", e)))?;
+
+    // 3. Build IMAP client and read greeting
+    let mut client = async_imap::Client::new(tls_stream);
+    let _greeting = tokio::time::timeout(Duration::from_secs(10), client.read_response())
+        .await
+        .map_err(|_| ImapError::ConnectionError("IMAP greeting timed out (10s)".to_string()))?
+        .ok_or_else(|| ImapError::ConnectionError("No IMAP greeting received".to_string()))?
+        .map_err(|e| ImapError::ConnectionError(format!("IMAP greeting error: {}", e)))?;
+
+    // 4. Login
+    let session = tokio::time::timeout(Duration::from_secs(15), client.login(email, password))
+        .await
+        .map_err(|_| ImapError::CredentialsError("IMAP login timed out (15s)".to_string()))?
+        .map_err(|(e, _client)| ImapError::CredentialsError(format!("Failed to login: {}", e)))?;
+
+    Ok(session)
+}
 fn format_timestamp(timestamp: i64, timezone: Option<String>) -> String {
     // Convert timestamp to DateTime<Utc>
     let dt_utc = match DateTime::from_timestamp(timestamp, 0) {
@@ -259,124 +323,107 @@ pub async fn respond_to_email(
     let password = cred.password;
     let imap_server = cred.imap_server;
     let imap_port = cred.imap_port;
-    tracing::info!("setting up tls");
-    // Set up TLS
-    let tls = match TlsConnector::builder().build() {
-        Ok(tls) => tls,
-        Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({ "error": format!("Failed to create TLS connector: {}", e) })),
-            ))
-        }
-    };
     let server = imap_server
         .as_deref()
         .unwrap_or("imap.gmail.com")
         .to_string();
-    let port = imap_port.unwrap_or(993);
-    // Connect to IMAP server using spawn_blocking to prevent blocking the Tokio runtime.
-    // In the enclave, outbound TCP is unavailable so imap::connect would hang forever
-    // and poison the Tokio thread pool, making the entire server unresponsive.
-    let server_clone = server.clone();
-    let email_clone = email.clone();
-    let password_clone = password.clone();
-    let mut imap_session = match tokio::time::timeout(
-        std::time::Duration::from_secs(15),
-        tokio::task::spawn_blocking(move || {
-            let client = imap::connect((&*server_clone, port as u16), &server_clone, &tls)
-                .map_err(|e| format!("Failed to connect to IMAP server: {}", e))?;
-            client
-                .login(&email_clone, &password_clone)
-                .map_err(|(e, _)| format!("Failed to login: {}", e))
-        }),
-    )
-    .await
-    {
-        Ok(Ok(Ok(session))) => session,
-        Ok(Ok(Err(e))) => {
+    let port = imap_port.unwrap_or(993) as u16;
+
+    // Connect, login, fetch envelope, extract reply data — all async, no spawn_blocking.
+    // Outer 60s wall-clock guard around the entire IMAP phase.
+    let imap_result = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        let mut imap_session = open_imap_session(&server, port, &email, &password).await?;
+        tracing::info!("logged in");
+
+        imap_session
+            .select("INBOX")
+            .await
+            .map_err(|e| ImapError::FetchError(format!("Failed to select INBOX: {}", e)))?;
+
+        let mut messages_stream = imap_session
+            .uid_fetch(&request.email_id, "(ENVELOPE)")
+            .await
+            .map_err(|e| {
+                ImapError::FetchError(format!("Failed to fetch original message: {}", e))
+            })?;
+        let original_message = messages_stream
+            .try_next()
+            .await
+            .map_err(|e| ImapError::FetchError(format!("Failed to read original message: {}", e)))?
+            .ok_or_else(|| ImapError::FetchError("Original message not found".to_string()))?;
+
+        let envelope = original_message.envelope().ok_or_else(|| {
+            ImapError::ParseError("Failed to get original message envelope".to_string())
+        })?;
+
+        let reply_to_address = envelope
+            .from
+            .as_ref()
+            .and_then(|addrs| addrs.first())
+            .and_then(|addr| {
+                let mailbox = addr.mailbox.as_ref()?.to_vec();
+                let host = addr.host.as_ref()?.to_vec();
+                Some(format!(
+                    "{}@{}",
+                    String::from_utf8_lossy(&mailbox),
+                    String::from_utf8_lossy(&host)
+                ))
+            })
+            .ok_or_else(|| ImapError::ParseError("Failed to get recipient address".to_string()))?;
+
+        let original_subject = envelope
+            .subject
+            .as_ref()
+            .map(|s| String::from_utf8_lossy(s).into_owned())
+            .unwrap_or_else(|| String::from("No subject"));
+
+        // Drain remaining stream items so we can drop it cleanly before logout
+        drop(messages_stream);
+
+        // Best-effort logout (ignore errors)
+        if let Err(e) = imap_session.logout().await {
+            tracing::warn!("Failed to logout from IMAP: {}", e);
+        }
+
+        Ok::<(String, String), ImapError>((reply_to_address, original_subject))
+    })
+    .await;
+
+    let (reply_to_address, original_subject) = match imap_result {
+        Ok(Ok(pair)) => pair,
+        Ok(Err(ImapError::CredentialsError(msg))) => {
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({ "error": e })),
+                AxumJson(json!({ "error": msg })),
             ))
         }
-        Ok(Err(e)) => {
+        Ok(Err(ImapError::FetchError(msg))) | Ok(Err(ImapError::ParseError(msg))) => {
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({ "error": format!("IMAP task panicked: {}", e) })),
+                AxumJson(json!({ "error": msg })),
+            ))
+        }
+        Ok(Err(ImapError::ConnectionError(msg))) => {
+            return Err((
+                StatusCode::GATEWAY_TIMEOUT,
+                AxumJson(json!({ "error": msg })),
+            ))
+        }
+        Ok(Err(ImapError::NoConnection)) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({ "error": "No IMAP connection" })),
             ))
         }
         Err(_) => {
             return Err((
                 StatusCode::GATEWAY_TIMEOUT,
-                AxumJson(json!({ "error": "IMAP connection timed out (15s)" })),
+                AxumJson(json!({ "error": "IMAP fetch wall-clock timeout (60s)" })),
             ))
         }
     };
-    tracing::info!("logged in");
-    // Select INBOX
-    if let Err(e) = imap_session.select("INBOX") {
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({ "error": format!("Failed to select INBOX: {}", e) })),
-        ));
-    }
-    // Fetch the original message to get subject and other details
-    let messages = match imap_session.uid_fetch(&request.email_id, "(ENVELOPE)") {
-        Ok(messages) => messages,
-        Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({ "error": format!("Failed to fetch original message: {}", e) })),
-            ))
-        }
-    };
-    let original_message = match messages.iter().next() {
-        Some(msg) => msg,
-        None => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                AxumJson(json!({ "error": "Original message not found" })),
-            ))
-        }
-    };
-    let envelope = match original_message.envelope() {
-        Some(env) => env,
-        None => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({ "error": "Failed to get original message envelope" })),
-            ))
-        }
-    };
-    tracing::info!("getting the reply address");
-    // Get the recipient's email address from the original sender
-    let reply_to_address = envelope
-        .from
-        .as_ref()
-        .and_then(|addrs| addrs.first())
-        .and_then(|addr| {
-            let mailbox = addr.mailbox.as_ref()?.to_vec();
-            let host = addr.host.as_ref()?.to_vec();
-            Some(format!(
-                "{}@{}",
-                String::from_utf8_lossy(&mailbox),
-                String::from_utf8_lossy(&host)
-            ))
-        })
-        .ok_or_else(|| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({ "error": "Failed to get recipient address" })),
-            )
-        })?;
+
     tracing::info!("reply addr: {}", reply_to_address);
-    // Get original subject
-    let original_subject = envelope
-        .subject
-        .as_ref()
-        .map(|s| String::from_utf8_lossy(s).into_owned())
-        .unwrap_or_else(|| String::from("No subject"));
     let subject = if !original_subject.to_lowercase().starts_with("re:") {
         format!("Re: {}", original_subject)
     } else {
@@ -429,12 +476,6 @@ pub async fn respond_to_email(
     match send_result {
         Ok(_) => {
             tracing::info!("Email sent successfully via SMTP");
-
-            // Attempt IMAP logout
-            match imap_session.logout() {
-                Ok(_) => tracing::info!("Successfully logged out from IMAP"),
-                Err(e) => tracing::warn!("Failed to logout from IMAP: {}", e),
-            }
             Ok(AxumJson(json!({
                 "success": true,
                 "message": "Email response sent successfully"
@@ -452,10 +493,6 @@ pub async fn respond_to_email(
                 smtp_port
             );
 
-            // Attempt IMAP logout even if SMTP failed
-            if let Err(logout_err) = imap_session.logout() {
-                tracing::warn!("Additionally failed to logout from IMAP: {}", logout_err);
-            }
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 AxumJson(json!({
@@ -649,60 +686,39 @@ async fn fetch_emails_imap_for_account(
     unprocessed: bool,
     unread_only: bool,
 ) -> Result<Vec<ImapEmailPreview>, ImapError> {
-    let email = email.to_string();
-    let password = password.to_string();
-    // Add logging for debugging (remove in production)
-    tracing::debug!(
-        "Fetching IMAP emails for user {} with email {}",
-        user_id,
-        email
-    );
-    // Set up TLS
-    let tls = TlsConnector::builder().build().map_err(|e| {
-        ImapError::ConnectionError(format!("Failed to create TLS connector: {}", e))
-    })?;
+    tracing::debug!("Fetching IMAP emails for user {}", user_id);
+
     let server = imap_server.unwrap_or("imap.gmail.com").to_string();
-    let port = imap_port.unwrap_or(993);
-    // Connect to IMAP server using spawn_blocking with timeout to prevent blocking Tokio runtime
-    let server_clone = server.clone();
-    let email_clone = email.clone();
-    let password_clone = password.clone();
-    let mut imap_session = tokio::time::timeout(
-        std::time::Duration::from_secs(15),
-        tokio::task::spawn_blocking(move || -> Result<_, ImapError> {
-            let client = imap::connect((&*server_clone, port as u16), &server_clone, &tls)
-                .map_err(|e| {
-                    ImapError::ConnectionError(format!("Failed to connect to IMAP server: {}", e))
-                })?;
-            let session = client
-                .login(&email_clone, &password_clone)
-                .map_err(|(e, _)| ImapError::CredentialsError(format!("Failed to login: {}", e)))?;
-            Ok(session)
-        }),
-    )
-    .await
-    .map_err(|_| ImapError::ConnectionError("IMAP connection timed out (15s)".to_string()))?
-    .map_err(|e| ImapError::ConnectionError(format!("IMAP task failed: {}", e)))??;
-    // Select INBOX
-    let mailbox = imap_session
-        .select("INBOX")
-        .map_err(|e| ImapError::FetchError(format!("Failed to select INBOX: {}", e)))?;
-    // Calculate how many messages to fetch based on limit parameter
+    let port = imap_port.unwrap_or(993) as u16;
     let limit = limit.unwrap_or(20);
-    let sequence_set = format!(
-        "{}:{}",
-        (mailbox.exists.saturating_sub(limit - 1)),
-        mailbox.exists
-    );
-    let messages = imap_session
-        .fetch(
-            &sequence_set,
-            "(UID FLAGS ENVELOPE BODY.PEEK[])", // PEEK to not mark the email as read
-        )
-        .map_err(|e| ImapError::FetchError(format!("Failed to fetch messages: {}", e)))?;
-    let mut email_previews = Vec::new();
-    for message in messages.iter() {
-        let uid = message.uid.unwrap_or(0).to_string();
+
+    // Outer wall-clock guard around the entire fetch flow
+    let fetch_result: Result<Vec<ImapEmailPreview>, ImapError> = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        async {
+            let mut imap_session = open_imap_session(&server, port, email, password).await?;
+
+            let mailbox = imap_session
+                .select("INBOX")
+                .await
+                .map_err(|e| ImapError::FetchError(format!("Failed to select INBOX: {}", e)))?;
+
+            let sequence_set = format!(
+                "{}:{}",
+                (mailbox.exists.saturating_sub(limit - 1)),
+                mailbox.exists
+            );
+
+            let mut messages_stream = imap_session
+                .fetch(&sequence_set, "(UID FLAGS ENVELOPE BODY.PEEK[])")
+                .await
+                .map_err(|e| ImapError::FetchError(format!("Failed to fetch messages: {}", e)))?;
+
+            let mut email_previews = Vec::new();
+            while let Some(message) = messages_stream.try_next().await.map_err(|e| {
+                ImapError::FetchError(format!("Stream error reading messages: {}", e))
+            })? {
+                let uid = message.uid.unwrap_or(0).to_string();
 
         // Check if email is already processed using repository method
         let is_processed = state
@@ -775,8 +791,7 @@ async fn fetch_emails_imap_for_account(
         tracing::debug!("Final processed date: {:?}", date);
         let is_read = message
             .flags()
-            .iter()
-            .any(|flag| flag.to_string() == "\\Seen");
+            .any(|flag| flag == async_imap::types::Flag::Seen);
         // Skip read emails if unread_only is true
         if unread_only && is_read {
             continue;
@@ -860,14 +875,27 @@ async fn fetch_emails_imap_for_account(
                 }
             }
         }
-    }
-    // Logout - don't fail if logout fails, we already have the emails
-    if let Err(e) = imap_session.logout() {
-        tracing::warn!("Failed to logout from IMAP session: {} - ignoring since emails were fetched successfully", e);
-    }
-    // Reverse the order so newest emails appear first
-    //email_previews.reverse();
-    Ok(email_previews)
+            }
+
+            // Drop stream before logout to release the borrow on imap_session
+            drop(messages_stream);
+
+            // Logout - don't fail if logout fails, we already have the emails
+            if let Err(e) = imap_session.logout().await {
+                tracing::warn!("Failed to logout from IMAP session: {} - ignoring since emails were fetched successfully", e);
+            }
+
+            Ok(email_previews)
+        },
+    )
+    .await
+    .unwrap_or_else(|_| {
+        Err(ImapError::ConnectionError(
+            "IMAP fetch wall-clock timeout (60s)".to_string(),
+        ))
+    });
+
+    fetch_result
 }
 pub async fn fetch_single_email_imap(
     state: &AppState,
@@ -922,60 +950,38 @@ async fn fetch_single_email_from_account(
     imap_server: Option<&str>,
     imap_port: Option<i32>,
 ) -> Result<ImapEmail, ImapError> {
-    let email = email.to_string();
-    let password = password.to_string();
-    // Set up TLS
-    let tls = TlsConnector::builder().build().map_err(|e| {
-        ImapError::ConnectionError(format!("Failed to create TLS connector: {}", e))
-    })?;
     let server = imap_server.unwrap_or("imap.gmail.com").to_string();
-    let port = imap_port.unwrap_or(993);
-    // Connect to IMAP server using spawn_blocking with timeout
-    let server_clone = server.clone();
-    let email_clone = email.clone();
-    let password_clone = password.clone();
-    let mut imap_session = tokio::time::timeout(
-        std::time::Duration::from_secs(15),
-        tokio::task::spawn_blocking(move || -> Result<_, ImapError> {
-            let client = imap::connect((&*server_clone, port as u16), &server_clone, &tls)
-                .map_err(|e| {
-                    ImapError::ConnectionError(format!("Failed to connect to IMAP server: {}", e))
-                })?;
-            let mut session = client
-                .login(&email_clone, &password_clone)
-                .map_err(|(e, _)| ImapError::CredentialsError(format!("Failed to login: {}", e)))?;
-            session
+    let port = imap_port.unwrap_or(993) as u16;
+
+    // Wrap the entire IMAP session in a wall-clock timeout for safety
+    let result: Result<ImapEmail, ImapError> = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        async {
+            let mut imap_session = open_imap_session(&server, port, email, password).await?;
+            imap_session
                 .select("INBOX")
+                .await
                 .map_err(|e| ImapError::FetchError(format!("Failed to select INBOX: {}", e)))?;
-            Ok(session)
-        }),
-    )
-    .await
-    .map_err(|_| ImapError::ConnectionError("IMAP connection timed out (15s)".to_string()))?
-    .map_err(|e| ImapError::ConnectionError(format!("IMAP task failed: {}", e)))??;
-    // Fetch specific message with body structure for attachments
-    // Using BODY.PEEK[] to avoid marking the email as read
-    let messages =
-        match imap_session.uid_fetch(email_id, "(UID FLAGS ENVELOPE BODY.PEEK[] BODYSTRUCTURE)") {
-            Ok(messages) => messages,
-            Err(e) => {
-                tracing::error!("Failed to fetch message with UID {}: {}", email_id, e);
-                return Err(ImapError::FetchError(format!(
-                    "Failed to fetch message: {}",
-                    e
-                )));
-            }
-        };
-    let message = match messages.iter().next() {
-        Some(msg) => msg,
-        None => {
-            tracing::error!("No message found with UID {}", email_id);
-            return Err(ImapError::FetchError(format!(
-                "Message with UID {} not found",
-                email_id
-            )));
-        }
-    };
+
+            // Fetch specific message with body structure for attachments
+            // Using BODY.PEEK[] to avoid marking the email as read
+            let mut messages_stream = imap_session
+                .uid_fetch(email_id, "(UID FLAGS ENVELOPE BODY.PEEK[] BODYSTRUCTURE)")
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to fetch message with UID {}: {}", email_id, e);
+                    ImapError::FetchError(format!("Failed to fetch message: {}", e))
+                })?;
+            let message = messages_stream
+                .try_next()
+                .await
+                .map_err(|e| {
+                    ImapError::FetchError(format!("Stream error reading message: {}", e))
+                })?
+                .ok_or_else(|| {
+                    tracing::error!("No message found with UID {}", email_id);
+                    ImapError::FetchError(format!("Message with UID {} not found", email_id))
+                })?;
     // Verify the UID matches
     let msg_uid = message.uid.ok_or_else(|| {
         tracing::error!("Message found but has no UID");
@@ -1050,8 +1056,7 @@ async fn fetch_single_email_from_account(
         });
     let is_read = message
         .flags()
-        .iter()
-        .any(|flag| flag.to_string() == "\\Seen");
+        .any(|flag| flag == async_imap::types::Flag::Seen);
 
     // Try to get both full body and text body
     let full_body = message
@@ -1089,10 +1094,6 @@ async fn fetch_single_email_from_account(
         }
         None => (String::new(), String::new(), Vec::new()),
     };
-    // Logout - don't fail if logout fails, we already have the email
-    if let Err(e) = imap_session.logout() {
-        tracing::warn!("Failed to logout from IMAP session: {} - ignoring since email was fetched successfully", e);
-    }
     let date_formatted = date.map(|dt| {
         format_timestamp(
             dt.timestamp(),
@@ -1103,7 +1104,8 @@ async fn fetch_single_email_from_account(
                 .and_then(|info| info.timezone),
         )
     });
-    Ok(ImapEmail {
+
+    let email_struct = ImapEmail {
         id: email_id.to_string(),
         subject,
         from,
@@ -1114,7 +1116,25 @@ async fn fetch_single_email_from_account(
         body: Some(body),
         is_read,
         attachments,
-    })
+    };
+
+    // Drop stream and logout (best-effort)
+    drop(messages_stream);
+    if let Err(e) = imap_session.logout().await {
+        tracing::warn!("Failed to logout from IMAP session: {} - ignoring since email was fetched successfully", e);
+    }
+
+    Ok::<ImapEmail, ImapError>(email_struct)
+        },
+    )
+    .await
+    .unwrap_or_else(|_| {
+        Err(ImapError::ConnectionError(
+            "IMAP fetch wall-clock timeout (60s)".to_string(),
+        ))
+    });
+
+    result
 }
 
 #[derive(Debug, Deserialize)]
