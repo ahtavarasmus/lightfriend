@@ -491,24 +491,33 @@ pub async fn imap_login(
                 tracing::warn!("Failed to logout IMAP session: {}", e);
             }
 
-            if let Err(e) = state.user_repository.set_imap_credentials(
+            let new_conn_id = match state.user_repository.set_imap_credentials(
                 auth_user.user_id,
                 &email,
                 &password,
                 imap_server,
                 imap_port,
             ) {
-                tracing::error!("Failed to store IMAP credentials: {}", e);
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    AxumJson(json!({"error": "Failed to store IMAP credentials"})),
-                ));
-            }
+                Ok(id) => id,
+                Err(e) => {
+                    tracing::error!("Failed to store IMAP credentials: {}", e);
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        AxumJson(json!({"error": "Failed to store IMAP credentials"})),
+                    ));
+                }
+            };
 
             tracing::info!(
-                "Successfully stored IMAP credentials for user {}",
-                auth_user.user_id
+                "Successfully stored IMAP credentials for user {} (connection id {})",
+                auth_user.user_id,
+                new_conn_id
             );
+
+            // Spawn the per-connection IDLE task so new mail gets pushed
+            // to us in real time instead of waiting for the next cron run.
+            crate::utils::imap_idle::spawn_idle_task_for_connection(state.clone(), new_conn_id);
+
             Ok(AxumJson(json!({"message": "IMAP connected successfully"})))
         }
         Err(e) => {
@@ -570,6 +579,15 @@ pub async fn delete_imap_connection(
         payload.email,
         auth_user.user_id
     );
+
+    // Look up the connection id first so we can abort its IDLE task
+    // before the DB row is deleted.
+    if let Ok(Some(info)) = state
+        .user_repository
+        .get_imap_credentials_by_email(auth_user.user_id, &payload.email)
+    {
+        crate::utils::imap_idle::abort_idle_task(&state, info.id);
+    }
 
     if let Err(e) = state
         .user_repository

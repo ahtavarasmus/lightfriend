@@ -502,6 +502,7 @@ async fn main() {
         matrix_clients,
         tesla_monitoring_tasks: Arc::new(DashMap::new()),
         tesla_charging_monitor_tasks: Arc::new(DashMap::new()),
+        imap_idle_tasks: Arc::new(DashMap::new()),
         tesla_waking_vehicles: Arc::new(DashMap::new()),
         phone_verify_limiter: DashMap::new(),
         phone_verify_verify_limiter: DashMap::new(),
@@ -1378,6 +1379,14 @@ async fn main() {
     let state_for_scheduler = state.clone();
     tokio::spawn(async move {
         jobs::scheduler::start_scheduler(state_for_scheduler).await;
+    });
+
+    // Spawn one IDLE task per active IMAP connection. The polling cron
+    // above remains as a safety net for servers that don't support IDLE
+    // and for any task-down windows.
+    let state_for_idle = state.clone();
+    tokio::spawn(async move {
+        backend::utils::imap_idle::initialize_all_idle_tasks(state_for_idle).await;
     });
     use tokio::net::TcpListener;
     let port = match std::env::var("ENVIRONMENT").as_deref() {

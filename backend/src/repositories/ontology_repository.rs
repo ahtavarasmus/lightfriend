@@ -1005,6 +1005,26 @@ impl OntologyRepository {
             .get_result(&mut conn)
     }
 
+    /// Look up an existing email-sourced message by its deterministic
+    /// `email_<uid>` room_id. Used by the IDLE path (and cron) to avoid
+    /// inserting the same email twice when both paths run concurrently.
+    ///
+    /// Unlike the time-windowed dedup inside `insert_message`, this has
+    /// no time bound — if the row exists at all for this `(user_id,
+    /// room_id)`, we reuse it.
+    pub fn get_message_by_email_room_id(
+        &self,
+        user_id: i32,
+        room_id: &str,
+    ) -> Result<Option<OntMessage>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::room_id.eq(room_id))
+            .first::<OntMessage>(&mut conn)
+            .optional()
+    }
+
     /// Get messages for a specific room, ordered by created_at DESC.
     pub fn get_messages_for_room(
         &self,

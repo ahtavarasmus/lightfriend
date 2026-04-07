@@ -189,6 +189,9 @@ impl UserRepository {
         })
     }
 
+    /// Insert or update IMAP credentials for a user and return the
+    /// `imap_connection.id` of the row (needed so callers can spawn a
+    /// per-connection IDLE task).
     pub fn set_imap_credentials(
         &self,
         user_id: i32,
@@ -196,7 +199,7 @@ impl UserRepository {
         password: &str,
         imap_server: Option<&str>,
         imap_port: Option<u16>,
-    ) -> Result<(), diesel::result::Error> {
+    ) -> Result<i32, diesel::result::Error> {
         use crate::pg_schema::imap_connection;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
@@ -216,7 +219,7 @@ impl UserRepository {
             .first::<crate::pg_models::PgImapConnection>(&mut conn)
             .optional()?;
 
-        if existing.is_some() {
+        if let Some(existing) = existing {
             // Update existing connection
             diesel::update(
                 imap_connection::table
@@ -234,6 +237,7 @@ impl UserRepository {
                     .unwrap_or("gmail".to_string())),
             ))
             .execute(&mut conn)?;
+            Ok(existing.id)
         } else {
             // Insert new connection
             let new_connection = NewPgImapConnection {
@@ -250,12 +254,12 @@ impl UserRepository {
                 imap_port: imap_port.map(|p| p as i32),
             };
 
-            diesel::insert_into(imap_connection::table)
-                .values(&new_connection)
-                .execute(&mut conn)?;
+            let inserted: crate::pg_models::PgImapConnection =
+                diesel::insert_into(imap_connection::table)
+                    .values(&new_connection)
+                    .get_result(&mut conn)?;
+            Ok(inserted.id)
         }
-
-        Ok(())
     }
 
     pub fn get_imap_credentials(
@@ -317,6 +321,110 @@ impl UserRepository {
             }
         }
         Ok(result)
+    }
+
+    /// Look up a specific IMAP connection by its primary key, returning
+    /// `(user_id, ImapConnectionInfo, status)`. Used by the IDLE task loop
+    /// to re-fetch credentials on each reconnect (so a password change in
+    /// DB is picked up on the next backoff cycle).
+    pub fn get_imap_connection_by_id(
+        &self,
+        imap_connection_id: i32,
+    ) -> Result<Option<(i32, ImapConnectionInfo, String)>, diesel::result::Error> {
+        use crate::pg_schema::imap_connection;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let row = imap_connection::table
+            .filter(imap_connection::id.eq(imap_connection_id))
+            .first::<crate::pg_models::PgImapConnection>(&mut conn)
+            .optional()?;
+
+        if let Some(c) = row {
+            match decrypt(&c.encrypted_password) {
+                Ok(password) => Ok(Some((
+                    c.user_id,
+                    ImapConnectionInfo {
+                        id: c.id,
+                        email: c.description,
+                        password,
+                        imap_server: c.imap_server,
+                        imap_port: c.imap_port,
+                    },
+                    c.status,
+                ))),
+                Err(_) => Err(diesel::result::Error::RollbackTransaction),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Return `(imap_connection.id, user_id)` pairs for every active IMAP
+    /// connection in the system. Called once at startup by
+    /// `initialize_all_idle_tasks`.
+    pub fn get_all_active_imap_connections(
+        &self,
+    ) -> Result<Vec<(i32, i32)>, diesel::result::Error> {
+        use crate::pg_schema::imap_connection;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        imap_connection::table
+            .filter(imap_connection::status.eq("active"))
+            .select((imap_connection::id, imap_connection::user_id))
+            .load::<(i32, i32)>(&mut conn)
+    }
+
+    /// Update just the status column of a single IMAP connection. Used by
+    /// the IDLE loop to flag a connection as `"auth_failed"` after 3
+    /// consecutive credential errors.
+    pub fn set_imap_connection_status(
+        &self,
+        imap_connection_id: i32,
+        new_status: &str,
+    ) -> Result<(), diesel::result::Error> {
+        use crate::pg_schema::imap_connection;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::update(imap_connection::table.filter(imap_connection::id.eq(imap_connection_id)))
+            .set(imap_connection::status.eq(new_status))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    /// Return the highest numeric `email_uid` value in `processed_emails`
+    /// for a given (user_id, imap_connection_id). Used by the IDLE loop
+    /// to resync mail that arrived while the task was down: we fetch UID
+    /// `(max+1):*` from INBOX instead of re-scanning the last 10.
+    ///
+    /// Returns `None` for a brand-new connection (first-ever startup) —
+    /// the caller should fall back to "fetch the last N messages".
+    pub fn get_max_processed_uid(
+        &self,
+        user_id: i32,
+        imap_connection_id: i32,
+    ) -> Result<Option<u32>, DieselError> {
+        use diesel::sql_types::{Integer, Nullable};
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        #[derive(QueryableByName)]
+        struct MaxUid {
+            #[diesel(sql_type = Nullable<Integer>)]
+            max_uid: Option<i32>,
+        }
+
+        let row: MaxUid = diesel::sql_query(
+            "SELECT MAX(CAST(email_uid AS INTEGER)) AS max_uid \
+             FROM processed_emails \
+             WHERE user_id = $1 \
+             AND imap_connection_id = $2 \
+             AND email_uid ~ '^[0-9]+$'",
+        )
+        .bind::<Integer, _>(user_id)
+        .bind::<Integer, _>(imap_connection_id)
+        .get_result(&mut conn)?;
+
+        Ok(row.max_uid.map(|n| n as u32))
     }
 
     /// Get IMAP credentials for a specific email address

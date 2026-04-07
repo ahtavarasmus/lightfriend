@@ -138,6 +138,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         matrix_clients: Arc::new(Mutex::new(HashMap::new())),
         tesla_monitoring_tasks: Arc::new(DashMap::new()),
         tesla_charging_monitor_tasks: Arc::new(DashMap::new()),
+        imap_idle_tasks: Arc::new(DashMap::new()),
         tesla_waking_vehicles: Arc::new(DashMap::new()),
         password_reset_otps: DashMap::new(),
         phone_verify_limiter: DashMap::new(),

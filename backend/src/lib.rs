@@ -41,6 +41,7 @@ pub mod utils {
     pub mod country;
     pub mod email;
     pub mod encryption;
+    pub mod imap_idle;
     pub mod matrix_auth;
     pub mod notification_utils;
     pub mod plan_features;
@@ -203,6 +204,10 @@ pub struct AppState {
     pub matrix_clients: Arc<Mutex<HashMap<i32, Arc<matrix_sdk::Client>>>>,
     pub tesla_monitoring_tasks: Arc<DashMap<i32, tokio::task::JoinHandle<()>>>,
     pub tesla_charging_monitor_tasks: Arc<DashMap<i32, tokio::task::JoinHandle<()>>>,
+    /// Per-IMAP-connection IDLE tasks. Key is `imap_connection.id`
+    /// (NOT `user_id`) so users with multiple email accounts each get
+    /// their own task.
+    pub imap_idle_tasks: Arc<DashMap<i32, tokio::task::JoinHandle<()>>>,
     // Track vehicles currently being woken to prevent parallel wake attempts
     // Key: VIN, Value: broadcast sender that notifies waiters when wake completes
     pub tesla_waking_vehicles: Arc<DashMap<String, tokio::sync::broadcast::Sender<bool>>>,

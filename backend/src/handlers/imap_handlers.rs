@@ -28,6 +28,7 @@ pub(crate) type ImapSession = Session<TlsStream<TcpStream>>;
 ///   * `tokio::time::timeout` (15s) on the TCP connect
 ///   * `tokio::time::timeout` (15s) on the TLS handshake
 ///   * `tokio::time::timeout` (15s) on the LOGIN command
+///
 /// Callers should add their own outer wall-clock `tokio::time::timeout` around
 /// the full fetch flow as a last-resort guard.
 pub(crate) async fn open_imap_session(
@@ -141,6 +142,350 @@ pub enum ImapError {
 #[derive(Debug, Deserialize)]
 pub struct FetchEmailsQuery {
     pub limit: Option<u32>,
+}
+
+/// Pure parser: turn a `async_imap::types::Fetch` message into an
+/// `ImapEmailPreview`. No DB access, no ontology interaction. Extracted
+/// from the old inline body of `fetch_emails_imap_for_account` so the
+/// same parsing is used by the cron and IDLE code paths.
+pub(crate) fn parse_imap_message(
+    message: &async_imap::types::Fetch,
+    user_timezone: Option<String>,
+) -> Result<ImapEmailPreview, ImapError> {
+    let uid = message.uid.unwrap_or(0).to_string();
+
+    let envelope = message
+        .envelope()
+        .ok_or_else(|| ImapError::ParseError("Failed to get message envelope".to_string()))?;
+
+    let (from, from_email) = envelope
+        .from
+        .as_ref()
+        .and_then(|addrs| addrs.first())
+        .map(|addr| {
+            let name = addr
+                .name
+                .as_ref()
+                .and_then(|n| String::from_utf8(n.to_vec()).ok())
+                .unwrap_or_default();
+            let email = addr
+                .mailbox
+                .as_ref()
+                .and_then(|m| {
+                    let mailbox = String::from_utf8(m.to_vec()).ok()?;
+                    let host = addr
+                        .host
+                        .as_ref()
+                        .and_then(|h| String::from_utf8(h.to_vec()).ok())?;
+                    Some(format!("{}@{}", mailbox, host))
+                })
+                .unwrap_or_default();
+            (name, email)
+        })
+        .unwrap_or_default();
+
+    let subject = envelope
+        .subject
+        .as_ref()
+        .and_then(|s| String::from_utf8(s.to_vec()).ok());
+
+    let raw_date = envelope
+        .date
+        .as_ref()
+        .and_then(|d| String::from_utf8(d.to_vec()).ok());
+
+    let date = raw_date.as_ref().and_then(|date_str| {
+        match chrono::DateTime::parse_from_rfc2822(date_str) {
+            Ok(dt) => Some(dt.with_timezone(&Utc)),
+            Err(e) => {
+                tracing::warn!("Failed to parse date '{}': {}", date_str, e);
+                None
+            }
+        }
+    });
+
+    let is_read = message
+        .flags()
+        .any(|flag| flag == async_imap::types::Flag::Seen);
+
+    // Try to get both full body and text body
+    let full_body = message
+        .body()
+        .map(|b| String::from_utf8_lossy(b).into_owned());
+    let text_body = message
+        .text()
+        .map(|b| String::from_utf8_lossy(b).into_owned());
+
+    use mail_parser::MessageParser;
+    let body_content = full_body.or(text_body);
+    let (body, snippet) = body_content
+        .as_ref()
+        .map(|content| {
+            let parser = MessageParser::default();
+            let parsed = parser.parse(content.as_bytes());
+            let clean_content = parsed
+                .map(|msg| {
+                    let body_text = msg.body_text(0).or_else(|| msg.body_html(0));
+                    body_text
+                        .map(|text| {
+                            text.lines()
+                                .map(str::trim)
+                                .filter(|line| !line.is_empty())
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        })
+                        .unwrap_or_else(|| String::from("[No readable body found]"))
+                })
+                .unwrap_or_else(|| String::from("[Failed to parse email body]"));
+            let snippet = clean_content.chars().take(200).collect::<String>();
+            (clean_content, snippet)
+        })
+        .unwrap_or_else(|| (String::new(), String::new()));
+
+    let date_formatted = date.map(|dt| format_timestamp(dt.timestamp(), user_timezone));
+
+    Ok(ImapEmailPreview {
+        id: uid,
+        subject,
+        from: Some(from),
+        from_email: Some(from_email),
+        date,
+        date_formatted,
+        snippet: Some(snippet),
+        body: Some(body),
+        is_read,
+    })
+}
+
+/// Insert an email preview into `ont_messages` and emit an ontology
+/// change event so rules can react. Idempotent: if a message with the
+/// same `email_<uid>` room_id already exists for this user (e.g. the
+/// cron fallback inserted it first), we skip the insert and return the
+/// existing id.
+///
+/// Returns `Ok(Some(id))` on successful insert or discovered duplicate,
+/// `Err` on DB failure. The caller should only mark the email as
+/// processed after this returns `Ok`.
+pub(crate) async fn insert_email_into_ontology(
+    state: &Arc<AppState>,
+    user_id: i32,
+    preview: &ImapEmailPreview,
+    persons: &[crate::models::ontology_models::PersonWithChannels],
+) -> Result<i64, String> {
+    let email_uid = preview.id.clone();
+    let room_id = format!("email_{}", email_uid);
+
+    // Cron-vs-IDLE dedup: if the row already exists, we're done.
+    match state
+        .ontology_repository
+        .get_message_by_email_room_id(user_id, &room_id)
+    {
+        Ok(Some(existing)) => {
+            tracing::debug!(
+                "Email {} already in ontology for user {} (id={}), skipping insert",
+                room_id,
+                user_id,
+                existing.id
+            );
+            return Ok(existing.id);
+        }
+        Ok(None) => {}
+        Err(e) => return Err(format!("Failed to check existing email message: {}", e)),
+    }
+
+    // Match an ontology Person for the sender based on email channel handle.
+    let mut matched_person_id: Option<i32> = None;
+    let from_lower = preview.from_email.as_deref().unwrap_or("").to_lowercase();
+    let from_name_lower = preview.from.as_deref().unwrap_or("").to_lowercase();
+    for pwc in persons {
+        for channel in &pwc.channels {
+            if channel.platform == "email" {
+                if let Some(ref handle) = channel.handle {
+                    let handle_lower = handle.to_lowercase();
+                    if from_lower.contains(&handle_lower) || from_name_lower.contains(&handle_lower)
+                    {
+                        matched_person_id = Some(pwc.person.id);
+                        break;
+                    }
+                }
+            }
+        }
+        if matched_person_id.is_some() {
+            break;
+        }
+    }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i32;
+    let sender_name = preview.from.as_deref().unwrap_or("Unknown").to_string();
+    let content = format!(
+        "{}\n{}",
+        preview.subject.as_deref().unwrap_or(""),
+        preview
+            .body
+            .as_deref()
+            .unwrap_or("")
+            .chars()
+            .take(500)
+            .collect::<String>()
+    );
+
+    let msg = crate::models::ontology_models::NewOntMessage {
+        user_id,
+        room_id: room_id.clone(),
+        platform: "email".to_string(),
+        sender_name: sender_name.clone(),
+        content: content.clone(),
+        person_id: matched_person_id,
+        created_at: now,
+    };
+
+    let created = state
+        .ontology_repository
+        .insert_message(&msg)
+        .map_err(|e| format!("Failed to insert email ont_message: {}", e))?;
+
+    let snapshot = json!({
+        "message_id": created.id,
+        "platform": "email",
+        "sender": sender_name,
+        "sender_name": sender_name,
+        "content": content,
+        "room_id": room_id,
+    });
+
+    crate::proactive::rules::emit_ontology_change(
+        state,
+        user_id,
+        "Message",
+        created.id as i32,
+        "created",
+        snapshot,
+    )
+    .await;
+
+    Ok(created.id)
+}
+
+/// Fetch new emails from an already-open IMAP session, insert them into
+/// the ontology, and mark them as processed. Used by the IDLE loop on
+/// every wake event (NewData) and at startup (initial resync).
+///
+/// * `since_uid = Some(n)`: fetch UID `(n+1):*` — normal resync path.
+/// * `since_uid = None`: first-ever startup for this connection; fetch
+///   the last 10 messages via the mailbox's `uid_next` counter.
+///
+/// Crucially: `mark_email_as_processed` is called ONLY after
+/// `insert_email_into_ontology` returns `Ok`. If insertion fails, the
+/// email stays unprocessed and will be retried on the next IDLE wake.
+/// This fixes the old mark-before-insert ordering bug.
+pub(crate) async fn process_new_emails(
+    state: &Arc<AppState>,
+    user_id: i32,
+    imap_connection_id: i32,
+    session: &mut ImapSession,
+    since_uid: Option<u32>,
+) -> Result<usize, ImapError> {
+    // Select INBOX to get current UID counters.
+    let mailbox = session
+        .select("INBOX")
+        .await
+        .map_err(|e| ImapError::FetchError(format!("Failed to select INBOX: {}", e)))?;
+
+    // Compute UID range.
+    let uid_range = match since_uid {
+        Some(n) => format!("{}:*", n.saturating_add(1)),
+        None => {
+            // First-ever startup — fetch the last 10 UIDs.
+            let uid_next = mailbox.uid_next.unwrap_or(1);
+            let start = uid_next.saturating_sub(10).max(1);
+            format!("{}:{}", start, uid_next.saturating_sub(1).max(1))
+        }
+    };
+
+    tracing::debug!(
+        "process_new_emails: user={} conn={} fetching UID range {}",
+        user_id,
+        imap_connection_id,
+        uid_range
+    );
+
+    let mut messages_stream = session
+        .uid_fetch(&uid_range, "(UID FLAGS ENVELOPE BODY.PEEK[])")
+        .await
+        .map_err(|e| ImapError::FetchError(format!("Failed to uid_fetch: {}", e)))?;
+
+    // Cache persons once for the whole batch.
+    let persons = state
+        .ontology_repository
+        .get_persons_with_channels(user_id, 500, 0)
+        .unwrap_or_default();
+
+    let user_timezone = state
+        .user_core
+        .get_user_info(user_id)
+        .ok()
+        .and_then(|info| info.timezone);
+
+    let mut new_count = 0usize;
+    while let Some(message) = messages_stream
+        .try_next()
+        .await
+        .map_err(|e| ImapError::FetchError(format!("Stream error reading messages: {}", e)))?
+    {
+        let preview = match parse_imap_message(&message, user_timezone.clone()) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("Skipping malformed IMAP message: {:?}", e);
+                continue;
+            }
+        };
+
+        // Skip if already processed (by UID).
+        match state.user_repository.is_email_processed(
+            user_id,
+            &preview.id,
+            Some(imap_connection_id),
+        ) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(e) => {
+                tracing::warn!("Failed to check processed state for {}: {}", preview.id, e);
+                continue;
+            }
+        }
+
+        let uid_str = preview.id.clone();
+        match insert_email_into_ontology(state, user_id, &preview, &persons).await {
+            Ok(_) => {
+                new_count += 1;
+                // Only mark as processed AFTER successful ontology insertion.
+                if let Err(e) = state.user_repository.mark_email_as_processed(
+                    user_id,
+                    &uid_str,
+                    Some(imap_connection_id),
+                ) {
+                    tracing::warn!(
+                        "Failed to mark email {} as processed (will retry next IDLE): {}",
+                        uid_str,
+                        e
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to insert email {} into ontology (will retry next IDLE): {}",
+                    uid_str,
+                    e
+                );
+            }
+        }
+    }
+
+    drop(messages_stream);
+    Ok(new_count)
 }
 pub async fn fetch_imap_previews(
     State(state): State<Arc<AppState>>,
@@ -714,167 +1059,52 @@ async fn fetch_emails_imap_for_account(
                 .await
                 .map_err(|e| ImapError::FetchError(format!("Failed to fetch messages: {}", e)))?;
 
+            let user_timezone = state
+                .user_core
+                .get_user_info(user_id)
+                .ok()
+                .and_then(|info| info.timezone);
+
             let mut email_previews = Vec::new();
             while let Some(message) = messages_stream.try_next().await.map_err(|e| {
                 ImapError::FetchError(format!("Stream error reading messages: {}", e))
             })? {
-                let uid = message.uid.unwrap_or(0).to_string();
+                let uid_str = message.uid.unwrap_or(0).to_string();
 
-        // Check if email is already processed using repository method
-        let is_processed = state
-            .user_repository
-            .is_email_processed(user_id, &uid, None)
-            .map_err(|e| {
-                ImapError::FetchError(format!("Failed to check email processed status: {}", e))
-            })?;
-
-        // Skip processed emails if unprocessed is true
-        if unprocessed && is_processed {
-            continue;
-        }
-        let envelope = message
-            .envelope()
-            .ok_or_else(|| ImapError::ParseError("Failed to get message envelope".to_string()))?;
-        let (from, from_email) = envelope
-            .from
-            .as_ref()
-            .and_then(|addrs| addrs.first())
-            .map(|addr| {
-                let name = addr
-                    .name
-                    .as_ref()
-                    .and_then(|n| String::from_utf8(n.to_vec()).ok())
-                    .unwrap_or_default();
-                let email = addr
-                    .mailbox
-                    .as_ref()
-                    .and_then(|m| {
-                        let mailbox = String::from_utf8(m.to_vec()).ok()?;
-                        let host = addr
-                            .host
-                            .as_ref()
-                            .and_then(|h| String::from_utf8(h.to_vec()).ok())?;
-                        Some(format!("{}@{}", mailbox, host))
-                    })
-                    .unwrap_or_default();
-                (name, email)
-            })
-            .unwrap_or_default();
-        let subject = envelope
-            .subject
-            .as_ref()
-            .and_then(|s| String::from_utf8(s.to_vec()).ok());
-        let raw_date = envelope
-            .date
-            .as_ref()
-            .and_then(|d| String::from_utf8(d.to_vec()).ok());
-
-        tracing::debug!("Raw date from envelope: {:?}", raw_date);
-        let date =
-            raw_date.as_ref().and_then(|date_str| {
-                match chrono::DateTime::parse_from_rfc2822(date_str) {
-                    Ok(dt) => {
-                        let utc_dt = dt.with_timezone(&Utc);
-                        tracing::debug!(
-                            "Successfully parsed date '{}' to UTC: {}",
-                            date_str,
-                            utc_dt
-                        );
-                        Some(utc_dt)
+                // Skip already-processed emails when the caller asks us to.
+                // We no longer mark processed inside this fetcher — that
+                // happens in the scheduler after successful ontology
+                // insertion, so a failed insert gets retried next run.
+                if unprocessed {
+                    match state
+                        .user_repository
+                        .is_email_processed(user_id, &uid_str, None)
+                    {
+                        Ok(true) => continue,
+                        Ok(false) => {}
+                        Err(e) => {
+                            return Err(ImapError::FetchError(format!(
+                                "Failed to check email processed status: {}",
+                                e
+                            )));
+                        }
                     }
+                }
+
+                let preview = match parse_imap_message(&message, user_timezone.clone()) {
+                    Ok(p) => p,
                     Err(e) => {
-                        tracing::warn!("Failed to parse date '{}': {}", date_str, e);
-                        None
+                        tracing::warn!("Skipping malformed IMAP message: {:?}", e);
+                        continue;
                     }
-                }
-            });
-        tracing::debug!("Final processed date: {:?}", date);
-        let is_read = message
-            .flags()
-            .any(|flag| flag == async_imap::types::Flag::Seen);
-        // Skip read emails if unread_only is true
-        if unread_only && is_read {
-            continue;
-        }
-        // Try to get both full body and text body
-        let full_body = message
-            .body()
-            .map(|b| String::from_utf8_lossy(b).into_owned());
-        let text_body = message
-            .text()
-            .map(|b| String::from_utf8_lossy(b).into_owned());
+                };
 
-        use mail_parser::MessageParser;
-        let body_content = full_body.or(text_body);
-        let (body, snippet) = body_content
-            .as_ref()
-            .map(|content| {
-                // Create a parser and parse the content into an Option<Message>
-                let parser = MessageParser::default();
-                let parsed = parser.parse(content.as_bytes());
-                // Get the best available body content, if parsing succeeded
-                let clean_content = parsed
-                    .map(|msg| {
-                        let body_text = msg.body_text(0).or_else(|| msg.body_html(0));
-                        body_text
-                            .map(|text| {
-                                text.lines()
-                                    .map(str::trim)
-                                    .filter(|line| !line.is_empty())
-                                    .collect::<Vec<_>>()
-                                    .join("\n")
-                            })
-                            .unwrap_or_else(|| String::from("[No readable body found]"))
-                    })
-                    .unwrap_or_else(|| String::from("[Failed to parse email body]"));
-                // Generate a snippet from the clean body
-                let snippet = clean_content.chars().take(200).collect::<String>();
-                (clean_content, snippet)
-            })
-            .unwrap_or_else(|| (String::new(), String::new()));
-        let user_timezone = state
-            .user_core
-            .get_user_info(user_id)
-            .ok()
-            .and_then(|info| info.timezone);
-
-        tracing::debug!("User timezone from repository: {:?}", user_timezone);
-        let date_formatted = date.map(|dt| {
-            let timestamp = dt.timestamp();
-            tracing::debug!(
-                "Converting timestamp {} with timezone {:?}",
-                timestamp,
-                user_timezone
-            );
-            let formatted = format_timestamp(timestamp, user_timezone);
-            tracing::debug!("Formatted date result: {}", formatted);
-            formatted
-        });
-        tracing::debug!("Final formatted date: {:?}", date_formatted);
-        email_previews.push(ImapEmailPreview {
-            id: uid.clone(),
-            subject: subject.clone(),
-            from: Some(from.clone()),
-            from_email: Some(from_email.clone()),
-            date,
-            date_formatted,
-            snippet: Some(snippet),
-            body: Some(body),
-            is_read,
-        });
-        // Mark email as processed if unprocessed is true
-        if unprocessed {
-            match state
-                .user_repository
-                .mark_email_as_processed(user_id, &uid, None)
-            {
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::error!("Failed to mark email {} as processed: {}", uid, e);
-                    // Continue processing other emails even if marking as processed fails
+                // Skip read emails if unread_only is true.
+                if unread_only && preview.is_read {
+                    continue;
                 }
-            }
-        }
+
+                email_previews.push(preview);
             }
 
             // Drop stream before logout to release the borrow on imap_session

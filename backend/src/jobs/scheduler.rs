@@ -539,78 +539,45 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         b_date.cmp(&a_date)
                                     });
 
+                                    // Cache persons once per batch (free perf win).
+                                    let persons = state
+                                        .ontology_repository
+                                        .get_persons_with_channels(user.id, 500, 0)
+                                        .unwrap_or_default();
+
                                     for email in &sorted_emails {
-                                        // Find matching ontology Person for this email sender
-                                        let mut matched_person_id: Option<i32> = None;
-                                        if let Ok(persons) = state.ontology_repository.get_persons_with_channels(user.id, 500, 0) {
-                                            let from_lower = email.from_email.as_deref().unwrap_or("").to_lowercase();
-                                            let from_name_lower = email.from.as_deref().unwrap_or("").to_lowercase();
-                                            for pwc in &persons {
-                                                for channel in &pwc.channels {
-                                                    if channel.platform == "email" {
-                                                        if let Some(ref handle) = channel.handle {
-                                                            let handle_lower = handle.to_lowercase();
-                                                            if from_lower.contains(&handle_lower) || from_name_lower.contains(&handle_lower) {
-                                                                matched_person_id = Some(pwc.person.id);
-                                                                break;
-                                                            }
-                                                        }
-                                                    }
+                                        let uid_str = email.id.clone();
+                                        match imap_handlers::insert_email_into_ontology(
+                                            &state,
+                                            user.id,
+                                            email,
+                                            &persons,
+                                        )
+                                        .await
+                                        {
+                                            Ok(_) => {
+                                                // Mark as processed ONLY after successful ontology
+                                                // insertion. A failed insert stays unprocessed so
+                                                // the next run retries it. This fixes the old
+                                                // mark-before-insert ordering bug.
+                                                if let Err(e) = state.user_repository.mark_email_as_processed(
+                                                    user.id,
+                                                    &uid_str,
+                                                    None,
+                                                ) {
+                                                    error!(
+                                                        "Failed to mark email {} as processed for user {}: {}",
+                                                        uid_str, user.id, e
+                                                    );
                                                 }
-                                                if matched_person_id.is_some() { break; }
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!(
+                                                    "Failed to insert email {} into ontology for user {} (will retry): {}",
+                                                    uid_str, user.id, e
+                                                );
                                             }
                                         }
-
-                                        // Store email as ont_message + emit ontology change for rule matching
-                                        let now = std::time::SystemTime::now()
-                                            .duration_since(std::time::UNIX_EPOCH)
-                                            .unwrap_or_default()
-                                            .as_secs() as i32;
-                                        let email_uid = email.id.clone();
-                                        let sender_name = email.from.as_deref().unwrap_or("Unknown").to_string();
-                                        let content = format!(
-                                            "{}\n{}",
-                                            email.subject.as_deref().unwrap_or(""),
-                                            email.body.as_deref().unwrap_or("").chars().take(500).collect::<String>()
-                                        );
-                                        let msg = crate::models::ontology_models::NewOntMessage {
-                                            user_id: user.id,
-                                            room_id: format!("email_{}", email_uid),
-                                            platform: "email".to_string(),
-                                            sender_name: sender_name.clone(),
-                                            content: content.clone(),
-                                            person_id: matched_person_id,
-                                            created_at: now,
-                                        };
-                                        let state_emit = state.clone();
-                                        let uid = user.id;
-                                        tokio::spawn(async move {
-                                            match state_emit.ontology_repository.insert_message(&msg) {
-                                                Ok(created) => {
-                                                    let snapshot = serde_json::json!({
-                                                        "message_id": created.id,
-                                                        "platform": "email",
-                                                        "sender": msg.sender_name,
-                                                        "sender_name": msg.sender_name,
-                                                        "content": msg.content,
-                                                        "room_id": msg.room_id,
-                                                    });
-                                                    crate::proactive::rules::emit_ontology_change(
-                                                        &state_emit,
-                                                        uid,
-                                                        "Message",
-                                                        created.id as i32,
-                                                        "created",
-                                                        snapshot,
-                                                    )
-                                                    .await;
-                                                }
-                                                Err(e) => {
-                                                    tracing::warn!("Failed to store email message: {}", e);
-                                                }
-                                            }
-                                        });
-
                                         // Rules handle all notification logic via ontology change events
                                     }
                                 }
@@ -1028,7 +995,7 @@ pub fn parse_digest_times(input: &str) -> Result<(String, Vec<u16>), String> {
             return Err(format!("minute must be 0-59 in '{}'", token));
         }
         // Snap to nearest 10-minute boundary, wrap 24:00 -> 00:00
-        let total_min = (h * 60 + m) as u32;
+        let total_min = h * 60 + m;
         let snapped = (((total_min + 5) / 10) * 10) % 1440;
         let snapped = snapped as u16;
         if !slots.contains(&snapped) {
@@ -1057,7 +1024,7 @@ pub fn parse_digest_times(input: &str) -> Result<(String, Vec<u16>), String> {
 /// returns true if any of the user's slots equals the snapped current minute-of-day.
 pub fn should_deliver_now(slots: &[u16], local_minute_of_day: u16) -> bool {
     let current_slot = (local_minute_of_day / 10) * 10;
-    slots.iter().any(|&s| s == current_slot)
+    slots.contains(&current_slot)
 }
 
 /// Score a message's category for in-section ordering. Higher = more important.
