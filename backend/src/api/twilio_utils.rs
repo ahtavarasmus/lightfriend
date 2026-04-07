@@ -25,14 +25,65 @@ pub async fn set_twilio_webhook(
     _user_id: i32,
     state: Arc<AppState>,
 ) -> Result<(), Box<dyn Error>> {
-    let webhook_url = format!("{}/api/sms/server", env::var("SERVER_URL")?);
+    let server_url = env::var("SERVER_URL")?;
+    let sms_url = format!("{}/api/sms/server", server_url.trim_end_matches('/'));
+    let voice_url = format!("{}/api/voice/incoming", server_url.trim_end_matches('/'));
     let credentials = TwilioCredentials::new(account_sid.to_string(), auth_token.to_string());
     state
         .twilio_client
-        .configure_webhook(&credentials, phone_number, &webhook_url)
+        .configure_webhook(&credentials, phone_number, &sms_url, Some(&voice_url))
         .await
         .map_err(|e| -> Box<dyn Error> { Box::new(e) })?;
     Ok(())
+}
+
+/// Pure function: verify a Twilio webhook signature using HMAC-SHA1.
+///
+/// This implements Twilio's signature scheme:
+///   1. Concatenate the full URL with the sorted form params (key + value, no separators)
+///   2. HMAC-SHA1 with the auth token as the key
+///   3. Base64-encode and compare with the X-Twilio-Signature header
+///
+/// Returns Ok(()) if the signature matches, Err with reason otherwise.
+pub fn verify_twilio_signature(
+    url: &str,
+    params: &BTreeMap<String, String>,
+    signature_b64: &str,
+    auth_token: &str,
+) -> Result<(), String> {
+    let mut string_to_sign = String::from(url);
+    for (key, value) in params.iter() {
+        string_to_sign.push_str(key);
+        string_to_sign.push_str(value);
+    }
+
+    let mut mac = Hmac::<Sha1>::new_from_slice(auth_token.as_bytes())
+        .map_err(|e| format!("Failed to create HMAC: {}", e))?;
+    mac.update(string_to_sign.as_bytes());
+
+    let signature_bytes = BASE64
+        .decode(signature_b64.as_bytes())
+        .map_err(|e| format!("Failed to decode signature base64: {}", e))?;
+
+    mac.verify_slice(&signature_bytes)
+        .map_err(|_| "HMAC verification failed".to_string())
+}
+
+/// Pure function: compute the Twilio signature for a given URL+params+token.
+/// Useful for tests.
+pub fn compute_twilio_signature(
+    url: &str,
+    params: &BTreeMap<String, String>,
+    auth_token: &str,
+) -> String {
+    let mut string_to_sign = String::from(url);
+    for (key, value) in params.iter() {
+        string_to_sign.push_str(key);
+        string_to_sign.push_str(value);
+    }
+    let mut mac = Hmac::<Sha1>::new_from_slice(auth_token.as_bytes()).unwrap();
+    mac.update(string_to_sign.as_bytes());
+    BASE64.encode(mac.finalize().into_bytes())
 }
 
 pub async fn validate_twilio_signature(
@@ -184,12 +235,16 @@ pub async fn validate_twilio_signature(
     Ok(next.run(request).await)
 }
 
-/// Validate Twilio signature for status callbacks
+/// Validate Twilio signature for status callbacks.
 ///
-/// This is a simpler version that doesn't need to look up users since:
-/// 1. Status callbacks come from our main Twilio account
-/// 2. The From number is Lightfriend's number, not the user's
+/// Status callbacks can come from either:
+/// 1. The master Twilio account (signed with master TWILIO_AUTH_TOKEN), or
+/// 2. A BYOT user's own Twilio account (signed with their auth token).
+///
+/// We extract MessageSid from the body, look up which user it belongs to,
+/// and validate using the correct token.
 pub async fn validate_twilio_status_callback_signature(
+    State(state): State<Arc<AppState>>,
     request: Request<Body>,
     next: middleware::Next,
 ) -> Result<Response, StatusCode> {
@@ -207,15 +262,6 @@ pub async fn validate_twilio_status_callback_signature(
         None => {
             tracing::error!("No X-Twilio-Signature header found for status callback");
             return Err(StatusCode::UNAUTHORIZED);
-        }
-    };
-
-    // Get the auth token - always use main account for status callbacks
-    let auth_token = match std::env::var("TWILIO_AUTH_TOKEN") {
-        Ok(token) => token,
-        Err(e) => {
-            tracing::error!("Failed to get TWILIO_AUTH_TOKEN: {}", e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
 
@@ -242,6 +288,38 @@ pub async fn validate_twilio_status_callback_signature(
         .into_owned()
         .collect();
 
+    // Look up which user this MessageSid belongs to so we can pick the right auth token.
+    // BYOT users sign callbacks with their own auth token; everyone else uses the master.
+    let auth_token = {
+        use crate::repositories::twilio_status_repository::TwilioStatusRepository;
+        use crate::repositories::twilio_status_repository_impl::DieselTwilioStatusRepository;
+
+        let master_token = std::env::var("TWILIO_AUTH_TOKEN").ok();
+        let mut chosen: Option<String> = None;
+
+        if let Some(message_sid) = params.get("MessageSid") {
+            let repo = DieselTwilioStatusRepository::new(state.pg_pool.clone());
+            if let Ok(Some(user_info)) = repo.get_message_user_info(message_sid) {
+                if state.user_core.is_byot_user(user_info.user_id) {
+                    if let Ok((_, token)) = state
+                        .user_repository
+                        .get_twilio_credentials(user_info.user_id)
+                    {
+                        chosen = Some(token);
+                    }
+                }
+            }
+        }
+
+        match chosen.or(master_token) {
+            Some(t) => t,
+            None => {
+                tracing::error!("No usable auth token for status callback validation");
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+        }
+    };
+
     // Build the callback URL
     let url = match std::env::var("SERVER_URL") {
         Ok(url) => format!("{}/api/twilio/status-callback", url),
@@ -251,33 +329,9 @@ pub async fn validate_twilio_status_callback_signature(
         }
     };
 
-    // Build the string to sign (URL + sorted params)
-    let mut string_to_sign = url;
-    for (key, value) in params.iter() {
-        string_to_sign.push_str(key);
-        string_to_sign.push_str(value);
-    }
-
-    // Create HMAC-SHA1
-    let mut mac = match Hmac::<Sha1>::new_from_slice(auth_token.as_bytes()) {
-        Ok(mac) => mac,
-        Err(e) => {
-            tracing::error!("Failed to create HMAC: {}", e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
-    };
-
-    mac.update(string_to_sign.as_bytes());
-    let signature_bytes = match BASE64.decode(signature.as_bytes()) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            tracing::error!("Failed to decode Twilio signature: {}", e);
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-    };
-
-    if mac.verify_slice(&signature_bytes).is_err() {
-        tracing::error!("Status callback signature validation failed");
+    // Verify the signature using the chosen auth token
+    if let Err(e) = verify_twilio_signature(&url, &params, &signature, &auth_token) {
+        tracing::error!("Status callback signature validation failed: {}", e);
         return Err(StatusCode::UNAUTHORIZED);
     }
 

@@ -500,13 +500,14 @@ async fn main() {
             state.clone(),
             api::twilio_utils::validate_twilio_signature,
         ));
-    // Status callback route - validates signature using main Twilio account
+    // Status callback route - validates signature using master account or BYOT user's token
     let twilio_status_routes = Router::new()
         .route(
             "/api/twilio/status-callback",
             post(twilio_handlers::twilio_status_callback),
         )
-        .layer(middleware::from_fn(
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
             api::twilio_utils::validate_twilio_status_callback_signature,
         ));
     let twilio_routes = twilio_sms_routes.merge(twilio_status_routes);

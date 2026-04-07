@@ -241,7 +241,8 @@ impl crate::api::twilio_client::TwilioClient for NoOpTwilioClient {
         &self,
         _credentials: &crate::api::twilio_client::TwilioCredentials,
         _phone_number: &str,
-        _webhook_url: &str,
+        _sms_url: &str,
+        _voice_url: Option<&str>,
     ) -> Result<String, crate::api::twilio_client::TwilioClientError> {
         Ok("noop".to_string())
     }

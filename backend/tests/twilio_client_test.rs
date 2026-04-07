@@ -192,7 +192,12 @@ async fn test_mock_configure_webhook_records_call() {
     let creds = TwilioCredentials::new("test_sid".into(), "test_token".into());
 
     let result = client
-        .configure_webhook(&creds, "+14155551234", "https://example.com/webhook")
+        .configure_webhook(
+            &creds,
+            "+14155551234",
+            "https://example.com/sms",
+            Some("https://example.com/voice"),
+        )
         .await;
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "PN_mock_sid");
@@ -202,8 +207,21 @@ async fn test_mock_configure_webhook_records_call() {
     assert_eq!(calls.configure_webhook_calls[0].0, "+14155551234");
     assert_eq!(
         calls.configure_webhook_calls[0].1,
-        "https://example.com/webhook"
+        "https://example.com/sms"
     );
+}
+
+#[tokio::test]
+async fn test_mock_configure_webhook_accepts_no_voice_url() {
+    let client = MockTwilioClient::new();
+    let creds = TwilioCredentials::new("test_sid".into(), "test_token".into());
+
+    // Calling without a voice URL is valid (e.g. SMS-only setup)
+    let result = client
+        .configure_webhook(&creds, "+14155551234", "https://example.com/sms", None)
+        .await;
+    assert!(result.is_ok());
+    assert_eq!(client.configure_webhook_call_count(), 1);
 }
 
 #[tokio::test]
@@ -213,7 +231,12 @@ async fn test_mock_configure_webhook_error_injection() {
     let creds = TwilioCredentials::new("test_sid".into(), "test_token".into());
 
     let result = client
-        .configure_webhook(&creds, "+14155551234", "https://example.com/webhook")
+        .configure_webhook(
+            &creds,
+            "+14155551234",
+            "https://example.com/sms",
+            Some("https://example.com/voice"),
+        )
         .await;
     assert!(result.is_err());
     assert!(result
