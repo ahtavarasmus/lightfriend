@@ -357,7 +357,13 @@ async fn main() {
     let pg_database_url =
         std::env::var("PG_DATABASE_URL").expect("PG_DATABASE_URL must be set in environment");
     let pg_manager = ConnectionManager::<diesel::PgConnection>::new(pg_database_url);
+    // Pool size 50: scheduler jobs (IMAP, monitoring) + HTTP request handlers can each
+    // hold a connection while waiting on slow Diesel queries. The default of 10 was
+    // getting starved by the message-monitor scheduler, blocking /api/health and
+    // tripping the service-watchdog 2-second health check.
     let pg_pool = r2d2::Pool::builder()
+        .max_size(50)
+        .connection_timeout(std::time::Duration::from_secs(10))
         .build(pg_manager)
         .expect("Failed to create PG pool");
 

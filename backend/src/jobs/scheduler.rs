@@ -460,6 +460,12 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     //let message_monitor_job = Job::new_async("*/30 * * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
+            // Hard cap on the entire job duration. If a slow IMAP server or DB
+            // contention causes the loop to run long, we abort instead of holding
+            // pool connections indefinitely and starving /api/health.
+            // 5 minutes is well under the 10-minute cron interval so the next run
+            // will start cleanly.
+            let job_body = async {
 
             // Process each user with auto-features (autopilot/byot)
             let tier2_users = state.user_core.get_users_by_tier("tier 2").unwrap_or_default();
@@ -618,6 +624,16 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 }
             }
 
+            }; // end of job_body
+
+            match tokio::time::timeout(std::time::Duration::from_secs(300), job_body).await {
+                Ok(()) => {}
+                Err(_) => {
+                    error!(
+                        "Message monitor job exceeded 5-minute timeout - aborting to free DB connections. Next run will retry."
+                    );
+                }
+            }
         })
     }).expect("Failed to create message monitor job");
 
