@@ -394,6 +394,33 @@ async fn main() {
     let llm_usage_repository = Arc::new(LlmUsageRepository::new(pg_pool.clone()));
     let bandwidth_repository = Arc::new(backend::BandwidthRepository::new(pg_pool.clone()));
     let ontology_repository = Arc::new(backend::OntologyRepository::new(pg_pool.clone()));
+
+    // Optional read-only pool for the mautrix-whatsapp bridge database. Only
+    // configured when WHATSAPP_BRIDGE_DATABASE_URL is set (typically inside
+    // the enclave). Used to enumerate WhatsApp contacts that don't yet have
+    // a Matrix DM room (the bridge creates rooms lazily).
+    let whatsapp_bridge_repository: Option<Arc<backend::WhatsAppBridgeRepository>> =
+        match std::env::var("WHATSAPP_BRIDGE_DATABASE_URL") {
+            Ok(url) => {
+                let manager = diesel::r2d2::ConnectionManager::<diesel::PgConnection>::new(url);
+                match diesel::r2d2::Pool::builder().max_size(5).build(manager) {
+                    Ok(pool) => {
+                        tracing::info!("WhatsApp bridge repository configured");
+                        Some(Arc::new(backend::WhatsAppBridgeRepository::new(pool)))
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to build whatsapp bridge pool: {}", e);
+                        None
+                    }
+                }
+            }
+            Err(_) => {
+                tracing::info!(
+                    "WHATSAPP_BRIDGE_DATABASE_URL not set; WhatsApp bridge repository disabled"
+                );
+                None
+            }
+        };
     let server_url_oauth =
         std::env::var("SERVER_URL_OAUTH").unwrap_or_else(|_| "http://localhost:3000".to_string());
     let server_url =
@@ -491,6 +518,7 @@ async fn main() {
         llm_usage_repository,
         bandwidth_repository,
         ontology_repository,
+        whatsapp_bridge_repository,
         ontology_registry: backend::ontology::registry::OntologyRegistry::build(),
         tool_registry: backend::build_tool_registry(),
         pending_rule_tests: Arc::new(DashMap::new()),

@@ -106,6 +106,7 @@ fi
 
 # ── 0b. Set internal defaults ────────────────────────────────────────────────
 export PG_DATABASE_URL="${PG_DATABASE_URL:-postgres://lightfriend:lightfriend@localhost:5432/lightfriend_db?sslmode=disable}"
+export WHATSAPP_BRIDGE_DATABASE_URL="${WHATSAPP_BRIDGE_DATABASE_URL:-postgres://whatsapp_user:whatsapp_password@localhost:5432/whatsapp_db?sslmode=disable}"
 export MATRIX_HOMESERVER="${MATRIX_HOMESERVER:-http://localhost:8008}"
 export MATRIX_HOMESERVER_PERSISTENT_STORE_PATH="${MATRIX_HOMESERVER_PERSISTENT_STORE_PATH:-/app/matrix_store}"
 export WHATSAPP_BRIDGE_BOT="${WHATSAPP_BRIDGE_BOT:-@whatsappbot:localhost}"

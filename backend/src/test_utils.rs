@@ -156,6 +156,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         llm_usage_repository,
         bandwidth_repository,
         ontology_repository,
+        whatsapp_bridge_repository: None,
         ontology_registry: crate::ontology::registry::OntologyRegistry::build(),
         tool_registry: crate::build_tool_registry(),
         pending_rule_tests: Arc::new(dashmap::DashMap::new()),
