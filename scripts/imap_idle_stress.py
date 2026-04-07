@@ -175,33 +175,38 @@ def query_pg(pg_url: str, sql: str) -> list[list[str]]:
     return rows
 
 
-def count_email_messages_since(
-    pg_url: str, user_email: str, since_epoch: int
-) -> int:
+def count_tagged_messages(pg_url: str, tag: str) -> int:
+    """Count ont_messages matching our unique per-run test tag. The tag
+    appears as the first line of the subject (which is stored in the
+    message content), so a LIKE match is both sufficient and scoped to
+    this specific run — no cross-talk with other stress tests or real
+    mail."""
+    safe = tag.replace("'", "''")
     rows = query_pg(
         pg_url,
         f"""
         SELECT COUNT(*)
-        FROM ont_messages m
-        JOIN users u ON u.id = m.user_id
-        WHERE u.email = '{user_email}'
-          AND m.platform = 'email'
-          AND m.created_at >= {since_epoch}
+        FROM ont_messages
+        WHERE platform = 'email'
+          AND content LIKE '{safe}%'
         """,
     )
     return int(rows[0][0]) if rows else 0
 
 
-def find_duplicate_email_room_ids(pg_url: str, user_email: str) -> list[tuple[str, int]]:
+def find_duplicate_email_room_ids(pg_url: str) -> list[tuple[str, int]]:
+    """Global duplicate check across all email-sourced rows. Dedup is a
+    cross-user invariant, so we don't need to scope by user here —
+    `room_id` is `email_<uid>` and collisions within the same user
+    would indicate the `get_message_by_email_room_id` check is
+    broken."""
     rows = query_pg(
         pg_url,
-        f"""
+        """
         SELECT room_id, COUNT(*)
-        FROM ont_messages m
-        JOIN users u ON u.id = m.user_id
-        WHERE u.email = '{user_email}'
-          AND m.platform = 'email'
-          AND m.room_id LIKE 'email_%'
+        FROM ont_messages
+        WHERE platform = 'email'
+          AND room_id LIKE 'email_%'
         GROUP BY room_id
         HAVING COUNT(*) > 1
         """,
@@ -210,6 +215,33 @@ def find_duplicate_email_room_ids(pg_url: str, user_email: str) -> list[tuple[st
 
 
 # --- Main test -------------------------------------------------------------
+
+
+def cleanup_tagged_messages(imap: imaplib.IMAP4_SSL, tag: str) -> int:
+    """Mark messages whose Subject contains `tag` as Deleted and
+    expunge. Returns the number of expunged messages. Safe: only
+    touches messages tagged by this script's own unique run tag."""
+    # SEARCH by Subject — case-sensitive on privateemail.com; we use
+    # the raw tag which contains only safe ASCII.
+    try:
+        imap.select("INBOX")
+        status, data = imap.search(None, "SUBJECT", f'"{tag}"')
+    except Exception as e:
+        log_warn(f"Cleanup search failed: {e}")
+        return 0
+    if status != "OK" or not data or not data[0]:
+        return 0
+    ids = data[0].split()
+    if not ids:
+        return 0
+    seq = b",".join(ids).decode()
+    try:
+        imap.store(seq, "+FLAGS", "\\Deleted")
+        imap.expunge()
+    except Exception as e:
+        log_warn(f"Cleanup expunge failed: {e}")
+        return 0
+    return len(ids)
 
 
 def stress_test(
@@ -221,6 +253,7 @@ def stress_test(
     imap_host: str = "imap.gmail.com",
     imap_port: int = 993,
     wait_secs: int = 45,
+    cleanup: bool = False,
 ) -> int:
     log(f"Stress test starting: {count} messages to {email_addr}")
     log(f"IMAP: {imap_host}:{imap_port}   Backend log: {backend_log}")
@@ -242,18 +275,39 @@ def stress_test(
         return 3
 
     # --- Connect IMAP for APPEND ------------------------------------------
+    # Retry loop: some IMAP providers (notably privateemail.com) apply
+    # short-lived rate limiting per source IP. Back off and retry a few
+    # times before giving up.
     log(f"Connecting to {imap_host}:{imap_port}")
-    try:
-        imap = imaplib.IMAP4_SSL(imap_host, imap_port)
-        imap.login(email_addr, password)
-        imap.select("INBOX")
-    except Exception as e:
-        log_fail(f"IMAP login failed: {e}")
+    imap = None
+    attempts = 5
+    for attempt in range(1, attempts + 1):
+        try:
+            imap = imaplib.IMAP4_SSL(imap_host, imap_port)
+            imap.login(email_addr, password)
+            imap.select("INBOX")
+            break
+        except Exception as e:
+            if attempt == attempts:
+                log_fail(f"IMAP login failed after {attempts} attempts: {e}")
+                return 3
+            backoff = 5 * attempt
+            log_warn(
+                f"IMAP login attempt {attempt}/{attempts} failed: {e}. "
+                f"Retrying in {backoff}s..."
+            )
+            try:
+                if imap:
+                    imap.shutdown()
+            except Exception:
+                pass
+            imap = None
+            time.sleep(backoff)
+    if imap is None:
         return 3
     log_ok("IMAP logged in, INBOX selected")
 
     start_utc = datetime.now(timezone.utc)
-    start_epoch = int(start_utc.timestamp())
 
     test_tag = f"lf-stress-{uuid.uuid4().hex[:8]}"
     log(f"Test tag: {test_tag}  (Subject prefix)")
@@ -289,6 +343,11 @@ def stress_test(
         if (i + 1) % 5 == 0 or i == count - 1:
             log_ok(f"APPEND progress: {i+1}/{count}")
 
+    # Always logout after APPEND so we don't hold a session during the
+    # ~90s wait window. privateemail.com in particular rate-limits
+    # concurrent sessions per user, and the backend's IDLE task is
+    # already one. If cleanup is requested, we reopen a fresh session
+    # at the very end.
     try:
         imap.logout()
     except Exception:
@@ -302,12 +361,12 @@ def stress_test(
     while time.monotonic() < deadline:
         time.sleep(2)
         try:
-            db_count = count_email_messages_since(pg_url, email_addr, start_epoch)
+            db_count = count_tagged_messages(pg_url, test_tag)
         except Exception as e:
             log_warn(f"DB query failed, retrying: {e}")
             continue
         if db_count != last_db_count:
-            log(f"  DB now has {db_count}/{count} email messages since test start")
+            log(f"  DB now has {db_count}/{count} tagged messages")
             last_db_count = db_count
         if db_count >= count:
             break
@@ -351,12 +410,28 @@ def stress_test(
     # --- DB counts ---------------------------------------------------------
     log("")
     log("Checking DB for inserted ont_messages...")
-    db_count = count_email_messages_since(pg_url, email_addr, start_epoch)
-    log(f"  ont_messages rows since test start: {db_count}")
+    db_count = count_tagged_messages(pg_url, test_tag)
+    log(f"  Tagged ont_messages rows: {db_count}")
 
-    dupes = find_duplicate_email_room_ids(pg_url, email_addr)
+    dupes = find_duplicate_email_room_ids(pg_url)
     if dupes:
         log_fail(f"  Duplicate room_ids detected: {dupes}")
+
+    # --- Optional cleanup --------------------------------------------------
+    if cleanup:
+        log("")
+        log("Cleaning up test messages from INBOX...")
+        try:
+            cleanup_imap = imaplib.IMAP4_SSL(imap_host, imap_port)
+            cleanup_imap.login(email_addr, password)
+            removed = cleanup_tagged_messages(cleanup_imap, test_tag)
+            log_ok(f"  Expunged {removed} test message(s)")
+            try:
+                cleanup_imap.logout()
+            except Exception:
+                pass
+        except Exception as e:
+            log_warn(f"  Cleanup failed: {e}")
 
     # --- Verdict -----------------------------------------------------------
     log("")
@@ -430,6 +505,11 @@ def main() -> int:
         default=45,
         help="Seconds to wait for IDLE to process all messages (default: 45)",
     )
+    p.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="After the test, delete injected messages from INBOX via IMAP expunge (safe: only matches our unique test tag)",
+    )
     args = p.parse_args()
 
     missing = [
@@ -458,6 +538,7 @@ def main() -> int:
         imap_host=args.imap_host,
         imap_port=args.imap_port,
         wait_secs=args.wait,
+        cleanup=args.cleanup,
     )
 
 
