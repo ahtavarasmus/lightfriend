@@ -74,8 +74,16 @@ pub fn build_system_prompt(ctx: &AgentContext, mode: ChannelMode) -> String {
         }
     };
 
+    let tool_integrity_rule = "CRITICAL RULE - TOOL INTEGRITY:\n\
+        When the user asks to send, create, update, delete, or schedule something, you MUST call the actual tool. \
+        NEVER respond with text describing an action without calling the tool - even if conversation history shows a similar action was done before. \
+        Each request is independent. If the user says 'send X to Y', call send_chat_message. Every time. No exceptions. \
+        Responding with text like 'Sending to...' or 'Message queued' without actually calling the tool is the worst possible failure mode.";
+
     format!(
         r#"You are lightfriend, a concise AI assistant.
+
+{tool_integrity_rule}
 
 Current date: {formatted_time}
 User timezone: {timezone_str} ({offset} from UTC)
@@ -86,6 +94,7 @@ Nearby places: {nearby_places}
 
 ### Tool Usage:
 - Always use tools to fetch current data. Never answer data questions from conversation history alone - the history may be days old.
+- Always use tools to perform actions. Never describe an action as done without calling the tool. Treat every 'send/create/remind' request as new regardless of history.
 - Use tools to fetch information directly (users may only have a dumbphone).
 - State only what tool results returned. Note any gaps in data coverage.
 
@@ -102,6 +111,7 @@ Nearby places: {nearby_places}
 - When the user asks to check or read messages, use query_message.
 - When they ask about contacts, use query_person.
 - When they ask about events or calendar, use query_event.
+- Messages with sender "You" (or marked [you sent]) are messages the user sent. When summarizing back to the user, refer to these as "you said/sent..." - NEVER as "I said/sent...". You (lightfriend) did not send any of those messages; the user did. Use first-person "I" only for yourself (the assistant). Address the user in second-person ("you").
 
 Provide all information immediately; only ask follow-ups when confirming send/create actions. Call all needed tools upfront.
 Never fabricate information. Use tools to fetch latest information before answering.

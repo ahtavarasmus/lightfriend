@@ -259,6 +259,16 @@ pub fn activity_feed(props: &ActivityFeedProps) -> Html {
                         es.add_event_listener_with_callback("refresh", cb.as_ref().unchecked_ref());
                     cb.forget();
 
+                    // On error, trigger a refresh so we don't miss events while reconnecting
+                    let rt_err = refresh_trigger.clone();
+                    let err_cb = Closure::wrap(Box::new(move |_: web_sys::Event| {
+                        rt_err.set(js_sys::Date::now() as u32);
+                    })
+                        as Box<dyn Fn(web_sys::Event)>);
+                    let _ =
+                        es.add_event_listener_with_callback("error", err_cb.as_ref().unchecked_ref());
+                    err_cb.forget();
+
                     es_handle_clone.set(Some(es));
                 }
 
@@ -283,6 +293,21 @@ pub fn activity_feed(props: &ActivityFeedProps) -> Html {
                 (),
             );
         }
+    }
+
+    // Fallback poll: refresh every 30s in case SSE connection drops silently
+    {
+        let refresh_trigger = refresh_trigger.clone();
+        use_effect_with_deps(
+            move |_| {
+                let rt = refresh_trigger;
+                let interval = gloo_timers::callback::Interval::new(30_000, move || {
+                    rt.set(js_sys::Date::now() as u32);
+                });
+                move || drop(interval)
+            },
+            (),
+        );
     }
 
     // Listen for chat-sent and rules-changed events (user-initiated, no SSE)

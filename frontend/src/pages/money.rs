@@ -1846,17 +1846,15 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             <br/>
                             <p class="availability-note" style="color: #ff9494; font-size: 0.9rem; margin-top: 0.5rem;">
                                 {format!("Note: Service may be limited or unavailable in {}. ", props.country_name.clone())}
-                                {" More info about supported countries can be checked in "}
+                                {" Contact "}
                                 <span class="legal-links">
-                                    <a style="color: rgba(255, 255, 255, 0.8);" href="/supported-countries">{"Supported Countries"}</a>
-                                    {" or by emailing "}
                                     <a style="color: rgba(255, 255, 255, 0.8);"
                                        href={format!("mailto:rasmus@lightfriend.ai?subject=Country%20Availability%20Inquiry%20for%20{}&body=Hey,%0A%0AIs%20the%20service%20available%20in%20{}%3F%0A%0AThanks,%0A",
                                        props.country_name.clone(), props.country_name.clone())}>
                                         {"rasmus@lightfriend.ai"}
                                     </a>
                                 </span>
-                                {". Contact to ask for availability"}
+                                {" to ask for availability."}
                             </p>
                             </>
                         }
@@ -2209,8 +2207,6 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                 <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
                 {" | "}
                 <Link<Route> to={Route::Trustless}>{"Verifiably Private"}</Link<Route>>
-                {" | "}
-                <Link<Route> to={Route::Changelog}>{"Updates"}</Link<Route>>
                 {" | "}
                 <Link<Route> to={Route::TrustChain}>{"Trust Chain"}</Link<Route>>
             </div>

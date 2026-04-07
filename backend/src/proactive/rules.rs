@@ -150,6 +150,38 @@ pub fn resolve_prompt_template(prompt: &str, trigger_type: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Human-readable fallback for notification messages
+// ---------------------------------------------------------------------------
+
+/// Build a short, readable notification from a trigger snapshot so the user
+/// doesn't receive raw JSON. Falls back to a generic line if the snapshot
+/// doesn't contain the expected fields.
+fn format_snapshot_message(snap: &serde_json::Value) -> String {
+    let sender = snap
+        .get("sender_name")
+        .or_else(|| snap.get("person_name"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("Someone");
+    let platform = snap
+        .get("platform")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let content = snap.get("content").and_then(|v| v.as_str()).unwrap_or("");
+
+    if content.is_empty() {
+        format!("{} sent a message on {}", sender, platform)
+    } else {
+        // Truncate long messages to keep SMS short
+        let truncated = if content.len() > 200 {
+            format!("{}...", &content[..200])
+        } else {
+            content.to_string()
+        };
+        format!("{} on {}: {}", sender, platform, truncated)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Config types (deserialized from JSON columns)
 // ---------------------------------------------------------------------------
 
@@ -224,15 +256,40 @@ pub fn matches_trigger(
     // Check filters against entity snapshot
     if let Some(ref filters) = config.filters {
         for (key, expected_value) in filters {
-            let actual = entity_snapshot
-                .get(key)
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            if !actual
-                .to_lowercase()
-                .contains(&expected_value.to_lowercase())
-            {
-                return false;
+            if key == "sender" {
+                // Sender matching: try person_name first (canonical), then
+                // sender_name (room display name, already suffix-stripped).
+                // Both use case-insensitive exact match.
+                let expected_lower = expected_value.trim().to_lowercase();
+                let person_name = entity_snapshot
+                    .get("person_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let sender_name = entity_snapshot
+                    .get("sender_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+
+                let matched = (!person_name.is_empty()
+                    && person_name.trim().to_lowercase() == expected_lower)
+                    || (!sender_name.is_empty()
+                        && sender_name.trim().to_lowercase() == expected_lower);
+
+                if !matched {
+                    return false;
+                }
+            } else {
+                // Other filters: substring match (content, platform, etc.)
+                let actual = entity_snapshot
+                    .get(key)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if !actual
+                    .to_lowercase()
+                    .contains(&expected_value.to_lowercase())
+                {
+                    return false;
+                }
             }
         }
     }
@@ -265,7 +322,27 @@ pub async fn evaluate_and_execute(
     trigger_context: &str,
     trigger_snapshot: Option<&serde_json::Value>,
 ) {
-    // Check expiry FIRST (before marking as triggered)
+    // For one-shot rules, atomically claim before doing any work.
+    // This prevents duplicate executions when multiple messages race.
+    let trigger: TriggerConfig = serde_json::from_str(&rule.trigger_config).unwrap_or_default();
+    if trigger.schedule.as_deref() == Some("once") || trigger.fire_once {
+        match state.ontology_repository.try_claim_rule(rule.id) {
+            Ok(true) => {} // we won the claim, proceed
+            Ok(false) => {
+                info!(
+                    "Rule {} ({}): already claimed by another task, skipping",
+                    rule.id, rule.name
+                );
+                return;
+            }
+            Err(e) => {
+                error!("Rule {} claim check failed: {}", rule.id, e);
+                return;
+            }
+        }
+    }
+
+    // Check expiry
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -295,7 +372,7 @@ pub async fn evaluate_and_execute(
         return;
     }
 
-    // Mark as triggered (only if not expired)
+    // Mark as triggered
     let _ = state
         .ontology_repository
         .update_rule_last_triggered(rule.id);
@@ -324,14 +401,6 @@ pub async fn evaluate_and_execute(
         }
     } else {
         warn!("Rule {} has no flow_config, skipping", rule.id);
-    }
-
-    // For one-shot rules (schedule "once" or fire_once flag), mark completed
-    let trigger: TriggerConfig = serde_json::from_str(&rule.trigger_config).unwrap_or_default();
-    if trigger.schedule.as_deref() == Some("once") || trigger.fire_once {
-        let _ = state
-            .ontology_repository
-            .update_rule_status(rule.id, "completed");
     }
 }
 
@@ -458,7 +527,17 @@ async fn evaluate_flow(
             action_type,
             config,
         } => {
-            let message = prev_message.unwrap_or(trigger_context);
+            // Use LLM-generated message if available, otherwise build a
+            // human-readable fallback from the trigger snapshot.
+            let fallback;
+            let message = if let Some(msg) = prev_message {
+                msg
+            } else if let Some(snap) = trigger_snapshot {
+                fallback = format_snapshot_message(snap);
+                &fallback
+            } else {
+                trigger_context
+            };
             execute_flow_action(
                 state,
                 rule,

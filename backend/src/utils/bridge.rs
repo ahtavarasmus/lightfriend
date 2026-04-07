@@ -190,27 +190,63 @@ pub async fn get_service_rooms(client: &MatrixClient, service: &str) -> Result<V
         let skip_terms = skip_terms.clone();
         let service = service.to_string();
         futures.push(async move {
+            let room_id_str = room.room_id().to_string();
             let display_name = match room.display_name().await {
                 Ok(name) => name.to_string(),
-                Err(_) => return None,
+                Err(e) => {
+                    tracing::warn!(
+                        "get_service_rooms: room {} display_name() failed: {}",
+                        room_id_str,
+                        e
+                    );
+                    return None;
+                }
             };
             if skip_terms.iter().any(|t| display_name.contains(t)) {
+                tracing::info!(
+                    "get_service_rooms: SKIP-BOT '{}' (room {})",
+                    display_name,
+                    room_id_str
+                );
                 return None;
             }
             // Check membership instead of last message sender
             let members = match room.members(RoomMemberships::JOIN).await {
                 Ok(m) => m,
-                Err(_) => return None,
+                Err(e) => {
+                    tracing::warn!(
+                        "get_service_rooms: room {} '{}' members() failed: {}",
+                        room_id_str,
+                        display_name,
+                        e
+                    );
+                    return None;
+                }
             };
             let member_localparts: Vec<String> = members
                 .iter()
                 .map(|member| member.user_id().localpart().to_string())
                 .collect();
-            if !room_name_matches_service(&display_name, &service)
-                && !has_service_member(&service, &member_localparts)
-            {
+            let name_match = room_name_matches_service(&display_name, &service);
+            let member_match = has_service_member(&service, &member_localparts);
+            if !name_match && !member_match {
+                tracing::info!(
+                    "get_service_rooms: SKIP '{}' for '{}' (room {}, members={:?})",
+                    display_name,
+                    service,
+                    room_id_str,
+                    member_localparts
+                );
                 return None;
             }
+            tracing::info!(
+                "get_service_rooms: MATCH '{}' for '{}' (room {}, name_match={}, member_match={})",
+                display_name,
+                service,
+                room_id_str,
+                name_match,
+                member_match
+            );
             let is_group = is_group_room(&service, &member_localparts);
             // Get last activity from most recent message, regardless of sender
             let mut options = matrix_sdk::room::MessagesOptions::backward();
@@ -1255,17 +1291,13 @@ pub async fn handle_bridge_message(
     };
     let user_id = user.id;
 
-    // Early exit: Skip ALL message processing if any bridge is in "connecting" state
-    // This prevents blocking the connection flow with long waits
-    let connecting_bridge_types = vec!["signal", "telegram", "whatsapp"];
-    for bridge_type in &connecting_bridge_types {
+    // Track which bridges are currently connecting (used below to skip
+    // management-room processing for those bridges only).
+    let mut connecting_bridges: Vec<String> = Vec::new();
+    for bridge_type in &["signal", "telegram", "whatsapp"] {
         if let Ok(Some(bridge)) = state.user_repository.get_bridge(user_id, bridge_type) {
             if bridge.status == "connecting" {
-                tracing::debug!(
-                    "⏳ Skipping message processing - {} bridge is connecting",
-                    bridge_type
-                );
-                return;
+                connecting_bridges.push(bridge_type.to_string());
             }
         }
     }
@@ -1446,6 +1478,17 @@ pub async fn handle_bridge_message(
         }
     };
 
+    // Skip portal messages for a service that is currently connecting
+    // (the connection monitor handles those). Only skip the connecting service,
+    // not all services.
+    if connecting_bridges.contains(&service) {
+        tracing::info!(
+            "⏳ Skipping {} portal message - bridge is connecting",
+            service
+        );
+        return;
+    }
+
     // Check if sender is a bridge ghost or the user themselves
     let sender_prefix = get_sender_prefix(&service);
     if !sender_localpart.starts_with(&sender_prefix) {
@@ -1489,6 +1532,7 @@ pub async fn handle_bridge_message(
                     let snapshot = serde_json::json!({
                         "message_id": created.id,
                         "platform": msg.platform,
+                        "sender": "You",
                         "sender_name": "You",
                         "content": msg.content,
                         "room_id": msg.room_id,
@@ -1684,6 +1728,9 @@ pub async fn handle_bridge_message(
     // Store message in ont_messages + emit ontology change.
     // Rules handle all notification logic from here.
     let person_id = matching_person.as_ref().map(|p| p.person.id);
+    let person_name: Option<String> = matching_person
+        .as_ref()
+        .map(|p| p.display_name().to_string());
     let msg = crate::models::ontology_models::NewOntMessage {
         user_id,
         room_id: current_room_id.clone(),
@@ -1700,14 +1747,18 @@ pub async fn handle_bridge_message(
     tokio::spawn(async move {
         match state_clone.ontology_repository.insert_message(&msg) {
             Ok(created) => {
-                let snapshot = serde_json::json!({
+                let mut snapshot = serde_json::json!({
                     "message_id": created.id,
                     "platform": msg.platform,
+                    "sender": msg.sender_name,
                     "sender_name": msg.sender_name,
                     "content": msg.content,
                     "room_id": msg.room_id,
                     "is_group": is_group,
                 });
+                if let Some(ref pn) = person_name {
+                    snapshot["person_name"] = serde_json::Value::String(pn.clone());
+                }
                 crate::proactive::rules::emit_ontology_change(
                     &state_clone,
                     user_id,
@@ -1723,6 +1774,364 @@ pub async fn handle_bridge_message(
             }
         }
     });
+}
+
+/// Fetch contacts via mautrix bridge provisioning API (v3).
+/// Returns (total_contacts, matched_results).
+/// Requires WHATSAPP_BRIDGE_URL / SIGNAL_BRIDGE_URL / TELEGRAM_BRIDGE_URL env var.
+async fn fetch_provision_contacts(
+    client: &MatrixClient,
+    service: &str,
+    search_term: &str,
+) -> Result<(usize, Vec<BridgeRoom>)> {
+    let bridge_url_var = match service {
+        "whatsapp" => "WHATSAPP_BRIDGE_URL",
+        "signal" => "SIGNAL_BRIDGE_URL",
+        "telegram" => "TELEGRAM_BRIDGE_URL",
+        _ => return Err(anyhow!("Unknown service: {}", service)),
+    };
+    let bridge_url =
+        std::env::var(bridge_url_var).map_err(|_| anyhow!("{} not set", bridge_url_var))?;
+
+    let access_token = client
+        .matrix_auth()
+        .session()
+        .map(|s| s.tokens.access_token.clone())
+        .unwrap_or_default();
+
+    if access_token.is_empty() {
+        return Err(anyhow!("No Matrix access token"));
+    }
+
+    let contacts_url = format!(
+        "{}/_matrix/provision/v3/contacts",
+        bridge_url.trim_end_matches('/')
+    );
+
+    let http_client = reqwest::Client::new();
+    let resp = http_client
+        .get(&contacts_url)
+        .header("Authorization", format!("Bearer {}", access_token))
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        return Err(anyhow!("Provision API returned status {}", resp.status()));
+    }
+
+    let body: serde_json::Value = resp.json().await?;
+    let contacts = body["contacts"].as_array();
+    let total = contacts.map(|c| c.len()).unwrap_or(0);
+
+    if total == 0 {
+        return Ok((0, Vec::new()));
+    }
+
+    let search_lower = search_term.trim().to_lowercase();
+    let mut matched = Vec::new();
+
+    if let Some(contacts) = contacts {
+        for contact in contacts {
+            let name = contact["name"].as_str().unwrap_or_default();
+            let name_clean = remove_bridge_suffix(name);
+            if name_clean.is_empty() {
+                continue;
+            }
+            let name_lower = name_clean.to_lowercase();
+            let is_match = name_lower == search_lower
+                || name_lower.contains(&search_lower)
+                || strsim::jaro_winkler(&name_lower, &search_lower) >= 0.7;
+
+            if is_match {
+                let dm_room = contact["dm_room_mxid"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                matched.push(BridgeRoom {
+                    room_id: dm_room,
+                    display_name: name_clean,
+                    last_activity: 0,
+                    last_activity_formatted: "Contact".to_string(),
+                    is_group: false,
+                });
+            }
+        }
+    }
+
+    Ok((total, matched))
+}
+
+/// Fetch contacts via Matrix user directory search API.
+/// Returns (total_users_returned, matched_results).
+async fn fetch_directory_contacts(
+    client: &MatrixClient,
+    service: &str,
+    search_term: &str,
+) -> Result<(usize, Vec<BridgeRoom>)> {
+    let homeserver_url =
+        std::env::var("MATRIX_HOMESERVER").map_err(|_| anyhow!("MATRIX_HOMESERVER not set"))?;
+    let access_token = client
+        .matrix_auth()
+        .session()
+        .map(|s| s.tokens.access_token.clone())
+        .unwrap_or_default();
+
+    if access_token.is_empty() {
+        return Err(anyhow!("No Matrix access token"));
+    }
+
+    let search_url = format!(
+        "{}/_matrix/client/v3/user_directory/search",
+        homeserver_url.trim_end_matches('/')
+    );
+    let http_client = reqwest::Client::new();
+    let resp = http_client
+        .post(&search_url)
+        .header("Authorization", format!("Bearer {}", access_token))
+        .json(&serde_json::json!({
+            "search_term": search_term.trim(),
+            "limit": 50
+        }))
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        return Err(anyhow!("User directory returned status {}", resp.status()));
+    }
+
+    let body: serde_json::Value = resp.json().await?;
+    let users = body["results"].as_array();
+    let total = users.map(|u| u.len()).unwrap_or(0);
+
+    if total == 0 {
+        return Ok((0, Vec::new()));
+    }
+
+    let sender_prefix = get_sender_prefix(service);
+    let bot_names: [String; 2] = [format!("{}bot", service), format!("{}-bridge", service)];
+    let search_lower = search_term.trim().to_lowercase();
+    let mut matched = Vec::new();
+
+    if let Some(users) = users {
+        for user in users {
+            let uid = user["user_id"].as_str().unwrap_or_default();
+            let localpart = uid
+                .trim_start_matches('@')
+                .split(':')
+                .next()
+                .unwrap_or_default();
+
+            if !localpart.starts_with(&sender_prefix) {
+                continue;
+            }
+            if bot_names.iter().any(|b| localpart == b.as_str()) {
+                continue;
+            }
+
+            let raw_display = user["display_name"].as_str().unwrap_or_default();
+            let display_name = if !raw_display.is_empty() {
+                remove_bridge_suffix(raw_display)
+            } else {
+                let number = localpart.trim_start_matches(&sender_prefix);
+                if number.chars().all(|c| c.is_ascii_digit()) && number.len() > 5 {
+                    format!("+{}", number)
+                } else {
+                    continue;
+                }
+            };
+
+            let name_lower = display_name.to_lowercase();
+            let is_match = name_lower == search_lower
+                || name_lower.contains(&search_lower)
+                || strsim::jaro_winkler(&name_lower, &search_lower) >= 0.7;
+
+            if is_match {
+                matched.push(BridgeRoom {
+                    room_id: String::new(),
+                    display_name,
+                    last_activity: 0,
+                    last_activity_formatted: "Contact".to_string(),
+                    is_group: false,
+                });
+            }
+        }
+    }
+
+    Ok((total, matched))
+}
+
+/// Fetch contacts directly from the bridge bot via management room commands.
+/// Sends `!<service> list contacts` and parses the response.
+/// Returns (all_contact_names, matched_results) so the caller can log totals.
+async fn fetch_bridge_contacts(
+    client: &MatrixClient,
+    service: &str,
+    mgmt_room_id: &str,
+    search_term: &str,
+) -> Result<(usize, Vec<BridgeRoom>)> {
+    use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
+
+    let room_id = matrix_sdk::ruma::OwnedRoomId::try_from(mgmt_room_id)?;
+    let room = client
+        .get_room(&room_id)
+        .ok_or_else(|| anyhow!("Management room not found in client"))?;
+
+    // Determine bridge command prefix
+    let cmd = match service {
+        "whatsapp" => "!wa list contacts",
+        "signal" => "!signal list contacts",
+        "telegram" => "!tg list contacts",
+        _ => return Err(anyhow!("Unknown service: {}", service)),
+    };
+
+    tracing::info!(
+        "BRIDGE_CONTACTS: Sending '{}' to mgmt room {}",
+        cmd,
+        mgmt_room_id
+    );
+    room.send(RoomMessageEventContent::text_plain(cmd)).await?;
+
+    // Get bridge bot user ID
+    let bridge_bot_var = match service {
+        "signal" => "SIGNAL_BRIDGE_BOT",
+        "whatsapp" => "WHATSAPP_BRIDGE_BOT",
+        "telegram" => "TELEGRAM_BRIDGE_BOT",
+        _ => return Err(anyhow!("Unknown service")),
+    };
+    let bridge_bot =
+        std::env::var(bridge_bot_var).map_err(|_| anyhow!("{} not set", bridge_bot_var))?;
+    let bot_user_id = matrix_sdk::ruma::OwnedUserId::try_from(bridge_bot)?;
+
+    // Poll for the bot's response (up to 15 attempts, ~15s)
+    let sync_settings =
+        matrix_sdk::config::SyncSettings::default().timeout(std::time::Duration::from_secs(2));
+    let mut contact_names: Vec<String> = Vec::new();
+
+    for attempt in 1..=15 {
+        client.sync_once(sync_settings.clone()).await.ok();
+
+        let Some(room) = client.get_room(&room_id) else {
+            continue;
+        };
+        let mut options = MessagesOptions::backward();
+        options.limit = matrix_sdk::ruma::UInt::new(5).unwrap();
+        let messages = match room.messages(options).await {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        for msg in &messages.chunk {
+            if let Ok(event) = msg.raw().deserialize() {
+                if event.sender() != bot_user_id {
+                    continue;
+                }
+                if let AnySyncTimelineEvent::MessageLike(
+                    matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(
+                        SyncRoomMessageEvent::Original(e),
+                    ),
+                ) = event
+                {
+                    let body = match &e.content.msgtype {
+                        MessageType::Text(t) => &t.body,
+                        MessageType::Notice(n) => &n.body,
+                        _ => continue,
+                    };
+
+                    // Parse contact list response.
+                    // Format: "* Name / [DisplayName](mxc_link) - `+phone`"
+                    // or bridgev2: "* `user_id` / Name"
+                    // Also handles "### Contacts" section headers.
+                    if body.contains("Contacts") || body.contains("* ") {
+                        for line in body.lines() {
+                            let line = line.trim();
+                            if !line.starts_with("* ") && !line.starts_with("- ") {
+                                continue;
+                            }
+                            let entry = line.trim_start_matches("* ").trim_start_matches("- ");
+                            // Extract name: take text before " / " or " - " delimiters
+                            let name = entry
+                                .split(" / ")
+                                .next()
+                                .unwrap_or(entry)
+                                .split(" - ")
+                                .next()
+                                .unwrap_or(entry)
+                                .trim()
+                                // Strip markdown link syntax: [Name](url) -> Name
+                                .trim_start_matches('[')
+                                .split("](")
+                                .next()
+                                .unwrap_or("")
+                                .trim_end_matches(']')
+                                // Strip backtick wrapping
+                                .trim_matches('`')
+                                .trim();
+
+                            if !name.is_empty() && name.len() > 1 {
+                                contact_names.push(name.to_string());
+                            }
+                        }
+                        if !contact_names.is_empty() {
+                            tracing::info!(
+                                "BRIDGE_CONTACTS: Parsed {} contacts from bot response on attempt {}",
+                                contact_names.len(),
+                                attempt
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if !contact_names.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+
+    let total_contacts = contact_names.len();
+    if total_contacts == 0 {
+        tracing::info!("BRIDGE_CONTACTS: No contacts returned from bridge command");
+        return Ok((0, Vec::new()));
+    }
+
+    // Filter contacts by search term
+    let search_lower = search_term.trim().to_lowercase();
+    let matched: Vec<BridgeRoom> = contact_names
+        .into_iter()
+        .filter_map(|name| {
+            let name_lower = name.to_lowercase();
+            let name_cleaned = remove_bridge_suffix(&name).to_lowercase();
+            let is_match = name_cleaned == search_lower
+                || name_lower == search_lower
+                || name_cleaned.contains(&search_lower)
+                || name_lower.contains(&search_lower)
+                || strsim::jaro_winkler(&name_cleaned, &search_lower) >= 0.7;
+
+            if is_match {
+                Some(BridgeRoom {
+                    room_id: String::new(), // no room yet - will be created on first message
+                    display_name: remove_bridge_suffix(&name),
+                    last_activity: 0,
+                    last_activity_formatted: "Contact".to_string(),
+                    is_group: false,
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    tracing::info!(
+        "BRIDGE_CONTACTS: {} total contacts from bridge, {} matched '{}'",
+        total_contacts,
+        matched.len(),
+        search_term
+    );
+
+    Ok((total_contacts, matched))
 }
 
 pub async fn search_bridge_rooms(
@@ -1783,118 +2192,98 @@ pub async fn search_bridge_rooms(
     );
 
     let mut results: Vec<BridgeRoom> = matching_rooms.into_iter().map(|(_, room)| room).collect();
+    let room_result_count = results.len();
 
-    // Search Matrix user directory for bridge ghost users (contacts without rooms).
-    // Uses the standard Matrix user directory search API which, unlike Synapse,
-    // may include appservice-managed users on Tuwunel/Conduit-based homeservers.
+    // Try all three contact search methods, log counts, pick the one with most total contacts.
     if search_term.trim().len() >= 2 {
-        let homeserver_url = std::env::var("MATRIX_HOMESERVER").unwrap_or_default();
-        let access_token = client
-            .matrix_auth()
-            .session()
-            .map(|s| s.tokens.access_token.clone())
-            .unwrap_or_default();
+        // Method 1: Provisioning API (structured JSON, needs BRIDGE_URL env var)
+        let provision_result = fetch_provision_contacts(&client, service, search_term).await;
+        let (prov_total, prov_matched) = match &provision_result {
+            Ok((total, matched)) => (*total, matched.len()),
+            Err(e) => {
+                tracing::info!("CONTACT_SEARCH: provision API skip for {}: {}", service, e);
+                (0, 0)
+            }
+        };
 
-        if !homeserver_url.is_empty() && !access_token.is_empty() {
-            let search_url = format!(
-                "{}/_matrix/client/v3/user_directory/search",
-                homeserver_url.trim_end_matches('/')
+        // Method 2: Bridge command via management room
+        let bridge = state.user_repository.get_bridge(user_id, service)?;
+        let mgmt_room_id = bridge.and_then(|b| b.room_id);
+        let bridge_cmd_result = if let Some(ref mgmt_room) = mgmt_room_id {
+            fetch_bridge_contacts(&client, service, mgmt_room, search_term).await
+        } else {
+            Err(anyhow!("No management room"))
+        };
+        let (cmd_total, cmd_matched) = match &bridge_cmd_result {
+            Ok((total, matched)) => (*total, matched.len()),
+            Err(e) => {
+                tracing::info!("CONTACT_SEARCH: bridge command skip for {}: {}", service, e);
+                (0, 0)
+            }
+        };
+
+        // Method 3: Matrix user directory search
+        let directory_result = fetch_directory_contacts(&client, service, search_term).await;
+        let (dir_total, dir_matched) = match &directory_result {
+            Ok((total, matched)) => (*total, matched.len()),
+            Err(e) => {
+                tracing::info!("CONTACT_SEARCH: user directory skip for {}: {}", service, e);
+                (0, 0)
+            }
+        };
+
+        // Log comparison of all three methods
+        tracing::info!(
+            "CONTACT_SEARCH_COMPARE: service={}, search='{}', rooms={}, provision=(total:{}, matched:{}), bridge_cmd=(total:{}, matched:{}), directory=(total:{}, matched:{})",
+            service, search_term, room_result_count,
+            prov_total, prov_matched,
+            cmd_total, cmd_matched,
+            dir_total, dir_matched,
+        );
+
+        // Pick the method with the most total contacts (best coverage)
+        let best_contacts = if prov_total >= cmd_total && prov_total >= dir_total && prov_total > 0
+        {
+            tracing::info!(
+                "CONTACT_SEARCH: WINNER=provision ({} total contacts)",
+                prov_total
             );
-            let http_client = reqwest::Client::new();
-            match http_client
-                .post(&search_url)
-                .header("Authorization", format!("Bearer {}", access_token))
-                .json(&serde_json::json!({
-                    "search_term": search_term.trim(),
-                    "limit": 50
-                }))
-                .send()
-                .await
-            {
-                Ok(resp) if resp.status().is_success() => {
-                    if let Ok(body) = resp.json::<serde_json::Value>().await {
-                        let sender_prefix = get_sender_prefix(service);
-                        let bot_names: [String; 2] =
-                            [format!("{}bot", service), format!("{}-bridge", service)];
+            provision_result.unwrap().1
+        } else if cmd_total >= dir_total && cmd_total > 0 {
+            tracing::info!(
+                "CONTACT_SEARCH: WINNER=bridge_cmd ({} total contacts)",
+                cmd_total
+            );
+            bridge_cmd_result.unwrap().1
+        } else if dir_total > 0 {
+            tracing::info!(
+                "CONTACT_SEARCH: WINNER=directory ({} total contacts)",
+                dir_total
+            );
+            directory_result.unwrap().1
+        } else {
+            tracing::info!("CONTACT_SEARCH: no additional contacts from any method");
+            Vec::new()
+        };
 
-                        let mut existing_names: std::collections::HashSet<String> = results
-                            .iter()
-                            .map(|r| remove_bridge_suffix(&r.display_name).to_lowercase())
-                            .collect();
-
-                        if let Some(users) = body["results"].as_array() {
-                            tracing::info!(
-                                "User directory returned {} users for '{}'",
-                                users.len(),
-                                search_term
-                            );
-                            for user in users {
-                                let user_id = user["user_id"].as_str().unwrap_or_default();
-                                // Extract localpart from @localpart:server
-                                let localpart = user_id
-                                    .trim_start_matches('@')
-                                    .split(':')
-                                    .next()
-                                    .unwrap_or_default();
-
-                                if !localpart.starts_with(&sender_prefix) {
-                                    continue;
-                                }
-                                if bot_names.iter().any(|b| localpart == b.as_str()) {
-                                    continue;
-                                }
-
-                                let raw_display = user["display_name"].as_str().unwrap_or_default();
-                                let display_name = if !raw_display.is_empty() {
-                                    remove_bridge_suffix(raw_display)
-                                } else {
-                                    let number = localpart.trim_start_matches(&sender_prefix);
-                                    if number.chars().all(|c| c.is_ascii_digit())
-                                        && number.len() > 5
-                                    {
-                                        format!("+{}", number)
-                                    } else {
-                                        continue;
-                                    }
-                                };
-
-                                if existing_names.contains(&display_name.to_lowercase()) {
-                                    continue;
-                                }
-
-                                let name_lower = display_name.to_lowercase();
-                                let is_match = name_lower == search_term_lower
-                                    || name_lower.contains(&search_term_lower)
-                                    || strsim::jaro_winkler(&name_lower, &search_term_lower) >= 0.7;
-
-                                if is_match {
-                                    existing_names.insert(display_name.to_lowercase());
-                                    results.push(BridgeRoom {
-                                        room_id: String::new(),
-                                        display_name,
-                                        last_activity: 0,
-                                        last_activity_formatted: "Contact".to_string(),
-                                        is_group: false,
-                                    });
-                                }
-                            }
-                        }
-                        tracing::info!(
-                            "Total results after directory search: {} for {}",
-                            results.len(),
-                            capitalize(service)
-                        );
-                    }
-                }
-                Ok(resp) => {
-                    tracing::warn!("User directory search returned status {}", resp.status());
-                }
-                Err(e) => {
-                    tracing::warn!("User directory search failed: {:?}", e);
-                }
+        // Deduplicate: only add contacts not already in room results
+        let existing_names: std::collections::HashSet<String> = results
+            .iter()
+            .map(|r| remove_bridge_suffix(&r.display_name).to_lowercase())
+            .collect();
+        for contact in best_contacts {
+            if !existing_names.contains(&contact.display_name.to_lowercase()) {
+                results.push(contact);
             }
         }
     }
+
+    tracing::info!(
+        "search_bridge_rooms: final {} results for '{}' on {}",
+        results.len(),
+        search_term,
+        capitalize(service)
+    );
 
     Ok(results)
 }

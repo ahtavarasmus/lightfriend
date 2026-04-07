@@ -8,7 +8,7 @@ use tracing::{debug, error};
 
 use crate::handlers::imap_handlers;
 
-async fn initialize_matrix_clients(state: Arc<AppState>) {
+pub async fn initialize_matrix_clients(state: Arc<AppState>) {
     tracing::debug!("Starting Matrix client initialization...");
 
     // Get all users with active WhatsApp connection
@@ -229,6 +229,171 @@ async fn cleanup_matrix_client(state: &Arc<AppState>, user_id: i32) {
     }
 }
 
+/// Check if any Matrix sync tasks have died and restart them.
+/// A dead sync task means messages stop flowing even though the bridge
+/// DB record still shows "connected".
+pub async fn check_and_restart_dead_sync_tasks(state: &Arc<AppState>) {
+    let mut dead_user_ids = Vec::new();
+
+    // Find dead sync tasks
+    {
+        let sync_tasks = state.matrix_sync_tasks.lock().await;
+        for (&user_id, handle) in sync_tasks.iter() {
+            if handle.is_finished() {
+                tracing::warn!("Sync task for user {} is dead, will restart", user_id);
+                dead_user_ids.push(user_id);
+            }
+        }
+    }
+
+    if dead_user_ids.is_empty() {
+        return;
+    }
+
+    tracing::info!(
+        "Restarting {} dead sync tasks: {:?}",
+        dead_user_ids.len(),
+        dead_user_ids
+    );
+
+    // Restart each dead sync task
+    for user_id in dead_user_ids {
+        // Remove the dead task handle
+        {
+            let mut sync_tasks = state.matrix_sync_tasks.lock().await;
+            sync_tasks.remove(&user_id);
+        }
+
+        // Get existing cached client (should still be there)
+        let client = match state.matrix_clients.lock().await.get(&user_id).cloned() {
+            Some(c) => c,
+            None => {
+                // Client was also removed - try to recreate from scratch
+                match crate::utils::matrix_auth::get_cached_client(user_id, state).await {
+                    Ok(c) => {
+                        // Register event handler on the new client
+                        use matrix_sdk::room::Room;
+                        use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
+                        let state_for_handler = Arc::clone(state);
+                        c.add_event_handler(
+                            move |ev: OriginalSyncRoomMessageEvent, room: Room, client| {
+                                let state = Arc::clone(&state_for_handler);
+                                async move {
+                                    crate::utils::bridge::handle_bridge_message(
+                                        ev, room, client, state,
+                                    )
+                                    .await;
+                                }
+                            },
+                        );
+                        // Store in cache
+                        state.matrix_clients.lock().await.insert(user_id, c.clone());
+                        c
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to recreate Matrix client for user {}: {}",
+                            user_id,
+                            e
+                        );
+                        continue;
+                    }
+                }
+            }
+        };
+
+        // Start new sync task
+        let sync_settings =
+            matrix_sdk::config::SyncSettings::default().timeout(std::time::Duration::from_secs(30));
+        let client_for_sync = client.clone();
+        let handle = tokio::spawn(async move {
+            let mut backoff_secs: u64 = 1;
+            const MAX_BACKOFF_SECS: u64 = 300;
+            loop {
+                match client_for_sync.sync(sync_settings.clone()).await {
+                    Ok(_) => {
+                        backoff_secs = 1;
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    }
+                    Err(e) => {
+                        error!(
+                            "Matrix sync error for user {} (retry in {}s): {}",
+                            user_id, backoff_secs, e
+                        );
+                        tokio::time::sleep(tokio::time::Duration::from_secs(backoff_secs)).await;
+                        backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
+                    }
+                }
+            }
+        });
+
+        {
+            let mut sync_tasks = state.matrix_sync_tasks.lock().await;
+            sync_tasks.insert(user_id, handle);
+        }
+        tracing::info!("Restarted sync task for user {}", user_id);
+    }
+}
+
+/// Delete bridges stuck in "connecting" status for more than 10 minutes.
+/// A bridge stuck in "connecting" blocks message processing for that service.
+fn cleanup_stale_connecting_bridges(state: &Arc<AppState>) {
+    use crate::pg_schema::bridges;
+    use diesel::prelude::*;
+
+    let mut conn = match state.user_repository.pool.get() {
+        Ok(c) => c,
+        Err(e) => {
+            error!(
+                "Failed to get DB connection for stale bridge cleanup: {}",
+                e
+            );
+            return;
+        }
+    };
+
+    let five_minutes_ago = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i32
+        - 300;
+
+    let stale: Vec<(i32, String)> = match bridges::table
+        .filter(bridges::status.eq("connecting"))
+        .filter(
+            bridges::created_at
+                .lt(five_minutes_ago)
+                .or(bridges::created_at.is_null()),
+        )
+        .select((bridges::user_id, bridges::bridge_type))
+        .load::<(i32, String)>(&mut conn)
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            error!("Failed to query stale connecting bridges: {}", e);
+            return;
+        }
+    };
+
+    for (user_id, bridge_type) in &stale {
+        tracing::warn!(
+            "Deleting stale 'connecting' bridge {} for user {} (older than 5 min)",
+            bridge_type,
+            user_id
+        );
+        if let Err(e) = state.user_repository.delete_bridge(*user_id, bridge_type) {
+            error!(
+                "Failed to delete stale connecting bridge {} for user {}: {}",
+                bridge_type, user_id, e
+            );
+        }
+    }
+
+    if !stale.is_empty() {
+        tracing::info!("Cleaned up {} stale connecting bridges", stale.len());
+    }
+}
+
 /// Migrate existing digest settings to items (one-time migration).
 /// Initialize the smartphone-free days metric if it doesn't exist.
 /// This runs on startup to ensure the metric is available immediately.
@@ -419,6 +584,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                     let snapshot = serde_json::json!({
                                                         "message_id": created.id,
                                                         "platform": "email",
+                                                        "sender": msg.sender_name,
                                                         "sender_name": msg.sender_name,
                                                         "content": msg.content,
                                                         "room_id": msg.room_id,
@@ -477,6 +643,23 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .add(bridge_health_job)
         .await
         .expect("Failed to add bridge health check job to scheduler");
+
+    // Sync task health check - runs every 2 minutes to restart dead sync tasks
+    // and clean up stale "connecting" bridges
+    let state_clone = Arc::clone(&state);
+    let sync_health_job = Job::new_async("0 */2 * * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            check_and_restart_dead_sync_tasks(&state).await;
+            cleanup_stale_connecting_bridges(&state);
+        })
+    })
+    .expect("Failed to create sync health check job");
+
+    sched
+        .add(sync_health_job)
+        .await
+        .expect("Failed to add sync health check job to scheduler");
 
     // Admin alert cleanup - runs daily at 2am UTC to remove alerts older than 30 days
     let state_clone = Arc::clone(&state);
@@ -793,10 +976,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");
-
-    // TODO we should add another scheduled call that just checks if there are items that are 'done' or not found in the elevenlabs
-    // but are still 'ongoing' in our db. we don't want to be accidentally charging users.
-    // and if that happens make error visible
 }
 
 /// Deliver smart digests: check which users have pending medium-urgency messages

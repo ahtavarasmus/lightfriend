@@ -1129,21 +1129,6 @@ pub mod mock_user_core {
             self.byot_users.lock().unwrap().contains(&user_id)
         }
 
-        fn get_elevenlabs_phone_number_id(
-            &self,
-            _user_id: i32,
-        ) -> Result<Option<String>, DieselError> {
-            Ok(None)
-        }
-
-        fn set_elevenlabs_phone_number_id(
-            &self,
-            _user_id: i32,
-            _id: &str,
-        ) -> Result<(), DieselError> {
-            Ok(())
-        }
-
         fn update_subscription_tier(
             &self,
             _user_id: i32,

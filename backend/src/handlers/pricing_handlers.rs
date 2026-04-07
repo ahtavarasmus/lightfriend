@@ -114,7 +114,7 @@ pub async fn get_single_country_pricing(
             country_code: code.clone(),
             country_name: get_country_name(&code),
             sms_price: 0.075,   // Fixed US/CA SMS price
-            voice_price: 0.185, // Twilio $0.075 + ElevenLabs $0.11
+            voice_price: 0.075, // Twilio voice
         }));
     } else {
         // Notification-only countries
@@ -386,9 +386,6 @@ pub async fn get_byot_country_pricing(
 
     let sms_price = capability.outbound_sms_price;
 
-    // ElevenLabs voice AI cost: $0.11 per minute (added to all voice calls)
-    const ELEVENLABS_COST_PER_MIN: f32 = 0.11;
-
     Ok(Json(ByotPricingResponse {
         country_code: country_code.to_uppercase(),
         country_name: get_country_name(&country_code.to_uppercase()),
@@ -399,13 +396,8 @@ pub async fn get_byot_country_pricing(
             notification: sms_price.map(|p| p * 1.5),
             normal_response: sms_price.map(|p| p * 3.0),
             digest: sms_price.map(|p| p * 3.0),
-            // Add ElevenLabs cost to voice (AI voice generation)
-            voice_outbound_per_min: capability
-                .outbound_voice_price_per_min
-                .map(|p| p + ELEVENLABS_COST_PER_MIN),
-            voice_inbound_per_min: capability
-                .inbound_voice_price_per_min
-                .map(|p| p + ELEVENLABS_COST_PER_MIN),
+            voice_outbound_per_min: capability.outbound_voice_price_per_min,
+            voice_inbound_per_min: capability.inbound_voice_price_per_min,
         },
     }))
 }
@@ -494,9 +486,6 @@ pub async fn get_dashboard_credits(
         None
     };
 
-    // ElevenLabs voice AI cost
-    const ELEVENLABS_COST_PER_MIN: f32 = 0.11;
-
     // Calculate equivalents helper
     let calculate_equivalents = |credit_value: f32, is_euro: bool| -> CreditEquivalents {
         if is_us_ca {
@@ -504,9 +493,9 @@ pub async fn get_dashboard_credits(
             let notifications = (credit_value * 2.0).floor() as i32; // 2 notifications per message
             let responses = (credit_value).floor() as i32; // 1 response per message
             let digests = (credit_value).floor() as i32; // 1 digest per message
-                                                         // Voice: ~$0.185 per min total (Twilio $0.075 + ElevenLabs $0.11)
-                                                         // Each message credit is worth ~$0.075, so voice_mins = (credits * $0.075) / $0.185
-            let voice_mins = (credit_value * 0.075 / 0.185).floor() as i32;
+                                                         // Voice: ~$0.075 per min (Twilio)
+                                                         // Each message credit is worth ~$0.075, so voice_mins = credits
+            let voice_mins = credit_value.floor() as i32;
 
             CreditEquivalents {
                 raw_value: credit_value,
@@ -534,11 +523,11 @@ pub async fn get_dashboard_credits(
             // Voice outbound
             let voice_out = cap
                 .outbound_voice_price_per_min
-                .map(|v| (credit_value / (v + ELEVENLABS_COST_PER_MIN)).floor() as i32);
+                .map(|v| (credit_value / v).floor() as i32);
             // Voice inbound (only for local number countries)
             let voice_in = if has_local_numbers {
                 cap.inbound_voice_price_per_min
-                    .map(|v| (credit_value / (v + ELEVENLABS_COST_PER_MIN)).floor() as i32)
+                    .map(|v| (credit_value / v).floor() as i32)
             } else {
                 None
             };
@@ -1058,7 +1047,7 @@ pub async fn get_usage_projection(
             if let Ok(pricing) = get_notification_only_pricing(&state, &country_code).await {
                 // SMS notifications use notification_price, call notifications are more expensive
                 let sms_cost = pricing.notification_price;
-                let call_cost = pricing.calculated_voice_price * 0.5 + 0.11; // ~30 sec call + ElevenLabs
+                let call_cost = pricing.calculated_voice_price * 0.5; // ~30 sec call
 
                 let total_notis = avg_sms_notifications_per_day + avg_call_notifications_per_day;
                 if total_notis > 0.0 {
@@ -1328,10 +1317,7 @@ pub async fn get_byot_usage(
     let message_cost = sms_per_segment * 3.0; // 3 segments per message
     let digest_cost = sms_per_segment * 3.0; // 3 segments per digest
 
-    // Voice cost includes ElevenLabs AI ($0.11/min)
-    const ELEVENLABS_COST_PER_MIN: f32 = 0.11;
-    let voice_per_min =
-        capability.outbound_voice_price_per_min.unwrap_or(0.0) + ELEVENLABS_COST_PER_MIN;
+    let voice_per_min = capability.outbound_voice_price_per_min.unwrap_or(0.0);
 
     // Calculate billing period
     let now: i64 = SystemTime::now()

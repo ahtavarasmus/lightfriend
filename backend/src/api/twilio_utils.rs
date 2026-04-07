@@ -10,9 +10,6 @@ use axum::{
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use hmac::{Hmac, Mac};
-use reqwest::Client;
-use serde::Deserialize;
-use serde_json::json;
 use sha1::Sha1;
 use std::collections::BTreeMap;
 use std::env;
@@ -21,122 +18,20 @@ use std::sync::Arc;
 use tracing;
 use url::form_urlencoded;
 
-#[derive(Deserialize)]
-struct ElevenLabsResponse {
-    phone_number_id: String,
-}
-
 pub async fn set_twilio_webhook(
     account_sid: &str,
     auth_token: &str,
     phone_number: &str,
-    user_id: i32,
+    _user_id: i32,
     state: Arc<AppState>,
 ) -> Result<(), Box<dyn Error>> {
     let webhook_url = format!("{}/api/sms/server", env::var("SERVER_URL")?);
-
-    // Use TwilioClient to configure the webhook
     let credentials = TwilioCredentials::new(account_sid.to_string(), auth_token.to_string());
     state
         .twilio_client
         .configure_webhook(&credentials, phone_number, &webhook_url)
         .await
         .map_err(|e| -> Box<dyn Error> { Box::new(e) })?;
-
-    // If Twilio update succeeds, add to ElevenLabs
-    let client = Client::new();
-    let eleven_key = env::var("ELEVENLABS_API_KEY")?;
-
-    // Check for existing phone number ID and delete if exists
-    let existing_id = state.user_core.get_elevenlabs_phone_number_id(user_id)?;
-    if let Some(id) = existing_id {
-        let delete_url = format!("https://api.elevenlabs.io/v1/convai/phone-numbers/{}", id);
-        let delete_response = client
-            .delete(delete_url)
-            .header("xi-api-key", eleven_key.clone())
-            .send()
-            .await?;
-
-        let delete_status = delete_response.status();
-        if !delete_status.is_success() {
-            let error_text = delete_response.text().await.unwrap_or_default();
-            tracing::error!(
-                "Failed to delete existing phone number from ElevenLabs: {} - {}",
-                delete_status,
-                error_text
-            );
-            // Proceed anyway
-        } else {
-            tracing::debug!("Successfully deleted existing phone number from ElevenLabs");
-        }
-    }
-
-    let label = format!("{} number", user_id);
-    let el_body = json!({
-        "phone_number": phone_number,
-        "label": label,
-        "sid": account_sid,
-        "token": auth_token,
-        "provider": "twilio"
-    });
-
-    let el_response = client
-        .post("https://api.elevenlabs.io/v1/convai/phone-numbers")
-        .header("xi-api-key", eleven_key.clone())
-        .header("Content-Type", "application/json")
-        .json(&el_body)
-        .send()
-        .await?;
-
-    let status = el_response.status();
-    if !status.is_success() {
-        let error_text = el_response.text().await.unwrap_or_default();
-        tracing::error!(
-            "Failed to add phone number to ElevenLabs: {} - {}",
-            status,
-            error_text
-        );
-        // Proceed anyway, as per requirements
-    } else {
-        let el_data: ElevenLabsResponse = el_response.json().await?;
-        if let Err(e) = state
-            .user_core
-            .set_elevenlabs_phone_number_id(user_id, &el_data.phone_number_id)
-        {
-            tracing::error!("Failed to set ElevenLabs phone number ID: {}", e);
-        }
-        tracing::debug!("Successfully added phone number to ElevenLabs");
-        // Assign agent to the phone number
-        let agent_id = env::var("AGENT_ID")?;
-        let assign_body = json!({
-            "agent_id": agent_id
-        });
-
-        let assign_response = client
-            .patch(format!(
-                "https://api.elevenlabs.io/v1/convai/phone-numbers/{}",
-                el_data.phone_number_id
-            ))
-            .header("xi-api-key", eleven_key)
-            .header("Content-Type", "application/json")
-            .json(&assign_body)
-            .send()
-            .await?;
-
-        let assign_status = assign_response.status();
-        if !assign_status.is_success() {
-            let error_text = assign_response.text().await.unwrap_or_default();
-            tracing::error!(
-                "Failed to assign agent to phone number in ElevenLabs: {} - {}",
-                assign_status,
-                error_text
-            );
-            // Proceed anyway
-        } else {
-            tracing::debug!("Successfully assigned agent to phone number in ElevenLabs");
-        }
-    }
-
     Ok(())
 }
 

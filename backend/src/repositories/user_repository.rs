@@ -535,6 +535,16 @@ impl UserRepository {
         Ok(ongoing_log)
     }
 
+    /// Update the credits field on a usage log entry matched by SID.
+    /// Called when the Twilio status callback provides the actual message cost.
+    pub fn update_usage_log_credits(&self, sid: &str, credits: f32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(usage_logs::table.filter(usage_logs::sid.eq(sid)))
+            .set(usage_logs::credits.eq(Some(credits)))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
     pub fn update_usage_log_fields(
         &self,
         user_id: i32,

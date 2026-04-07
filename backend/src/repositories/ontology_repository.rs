@@ -2010,6 +2010,24 @@ impl OntologyRepository {
         Ok(())
     }
 
+    /// Atomically claim a rule for execution: sets status to "completed" only
+    /// if the rule is currently "active". Returns true if this caller won the
+    /// claim (i.e. the row was updated), false if another task already claimed it.
+    pub fn try_claim_rule(&self, rule_id: i32) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let rows = diesel::update(
+            ont_rules::table
+                .filter(ont_rules::id.eq(rule_id))
+                .filter(ont_rules::status.eq("active")),
+        )
+        .set((
+            ont_rules::status.eq("completed"),
+            ont_rules::updated_at.eq(Self::now()),
+        ))
+        .execute(&mut conn)?;
+        Ok(rows > 0)
+    }
+
     pub fn update_rule_last_triggered(&self, rule_id: i32) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(ont_rules::table.filter(ont_rules::id.eq(rule_id)))
@@ -2094,7 +2112,7 @@ impl OntologyRepository {
         diesel::sql_query(
             "SELECT sender_name, platform, '' as room_id, COUNT(*) as msg_count \
              FROM ont_messages \
-             WHERE user_id = $1 \
+             WHERE user_id = $1 AND sender_name != 'You' \
              GROUP BY sender_name, platform \
              ORDER BY msg_count DESC \
              LIMIT 200",

@@ -7,7 +7,8 @@
 
 use std::sync::Arc;
 
-use chrono::{FixedOffset, TimeZone, Utc};
+use chrono::{FixedOffset, Offset, TimeZone, Utc};
+use chrono_tz::Tz;
 use openai_api_rs::v1::api::OpenAIClient;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionMessage};
 
@@ -50,13 +51,14 @@ pub struct TimezoneInfo {
 
 impl TimezoneInfo {
     fn compute(tz_str: &str) -> Self {
-        let (hours, minutes) = match crate::api::elevenlabs::get_timezone_offset(tz_str) {
-            Ok((h, m)) => (h, m),
+        let (hours, minutes) = match tz_str.parse::<Tz>() {
+            Ok(tz) => {
+                let now = Utc::now().with_timezone(&tz);
+                let total_seconds = now.offset().fix().local_minus_utc();
+                (total_seconds / 3600, (total_seconds.abs() % 3600) / 60)
+            }
             Err(_) => {
-                tracing::error!(
-                    "Failed to get timezone offset for {}, defaulting to UTC",
-                    tz_str
-                );
+                tracing::error!("Failed to parse timezone {}, defaulting to UTC", tz_str);
                 (0, 0)
             }
         };

@@ -330,6 +330,7 @@ struct CallSession {
     call_start: Instant,
     mark_counter: u32,
     is_outbound: bool,
+    media_count: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -377,12 +378,18 @@ pub async fn voice_incoming(State(state): State<Arc<AppState>>, body: String) ->
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="{}/api/voice/ws">
+    <Stream url="{}/api/voice/ws" track="inbound_track">
       <Parameter name="user_id" value="{}" />
     </Stream>
   </Connect>
 </Response>"#,
         ws_url, user.id
+    );
+
+    tracing::info!(
+        "Voice incoming TwiML: WS={}/api/voice/ws, user={}",
+        ws_url,
+        user.id
     );
 
     (
@@ -443,7 +450,7 @@ pub async fn make_notification_call(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="{}/api/voice/ws">
+    <Stream url="{}/api/voice/ws" track="inbound_track">
       <Parameter name="user_id" value="{}" />
       <Parameter name="greeting" value="{}" />
     </Stream>
@@ -904,24 +911,53 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
 
                     let pcm_8k: Vec<i16> = mulaw_bytes.iter().map(|&b| mulaw_decode(b)).collect();
 
-                    // Resample 8kHz -> 16kHz for STT
-                    let pcm_16k = resample(&pcm_8k, 8000, 16000);
+                    // VAD on raw 8kHz PCM (don't resample per-packet - rubato
+                    // needs 1024+ samples but each Twilio packet is only 160)
+                    let rms = compute_rms(&pcm_8k);
 
-                    // Energy-based VAD
-                    let rms = compute_rms(&pcm_16k);
+                    sess.media_count += 1;
+                    if sess.media_count == 1 {
+                        let raw_hex: String = mulaw_bytes
+                            .iter()
+                            .take(20)
+                            .map(|b| format!("{:02x}", b))
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        tracing::info!(
+                            "First media: mulaw_len={}, raw_hex=[{}], pcm_range=[{}, {}], rms={:.0}",
+                            mulaw_bytes.len(),
+                            raw_hex,
+                            pcm_8k.iter().min().unwrap_or(&0),
+                            pcm_8k.iter().max().unwrap_or(&0),
+                            rms
+                        );
+                    } else if sess.media_count % 50 == 0 {
+                        tracing::info!(
+                            "[media #{}] RMS={:.0}, state={:?}, speaking={}",
+                            sess.media_count,
+                            rms,
+                            sess.state,
+                            sess.is_speaking
+                        );
+                    }
 
                     if rms > SPEECH_RMS_THRESHOLD {
                         if !sess.is_speaking {
                             sess.is_speaking = true;
                             sess.speech_start = Some(Instant::now());
                             sess.silence_start = None;
-                            tracing::debug!("Speech detected (RMS={:.0})", rms);
+                            tracing::info!(
+                                "Speech detected (RMS={:.0}, media#{})",
+                                rms,
+                                sess.media_count
+                            );
                         }
-                        sess.speech_audio.extend_from_slice(&pcm_16k);
+                        // Accumulate 8kHz samples; resample to 16kHz in bulk for STT
+                        sess.speech_audio.extend_from_slice(&pcm_8k);
                         sess.silence_start = None;
                     } else if sess.is_speaking {
                         // Still accumulate audio during brief silence
-                        sess.speech_audio.extend_from_slice(&pcm_16k);
+                        sess.speech_audio.extend_from_slice(&pcm_8k);
 
                         if sess.silence_start.is_none() {
                             sess.silence_start = Some(Instant::now());
@@ -1111,6 +1147,7 @@ async fn init_session(
         call_start: Instant::now(),
         mark_counter: 0,
         is_outbound,
+        media_count: 0,
     })
 }
 
@@ -1141,8 +1178,9 @@ async fn process_utterance(
 ) -> Result<(), String> {
     use crate::api::tinfoil_client::CompletionResult;
 
-    // 1. Encode speech as WAV at 16kHz
-    let wav = encode_wav_16bit_mono(speech_samples, 16000);
+    // 1. Resample accumulated 8kHz speech to 16kHz for Whisper, then encode as WAV
+    let speech_16k = resample(speech_samples, 8000, 16000);
+    let wav = encode_wav_16bit_mono(&speech_16k, 16000);
 
     // 2. Transcribe
     let transcript = session.tinfoil.transcribe(&wav).await?;

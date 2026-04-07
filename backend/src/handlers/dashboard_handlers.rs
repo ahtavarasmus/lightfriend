@@ -981,6 +981,12 @@ pub async fn get_senders(
     let services = ["signal", "whatsapp", "telegram"];
     let matrix_clients = state.matrix_clients.lock().await;
     if let Some(client) = matrix_clients.get(&user_id) {
+        let total_joined = client.joined_rooms().len();
+        tracing::info!(
+            "get_senders: user {} matrix client has {} joined rooms",
+            user_id,
+            total_joined
+        );
         for service in &services {
             let bridge_ok = state
                 .user_repository
@@ -990,40 +996,76 @@ pub async fn get_senders(
                 .map(|b| b.status == "connected")
                 .unwrap_or(false);
             if !bridge_ok {
+                tracing::info!(
+                    "get_senders: user {} skipping {} (bridge not connected)",
+                    user_id,
+                    service
+                );
                 continue;
             }
-            if let Ok(rooms) = crate::utils::bridge::get_service_rooms(client, service).await {
-                for room in rooms {
-                    let display = crate::utils::bridge::remove_bridge_suffix(&room.display_name);
-                    if room.is_group {
-                        let key = format!("group:{}:{}", display.to_lowercase(), service);
-                        if seen.insert(key) {
-                            options.push(SenderOption {
-                                name: display,
-                                platform: Some(service.to_string()),
-                                source: "group".to_string(),
-                                msg_count: None,
-                                is_group: true,
-                            });
-                        }
-                    } else {
-                        // Non-group bridge room - add if not already present from ont_messages
-                        let key = format!("chat:{}:{}", display.to_lowercase(), service);
-                        if seen.insert(key) {
-                            options.push(SenderOption {
-                                name: display,
-                                platform: Some(service.to_string()),
-                                source: "chat".to_string(),
-                                msg_count: None,
-                                is_group: false,
-                            });
+            match crate::utils::bridge::get_service_rooms(client, service).await {
+                Ok(rooms) => {
+                    tracing::info!(
+                        "get_senders: user {} {} returned {} rooms",
+                        user_id,
+                        service,
+                        rooms.len()
+                    );
+                    for room in rooms {
+                        let display =
+                            crate::utils::bridge::remove_bridge_suffix(&room.display_name);
+                        if room.is_group {
+                            let key = format!("group:{}:{}", display.to_lowercase(), service);
+                            if seen.insert(key) {
+                                options.push(SenderOption {
+                                    name: display,
+                                    platform: Some(service.to_string()),
+                                    source: "group".to_string(),
+                                    msg_count: None,
+                                    is_group: true,
+                                });
+                            }
+                        } else {
+                            // Non-group bridge room - add if not already present from ont_messages
+                            let key = format!("chat:{}:{}", display.to_lowercase(), service);
+                            if seen.insert(key) {
+                                options.push(SenderOption {
+                                    name: display,
+                                    platform: Some(service.to_string()),
+                                    source: "chat".to_string(),
+                                    msg_count: None,
+                                    is_group: false,
+                                });
+                            }
                         }
                     }
                 }
+                Err(e) => {
+                    tracing::warn!(
+                        "get_senders: user {} get_service_rooms({}) failed: {}",
+                        user_id,
+                        service,
+                        e
+                    );
+                }
             }
         }
+    } else {
+        tracing::warn!("get_senders: user {} has no matrix client cached", user_id);
     }
     drop(matrix_clients);
+
+    let person_count = options.iter().filter(|o| o.source == "person").count();
+    let chat_count = options.iter().filter(|o| o.source == "chat").count();
+    let group_count = options.iter().filter(|o| o.source == "group").count();
+    tracing::info!(
+        "get_senders: user {} -> {} persons, {} chats, {} groups, {} total",
+        user_id,
+        person_count,
+        chat_count,
+        group_count,
+        options.len()
+    );
 
     Ok(Json(options))
 }
