@@ -2,7 +2,9 @@
 //!
 //! Tests the TwilioStatusCallback struct parsing from Twilio webhook payloads.
 
+use backend::api::twilio_utils::{compute_twilio_signature, verify_twilio_signature};
 use backend::handlers::twilio_handlers::TwilioStatusCallback;
+use std::collections::BTreeMap;
 
 // =========================================================================
 // Form Parsing Tests - TwilioStatusCallback
@@ -203,4 +205,118 @@ fn test_price_parsing_from_payload() {
     // Allow for floating point comparison
     let price = price_value.unwrap();
     assert!((price - (-0.0079)).abs() < 0.0001);
+}
+
+// =========================================================================
+// Twilio Signature Verification Tests
+// =========================================================================
+
+fn make_callback_params() -> BTreeMap<String, String> {
+    let mut params = BTreeMap::new();
+    params.insert("MessageSid".to_string(), "SMabc123".to_string());
+    params.insert("MessageStatus".to_string(), "delivered".to_string());
+    params.insert("To".to_string(), "+525540369693".to_string());
+    params.insert("From".to_string(), "+527341840032".to_string());
+    params.insert("AccountSid".to_string(), "AC123".to_string());
+    params
+}
+
+#[test]
+fn test_signature_verifies_when_signed_with_correct_token() {
+    let url = "https://lightfriend.ai/api/twilio/status-callback";
+    let params = make_callback_params();
+    let auth_token = "correct_secret_token";
+
+    let signature = compute_twilio_signature(url, &params, auth_token);
+    let result = verify_twilio_signature(url, &params, &signature, auth_token);
+    assert!(result.is_ok(), "Valid signature should verify successfully");
+}
+
+#[test]
+fn test_signature_rejects_when_signed_with_wrong_token() {
+    // This is exactly the BYOT bug: signature was computed with the BYOT
+    // user's auth token, but we tried to verify with the master token.
+    let url = "https://lightfriend.ai/api/twilio/status-callback";
+    let params = make_callback_params();
+    let byot_user_token = "byot_user_secret";
+    let master_token = "master_account_secret";
+
+    let signature = compute_twilio_signature(url, &params, byot_user_token);
+    let result = verify_twilio_signature(url, &params, &signature, master_token);
+    assert!(
+        result.is_err(),
+        "Signature signed with one token must not verify against another"
+    );
+}
+
+#[test]
+fn test_signature_rejects_when_url_differs() {
+    let params = make_callback_params();
+    let token = "secret";
+    let signature = compute_twilio_signature(
+        "https://lightfriend.ai/api/twilio/status-callback",
+        &params,
+        token,
+    );
+    let result = verify_twilio_signature(
+        "https://attacker.example.com/api/twilio/status-callback",
+        &params,
+        &signature,
+        token,
+    );
+    assert!(
+        result.is_err(),
+        "Signature must not verify if URL is different"
+    );
+}
+
+#[test]
+fn test_signature_rejects_when_params_tampered() {
+    let url = "https://lightfriend.ai/api/twilio/status-callback";
+    let mut params = make_callback_params();
+    let token = "secret";
+    let signature = compute_twilio_signature(url, &params, token);
+
+    // Tamper: change the message status
+    params.insert("MessageStatus".to_string(), "failed".to_string());
+
+    let result = verify_twilio_signature(url, &params, &signature, token);
+    assert!(
+        result.is_err(),
+        "Signature must not verify if params were modified"
+    );
+}
+
+#[test]
+fn test_signature_rejects_garbage_signature() {
+    let url = "https://lightfriend.ai/api/twilio/status-callback";
+    let params = make_callback_params();
+    let token = "secret";
+
+    let result = verify_twilio_signature(url, &params, "not-base64!!!", token);
+    assert!(result.is_err(), "Garbage signature must be rejected");
+}
+
+#[test]
+fn test_byot_signature_round_trip() {
+    // Simulates the full BYOT flow:
+    // 1. BYOT user's Twilio account computes signature with their token
+    // 2. Our validator looks up the user, finds they're BYOT, and uses their token
+    // 3. Verification succeeds
+    let url = "https://lightfriend.ai/api/twilio/status-callback";
+    let params = make_callback_params();
+    let byot_user_token = "AC_BYOT_USER_AUTH_TOKEN_FROM_THEIR_TWILIO_DASHBOARD";
+
+    // Step 1: simulate Twilio (the BYOT user's account) signing the callback
+    let signature_from_twilio = compute_twilio_signature(url, &params, byot_user_token);
+
+    // Step 2: our validator picks the BYOT user's token (because the MessageSid
+    // belongs to a BYOT user) and verifies
+    let result = verify_twilio_signature(url, &params, &signature_from_twilio, byot_user_token);
+
+    assert!(
+        result.is_ok(),
+        "BYOT signature round trip should succeed: {:?}",
+        result.err()
+    );
 }

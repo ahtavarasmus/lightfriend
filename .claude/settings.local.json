@@ -254,7 +254,22 @@
       "Bash($B text:*)",
       "Bash(aws logs:*)",
       "Bash(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 ec2-user@13.220.3.110 'docker logs --tail 50 $\\(docker ps -q | head -1\\) 2>&1')",
-      "Bash(timeout 10 npx -y wscat -c 'wss://enclave.lightfriend.ai/api/voice/ws')"
+      "Bash(timeout 10 npx -y wscat -c 'wss://enclave.lightfriend.ai/api/voice/ws')",
+      "Bash(~/.claude/skills/gstack/browse/dist/browse goto:*)",
+      "Bash(~/.claude/skills/gstack/browse/dist/browse text:*)",
+      "Bash(~/.claude/skills/gstack/browse/dist/browse newtab:*)",
+      "Bash(~/.claude/skills/gstack/browse/dist/browse js:*)",
+      "Bash(~/.claude/skills/gstack/browse/dist/browse snapshot:*)",
+      "Bash(~/.claude/skills/gstack/browse/dist/browse click:*)",
+      "Bash(~/.claude/skills/gstack/browse/dist/browse links:*)",
+      "Bash(~/.claude/skills/gstack/browse/dist/browse stop:*)",
+      "Bash($B newtab:*)",
+      "Bash($B snapshot:*)",
+      "Bash($B tab:*)",
+      "Bash($B closetab:*)",
+      "Bash($B js:*)",
+      "Bash(for region:*)",
+      "Bash(do echo:*)"
     ],
     "deny": [
       "Read(.env)",

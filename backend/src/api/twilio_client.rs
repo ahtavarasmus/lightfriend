@@ -159,13 +159,15 @@ pub trait TwilioClient: Send + Sync {
         message_sid: &str,
     ) -> Result<Option<MessagePrice>, TwilioClientError>;
 
-    /// Configure the SMS webhook URL for a phone number.
+    /// Configure the SMS and voice webhook URLs for a phone number.
+    /// `voice_url` is optional - if None, the voice webhook is left untouched.
     /// Returns the phone number SID on success.
     async fn configure_webhook(
         &self,
         credentials: &TwilioCredentials,
         phone_number: &str,
-        webhook_url: &str,
+        sms_url: &str,
+        voice_url: Option<&str>,
     ) -> Result<String, TwilioClientError>;
 
     /// Check if phone numbers are available for a country.
@@ -462,7 +464,8 @@ impl TwilioClient for RealTwilioClient {
         &self,
         credentials: &TwilioCredentials,
         phone_number: &str,
-        webhook_url: &str,
+        sms_url: &str,
+        voice_url: Option<&str>,
     ) -> Result<String, TwilioClientError> {
         // First, find the phone number SID
         let params = [("PhoneNumber", phone_number)];
@@ -498,8 +501,13 @@ impl TwilioClient for RealTwilioClient {
             .sid
             .clone();
 
-        // Update the webhook
-        let update_params = [("SmsUrl", webhook_url), ("SmsMethod", "POST")];
+        // Build the form params (SMS always set, voice only if provided)
+        let mut update_params: Vec<(&str, &str)> = vec![("SmsUrl", sms_url), ("SmsMethod", "POST")];
+        if let Some(v_url) = voice_url {
+            update_params.push(("VoiceUrl", v_url));
+            update_params.push(("VoiceMethod", "POST"));
+        }
+
         let update_response = self
             .http_client
             .post(format!(
@@ -985,13 +993,14 @@ pub mod mock {
             &self,
             _credentials: &TwilioCredentials,
             phone_number: &str,
-            webhook_url: &str,
+            sms_url: &str,
+            _voice_url: Option<&str>,
         ) -> Result<String, TwilioClientError> {
             self.calls
                 .lock()
                 .unwrap()
                 .configure_webhook_calls
-                .push((phone_number.to_string(), webhook_url.to_string()));
+                .push((phone_number.to_string(), sms_url.to_string()));
             self.configure_webhook_result
                 .lock()
                 .unwrap()
