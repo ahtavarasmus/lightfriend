@@ -1393,6 +1393,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                             {"Connect your first app"}
                         </button>
                         <div class="setup-chat-hint">{"Or chat with your assistant directly"}</div>
+                        if props.user_profile.plan_type.as_deref() == Some("byot") {
+                            <div class="assistant-plan-note" style="margin-top: 1rem;">
+                                {"BYOT plan: you also need to set up your own Twilio number. "}
+                                <a href="/bring-own-number">{"Setup guide"}</a>
+                            </div>
+                        }
                     </div>
                     <div>
                         <ChatBox
@@ -1412,6 +1418,23 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                             {"Monitoring is not automatic on the Assistant plan. Ask your assistant when you want to check messages or send replies. "}
                             <a href="/pricing">{"Upgrade to Autopilot"}</a>
                         </div>
+                    }
+
+                    // BYOT setup note
+                    if props.user_profile.plan_type.as_deref() == Some("byot") {
+                        if props.user_profile.twilio_sid.is_none()
+                            || props.user_profile.twilio_token.is_none()
+                        {
+                            <div class="assistant-plan-note">
+                                {"You're on the BYOT plan. Set up your own Twilio number to start receiving messages and calls. "}
+                                <a href="/bring-own-number">{"Setup guide"}</a>
+                            </div>
+                        } else {
+                            <div class="assistant-plan-note">
+                                {"BYOT plan active with your Twilio number. "}
+                                <a href="/bring-own-number">{"View setup guide"}</a>
+                            </div>
+                        }
                     }
 
                     // Status (compact) - clickable to expand/collapse digest items
