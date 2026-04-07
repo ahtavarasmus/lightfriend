@@ -669,7 +669,7 @@ fn render_arbitrum_node(d: &TrustChainData) -> Html {
                         if approved {
                             <span class="nv-approved"><i class="fa-solid fa-circle-check"></i>{" true"}</span>
                         } else {
-                            <code class="nv-val">{"checking..."}</code>
+                            <code class="nv-val">{"false"}</code>
                         }
                     </div>
                 </div>

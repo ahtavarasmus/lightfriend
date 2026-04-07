@@ -49,12 +49,9 @@ mod components {
 }
 mod dashboard {
     pub mod activity_feed;
-    pub mod activity_panel;
     pub mod chat_box;
-    pub mod contact_avatar_row;
     pub mod dashboard_view;
     pub mod emoji_utils;
-    pub mod items_status;
     pub mod media_panel;
     pub mod people_list;
     pub mod rule_builder;

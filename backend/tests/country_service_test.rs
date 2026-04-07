@@ -3,9 +3,7 @@
 //! Tests the phone number country detection logic that distinguishes
 //! US from CA (both use +1 prefix) and handles other countries.
 
-use backend::services::country_service::{
-    detect_country, is_ca_phone, is_north_american, is_us_phone,
-};
+use backend::services::country_service::detect_country;
 
 #[test]
 fn test_us_detection() {
@@ -51,24 +49,4 @@ fn test_worldwide_detection() {
 fn test_unknown_north_american() {
     // Invalid +1 area code
     assert_eq!(detect_country("+11115551234"), None);
-}
-
-#[test]
-fn test_is_us_phone() {
-    assert!(is_us_phone("+14155551234"));
-    assert!(!is_us_phone("+14165551234")); // Canada
-    assert!(!is_us_phone("+358401234567")); // Finland
-}
-
-#[test]
-fn test_is_ca_phone() {
-    assert!(is_ca_phone("+14165551234"));
-    assert!(!is_ca_phone("+14155551234")); // US
-}
-
-#[test]
-fn test_is_north_american() {
-    assert!(is_north_american("+14155551234")); // US
-    assert!(is_north_american("+14165551234")); // CA
-    assert!(!is_north_american("+358401234567")); // Finland
 }

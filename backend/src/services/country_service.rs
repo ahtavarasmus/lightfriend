@@ -92,18 +92,3 @@ pub fn detect_country(phone: &str) -> Option<String> {
         }
     }
 }
-
-/// Check if phone number is from the US.
-pub fn is_us_phone(phone: &str) -> bool {
-    matches!(detect_country(phone), Some(ref c) if c == "US")
-}
-
-/// Check if phone number is from Canada.
-pub fn is_ca_phone(phone: &str) -> bool {
-    matches!(detect_country(phone), Some(ref c) if c == "CA")
-}
-
-/// Check if phone number is from US or Canada.
-pub fn is_north_american(phone: &str) -> bool {
-    phone.starts_with("+1")
-}
