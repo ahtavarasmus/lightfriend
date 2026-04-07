@@ -698,22 +698,28 @@ pub async fn patch_profile_field(
                 })?;
         }
         "digest_time" => {
-            // Accept null (auto mode) or a string like "07:00" or "07:00,18:00"
-            let value = if request.value.is_null() {
+            // Accept null (auto mode) or a comma-separated list of HH:MM times.
+            // Times are validated and snapped to the nearest 10-minute boundary
+            // before storage to match the scheduler's fire interval.
+            let value: Option<String> = if request.value.is_null() {
                 None
             } else {
-                Some(
-                    request
-                        .value
-                        .as_str()
-                        .ok_or_else(|| {
-                            (
-                                StatusCode::BAD_REQUEST,
-                                Json(json!({"error": "digest_time must be a string or null"})),
-                            )
-                        })?
-                        .to_string(),
-                )
+                let raw = request.value.as_str().ok_or_else(|| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": "digest_time must be a string or null"})),
+                    )
+                })?;
+                let (canonical, _) = crate::jobs::scheduler::parse_digest_times(raw)
+                    .map_err(|e| {
+                        (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "error": format!("Invalid digest_time: {}. Use comma-separated HH:MM times, e.g. \"08:50,09:00,18:00\".", e)
+                            })),
+                        )
+                    })?;
+                Some(canonical)
             };
             state
                 .user_core

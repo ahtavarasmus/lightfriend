@@ -1213,6 +1213,7 @@ pub(crate) async fn check_message_seen(
 /// Check if user read the email in their actual email app via IMAP \Seen flag.
 async fn check_email_seen(state: &Arc<AppState>, user_id: i32, email_uid: &str) -> bool {
     use crate::repositories::user_core::UserCoreOps;
+    use futures_util::TryStreamExt;
 
     let creds = match state.user_repository.get_imap_credentials(user_id) {
         Ok(Some(c)) => c,
@@ -1229,38 +1230,45 @@ async fn check_email_seen(state: &Arc<AppState>, user_id: i32, email_uid: &str) 
         _ => return false,
     };
 
-    // Run in spawn_blocking with timeout since imap is synchronous
     let uid = email_uid.to_string();
-    tokio::time::timeout(
-        std::time::Duration::from_secs(15),
-        tokio::task::spawn_blocking(move || {
-            let tls = match native_tls::TlsConnector::new() {
-                Ok(t) => t,
-                Err(_) => return false,
-            };
-            let client = match imap::connect((server.as_str(), port), &server, &tls) {
-                Ok(c) => c,
-                Err(_) => return false,
-            };
-            let mut session = match client.login(&email, &password) {
-                Ok(s) => s,
-                Err(_) => return false,
-            };
-            let _ = session.select("INBOX");
+    let work = async {
+        let mut session = match crate::handlers::imap_handlers::open_imap_session(
+            &server, port, &email, &password,
+        )
+        .await
+        {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
 
-            let is_seen = match session.uid_fetch(&uid, "FLAGS") {
-                Ok(messages) => messages
-                    .iter()
-                    .any(|msg| msg.flags().iter().any(|flag| flag.to_string() == "\\Seen")),
-                Err(_) => false,
-            };
-            let _ = session.logout();
-            is_seen
-        }),
-    )
-    .await
-    .unwrap_or(Ok(false))
-    .unwrap_or(false)
+        if session.select("INBOX").await.is_err() {
+            return false;
+        }
+
+        let is_seen = match session.uid_fetch(&uid, "FLAGS").await {
+            Ok(mut stream) => {
+                let mut found_seen = false;
+                while let Ok(Some(msg)) = stream.try_next().await {
+                    if msg
+                        .flags()
+                        .any(|flag| flag == async_imap::types::Flag::Seen)
+                    {
+                        found_seen = true;
+                        break;
+                    }
+                }
+                found_seen
+            }
+            Err(_) => false,
+        };
+
+        let _ = session.logout().await;
+        is_seen
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(15), work)
+        .await
+        .unwrap_or(false)
 }
 
 /// Check if user saw a bridge message via Matrix read receipts.

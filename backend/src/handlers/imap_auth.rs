@@ -4,14 +4,9 @@ use axum::{
     http::StatusCode,
     response::Json as AxumJson,
 };
-use imap::Session;
-use native_tls::TlsConnector;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::error::Error;
-use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Arc;
-use std::time::Duration;
 
 // ============================================================
 // Pure Functions for Testability
@@ -446,17 +441,17 @@ pub struct DeleteImapRequest {
     pub email: String,
 }
 
-use native_tls::TlsStream;
-
-// Function to establish an IMAP connection for credential verification
+// Function to establish an IMAP connection for credential verification.
+// Uses async-imap so the entire connection lifecycle (TCP, TLS, login)
+// runs on the async runtime via real .await suspensions, never pinning a
+// worker thread.
 async fn connect_imap(
     email: &str,
     password: &str,
     imap_server: Option<&str>,
     imap_port: Option<u16>,
-) -> Result<Session<TlsStream<TcpStream>>, Box<dyn Error>> {
-    let tls = TlsConnector::builder().build()?;
-
+) -> Result<crate::handlers::imap_handlers::ImapSession, crate::handlers::imap_handlers::ImapError>
+{
     // Use provided server/port or auto-detect from email domain
     let (detected_server, detected_port) = detect_imap_server(email);
     let server = imap_server.unwrap_or(detected_server);
@@ -469,41 +464,7 @@ async fn connect_imap(
         email
     );
 
-    // Resolve hostname first. Parsing "host:port" as SocketAddr only works for
-    // numeric IPs and breaks normal IMAP hosts like imap.gmail.com.
-    let resolved_addrs: Vec<_> = (server, port).to_socket_addrs()?.collect();
-    if resolved_addrs.is_empty() {
-        return Err(format!("No socket addresses resolved for {}:{}", server, port).into());
-    }
-
-    // Use TCP connect with timeout to avoid hanging on unreachable servers.
-    let mut last_error = None;
-    let mut connected = None;
-    for addr in resolved_addrs {
-        match TcpStream::connect_timeout(&addr, Duration::from_secs(15)) {
-            Ok(stream) => {
-                connected = Some(stream);
-                break;
-            }
-            Err(err) => last_error = Some(err),
-        }
-    }
-
-    let tcp_stream = connected.ok_or_else(|| {
-        last_error
-            .map(|e| format!("Failed to connect to {}:{}: {}", server, port, e))
-            .unwrap_or_else(|| format!("Failed to connect to {}:{}", server, port))
-    })?;
-    tcp_stream.set_read_timeout(Some(Duration::from_secs(15)))?;
-    tcp_stream.set_write_timeout(Some(Duration::from_secs(15)))?;
-
-    let tls_stream = tls.connect(server, tcp_stream)?;
-    let client = imap::Client::new(tls_stream);
-
-    match client.login(email, password) {
-        Ok(session) => Ok(session),
-        Err((err, _orig_client)) => Err(Box::new(err)),
-    }
+    crate::handlers::imap_handlers::open_imap_session(server, port, email, password).await
 }
 
 // Handler to authenticate and store Gmail IMAP credentials
@@ -526,7 +487,7 @@ pub async fn imap_login(
     match connect_imap(&email, &password, imap_server, imap_port).await {
         Ok(mut session) => {
             // Logout immediately after verification to avoid keeping the session open
-            if let Err(e) = session.logout() {
+            if let Err(e) = session.logout().await {
                 tracing::warn!("Failed to logout IMAP session: {}", e);
             }
 
@@ -552,13 +513,13 @@ pub async fn imap_login(
         }
         Err(e) => {
             tracing::error!(
-                "IMAP connection failed for user {}: {}",
+                "IMAP connection failed for user {}: {:?}",
                 auth_user.user_id,
                 e
             );
             Err((
                 StatusCode::BAD_REQUEST,
-                AxumJson(json!({"error": format!("IMAP connection failed: {}", e)})),
+                AxumJson(json!({"error": format!("IMAP connection failed: {:?}", e)})),
             ))
         }
     }

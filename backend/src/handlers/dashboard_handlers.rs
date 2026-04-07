@@ -1055,6 +1055,33 @@ pub async fn get_senders(
     }
     drop(matrix_clients);
 
+    // 4. WhatsApp contacts from bridge DB (catches DMs without Matrix rooms yet).
+    // No-op if WHATSAPP_BRIDGE_DATABASE_URL is unset (e.g. dev). Failures are
+    // logged inside get_whatsapp_contacts and yield an empty Vec, so this
+    // branch can never break the rest of the endpoint.
+    if state.whatsapp_bridge_repository.is_some() {
+        let contacts = crate::utils::bridge_contacts::get_whatsapp_contacts(&state, user_id).await;
+        let mut added = 0usize;
+        for c in contacts {
+            let key = format!("chat:{}:whatsapp", c.name.to_lowercase());
+            if seen.insert(key) {
+                options.push(SenderOption {
+                    name: c.name,
+                    platform: Some("whatsapp".to_string()),
+                    source: "chat".to_string(),
+                    msg_count: None,
+                    is_group: false,
+                });
+                added += 1;
+            }
+        }
+        tracing::info!(
+            "get_senders: user {} added {} contacts from whatsapp bridge DB",
+            user_id,
+            added
+        );
+    }
+
     let person_count = options.iter().filter(|o| o.source == "person").count();
     let chat_count = options.iter().filter(|o| o.source == "chat").count();
     let group_count = options.iter().filter(|o| o.source == "group").count();

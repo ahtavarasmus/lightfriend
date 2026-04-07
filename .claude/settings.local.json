@@ -269,7 +269,10 @@
       "Bash($B closetab:*)",
       "Bash($B js:*)",
       "Bash(for region:*)",
-      "Bash(do echo:*)"
+      "Bash(do echo:*)",
+      "Read(//Users/ahtavarasmus/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/async-imap-0.10.4/src/**)",
+      "Read(//Users/ahtavarasmus/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/async-imap-0.10.4/examples/**)",
+      "Read(//Users/ahtavarasmus/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/async-imap-0.10.4/**)"
     ],
     "deny": [
       "Read(.env)",

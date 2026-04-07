@@ -37,6 +37,7 @@ pub mod handlers {
 }
 pub mod utils {
     pub mod bridge;
+    pub mod bridge_contacts;
     pub mod country;
     pub mod email;
     pub mod encryption;
@@ -113,6 +114,7 @@ pub mod repositories {
     pub mod user_repository;
     pub mod user_subscriptions;
     pub mod webauthn_repository;
+    pub mod whatsapp_bridge_repository;
 }
 pub mod services {
     pub mod country_service;
@@ -151,6 +153,7 @@ pub use repositories::totp_repository::TotpRepository;
 pub use repositories::user_core::{UserCore, UserCoreOps};
 pub use repositories::user_repository::UserRepository;
 pub use repositories::webauthn_repository::WebauthnRepository;
+pub use repositories::whatsapp_bridge_repository::{WhatsAppBridgeRepository, WhatsAppContact};
 pub use services::twilio_message_service::TwilioMessageService;
 
 // Tesla client trait and pure functions
@@ -224,6 +227,9 @@ pub struct AppState {
     pub llm_usage_repository: Arc<LlmUsageRepository>,
     pub bandwidth_repository: Arc<BandwidthRepository>,
     pub ontology_repository: Arc<OntologyRepository>,
+    /// Optional: read-only access to mautrix-whatsapp's PostgreSQL database.
+    /// None when WHATSAPP_BRIDGE_DATABASE_URL is unset (e.g. dev environments).
+    pub whatsapp_bridge_repository: Option<Arc<WhatsAppBridgeRepository>>,
     pub ontology_registry: ontology::registry::OntologyRegistry,
     pub tool_registry: tools::registry::ToolRegistry,
     pub pending_rule_tests: Arc<DashMap<String, handlers::rule_handlers::PendingRuleTest>>,
