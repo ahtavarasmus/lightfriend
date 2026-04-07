@@ -172,11 +172,18 @@ fn query_message(
 
     for (i, m) in messages.iter().enumerate() {
         let content_preview: String = m.content.chars().take(100).collect();
+        // Disambiguate outgoing messages so the LLM refers to them as "you sent"
+        // (not "I sent") when summarizing back to the user.
+        let sender_label = if m.sender_name == "You" {
+            "[you sent]".to_string()
+        } else {
+            format!("[from {}]", m.sender_name)
+        };
         output.push_str(&format!(
             "{}. [id={}] {} via {} - \"{}\"",
             i + 1,
             m.id,
-            m.sender_name,
+            sender_label,
             m.platform,
             content_preview
         ));

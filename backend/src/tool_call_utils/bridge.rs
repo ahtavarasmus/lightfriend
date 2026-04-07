@@ -695,20 +695,30 @@ pub async fn handle_fetch_chat_messages(state: &Arc<AppState>, user_id: i32, arg
                         msg.content.clone()
                     };
 
+                    // Disambiguate outgoing messages so the LLM refers to them
+                    // as "you sent" (not "I sent") when summarizing to the user.
+                    let sender_label = if msg.sender_display_name == "You" {
+                        "[you sent]".to_string()
+                    } else {
+                        format!("[from {}]", msg.sender_display_name)
+                    };
+
                     if i == 0 {
                         response.push_str(&format!(
-                            "{}. {} at {}:\n{}",
+                            "{}. {} at {} {}:\n{}",
                             i + 1,
                             msg.room_name,
                             msg.formatted_timestamp,
+                            sender_label,
                             content
                         ));
                     } else {
                         response.push_str(&format!(
-                            "\n\n{}. {} at {}:\n{}",
+                            "\n\n{}. {} at {} {}:\n{}",
                             i + 1,
                             msg.room_name,
                             msg.formatted_timestamp,
+                            sender_label,
                             content
                         ));
                     }
@@ -794,20 +804,30 @@ pub async fn handle_fetch_recent_messages(
                         msg.content.clone()
                     };
 
+                    // Disambiguate outgoing messages so the LLM refers to them
+                    // as "you sent" (not "I sent") when summarizing to the user.
+                    let sender_label = if msg.sender_display_name == "You" {
+                        "[you sent]".to_string()
+                    } else {
+                        format!("[from {}]", msg.sender_display_name)
+                    };
+
                     if i == 0 {
                         response.push_str(&format!(
-                            "{}. {} at {}:\n{}",
+                            "{}. {} at {} {}:\n{}",
                             i + 1,
                             msg.room_name,
                             msg.formatted_timestamp,
+                            sender_label,
                             content
                         ));
                     } else {
                         response.push_str(&format!(
-                            "\n\n{}. {} at {}:\n{}",
+                            "\n\n{}. {} at {} {}:\n{}",
                             i + 1,
                             msg.room_name,
                             msg.formatted_timestamp,
+                            sender_label,
                             content
                         ));
                     }
