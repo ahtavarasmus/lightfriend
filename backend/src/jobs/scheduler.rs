@@ -959,9 +959,10 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .await
         .expect("Failed to add rule schedule job to scheduler");
 
-    // Every 15 minutes: deliver smart digests to users at their predicted wake time
+    // Every 10 minutes: deliver smart digests to users at their predicted wake time
+    // (10-min interval is the granularity for user-set custom digest times)
     let state_clone = Arc::clone(&state);
-    let digest_job = Job::new_async("0 */15 * * * *", move |_, _| {
+    let digest_job = Job::new_async("0 */10 * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
             deliver_smart_digests(&state).await;
@@ -978,8 +979,462 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     sched.start().await.expect("Failed to start scheduler");
 }
 
-/// Deliver smart digests: check which users have pending medium-urgency messages
-/// and deliver them at the user's predicted active window.
+/// Parse and normalize a custom digest time string.
+///
+/// Accepts comma-separated `HH:MM` values (or bare `HH` which is treated as `HH:00`).
+/// Each time is snapped to the nearest 10-minute boundary (matching the scheduler's
+/// fire interval), deduplicated, and sorted.
+///
+/// Returns `(canonical_string, minutes_of_day)` where `canonical_string` is the
+/// normalized form to store (e.g. `"08:50,09:00,11:00"`) and `minutes_of_day` is
+/// the parsed slots in minutes-since-midnight.
+pub fn parse_digest_times(input: &str) -> Result<(String, Vec<u16>), String> {
+    let mut slots: Vec<u16> = Vec::new();
+    for raw in input.split(',') {
+        let token = raw.trim();
+        if token.is_empty() {
+            continue;
+        }
+        let (h_str, m_str) = match token.split_once(':') {
+            Some((h, m)) => (h, m),
+            None => (token, "0"),
+        };
+        let h: u32 = h_str
+            .parse()
+            .map_err(|_| format!("invalid hour in '{}'", token))?;
+        let m: u32 = m_str
+            .parse()
+            .map_err(|_| format!("invalid minute in '{}'", token))?;
+        if h >= 24 {
+            return Err(format!("hour must be 0-23 in '{}'", token));
+        }
+        if m >= 60 {
+            return Err(format!("minute must be 0-59 in '{}'", token));
+        }
+        // Snap to nearest 10-minute boundary, wrap 24:00 -> 00:00
+        let total_min = (h * 60 + m) as u32;
+        let snapped = (((total_min + 5) / 10) * 10) % 1440;
+        let snapped = snapped as u16;
+        if !slots.contains(&snapped) {
+            slots.push(snapped);
+        }
+    }
+    if slots.is_empty() {
+        return Err("at least one time required".to_string());
+    }
+    if slots.len() > 4 {
+        return Err(format!(
+            "too many digest times: {} (max 4 per day)",
+            slots.len()
+        ));
+    }
+    slots.sort();
+    let canonical = slots
+        .iter()
+        .map(|&m| format!("{:02}:{:02}", m / 60, m % 60))
+        .collect::<Vec<_>>()
+        .join(",");
+    Ok((canonical, slots))
+}
+
+/// Pure helper used by `deliver_smart_digests` and unit tests:
+/// returns true if any of the user's slots equals the snapped current minute-of-day.
+pub fn should_deliver_now(slots: &[u16], local_minute_of_day: u16) -> bool {
+    let current_slot = (local_minute_of_day / 10) * 10;
+    slots.iter().any(|&s| s == current_slot)
+}
+
+/// Score a message's category for in-section ordering. Higher = more important.
+/// Spam returns a very negative value so callers can drop those messages outright.
+pub fn category_score(category: Option<&str>) -> i32 {
+    match category {
+        Some("emergency") => 100,
+        Some("financial") => 60,
+        Some("health") => 60,
+        Some("work") => 30,
+        Some("relationship") => 30,
+        Some("logistics") => 15,
+        Some("social") => 5,
+        Some("spam") => -1000,
+        _ => 10,
+    }
+}
+
+/// Per-message teaser cap. We show just enough to grab interest — the user can
+/// reply to ask for the full message via SMS.
+const DIGEST_TEASER_CAP: usize = 50;
+
+/// How many high-signal items to show individually before collapsing to counts.
+const HIGH_SIGNAL_CAP: usize = 3;
+
+/// How many sender names to list in collapsed FYI / New / Done sections.
+const NAMES_LIST_CAP: usize = 5;
+
+/// Strip a leading sender-name prefix from a summary, even when the LLM
+/// re-states it despite the prompt. Handles common patterns like:
+///   "Mom is feeling unwell"  → "feeling unwell"
+///   "Mom: feeling unwell"    → "feeling unwell"
+///   "Mom's project update"   → "project update"
+///   "Mom asking about ..."   → "asking about ..."
+/// Case-insensitive. Returns the original summary if the sender prefix isn't found.
+pub fn strip_sender_prefix(summary: &str, sender: &str) -> String {
+    let trimmed = summary.trim();
+    let sender_trim = sender.trim();
+    if sender_trim.is_empty() {
+        return trimmed.to_string();
+    }
+    let lower_sum = trimmed.to_lowercase();
+    let lower_send = sender_trim.to_lowercase();
+    if !lower_sum.starts_with(&lower_send) {
+        return trimmed.to_string();
+    }
+    // Slice off the sender's letters from the original (preserving case in the rest)
+    let rest = &trimmed[sender_trim.len()..];
+    // Strip a possessive 's first if present
+    let rest = rest.strip_prefix("'s").unwrap_or(rest);
+    // Then any leading punctuation/whitespace
+    let rest =
+        rest.trim_start_matches(|c: char| c == ':' || c == ',' || c == '-' || c.is_whitespace());
+    // Finally strip a leading "is " / "was " / "has " connector if present
+    let lower_rest = rest.to_lowercase();
+    let rest = if let Some(stripped) = lower_rest.strip_prefix("is ") {
+        &rest[rest.len() - stripped.len()..]
+    } else if let Some(stripped) = lower_rest.strip_prefix("was ") {
+        &rest[rest.len() - stripped.len()..]
+    } else if let Some(stripped) = lower_rest.strip_prefix("has ") {
+        &rest[rest.len() - stripped.len()..]
+    } else {
+        rest
+    };
+    let cleaned = rest.trim();
+    if cleaned.is_empty() {
+        // Stripping killed the whole summary — fall back to the original
+        trimmed.to_string()
+    } else {
+        cleaned.to_string()
+    }
+}
+
+/// Format a single high-signal message line: "- Sender: short teaser".
+/// Drops platform name (redundant), strips sender re-statement from the
+/// summary, and aggressively truncates since this is an interest hook, not
+/// the full content.
+fn format_digest_message(msg: &crate::models::ontology_models::OntMessage) -> String {
+    let raw_summary = msg.summary.as_deref().unwrap_or(&msg.content);
+    let cleaned = strip_sender_prefix(raw_summary, &msg.sender_name);
+    let short: String = cleaned.chars().take(DIGEST_TEASER_CAP).collect();
+    let trimmed = short.trim();
+    if trimmed.is_empty() {
+        format!("- {}", msg.sender_name)
+    } else {
+        format!("- {}: {}", msg.sender_name, trimmed)
+    }
+}
+
+/// Render a high-signal section (Critical / Important): per-item lines with
+/// short teasers, capped at HIGH_SIGNAL_CAP. Anything beyond is summarized
+/// with "+N more".
+fn render_high_signal_section(
+    title: &str,
+    messages: &[crate::models::ontology_models::OntMessage],
+) -> Option<String> {
+    if messages.is_empty() {
+        return None;
+    }
+    let total = messages.len();
+    let shown: Vec<String> = messages
+        .iter()
+        .take(HIGH_SIGNAL_CAP)
+        .map(format_digest_message)
+        .collect();
+    let mut block = format!("{}:\n{}", title, shown.join("\n"));
+    if total > HIGH_SIGNAL_CAP {
+        block.push_str(&format!("\n+ {} more", total - HIGH_SIGNAL_CAP));
+    }
+    Some(block)
+}
+
+/// Render a low-signal section as a single inline sender list:
+/// "FYI from Sarah, John, Newsletter (+2 more)".
+/// Used for FYI to keep the digest from blowing up when there are many
+/// medium-urgency messages.
+fn render_fyi_inline(messages: &[crate::models::ontology_models::OntMessage]) -> Option<String> {
+    if messages.is_empty() {
+        return None;
+    }
+    let total = messages.len();
+    // Dedupe sender names while preserving order
+    let mut seen = std::collections::HashSet::new();
+    let mut names: Vec<String> = Vec::new();
+    for m in messages {
+        if seen.insert(m.sender_name.clone()) {
+            names.push(m.sender_name.clone());
+            if names.len() >= NAMES_LIST_CAP {
+                break;
+            }
+        }
+    }
+    let unique_total = messages
+        .iter()
+        .map(|m| &m.sender_name)
+        .collect::<std::collections::HashSet<_>>()
+        .len();
+    let names_str = names.join(", ");
+    let suffix = if unique_total > names.len() {
+        format!(" +{} more", unique_total - names.len())
+    } else {
+        String::new()
+    };
+    let count_label = if total == 1 { "msg" } else { "msgs" };
+    Some(format!(
+        "FYI ({} {}): {}{}",
+        total, count_label, names_str, suffix
+    ))
+}
+
+/// Build a sectioned digest for a single user.
+///
+/// Pure-ish: makes DB queries and one round of async lookups for bridge read
+/// receipts, but does not send anything or mutate state. Returns the rendered
+/// digest text and the message IDs that should be marked delivered, or None
+/// when there is nothing to send (after applying seen / spam filters).
+///
+/// Exposed for integration tests in `backend/tests/digest_layout_test.rs`.
+pub async fn build_digest_for_user(
+    state: &Arc<AppState>,
+    user_id: i32,
+    settings: &crate::models::user_models::UserSettings,
+    now: i32,
+    tz_offset_secs: i32,
+) -> Option<(String, Vec<i64>)> {
+    let local_ts = now as i64 + tz_offset_secs as i64;
+
+    // Compute today's local-day window in UTC seconds. Used for "Today" events.
+    let local_day_start_local = local_ts.div_euclid(86400) * 86400;
+    let local_day_start = (local_day_start_local - tz_offset_secs as i64) as i32;
+    let local_day_end = local_day_start.saturating_add(86400);
+
+    // Window for catching unhandled messages: last 24 hours.
+    let since_window: i32 = now.saturating_sub(86400);
+
+    // -------- Section 1: Today's events (due_at within local day) --------
+    let today_events = state
+        .ontology_repository
+        .get_events_due_on_local_day(user_id, local_day_start, local_day_end)
+        .unwrap_or_default();
+
+    // -------- Section 2/3: Critical + Important --------
+    // Both are filtered out when the user has critical pushes ON, because in
+    // that case the system already sent an SMS/call for both critical AND high
+    // urgency messages — repeating them in the digest would be redundant.
+    let critical_disabled = settings
+        .critical_enabled
+        .as_deref()
+        .map(|v| v.eq_ignore_ascii_case("off"))
+        .unwrap_or(false);
+
+    let mut critical_msgs = if critical_disabled {
+        state
+            .ontology_repository
+            .get_pending_messages_by_urgency(user_id, &["critical"], since_window, 20)
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    let mut important_msgs = if critical_disabled {
+        state
+            .ontology_repository
+            .get_pending_messages_by_urgency(user_id, &["high"], since_window, 20)
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    // -------- Section 4: FYI (medium urgency) --------
+    let mut fyi_msgs = state
+        .ontology_repository
+        .get_pending_messages_by_urgency(user_id, &["medium"], since_window, 30)
+        .unwrap_or_default();
+
+    // -------- Filter: drop messages the user has already seen via bridge read receipts --------
+    let mut seen_cache: std::collections::HashMap<String, Option<i64>> =
+        std::collections::HashMap::new();
+    let mut seen_lookup_keys: Vec<(String, String)> = Vec::new();
+    for msg in critical_msgs
+        .iter()
+        .chain(important_msgs.iter())
+        .chain(fyi_msgs.iter())
+    {
+        let key = format!("{}|{}", msg.room_id, msg.platform);
+        if !seen_cache.contains_key(&key) {
+            seen_cache.insert(key.clone(), None);
+            seen_lookup_keys.push((msg.room_id.clone(), msg.platform.clone()));
+        }
+    }
+    for (room_id, platform) in &seen_lookup_keys {
+        let key = format!("{}|{}", room_id, platform);
+        let ts =
+            crate::proactive::system_behaviors::get_room_seen_ts(state, user_id, room_id, platform)
+                .await;
+        seen_cache.insert(key, ts);
+    }
+
+    let drop_seen = |msgs: &mut Vec<crate::models::ontology_models::OntMessage>| {
+        msgs.retain(|m| {
+            let key = format!("{}|{}", m.room_id, m.platform);
+            match seen_cache.get(&key).copied().flatten() {
+                Some(seen_ts) => (m.created_at as i64) > seen_ts,
+                None => true,
+            }
+        });
+    };
+    drop_seen(&mut critical_msgs);
+    drop_seen(&mut important_msgs);
+    drop_seen(&mut fyi_msgs);
+
+    // -------- Filter: drop spam --------
+    let drop_spam = |msgs: &mut Vec<crate::models::ontology_models::OntMessage>| {
+        msgs.retain(|m| m.category.as_deref() != Some("spam"));
+    };
+    drop_spam(&mut critical_msgs);
+    drop_spam(&mut important_msgs);
+    drop_spam(&mut fyi_msgs);
+
+    // -------- Sort each section by category score, then recency --------
+    let sort_section = |msgs: &mut Vec<crate::models::ontology_models::OntMessage>| {
+        msgs.sort_by(|a, b| {
+            let a_score = category_score(a.category.as_deref());
+            let b_score = category_score(b.category.as_deref());
+            b_score
+                .cmp(&a_score)
+                .then_with(|| b.created_at.cmp(&a.created_at))
+        });
+    };
+    sort_section(&mut critical_msgs);
+    sort_section(&mut important_msgs);
+    sort_section(&mut fyi_msgs);
+
+    // -------- Recently added / completed events --------
+    let six_hours_ago = now - 6 * 3600;
+    let recent_events = state
+        .ontology_repository
+        .get_recently_created_events(user_id, six_hours_ago)
+        .unwrap_or_default();
+    let completed_events = state
+        .ontology_repository
+        .get_recently_completed_events(user_id, six_hours_ago)
+        .unwrap_or_default();
+
+    // -------- Build digest text --------
+    // Format philosophy: this is an interest grabber, not a full data dump.
+    // Show counts + headlines so the user knows what's waiting; they can reply
+    // via SMS to ask for the full content of any item.
+    let mut digest_parts: Vec<String> = Vec::new();
+
+    // Today's events: inline list with times. Cap at 5 (overflow → "+N more").
+    if !today_events.is_empty() {
+        let total_today = today_events.len();
+        let parts: Vec<String> = today_events
+            .iter()
+            .take(5)
+            .map(|event| {
+                let time_str = if let Some(due) = event.due_at {
+                    let local_due = due as i64 + tz_offset_secs as i64;
+                    let h = ((local_due % 86400 + 86400) % 86400 / 3600) as i32;
+                    let m = (((local_due % 86400 + 86400) % 86400) % 3600 / 60) as i32;
+                    format!("{:02}:{:02} {}", h, m, event.description)
+                } else {
+                    event.description.clone()
+                };
+                time_str
+            })
+            .collect();
+        let mut today_line = format!("Today: {}", parts.join(", "));
+        if total_today > 5 {
+            today_line.push_str(&format!(" +{} more", total_today - 5));
+        }
+        digest_parts.push(today_line);
+    }
+
+    // High-signal sections: per-item teasers
+    if let Some(block) = render_high_signal_section("Critical", &critical_msgs) {
+        digest_parts.push(block);
+    }
+    if let Some(block) = render_high_signal_section("Important", &important_msgs) {
+        digest_parts.push(block);
+    }
+
+    // FYI: collapsed to a single inline sender list
+    if let Some(line) = render_fyi_inline(&fyi_msgs) {
+        digest_parts.push(line);
+    }
+
+    // Recently added tracked items: inline list, no per-item due dates (teaser)
+    if !recent_events.is_empty() {
+        let total = recent_events.len();
+        let names: Vec<String> = recent_events
+            .iter()
+            .take(NAMES_LIST_CAP)
+            .map(|e| e.description.clone())
+            .collect();
+        let mut line = format!("New: {}", names.join(", "));
+        if total > NAMES_LIST_CAP {
+            line.push_str(&format!(" +{} more", total - NAMES_LIST_CAP));
+        }
+        digest_parts.push(line);
+    }
+
+    // Just done: inline list
+    if !completed_events.is_empty() {
+        let total = completed_events.len();
+        let names: Vec<String> = completed_events
+            .iter()
+            .take(NAMES_LIST_CAP)
+            .map(|e| e.description.clone())
+            .collect();
+        let mut line = format!("Done: {}", names.join(", "));
+        if total > NAMES_LIST_CAP {
+            line.push_str(&format!(" +{} more", total - NAMES_LIST_CAP));
+        }
+        digest_parts.push(line);
+    }
+
+    if digest_parts.is_empty() {
+        return None;
+    }
+
+    // Mark all displayed/counted messages as delivered (so they don't reappear
+    // in the next digest). We mark the FULL list, not just the rendered top —
+    // otherwise overflow items would loop.
+    let mut message_ids: Vec<i64> = Vec::new();
+    for m in critical_msgs.iter() {
+        message_ids.push(m.id);
+    }
+    for m in important_msgs.iter() {
+        message_ids.push(m.id);
+    }
+    for m in fyi_msgs.iter() {
+        message_ids.push(m.id);
+    }
+
+    let total_messages = critical_msgs.len() + important_msgs.len() + fyi_msgs.len();
+    let total_today = today_events.len();
+    let header = match (total_messages, total_today) {
+        (0, t) => format!("{} today", t),
+        (m, 0) => format!("{} msg{}", m, if m == 1 { "" } else { "s" }),
+        (m, t) => format!("{} msg{}, {} today", m, if m == 1 { "" } else { "s" }, t),
+    };
+
+    // CTA: nudge the user to reply for full content of any item.
+    let footer = "Reply to dig in.";
+
+    let digest_text = format!("{}\n\n{}\n\n{}", header, digest_parts.join("\n\n"), footer);
+    Some((digest_text, message_ids))
+}
+
+/// Deliver smart digests: check which users have pending unhandled messages
+/// and deliver a sectioned recap at the user's local digest window.
 async fn deliver_smart_digests(state: &Arc<AppState>) {
     let users = match state.ontology_repository.get_users_with_pending_digests() {
         Ok(u) => u,
@@ -1023,67 +1478,47 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
             Err(_) => 0,
         };
 
-        let current_hour = {
-            let local_ts = now as i64 + tz_offset_secs as i64;
-            ((local_ts % 86400 + 86400) % 86400 / 3600) as usize
-        };
+        let local_ts = now as i64 + tz_offset_secs as i64;
+        let current_minute_of_day = (((local_ts % 86400 + 86400) % 86400) / 60) as u16;
+        // Snap current time to a 10-minute slot — matches the cron's */10 cadence
+        let current_slot = (current_minute_of_day / 10) * 10;
+        let current_hour = (current_minute_of_day / 60) as usize;
 
-        // Determine target hours: user override(s) or predicted active windows
-        let target_hours: Vec<usize> = if let Some(ref time_str) = settings.digest_time {
-            // Parse comma-separated "HH:MM" or "HH" values, e.g. "07:00,12:00,18:00"
-            time_str
-                .split(',')
-                .filter_map(|t| {
-                    t.trim()
-                        .split(':')
-                        .next()
-                        .and_then(|h| h.parse::<usize>().ok())
-                        .filter(|&h| h < 24)
-                })
-                .collect()
+        // Determine if we're in a delivery window:
+        // - Manual mode: exact 10-min slot match against user's configured times
+        // - Auto mode: predicted wake hour (or default 8 AM), 2-hour fuzzy window
+        let in_target_window = if let Some(ref time_str) = settings.digest_time {
+            match parse_digest_times(time_str) {
+                Ok((_, slots)) => should_deliver_now(&slots, current_minute_of_day),
+                Err(e) => {
+                    debug!(
+                        "User {} has malformed digest_time '{}': {} — skipping",
+                        user_id, time_str, e
+                    );
+                    false
+                }
+            }
         } else {
-            // Predict from activity patterns
-            state
+            let predicted = state
                 .ontology_repository
-                .compute_user_wake_hour(user_id, tz_offset_secs)
-                .into_iter()
-                .collect()
-        };
-        let target_hours = if target_hours.is_empty() {
-            vec![8] // default 8 AM
-        } else {
+                .compute_user_wake_hour(user_id, tz_offset_secs);
+            let target_hours: Vec<usize> = predicted.into_iter().collect();
+            let target_hours = if target_hours.is_empty() {
+                vec![8] // default 8 AM
+            } else {
+                target_hours
+            };
             target_hours
+                .iter()
+                .any(|&h| current_hour == h || current_hour == (h + 1) % 24)
         };
 
-        // Deliver if current hour matches any target window
-        // or if items have been queued for more than 6 hours (staleness cap)
-        let in_target_window = target_hours
-            .iter()
-            .any(|&h| current_hour == h || current_hour == (h + 1) % 24);
-
-        let pending = match state
-            .ontology_repository
-            .get_pending_digest_messages(user_id)
-        {
-            Ok(msgs) => msgs,
-            Err(_) => continue,
-        };
-
-        if pending.is_empty() {
-            continue;
-        }
-
-        let oldest_queued = pending.last().map(|m| m.created_at).unwrap_or(now);
-        let stale = (now - oldest_queued) > 6 * 3600;
-
-        if !in_target_window && !stale {
-            continue;
-        }
-
-        // Cooldown: don't send more than one digest per 3 hours (auto mode)
-        // Manual digest_time users get exact delivery at their times (1h cooldown to prevent double-fire)
+        // Cooldown: don't send more than one digest per N seconds.
+        // Manual mode uses 9 min — just under the 10-min cron cadence — so consecutive
+        // 10-min slots like 08:50, 09:00 can both fire while still preventing
+        // double-fires from cron drift within the same slot.
         let cooldown_secs = if settings.digest_time.is_some() {
-            3600 // 1h for manual - just prevents double-fire within same window
+            540 // 9 min for manual
         } else {
             10800 // 3h for auto
         };
@@ -1093,89 +1528,28 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
             }
         }
 
-        // Build the digest message
-        let mut lines = Vec::new();
-        let mut message_ids = Vec::new();
-
-        for (i, msg) in pending.iter().enumerate() {
-            if i >= 10 {
-                break;
-            }
-            let summary = msg.summary.as_deref().unwrap_or(&msg.content);
-            let short: String = summary.chars().take(100).collect();
-            lines.push(format!(
-                "{}. {} ({}): {}",
-                i + 1,
-                msg.sender_name,
-                msg.platform,
-                short
-            ));
-            message_ids.push(msg.id);
-        }
-
-        // Add recently created tracked items
-        let six_hours_ago = now - 6 * 3600;
-        let recent_events = state
-            .ontology_repository
-            .get_recently_created_events(user_id, six_hours_ago)
-            .unwrap_or_default();
-
-        let mut event_lines = Vec::new();
-        for event in recent_events.iter().take(5) {
-            let due_str = if let Some(due) = event.due_at {
-                let days = (due - now) / 86400;
-                if days <= 0 {
-                    " (due today)".to_string()
-                } else if days == 1 {
-                    " (due tomorrow)".to_string()
-                } else {
-                    format!(" (due in {} days)", days)
-                }
-            } else {
-                String::new()
+        // Build the digest payload (sections, filters, formatting).
+        let (digest_text, message_ids) =
+            match build_digest_for_user(state, user_id, &settings, now, tz_offset_secs).await {
+                Some(d) => d,
+                None => continue, // nothing to send (empty after filters)
             };
-            let prefix = if event.status == "proposed" {
-                "Proposed: "
-            } else {
-                ""
-            };
-            event_lines.push(format!("- {}{}{}", prefix, event.description, due_str));
-        }
 
-        // Check recently auto-completed events
-        let completed_events = state
-            .ontology_repository
-            .get_recently_completed_events(user_id, six_hours_ago)
-            .unwrap_or_default();
-
-        if lines.is_empty() && event_lines.is_empty() && completed_events.is_empty() {
+        // Window check: only fire if we're in the user's delivery window. Skip
+        // the staleness fallback now that the digest is built — anything in the
+        // sections is at most 24h old already.
+        if !in_target_window {
             continue;
         }
 
-        let mut digest_parts = Vec::new();
-        if !lines.is_empty() {
-            let count = lines.len();
-            digest_parts.push(format!(
-                "{} thing{} while you were away:\n{}",
-                count,
-                if count == 1 { "" } else { "s" },
-                lines.join("\n")
-            ));
-        }
-        if !event_lines.is_empty() {
-            digest_parts.push(format!("Now tracking:\n{}", event_lines.join("\n")));
-        }
-
-        if !completed_events.is_empty() {
-            let completed_lines: Vec<String> = completed_events
-                .iter()
-                .take(5)
-                .map(|e| format!("- {}", e.description))
-                .collect();
-            digest_parts.push(format!("Auto-completed:\n{}", completed_lines.join("\n")));
-        }
-
-        let digest_text = digest_parts.join("\n\n");
+        tracing::info!(
+            "Built digest for user {} (msgs={}, slot={:02}:{:02}):\n{}",
+            user_id,
+            message_ids.len(),
+            current_slot / 60,
+            current_slot % 60,
+            digest_text
+        );
 
         crate::proactive::utils::send_notification(
             state,
@@ -1188,19 +1562,29 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
 
         // Record cooldown and mark as delivered
         state.digest_cooldowns.insert(user_id, now);
-        if let Err(e) = state
-            .ontology_repository
-            .mark_digest_delivered(&message_ids, now)
-        {
-            error!(
-                "Failed to mark digest messages as delivered for user {}: {}",
-                user_id, e
-            );
+        if !message_ids.is_empty() {
+            if let Err(e) = state
+                .ontology_repository
+                .mark_digest_delivered(&message_ids, now)
+            {
+                error!(
+                    "Failed to mark digest messages as delivered for user {}: {}",
+                    user_id, e
+                );
+            }
         }
 
         debug!(
-            "Delivered digest with {} msgs + {} events to user {} (target_hours={:?}, current_hour={})",
-            lines.len(), event_lines.len(), user_id, target_hours, current_hour
+            "Delivered digest to user {} (msgs={}, slot={:02}:{:02}, mode={})",
+            user_id,
+            message_ids.len(),
+            current_slot / 60,
+            current_slot % 60,
+            if settings.digest_time.is_some() {
+                "manual"
+            } else {
+                "auto"
+            }
         );
     }
 }

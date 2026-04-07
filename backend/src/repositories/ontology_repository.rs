@@ -1514,6 +1514,50 @@ impl OntologyRepository {
             .load::<OntMessage>(&mut conn)
     }
 
+    /// Generalized digest fetcher used for the sectioned digest layout.
+    /// Pulls undelivered, unresolved messages from the user matching any of
+    /// the given urgency levels, since the given UTC unix timestamp.
+    pub fn get_pending_messages_by_urgency(
+        &self,
+        user_id: i32,
+        urgencies: &[&str],
+        since: i32,
+        limit: i64,
+    ) -> Result<Vec<OntMessage>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let urgencies_owned: Vec<String> = urgencies.iter().map(|s| s.to_string()).collect();
+        ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::urgency.eq_any(urgencies_owned))
+            .filter(ont_messages::created_at.ge(since))
+            .filter(ont_messages::digest_delivered_at.is_null())
+            .filter(ont_messages::resolved_at.is_null())
+            .filter(ont_messages::sender_name.ne("You"))
+            .order(ont_messages::created_at.desc())
+            .limit(limit)
+            .load::<OntMessage>(&mut conn)
+    }
+
+    /// Tracked events with `due_at` falling inside the user's local current day.
+    /// Caller passes the day boundaries as UTC unix timestamps (compute from
+    /// `now + tz_offset_secs`). Excludes done/dismissed events.
+    pub fn get_events_due_on_local_day(
+        &self,
+        user_id: i32,
+        day_start_unix: i32,
+        day_end_unix: i32,
+    ) -> Result<Vec<OntEvent>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_events::table
+            .filter(ont_events::user_id.eq(user_id))
+            .filter(ont_events::status.eq_any(&["active", "proposed"]))
+            .filter(ont_events::due_at.is_not_null())
+            .filter(ont_events::due_at.ge(day_start_unix))
+            .filter(ont_events::due_at.lt(day_end_unix))
+            .order(ont_events::due_at.asc())
+            .load(&mut conn)
+    }
+
     /// Mark digest messages as delivered.
     pub fn mark_digest_delivered(&self, message_ids: &[i64], now: i32) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1568,11 +1612,14 @@ impl OntologyRepository {
     }
 
     /// Get all user IDs that have pending digest messages.
+    /// Includes users with any unresolved, undelivered critical/high/medium message
+    /// so the sectioned digest can pull from all three urgency levels.
     pub fn get_users_with_pending_digests(&self) -> Result<Vec<i32>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         ont_messages::table
-            .filter(ont_messages::urgency.eq("medium"))
+            .filter(ont_messages::urgency.eq_any(&["critical", "high", "medium"]))
             .filter(ont_messages::digest_delivered_at.is_null())
+            .filter(ont_messages::resolved_at.is_null())
             .filter(ont_messages::sender_name.ne("You"))
             .select(ont_messages::user_id)
             .distinct()

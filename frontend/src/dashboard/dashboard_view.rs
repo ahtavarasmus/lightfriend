@@ -840,11 +840,14 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let custom_rules_open = use_state(|| false);
     let critical_notif_details_open = use_state(|| false);
     let digest_details_open = use_state(|| false);
-    let digest_custom_input = use_state(|| String::new());
+    let digest_picker_hour = use_state(|| "08".to_string());
+    let digest_picker_minute = use_state(|| "00".to_string());
     let digest_show_custom = use_state({
         let t = (*digest_time_display).clone();
         move || !t.is_empty()
     });
+    // Whether the digest picker is in edit mode (collapsed by default to save space)
+    let digest_editing = use_state(|| false);
 
     // Critical notifications toggle handler
     let on_critical_toggle = {
@@ -908,11 +911,18 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
+    // Toggle the digest editor open/closed
+    let on_digest_edit_toggle = {
+        let digest_editing = digest_editing.clone();
+        Callback::from(move |_: web_sys::MouseEvent| {
+            digest_editing.set(!*digest_editing);
+        })
+    };
+
     // Digest schedule change handler
     let on_digest_schedule_change = {
         let digest_time_display = digest_time_display.clone();
         let digest_show_custom = digest_show_custom.clone();
-        let digest_custom_input = digest_custom_input.clone();
         let profile = props.user_profile.clone();
         let on_update = props.on_profile_update.clone();
         Callback::from(move |e: web_sys::Event| {
@@ -920,7 +930,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
             let selected = target.value();
 
             if selected == "custom" {
-                digest_custom_input.set((*digest_time_display).clone());
                 digest_show_custom.set(true);
                 return;
             }
@@ -951,42 +960,49 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         })
     };
 
-    // Custom digest time input handler
-    let on_digest_custom_input = {
-        let digest_custom_input = digest_custom_input.clone();
-        Callback::from(move |e: web_sys::InputEvent| {
-            let target: web_sys::HtmlInputElement = e.target_unchecked_into();
-            digest_custom_input.set(target.value());
+    // Picker dropdown change handlers
+    let on_digest_picker_hour_change = {
+        let digest_picker_hour = digest_picker_hour.clone();
+        Callback::from(move |e: web_sys::Event| {
+            let target: web_sys::HtmlSelectElement = e.target_unchecked_into();
+            digest_picker_hour.set(target.value());
+        })
+    };
+    let on_digest_picker_minute_change = {
+        let digest_picker_minute = digest_picker_minute.clone();
+        Callback::from(move |e: web_sys::Event| {
+            let target: web_sys::HtmlSelectElement = e.target_unchecked_into();
+            digest_picker_minute.set(target.value());
         })
     };
 
-    // Save custom digest times
-    let on_digest_custom_save = {
-        let digest_custom_input = digest_custom_input.clone();
+    // Add a time from the picker
+    let on_digest_add_time = {
         let digest_time_display = digest_time_display.clone();
+        let digest_picker_hour = digest_picker_hour.clone();
+        let digest_picker_minute = digest_picker_minute.clone();
         let profile = props.user_profile.clone();
         let on_update = props.on_profile_update.clone();
         Callback::from(move |_: web_sys::MouseEvent| {
-            let raw = (*digest_custom_input).clone();
-            // Validate: comma-separated HH:MM values
-            let times: Vec<&str> = raw.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
-            let valid = !times.is_empty() && times.iter().all(|t| {
-                let parts: Vec<&str> = t.split(':').collect();
-                parts.len() == 2
-                    && parts[0].parse::<u32>().map(|h| h < 24).unwrap_or(false)
-                    && parts[1].parse::<u32>().map(|m| m < 60).unwrap_or(false)
-            });
-            if !valid {
+            let new_time = format!("{}:{}", *digest_picker_hour, *digest_picker_minute);
+            let mut current: Vec<String> = (*digest_time_display)
+                .split(',')
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect();
+            if current.contains(&new_time) {
                 return;
             }
-            let cleaned: String = times.join(",");
-            digest_time_display.set(cleaned.clone());
+            current.push(new_time);
+            current.sort();
+            let canonical = current.join(",");
+            digest_time_display.set(canonical.clone());
             let profile = profile.clone();
             let on_update = on_update.clone();
             spawn_local(async move {
                 let request = serde_json::json!({
                     "field": "digest_time",
-                    "value": cleaned
+                    "value": canonical.clone()
                 });
                 if let Ok(r) = Api::patch("/api/profile/field")
                     .json(&request)
@@ -996,7 +1012,52 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 {
                     if r.ok() {
                         let mut p = profile.clone();
-                        p.digest_time = Some(cleaned);
+                        p.digest_time = Some(canonical);
+                        on_update.emit(p);
+                    }
+                }
+            });
+        })
+    };
+
+    // Remove a single chip
+    let on_digest_remove_time: Callback<String> = {
+        let digest_time_display = digest_time_display.clone();
+        let profile = props.user_profile.clone();
+        let on_update = props.on_profile_update.clone();
+        Callback::from(move |time_to_remove: String| {
+            let remaining: Vec<String> = (*digest_time_display)
+                .split(',')
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty() && *t != time_to_remove)
+                .collect();
+            let canonical = remaining.join(",");
+            digest_time_display.set(canonical.clone());
+            let profile = profile.clone();
+            let on_update = on_update.clone();
+            spawn_local(async move {
+                let value = if canonical.is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::Value::String(canonical.clone())
+                };
+                let request = serde_json::json!({
+                    "field": "digest_time",
+                    "value": value
+                });
+                if let Ok(r) = Api::patch("/api/profile/field")
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    if r.ok() {
+                        let mut p = profile.clone();
+                        p.digest_time = if canonical.is_empty() {
+                            None
+                        } else {
+                            Some(canonical)
+                        };
                         on_update.emit(p);
                     }
                 }
@@ -1838,18 +1899,32 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                         {if *digest_enabled { "Active" } else { "Inactive" }}
                                     </button>
                                 </div>
-                                <div class="critical-notif-desc">
-                                    {if *digest_enabled {
-                                        if (*digest_time_display).is_empty() {
-                                            "Auto-scheduled based on your activity patterns."
-                                        } else {
-                                            "Delivering at your custom times."
-                                        }
-                                    } else {
-                                        "Medium-priority messages collected and delivered periodically."
-                                    }}
-                                </div>
                                 if *digest_enabled {
+                                    // Compact one-line summary with inline Edit toggle
+                                    <div class="critical-notif-desc" style="display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">
+                                        <span>
+                                            {
+                                                if (*digest_time_display).is_empty() {
+                                                    "Auto-scheduled".to_string()
+                                                } else {
+                                                    format!("Custom: {}", (*digest_time_display).replace(',', ", "))
+                                                }
+                                            }
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onclick={on_digest_edit_toggle.clone()}
+                                            style="background: none; border: none; color: #7EB2FF; cursor: pointer; font-size: 0.75rem; padding: 0; text-decoration: underline;"
+                                        >
+                                            {if *digest_editing { "Done" } else { "Edit" }}
+                                        </button>
+                                    </div>
+                                } else {
+                                    <div class="critical-notif-desc">
+                                        {"Medium-priority messages collected and delivered periodically."}
+                                    </div>
+                                }
+                                if *digest_enabled && *digest_editing {
                                     <div class="digest-schedule-row">
                                         <label>{"Schedule:"}</label>
                                         <select
@@ -1865,23 +1940,95 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                         </select>
                                     </div>
                                     if *digest_show_custom {
-                                        <div class="digest-schedule-row">
-                                            <input
-                                                type="text"
-                                                class="digest-schedule-select"
-                                                style="flex: 1;"
-                                                placeholder="e.g. 08:00,12:30,19:00"
-                                                value={(*digest_custom_input).clone()}
-                                                oninput={on_digest_custom_input.clone()}
-                                            />
-                                            <button
-                                                class="critical-notif-badge active"
-                                                style="font-size: 0.7rem; padding: 0.2rem 0.5rem;"
-                                                onclick={on_digest_custom_save.clone()}
-                                            >
-                                                {"Save"}
-                                            </button>
+                                        // Selected times as removable chips
+                                        <div style="display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.4rem; min-height: 1.5rem;">
+                                            {
+                                                if (*digest_time_display).is_empty() {
+                                                    html! {
+                                                        <span style="color: rgba(255,255,255,0.4); font-size: 0.8rem; font-style: italic;">
+                                                            {"No times set — pick one below"}
+                                                        </span>
+                                                    }
+                                                } else {
+                                                    (*digest_time_display).split(',')
+                                                        .map(|t| t.trim().to_string())
+                                                        .filter(|t| !t.is_empty())
+                                                        .map(|time| {
+                                                            let on_remove = {
+                                                                let on_remove_handler = on_digest_remove_time.clone();
+                                                                let time = time.clone();
+                                                                Callback::from(move |_: web_sys::MouseEvent| {
+                                                                    on_remove_handler.emit(time.clone());
+                                                                })
+                                                            };
+                                                            html! {
+                                                                <span style="display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.55rem; background: rgba(126, 178, 255, 0.15); border: 1px solid rgba(126, 178, 255, 0.4); border-radius: 12px; font-size: 0.8rem; color: #7EB2FF;">
+                                                                    {time.clone()}
+                                                                    <button
+                                                                        type="button"
+                                                                        onclick={on_remove}
+                                                                        style="background: none; border: none; color: #7EB2FF; cursor: pointer; font-size: 0.95rem; line-height: 1; padding: 0;"
+                                                                        title="Remove"
+                                                                    >
+                                                                        {"×"}
+                                                                    </button>
+                                                                </span>
+                                                            }
+                                                        })
+                                                        .collect::<Html>()
+                                                }
+                                            }
                                         </div>
+                                        // Hour + minute pickers (hidden once we hit the 4-slot cap)
+                                        if (*digest_time_display)
+                                            .split(',')
+                                            .map(|t| t.trim())
+                                            .filter(|t| !t.is_empty())
+                                            .count() >= 4
+                                        {
+                                            <div style="margin-top: 0.4rem; font-size: 0.75rem; color: rgba(255,255,255,0.5); font-style: italic;">
+                                                {"Max 4 digest times per day reached. Remove one to add another."}
+                                            </div>
+                                        } else {
+                                            <div class="digest-schedule-row">
+                                                <select
+                                                    class="digest-schedule-select"
+                                                    style="width: auto;"
+                                                    value={(*digest_picker_hour).clone()}
+                                                    onchange={on_digest_picker_hour_change.clone()}
+                                                >
+                                                    {
+                                                        (0u8..24).map(|h| {
+                                                            let val = format!("{:02}", h);
+                                                            let selected = val == *digest_picker_hour;
+                                                            html! { <option value={val.clone()} selected={selected}>{val}</option> }
+                                                        }).collect::<Html>()
+                                                    }
+                                                </select>
+                                                <span style="color: rgba(255,255,255,0.5);">{":"}</span>
+                                                <select
+                                                    class="digest-schedule-select"
+                                                    style="width: auto;"
+                                                    value={(*digest_picker_minute).clone()}
+                                                    onchange={on_digest_picker_minute_change.clone()}
+                                                >
+                                                    {
+                                                        [0u8, 10, 20, 30, 40, 50].iter().map(|&m| {
+                                                            let val = format!("{:02}", m);
+                                                            let selected = val == *digest_picker_minute;
+                                                            html! { <option value={val.clone()} selected={selected}>{val}</option> }
+                                                        }).collect::<Html>()
+                                                    }
+                                                </select>
+                                                <button
+                                                    class="critical-notif-badge active"
+                                                    style="font-size: 0.7rem; padding: 0.2rem 0.5rem;"
+                                                    onclick={on_digest_add_time.clone()}
+                                                >
+                                                    {"+ Add"}
+                                                </button>
+                                            </div>
+                                        }
                                     }
                                 }
                                 <button class="critical-notif-details-toggle" onclick={on_toggle_digest_details}>

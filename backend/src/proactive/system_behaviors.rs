@@ -372,7 +372,11 @@ pub async fn run_system_behaviors(
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "One-line summary of the message for digest delivery (max 100 chars). Always fill this."
+                "Very short teaser of what the message is about, for the SMS digest (max 60 chars). \
+                 Do NOT restate the sender's name — they're already labeled separately. \
+                 Write what the message is about, not who sent it. \
+                 Examples: 'asking about dinner tonight', 'payment of $1200 declined', \
+                 'PRD review needed by EOD'. Always fill this."
                     .to_string(),
             ),
             ..Default::default()
@@ -1360,7 +1364,7 @@ pub async fn check_outgoing_event_resolution(
 
 /// Get the room's seen-up-to timestamp from bridge read receipts.
 /// Returns None for email or if the lookup fails.
-async fn get_room_seen_ts(
+pub async fn get_room_seen_ts(
     state: &Arc<AppState>,
     user_id: i32,
     room_id: &str,
