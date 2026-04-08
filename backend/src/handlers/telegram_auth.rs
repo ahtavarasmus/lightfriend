@@ -16,12 +16,290 @@ use matrix_sdk::{
 use serde::Serialize;
 use serde_json::json;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::time::{sleep, timeout, Duration};
 
 use std::path::Path;
 use tokio::fs;
 
 const TELEGRAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(45);
+
+/// Truncate a string to `max_chars` characters for log output, replacing newlines
+/// with spaces so the log stays on a single line. This is used to dump bot message
+/// bodies into logs without blowing up log size.
+fn truncate_for_log(s: &str, max_chars: usize) -> String {
+    let cleaned: String = s
+        .chars()
+        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+        .collect();
+    if cleaned.chars().count() <= max_chars {
+        cleaned
+    } else {
+        let truncated: String = cleaned.chars().take(max_chars).collect();
+        format!(
+            "{}...<+{} chars>",
+            truncated,
+            cleaned.chars().count() - max_chars
+        )
+    }
+}
+
+/// Flatten any std::error::Error source chain into a single grep-friendly line,
+/// joining causes with " -> ". Works for reqwest::Error, matrix_sdk::Error, etc.
+fn format_std_err_chain(e: &(dyn std::error::Error + 'static)) -> String {
+    let mut parts: Vec<String> = vec![e.to_string()];
+    let mut current: Option<&(dyn std::error::Error + 'static)> = e.source();
+    while let Some(cause) = current {
+        parts.push(cause.to_string());
+        current = cause.source();
+    }
+    parts.join(" -> ")
+}
+
+/// Flatten an anyhow::Error chain into a single line via its `.chain()` walker.
+fn format_anyhow_chain(e: &anyhow::Error) -> String {
+    e.chain()
+        .map(|cause| cause.to_string())
+        .collect::<Vec<_>>()
+        .join(" -> ")
+}
+
+/// Log the proxy / TLS environment variables that reqwest and matrix-sdk
+/// auto-detect. This is the first thing to check when the enclave behaves
+/// differently from a bare VPS, because the enclave usually routes outbound
+/// traffic through vsock -> host proxy and custom TLS config.
+fn log_network_env(user_id: i32) {
+    // Proxy env vars (reqwest/hyper auto-detect these)
+    let proxy_vars = [
+        "HTTP_PROXY",
+        "http_proxy",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+        "NO_PROXY",
+        "no_proxy",
+    ];
+    for key in proxy_vars.iter() {
+        match std::env::var(key) {
+            Ok(v) => tracing::info!("[TG-CONNECT user={}] PHASE=net_env {}={}", user_id, key, v),
+            Err(_) => tracing::info!(
+                "[TG-CONNECT user={}] PHASE=net_env {}=<unset>",
+                user_id,
+                key
+            ),
+        }
+    }
+
+    // TLS cert env vars (various crates honor these differently)
+    let tls_vars = [
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+    ];
+    for key in tls_vars.iter() {
+        match std::env::var(key) {
+            Ok(v) => tracing::info!("[TG-CONNECT user={}] PHASE=net_env {}={}", user_id, key, v),
+            Err(_) => tracing::info!(
+                "[TG-CONNECT user={}] PHASE=net_env {}=<unset>",
+                user_id,
+                key
+            ),
+        }
+    }
+}
+
+/// Read /etc/resolv.conf and log the first 500 chars. On the VPS this
+/// is usually the cloud provider's resolver; inside the enclave it's
+/// whatever was baked into the image (or nothing at all if DNS is broken).
+async fn log_resolv_conf(user_id: i32) {
+    match tokio::fs::read_to_string("/etc/resolv.conf").await {
+        Ok(contents) => {
+            tracing::info!(
+                "[TG-CONNECT user={}] PHASE=net_env /etc/resolv.conf={:?}",
+                user_id,
+                truncate_for_log(&contents, 500)
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                "[TG-CONNECT user={}] PHASE=net_env /etc/resolv.conf unreadable chain=[{}]",
+                user_id,
+                format_std_err_chain(&e)
+            );
+        }
+    }
+}
+
+/// Resolve the homeserver hostname to IP addresses using tokio's resolver.
+/// This isolates DNS from TCP/TLS/HTTP. If this fails but HTTP_PROXY is set,
+/// that's normal (proxy handles DNS); if this fails and no proxy is set,
+/// that's the root cause.
+async fn log_dns_lookup(user_id: i32, host: &str, port: u16) {
+    let t0 = Instant::now();
+    let target = format!("{}:{}", host, port);
+    tracing::info!(
+        "[TG-CONNECT user={}] PHASE=dns_lookup resolving {}",
+        user_id,
+        target
+    );
+    let result = tokio::net::lookup_host(target.clone()).await;
+    match result {
+        Ok(addrs) => {
+            let ips: Vec<String> = addrs.map(|a| a.to_string()).collect();
+            if ips.is_empty() {
+                tracing::error!(
+                    "[TG-CONNECT user={}] PHASE=dns_lookup EMPTY no addresses for {} elapsed_ms={}",
+                    user_id,
+                    target,
+                    t0.elapsed().as_millis()
+                );
+            } else {
+                tracing::info!(
+                    "[TG-CONNECT user={}] PHASE=dns_lookup OK {} -> [{}] elapsed_ms={}",
+                    user_id,
+                    target,
+                    ips.join(", "),
+                    t0.elapsed().as_millis()
+                );
+            }
+        }
+        Err(e) => {
+            tracing::error!(
+                "[TG-CONNECT user={}] PHASE=dns_lookup FAILED {} elapsed_ms={} chain=[{}]",
+                user_id,
+                target,
+                t0.elapsed().as_millis(),
+                format_std_err_chain(&e)
+            );
+        }
+    }
+}
+
+/// Raw TCP connect probe - no TLS, no HTTP. If this fails, it's either
+/// tap0 is dead, the vsock proxy on the host isn't running, or DNS gave
+/// us an unreachable IP. Isolates transport-layer issues from TLS/HTTP.
+async fn log_tcp_connect(user_id: i32, host: &str, port: u16) {
+    let t0 = Instant::now();
+    let target = format!("{}:{}", host, port);
+    tracing::info!(
+        "[TG-CONNECT user={}] PHASE=tcp_connect probing {}",
+        user_id,
+        target
+    );
+    match tokio::time::timeout(
+        Duration::from_secs(3),
+        tokio::net::TcpStream::connect(target.as_str()),
+    )
+    .await
+    {
+        Ok(Ok(stream)) => {
+            let peer = stream
+                .peer_addr()
+                .map(|a| a.to_string())
+                .unwrap_or_else(|e| format!("<peer_addr err: {}>", e));
+            tracing::info!(
+                "[TG-CONNECT user={}] PHASE=tcp_connect OK peer={} elapsed_ms={}",
+                user_id,
+                peer,
+                t0.elapsed().as_millis()
+            );
+            drop(stream);
+        }
+        Ok(Err(e)) => {
+            tracing::error!(
+                "[TG-CONNECT user={}] PHASE=tcp_connect FAILED {} elapsed_ms={} chain=[{}]",
+                user_id,
+                target,
+                t0.elapsed().as_millis(),
+                format_std_err_chain(&e)
+            );
+        }
+        Err(_) => {
+            tracing::error!(
+                "[TG-CONNECT user={}] PHASE=tcp_connect TIMEOUT {} after 3s elapsed_ms={}",
+                user_id,
+                target,
+                t0.elapsed().as_millis()
+            );
+        }
+    }
+}
+
+/// Pre-flight network connectivity check. Issues a plain HTTPS GET to
+/// `{homeserver}/_matrix/client/versions` with a short timeout so we can
+/// tell apart "tap0/network is broken" from "Matrix protocol misbehaving".
+/// This is the first place in the connect flow where we touch the network,
+/// so any network-level failure (DNS, TCP connect, TLS, HTTP) shows up here
+/// with a descriptive single-line error chain in the logs.
+async fn preflight_homeserver_reachability(user_id: i32, homeserver: &str) {
+    let t0 = Instant::now();
+    let versions_url = format!(
+        "{}/_matrix/client/versions",
+        homeserver.trim_end_matches('/')
+    );
+    tracing::info!(
+        "[TG-CONNECT user={}] PHASE=preflight GET {}",
+        user_id,
+        versions_url
+    );
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!(
+                "[TG-CONNECT user={}] PHASE=preflight FAILED to build reqwest client chain=[{}]",
+                user_id,
+                format_std_err_chain(&e)
+            );
+            return;
+        }
+    };
+    match client.get(&versions_url).send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            let body_snippet = match resp.text().await {
+                Ok(t) => truncate_for_log(&t, 200),
+                Err(e) => format!("<body read failed: {}>", format_std_err_chain(&e)),
+            };
+            if status.is_success() {
+                tracing::info!(
+                    "[TG-CONNECT user={}] PHASE=preflight OK status={} elapsed_ms={} body={:?}",
+                    user_id,
+                    status,
+                    t0.elapsed().as_millis(),
+                    body_snippet
+                );
+            } else {
+                tracing::warn!(
+                    "[TG-CONNECT user={}] PHASE=preflight HTTP non-2xx status={} elapsed_ms={} body={:?} (homeserver REACHABLE but returned error status)",
+                    user_id,
+                    status,
+                    t0.elapsed().as_millis(),
+                    body_snippet
+                );
+            }
+        }
+        Err(e) => {
+            // Walk the chain so we can see whether it's DNS, TCP connect,
+            // TLS, or request-body level. This is the log line that will
+            // clearly say "tap0 is broken" if the network is down.
+            tracing::error!(
+                "[TG-CONNECT user={}] PHASE=preflight NETWORK FAILURE elapsed_ms={} is_timeout={} is_connect={} is_request={} is_body={} chain=[{}]",
+                user_id,
+                t0.elapsed().as_millis(),
+                e.is_timeout(),
+                e.is_connect(),
+                e.is_request(),
+                e.is_body(),
+                format_std_err_chain(&e)
+            );
+        }
+    }
+}
 
 // Helper function to detect the one-time key conflict error
 fn is_one_time_key_conflict(error: &anyhow::Error) -> bool {
@@ -73,13 +351,42 @@ async fn connect_telegram_with_retry(
         .localpart()
         .to_string();
 
+    tracing::info!(
+        "[TG-CONNECT user={}] PHASE=retry_loop starting (max={}) matrix_username={}",
+        user_id,
+        MAX_RETRIES,
+        username
+    );
+
     for retry_count in 0..MAX_RETRIES {
-        match connect_telegram(client, bridge_bot).await {
-            Ok(result) => return Ok(result),
+        let attempt_start = Instant::now();
+        tracing::info!(
+            "[TG-CONNECT user={}] PHASE=retry_loop attempt={}/{}",
+            user_id,
+            retry_count + 1,
+            MAX_RETRIES
+        );
+        match connect_telegram(client, bridge_bot, user_id).await {
+            Ok(result) => {
+                tracing::info!(
+                    "[TG-CONNECT user={}] PHASE=retry_loop attempt={} SUCCEEDED elapsed_ms={}",
+                    user_id,
+                    retry_count + 1,
+                    attempt_start.elapsed().as_millis()
+                );
+                return Ok(result);
+            }
             Err(e) => {
+                tracing::warn!(
+                    "[TG-CONNECT user={}] PHASE=retry_loop attempt={} FAILED elapsed_ms={} err={:?}",
+                    user_id,
+                    retry_count + 1,
+                    attempt_start.elapsed().as_millis(),
+                    e
+                );
                 if retry_count < MAX_RETRIES - 1 && is_one_time_key_conflict(&e) {
                     tracing::warn!(
-                        "One-time key conflict detected for user {} (attempt {}/{}), resetting client store",
+                        "[TG-CONNECT user={}] PHASE=retry_loop one-time key conflict detected (attempt {}/{}), resetting client store",
                         user_id,
                         retry_count + 1,
                         MAX_RETRIES
@@ -91,7 +398,11 @@ async fn connect_telegram_with_retry(
                         fs::remove_dir_all(&store_path).await?;
                         sleep(Duration::from_millis(500)).await; // Small delay before recreation
                         fs::create_dir_all(&store_path).await?;
-                        tracing::info!("Cleared store directory: {}", store_path);
+                        tracing::info!(
+                            "[TG-CONNECT user={}] PHASE=retry_loop cleared store directory: {}",
+                            user_id,
+                            store_path
+                        );
                     }
 
                     // Add delay before retry
@@ -101,11 +412,18 @@ async fn connect_telegram_with_retry(
                     match matrix_auth::get_cached_client(user_id, state).await {
                         Ok(new_client) => {
                             *client = new_client; // Update the client reference
-                            tracing::info!("Client reinitialized, retrying operation");
+                            tracing::info!(
+                                "[TG-CONNECT user={}] PHASE=retry_loop client reinitialized, retrying",
+                                user_id
+                            );
                             continue;
                         }
                         Err(init_err) => {
-                            tracing::error!("Failed to reinitialize client: {}", init_err);
+                            tracing::error!(
+                                "[TG-CONNECT user={}] PHASE=retry_loop FAILED to reinitialize client: {:?}",
+                                user_id,
+                                init_err
+                            );
                             return Err(init_err);
                         }
                     }
@@ -133,140 +451,433 @@ pub struct TelegramConnectionResponse {
 async fn connect_telegram(
     client: &MatrixClient,
     bridge_bot: &str,
+    user_id: i32,
 ) -> Result<(OwnedRoomId, String)> {
-    tracing::info!("Telegram connect: starting, bot={}", bridge_bot);
+    let fn_start = Instant::now();
+    tracing::info!(
+        "[TG-CONNECT user={}] SUBPHASE=init entered connect_telegram bot={}",
+        user_id,
+        bridge_bot
+    );
 
-    let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
+    let bot_user_id = OwnedUserId::try_from(bridge_bot).map_err(|e| {
+        tracing::error!(
+            "[TG-CONNECT user={}] SUBPHASE=init invalid bridge_bot={:?} err={:?}",
+            user_id,
+            bridge_bot,
+            e
+        );
+        anyhow!("Invalid bridge_bot user id: {}", e)
+    })?;
 
-    tracing::info!("Telegram connect: creating room...");
+    // --- create room ---
+    let t_room = Instant::now();
+    tracing::info!(
+        "[TG-CONNECT user={}] SUBPHASE=create_room calling client.create_room()...",
+        user_id
+    );
     let request = CreateRoomRequest::new();
-    let response = client.create_room(request).await?;
+    let response = client.create_room(request).await.map_err(|e| {
+        tracing::error!(
+            "[TG-CONNECT user={}] SUBPHASE=create_room FAILED elapsed_ms={} chain=[{}]",
+            user_id,
+            t_room.elapsed().as_millis(),
+            format_std_err_chain(&e)
+        );
+        anyhow::Error::from(e)
+    })?;
     let room_id = response.room_id();
-    tracing::info!("Telegram connect: room created {}", room_id);
+    tracing::info!(
+        "[TG-CONNECT user={}] SUBPHASE=create_room OK room_id={} elapsed_ms={}",
+        user_id,
+        room_id,
+        t_room.elapsed().as_millis()
+    );
 
-    let room = client.get_room(room_id).ok_or(anyhow!("Room not found"))?;
+    let room = client.get_room(room_id).ok_or_else(|| {
+        tracing::error!(
+            "[TG-CONNECT user={}] SUBPHASE=create_room room lookup returned None for room_id={}",
+            user_id,
+            room_id
+        );
+        anyhow!("Room not found")
+    })?;
 
-    tracing::info!("Telegram connect: inviting bot...");
-    room.invite_user_by_id(&bot_user_id).await?;
-    tracing::info!("Telegram connect: bot invited, syncing...");
+    // --- invite bot ---
+    let t_invite = Instant::now();
+    tracing::info!(
+        "[TG-CONNECT user={}] SUBPHASE=invite_bot inviting {}",
+        user_id,
+        bot_user_id
+    );
+    room.invite_user_by_id(&bot_user_id).await.map_err(|e| {
+        tracing::error!(
+            "[TG-CONNECT user={}] SUBPHASE=invite_bot FAILED elapsed_ms={} chain=[{}]",
+            user_id,
+            t_invite.elapsed().as_millis(),
+            format_std_err_chain(&e)
+        );
+        anyhow::Error::from(e)
+    })?;
+    tracing::info!(
+        "[TG-CONNECT user={}] SUBPHASE=invite_bot OK elapsed_ms={}",
+        user_id,
+        t_invite.elapsed().as_millis()
+    );
 
-    // Single sync to get the invitation processed
+    // --- first sync so the invite is processed ---
+    let t_sync1 = Instant::now();
+    tracing::info!(
+        "[TG-CONNECT user={}] SUBPHASE=sync1 calling sync_once(timeout=5s) to process invitation...",
+        user_id
+    );
     client
         .sync_once(MatrixSyncSettings::default().timeout(Duration::from_secs(5)))
-        .await?;
-    tracing::info!("Telegram connect: sync done, waiting for bot to join...");
+        .await
+        .map_err(|e| {
+            tracing::error!(
+                "[TG-CONNECT user={}] SUBPHASE=sync1 FAILED elapsed_ms={} chain=[{}]",
+                user_id,
+                t_sync1.elapsed().as_millis(),
+                format_std_err_chain(&e)
+            );
+            anyhow::Error::from(e)
+        })?;
+    tracing::info!(
+        "[TG-CONNECT user={}] SUBPHASE=sync1 OK elapsed_ms={}",
+        user_id,
+        t_sync1.elapsed().as_millis()
+    );
 
-    // Reduced wait time and more frequent checks
-    let mut attempt = 0;
-    for _ in 0..15 {
-        // Reduced from 30 to 15
-        attempt += 1;
-        println!("🔍 Check attempt {}/15 for bot join status", attempt);
-        let members = room.members(matrix_sdk::RoomMemberships::JOIN).await?;
+    // --- wait for bot to join (15 x 500ms = 7.5s) ---
+    let t_join = Instant::now();
+    tracing::info!(
+        "[TG-CONNECT user={}] SUBPHASE=bot_join waiting for bot to join (max 15x500ms = 7.5s)...",
+        user_id
+    );
+    let mut bot_joined = false;
+    for attempt in 1..=15 {
+        let members = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!(
+                    "[TG-CONNECT user={}] SUBPHASE=bot_join attempt={}/15 members() FAILED chain=[{}]",
+                    user_id,
+                    attempt,
+                    format_std_err_chain(&e)
+                );
+                sleep(Duration::from_millis(500)).await;
+                continue;
+            }
+        };
+        tracing::debug!(
+            "[TG-CONNECT user={}] SUBPHASE=bot_join attempt={}/15 joined_count={} looking_for={}",
+            user_id,
+            attempt,
+            members.len(),
+            bot_user_id
+        );
         if members.iter().any(|m| m.user_id() == bot_user_id) {
-            tracing::debug!("✅ Bot has joined the room");
+            bot_joined = true;
+            tracing::info!(
+                "[TG-CONNECT user={}] SUBPHASE=bot_join OK attempt={}/15 elapsed_ms={}",
+                user_id,
+                attempt,
+                t_join.elapsed().as_millis()
+            );
             break;
         }
-        sleep(Duration::from_millis(500)).await; // Reduced from 1 second to 500ms
+        sleep(Duration::from_millis(500)).await;
     }
 
-    // Quick membership check
-    let members = room.members(matrix_sdk::RoomMemberships::empty()).await?;
-    if !members.iter().any(|m| m.user_id() == bot_user_id) {
-        tracing::warn!("Telegram connect: bot failed to join room after 15 attempts");
+    if !bot_joined {
+        // Detailed membership dump so we can see who IS in the room
+        let all_members = room
+            .members(matrix_sdk::RoomMemberships::empty())
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    "[TG-CONNECT user={}] SUBPHASE=bot_join FAILED to fetch full members list chain=[{}]",
+                    user_id,
+                    format_std_err_chain(&e)
+                );
+                anyhow::Error::from(e)
+            })?;
+        let member_summary: Vec<String> = all_members
+            .iter()
+            .map(|m| format!("{}={:?}", m.user_id(), m.membership()))
+            .collect();
+        tracing::error!(
+            "[TG-CONNECT user={}] SUBPHASE=bot_join FAILED bot={} never joined after 7.5s elapsed_ms={} all_members=[{}]",
+            user_id,
+            bot_user_id,
+            t_join.elapsed().as_millis(),
+            member_summary.join(", ")
+        );
         return Err(anyhow!("Bot {} failed to join room", bot_user_id));
     }
-    tracing::info!("Telegram connect: bot joined, cleaning up stale session...");
 
-    // Logout any stale session from previous failed attempts.
-    // Without this, a half-completed login leaves a stale auth key that
-    // causes AuthKeyUnregisteredError on the next attempt.
-    room.send(RoomMessageEventContent::text_plain("!tg logout"))
-        .await?;
+    // --- clean up stale login session (!tg logout / !tg cancel) ---
+    let t_cleanup = Instant::now();
+    tracing::info!(
+        "[TG-CONNECT user={}] SUBPHASE=cleanup sending !tg logout to clear stale session",
+        user_id
+    );
+    if let Err(e) = room
+        .send(RoomMessageEventContent::text_plain("!tg logout"))
+        .await
+    {
+        tracing::warn!(
+            "[TG-CONNECT user={}] SUBPHASE=cleanup !tg logout send FAILED (continuing) chain=[{}]",
+            user_id,
+            format_std_err_chain(&e)
+        );
+    }
     sleep(Duration::from_secs(1)).await;
 
-    // Cancel any in-progress login flow
-    let cancel_command = "!tg cancel".to_string();
-    room.send(RoomMessageEventContent::text_plain(&cancel_command))
-        .await?;
+    tracing::info!(
+        "[TG-CONNECT user={}] SUBPHASE=cleanup sending !tg cancel",
+        user_id
+    );
+    if let Err(e) = room
+        .send(RoomMessageEventContent::text_plain("!tg cancel"))
+        .await
+    {
+        tracing::warn!(
+            "[TG-CONNECT user={}] SUBPHASE=cleanup !tg cancel send FAILED (continuing) chain=[{}]",
+            user_id,
+            format_std_err_chain(&e)
+        );
+    }
+    tracing::info!(
+        "[TG-CONNECT user={}] SUBPHASE=cleanup DONE elapsed_ms={}",
+        user_id,
+        t_cleanup.elapsed().as_millis()
+    );
 
-    // Send login command
-    let login_command = "!tg login".to_string();
-    room.send(RoomMessageEventContent::text_plain(&login_command))
-        .await?;
-    tracing::info!("Telegram connect: login command sent, polling for URL...");
+    // --- send !tg login ---
+    let t_login_send = Instant::now();
+    tracing::info!(
+        "[TG-CONNECT user={}] SUBPHASE=send_login sending !tg login",
+        user_id
+    );
+    room.send(RoomMessageEventContent::text_plain("!tg login"))
+        .await
+        .map_err(|e| {
+            tracing::error!(
+                "[TG-CONNECT user={}] SUBPHASE=send_login FAILED elapsed_ms={} chain=[{}]",
+                user_id,
+                t_login_send.elapsed().as_millis(),
+                format_std_err_chain(&e)
+            );
+            anyhow::Error::from(e)
+        })?;
+    tracing::info!(
+        "[TG-CONNECT user={}] SUBPHASE=send_login OK elapsed_ms={} now polling up to 60x for URL response (max ~30s)",
+        user_id,
+        t_login_send.elapsed().as_millis()
+    );
 
-    // Optimized login url detection with event handler
-    let mut login_url = None;
+    // --- poll for login URL ---
+    let t_poll = Instant::now();
+    let mut login_url: Option<String> = None;
+    let mut bot_message_count = 0usize;
+    let mut last_bot_body: Option<String> = None;
+    // Track polls where sync_once returned Ok() but we saw no bot messages
+    // at all. If this stays high, either the network is flaky (requests
+    // returning quickly with no payload) or the bridge bot just hasn't
+    // spoken yet. Either way we want the diagnostic in logs.
+    let mut quiet_polls: u32 = 0;
 
-    // Use shorter sync timeout for faster response
     let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_millis(1500));
 
-    for attempt in 1..=60 {
-        if attempt <= 3 || attempt % 10 == 0 {
-            tracing::info!("Telegram connect: URL poll attempt {}/60", attempt);
+    'poll: for attempt in 1..=60 {
+        if attempt == 1 || attempt <= 3 || attempt % 10 == 0 {
+            tracing::info!(
+                "[TG-CONNECT user={}] SUBPHASE=url_poll attempt={}/60 poll_elapsed_ms={} bot_msgs_seen={}",
+                user_id,
+                attempt,
+                t_poll.elapsed().as_millis(),
+                bot_message_count
+            );
         }
-        client.sync_once(sync_settings.clone()).await?;
+
+        // Time sync_once so we can tell apart "proxy killed the long-poll"
+        // (returns Ok in << 1500ms) from "normal sync" (~1500ms).
+        let t_sync = Instant::now();
+        let sync_result = client.sync_once(sync_settings.clone()).await;
+        let sync_ms = t_sync.elapsed().as_millis();
+        if let Err(e) = sync_result {
+            tracing::warn!(
+                "[TG-CONNECT user={}] SUBPHASE=url_poll attempt={}/60 sync_once FAILED sync_ms={} chain=[{}]",
+                user_id,
+                attempt,
+                sync_ms,
+                format_std_err_chain(&e)
+            );
+            sleep(Duration::from_millis(500)).await;
+            continue;
+        }
+        if attempt == 1 || attempt <= 3 || attempt % 10 == 0 {
+            // Budget is 1500ms. Anything <100ms on success is suspicious
+            // (suggests the proxy is returning empty responses immediately).
+            let suspicious = if sync_ms < 100 {
+                " SUSPICIOUS_FAST"
+            } else {
+                ""
+            };
+            tracing::info!(
+                "[TG-CONNECT user={}] SUBPHASE=url_poll attempt={}/60 sync_once OK sync_ms={} budget_ms=1500{}",
+                user_id,
+                attempt,
+                sync_ms,
+                suspicious
+            );
+        }
 
         if let Some(room) = client.get_room(room_id) {
-            // Get only the most recent messages to reduce processing time
             let mut options =
                 matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
-            options.limit = matrix_sdk::ruma::UInt::new(5).unwrap(); // Reduced from 10 to 5
-            let messages = room.messages(options).await?;
+            options.limit = matrix_sdk::ruma::UInt::new(5).unwrap();
+            let messages = match room.messages(options).await {
+                Ok(m) => m,
+                Err(e) => {
+                    tracing::warn!(
+                        "[TG-CONNECT user={}] SUBPHASE=url_poll attempt={}/60 messages() FAILED chain=[{}]",
+                        user_id,
+                        attempt,
+                        format_std_err_chain(&e)
+                    );
+                    sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
+            };
+
+            // Diagnostic: how many events in the room at all, and how many
+            // from the bot specifically. Helps distinguish "network is fine,
+            // bot is silent" from "room.messages() returned nothing".
+            let total_events = messages.chunk.len();
+            let bot_events_this_poll = messages
+                .chunk
+                .iter()
+                .filter_map(|m| m.raw().deserialize().ok())
+                .filter(|ev| ev.sender() == bot_user_id)
+                .count();
+            if bot_events_this_poll == 0 {
+                quiet_polls += 1;
+                // Log at intervals so we don't spam
+                if quiet_polls == 1 || quiet_polls.is_multiple_of(10) {
+                    tracing::info!(
+                        "[TG-CONNECT user={}] SUBPHASE=url_poll attempt={}/60 QUIET quiet_streak={} total_events_in_window={} bot_events_in_window=0",
+                        user_id,
+                        attempt,
+                        quiet_polls,
+                        total_events
+                    );
+                }
+            } else {
+                quiet_polls = 0;
+            }
 
             for msg in messages.chunk.iter() {
                 let raw_event = msg.raw();
-                if let Ok(event) = raw_event.deserialize() {
-                    if event.sender() == bot_user_id {
-                        if let AnySyncTimelineEvent::MessageLike(
-                            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(
-                                sync_event,
-                            ),
-                        ) = event.clone()
-                        {
-                            let event_content: RoomMessageEventContent = match sync_event {
-                                SyncRoomMessageEvent::Original(original_event) => {
-                                    original_event.content
-                                }
-                                SyncRoomMessageEvent::Redacted(_) => {
-                                    continue;
-                                }
-                            };
-
-                            let message_body = match event_content.msgtype {
-                                MessageType::Notice(text_content) => text_content.body,
-                                MessageType::Text(text_content) => text_content.body,
-                                _ => {
-                                    continue;
-                                }
-                            };
-
-                            tracing::info!("Received Telegram login response from bot");
-
-                            // More efficient login url extraction
-                            if let Some(url) = extract_login_url(&message_body) {
-                                login_url = Some(url);
-                                tracing::debug!("🔑 Found login url");
-                                break;
-                            }
-                        }
+                let event = match raw_event.deserialize() {
+                    Ok(ev) => ev,
+                    Err(_) => continue,
+                };
+                if event.sender() != bot_user_id {
+                    continue;
+                }
+                let sync_event = match event.clone() {
+                    AnySyncTimelineEvent::MessageLike(
+                        matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(se),
+                    ) => se,
+                    _ => continue,
+                };
+                let event_content: RoomMessageEventContent = match sync_event {
+                    SyncRoomMessageEvent::Original(original_event) => original_event.content,
+                    SyncRoomMessageEvent::Redacted(_) => continue,
+                };
+                let message_body = match event_content.msgtype {
+                    MessageType::Notice(text_content) => text_content.body,
+                    MessageType::Text(text_content) => text_content.body,
+                    other => {
+                        tracing::debug!(
+                            "[TG-CONNECT user={}] SUBPHASE=url_poll attempt={}/60 skipping bot msgtype={:?}",
+                            user_id,
+                            attempt,
+                            std::mem::discriminant(&other)
+                        );
+                        continue;
                     }
+                };
+
+                bot_message_count += 1;
+                let body_for_log = truncate_for_log(&message_body, 500);
+                tracing::info!(
+                    "[TG-CONNECT user={}] SUBPHASE=url_poll attempt={}/60 bot_msg#{} body={:?}",
+                    user_id,
+                    attempt,
+                    bot_message_count,
+                    body_for_log
+                );
+                last_bot_body = Some(message_body.clone());
+
+                if let Some(url) = extract_login_url(&message_body) {
+                    tracing::info!(
+                        "[TG-CONNECT user={}] SUBPHASE=url_poll OK found login_url on attempt={}/60 url_len={} poll_elapsed_ms={}",
+                        user_id,
+                        attempt,
+                        url.len(),
+                        t_poll.elapsed().as_millis()
+                    );
+                    login_url = Some(url);
+                    break 'poll;
+                } else {
+                    tracing::debug!(
+                        "[TG-CONNECT user={}] SUBPHASE=url_poll attempt={}/60 bot msg had no URL pattern",
+                        user_id,
+                        attempt
+                    );
                 }
             }
+        } else {
+            tracing::warn!(
+                "[TG-CONNECT user={}] SUBPHASE=url_poll attempt={}/60 client.get_room({}) returned None",
+                user_id,
+                attempt,
+                room_id
+            );
         }
 
-        if login_url.is_some() {
-            break;
-        }
-
-        // Balanced delay - fast enough for responsiveness, long enough for user input
-        sleep(Duration::from_millis(500)).await; // 500ms gives good balance
+        sleep(Duration::from_millis(500)).await;
     }
 
-    let login_url = login_url.ok_or(anyhow!(
-        "Telegram login url not received within 30 seconds. Please try again."
-    ))?;
+    let login_url = match login_url {
+        Some(u) => u,
+        None => {
+            tracing::error!(
+                "[TG-CONNECT user={}] SUBPHASE=url_poll TIMEOUT no login URL after 60 attempts poll_elapsed_ms={} bot_msgs_seen={} last_bot_body={:?}",
+                user_id,
+                t_poll.elapsed().as_millis(),
+                bot_message_count,
+                last_bot_body
+                    .as_deref()
+                    .map(|b| truncate_for_log(b, 800))
+                    .unwrap_or_else(|| "<none>".to_string())
+            );
+            return Err(anyhow!(
+                "Telegram login url not received within 30 seconds ({} bot messages seen). Please try again.",
+                bot_message_count
+            ));
+        }
+    };
+
+    tracing::info!(
+        "[TG-CONNECT user={}] SUBPHASE=done connect_telegram OK total_elapsed_ms={}",
+        user_id,
+        fn_start.elapsed().as_millis()
+    );
     Ok((room_id.into(), login_url))
 }
 
@@ -299,55 +910,182 @@ pub async fn start_telegram_connection(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<TelegramConnectionResponse>, (StatusCode, AxumJson<serde_json::Value>)> {
-    tracing::debug!(
-        "🚀 Starting Telegram connection process for user {}",
-        auth_user.user_id
+    let user_id = auth_user.user_id;
+    let flow_start = Instant::now();
+    tracing::info!(
+        "[TG-CONNECT user={}] ==== start_telegram_connection invoked ====",
+        user_id
     );
 
     // Clean up any stale telegram bridge records from previous failed attempts
-    if let Err(e) = state
-        .user_repository
-        .delete_bridge(auth_user.user_id, "telegram")
-    {
-        tracing::warn!("Failed to clean stale telegram bridge record: {}", e);
+    let cleanup_start = Instant::now();
+    match state.user_repository.delete_bridge(user_id, "telegram") {
+        Ok(_) => tracing::info!(
+            "[TG-CONNECT user={}] PHASE=cleanup stale bridge cleared elapsed_ms={}",
+            user_id,
+            cleanup_start.elapsed().as_millis()
+        ),
+        Err(e) => tracing::warn!(
+            "[TG-CONNECT user={}] PHASE=cleanup failed to clean stale telegram bridge record elapsed_ms={} err={}",
+            user_id,
+            cleanup_start.elapsed().as_millis(),
+            e
+        ),
+    }
+
+    // Check env vars early and log
+    let bridge_bot = match std::env::var("TELEGRAM_BRIDGE_BOT") {
+        Ok(v) => {
+            tracing::info!(
+                "[TG-CONNECT user={}] PHASE=env TELEGRAM_BRIDGE_BOT={}",
+                user_id,
+                v
+            );
+            v
+        }
+        Err(e) => {
+            tracing::error!(
+                "[TG-CONNECT user={}] PHASE=env FATAL TELEGRAM_BRIDGE_BOT not set: {}",
+                user_id,
+                e
+            );
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": "Server misconfigured: TELEGRAM_BRIDGE_BOT not set"})),
+            ));
+        }
+    };
+    let homeserver_url = match std::env::var("MATRIX_HOMESERVER") {
+        Ok(v) => {
+            tracing::info!(
+                "[TG-CONNECT user={}] PHASE=env MATRIX_HOMESERVER={}",
+                user_id,
+                v
+            );
+            Some(v)
+        }
+        Err(e) => {
+            tracing::error!(
+                "[TG-CONNECT user={}] PHASE=env MATRIX_HOMESERVER not set: {}",
+                user_id,
+                e
+            );
+            None
+        }
+    };
+
+    // --- network pre-flight ---
+    // The enclave's network path (tap0 -> vsock -> host proxy) is completely
+    // different from a bare VPS. So before we even touch matrix-sdk, we probe
+    // each OSI layer separately:
+    //   1. PHASE=net_env - proxy / TLS env vars
+    //   2. PHASE=net_env - /etc/resolv.conf contents
+    //   3. PHASE=dns_lookup - DNS resolution of homeserver host
+    //   4. PHASE=tcp_connect - raw TCP to homeserver host:port
+    //   5. PHASE=preflight - plain HTTPS GET to /_matrix/client/versions
+    // Each produces a distinct log so we can grep and know exactly which
+    // layer broke after the enclave migration.
+    log_network_env(user_id);
+    log_resolv_conf(user_id).await;
+
+    if let Some(ref hs) = homeserver_url {
+        match url::Url::parse(hs) {
+            Ok(parsed) => {
+                let host = parsed.host_str().unwrap_or("").to_string();
+                let port = parsed.port_or_known_default().unwrap_or(443);
+                if host.is_empty() {
+                    tracing::error!(
+                        "[TG-CONNECT user={}] PHASE=preflight MATRIX_HOMESERVER has no host: {}",
+                        user_id,
+                        hs
+                    );
+                } else {
+                    log_dns_lookup(user_id, &host, port).await;
+                    log_tcp_connect(user_id, &host, port).await;
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    "[TG-CONNECT user={}] PHASE=preflight MATRIX_HOMESERVER parse FAILED url={:?} chain=[{}]",
+                    user_id,
+                    hs,
+                    format_std_err_chain(&e)
+                );
+            }
+        }
+        preflight_homeserver_reachability(user_id, hs).await;
+    } else {
+        tracing::warn!(
+            "[TG-CONNECT user={}] PHASE=preflight SKIPPED (MATRIX_HOMESERVER not set)",
+            user_id
+        );
     }
 
     tracing::info!(
-        "Telegram connect: getting Matrix client for user {}...",
-        auth_user.user_id
+        "[TG-CONNECT user={}] PHASE=get_client acquiring Matrix client (note: NOT inside the {}s connect timeout)...",
+        user_id,
+        TELEGRAM_CONNECT_TIMEOUT.as_secs()
     );
-    // Get or create Matrix client using the centralized function
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
+    // Get or create Matrix client using the centralized function.
+    // NOTE: this is OUTSIDE the 45s TELEGRAM_CONNECT_TIMEOUT, so if matrix_auth hangs
+    // here we'll see it in the timing log below and can tell it apart from a
+    // connect_telegram timeout.
+    let client_start = Instant::now();
+    let client = matrix_auth::get_cached_client(user_id, &state)
         .await
         .map_err(|e| {
-            tracing::error!("Telegram connect: failed to get Matrix client: {}", e);
+            tracing::error!(
+                "[TG-CONNECT user={}] PHASE=get_client FAILED elapsed_ms={} chain=[{}]",
+                user_id,
+                client_start.elapsed().as_millis(),
+                format_anyhow_chain(&e)
+            );
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 AxumJson(json!({"error": format!("Failed to initialize Matrix client: {}", e)})),
             )
         })?;
+    let client_elapsed_ms = client_start.elapsed().as_millis();
     tracing::info!(
-        "Telegram connect: Matrix client ready, user={}",
+        "[TG-CONNECT user={}] PHASE=get_client OK matrix_user={} elapsed_ms={}",
+        user_id,
         client
             .user_id()
-            .unwrap_or(&OwnedUserId::try_from("@unknown:localhost").unwrap())
+            .map(|u| u.to_string())
+            .unwrap_or_else(|| "<unknown>".to_string()),
+        client_elapsed_ms
     );
 
-    // Get bridge bot from environment
-    let bridge_bot = std::env::var("TELEGRAM_BRIDGE_BOT").expect("TELEGRAM_BRIDGE_BOT not set");
-
-    tracing::debug!("🔗 Connecting to Telegram bridge...");
+    tracing::info!(
+        "[TG-CONNECT user={}] PHASE=connect_telegram starting (budget={}s, flow_elapsed_ms={})...",
+        user_id,
+        TELEGRAM_CONNECT_TIMEOUT.as_secs(),
+        flow_start.elapsed().as_millis()
+    );
     // Connect to Telegram bridge
+    let connect_start = Instant::now();
     let mut client_clone = Arc::clone(&client);
     let (room_id, login_url) = match timeout(
         TELEGRAM_CONNECT_TIMEOUT,
-        connect_telegram_with_retry(&mut client_clone, &bridge_bot, auth_user.user_id, &state),
+        connect_telegram_with_retry(&mut client_clone, &bridge_bot, user_id, &state),
     )
     .await
     {
-        Ok(Ok(result)) => result,
+        Ok(Ok(result)) => {
+            tracing::info!(
+                "[TG-CONNECT user={}] PHASE=connect_telegram OK elapsed_ms={}",
+                user_id,
+                connect_start.elapsed().as_millis()
+            );
+            result
+        }
         Ok(Err(e)) => {
-            tracing::error!("Failed to connect to Telegram bridge: {}", e);
+            tracing::error!(
+                "[TG-CONNECT user={}] PHASE=connect_telegram FAILED elapsed_ms={} chain=[{}]",
+                user_id,
+                connect_start.elapsed().as_millis(),
+                format_anyhow_chain(&e)
+            );
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 AxumJson(json!({"error": format!("Failed to connect to Telegram bridge: {}", e)})),
@@ -355,9 +1093,11 @@ pub async fn start_telegram_connection(
         }
         Err(_) => {
             tracing::error!(
-                "Telegram connection timed out for user {} after {:?}",
-                auth_user.user_id,
-                TELEGRAM_CONNECT_TIMEOUT
+                "[TG-CONNECT user={}] PHASE=connect_telegram TIMEOUT after {}s (flow_total_elapsed_ms={}, get_client_elapsed_ms={}). Check preceding [TG-CONNECT] PHASE logs to see where inside connect_telegram we got stuck.",
+                user_id,
+                TELEGRAM_CONNECT_TIMEOUT.as_secs(),
+                flow_start.elapsed().as_millis(),
+                client_elapsed_ms
             );
             return Err((
                 StatusCode::GATEWAY_TIMEOUT,
@@ -368,8 +1108,13 @@ pub async fn start_telegram_connection(
         }
     };
 
-    // Debug: Log the login url
-    tracing::info!("Generated login url");
+    tracing::info!(
+        "[TG-CONNECT user={}] PHASE=login_url OK room_id={} login_url_len={} flow_elapsed_ms={}",
+        user_id,
+        room_id,
+        login_url.len(),
+        flow_start.elapsed().as_millis()
+    );
 
     // Create bridge record
     let current_time = std::time::SystemTime::now()
@@ -378,7 +1123,7 @@ pub async fn start_telegram_connection(
         .as_secs() as i32;
 
     let new_bridge = NewPgBridge {
-        user_id: auth_user.user_id,
+        user_id,
         bridge_type: "telegram".to_string(),
         status: "connecting".to_string(),
         room_id: Some(room_id.to_string()),
@@ -387,16 +1132,27 @@ pub async fn start_telegram_connection(
     };
 
     // Store bridge information
+    let db_write_start = Instant::now();
     state
         .user_repository
         .create_bridge(new_bridge)
         .map_err(|e| {
-            tracing::error!("Failed to store bridge information: {}", e);
+            tracing::error!(
+                "[TG-CONNECT user={}] PHASE=db_write FAILED elapsed_ms={} err={:?}",
+                user_id,
+                db_write_start.elapsed().as_millis(),
+                e
+            );
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 AxumJson(json!({"error": "Failed to store bridge information"})),
             )
         })?;
+    tracing::info!(
+        "[TG-CONNECT user={}] PHASE=db_write OK bridge row inserted elapsed_ms={}",
+        user_id,
+        db_write_start.elapsed().as_millis()
+    );
 
     // Spawn a task to monitor the connection status
     let state_clone = state.clone();
@@ -404,32 +1160,41 @@ pub async fn start_telegram_connection(
     let bridge_bot_clone = bridge_bot.to_string();
     let client_clone = client.clone();
 
+    tracing::info!(
+        "[TG-CONNECT user={}] PHASE=spawn_monitor starting monitor task",
+        user_id
+    );
     tokio::spawn(async move {
         match monitor_telegram_connection(
             &client_clone,
             &room_id_clone,
             &bridge_bot_clone,
-            auth_user.user_id,
+            user_id,
             state_clone,
         )
         .await
         {
             Ok(_) => {
                 tracing::info!(
-                    "Telegram connection monitoring completed successfully for user {}",
-                    auth_user.user_id
+                    "[TG-MONITOR user={}] connection monitoring completed successfully",
+                    user_id
                 );
             }
             Err(e) => {
                 tracing::error!(
-                    "Telegram connection monitoring failed for user {}: {}",
-                    auth_user.user_id,
+                    "[TG-MONITOR user={}] connection monitoring FAILED err={:?}",
+                    user_id,
                     e
                 );
             }
         }
     });
 
+    tracing::info!(
+        "[TG-CONNECT user={}] ==== returning login_url to frontend, flow_total_elapsed_ms={} ====",
+        user_id,
+        flow_start.elapsed().as_millis()
+    );
     Ok(AxumJson(TelegramConnectionResponse { login_url }))
 }
 
@@ -472,10 +1237,12 @@ async fn monitor_telegram_connection(
     user_id: i32,
     state: Arc<AppState>,
 ) -> Result<(), anyhow::Error> {
+    let monitor_start = Instant::now();
     tracing::info!(
-        "Starting Telegram connection monitoring for user {} in room {}",
+        "[TG-MONITOR user={}] starting monitoring in room={} bot={} max_duration=10min",
         user_id,
-        room_id
+        room_id,
+        bridge_bot
     );
     let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
 
@@ -485,21 +1252,51 @@ async fn monitor_telegram_connection(
     // web auth flow and sending messages floods the room, pushing the bridge's
     // "Logged in" response out of the message check window.
 
+    let mut total_bot_msgs_seen = 0usize;
+    let mut last_bot_body: Option<String> = None;
+    let mut quiet_polls: u32 = 0;
+
     for attempt in 1..=120 {
         if attempt <= 3 || attempt % 10 == 0 {
-            tracing::info!("Telegram monitor attempt #{} for user {}", attempt, user_id);
-        }
-
-        // Sync Matrix events - tolerate transient errors
-        if let Err(e) = client.sync_once(sync_settings.clone()).await {
-            tracing::warn!(
-                "Telegram monitor sync error for user {} (attempt {}): {}",
+            tracing::info!(
+                "[TG-MONITOR user={}] attempt={}/120 elapsed_ms={} bot_msgs_seen={}",
                 user_id,
                 attempt,
-                e
+                monitor_start.elapsed().as_millis(),
+                total_bot_msgs_seen
+            );
+        }
+
+        // Sync Matrix events - tolerate transient errors.
+        // Time sync_once so a proxy that kills long-poll connections is
+        // visible: budget is 10s, suspiciously-fast is < 500ms.
+        let t_sync = Instant::now();
+        let sync_result = client.sync_once(sync_settings.clone()).await;
+        let sync_ms = t_sync.elapsed().as_millis();
+        if let Err(e) = sync_result {
+            tracing::warn!(
+                "[TG-MONITOR user={}] attempt={}/120 sync_once FAILED sync_ms={} chain=[{}]",
+                user_id,
+                attempt,
+                sync_ms,
+                format_std_err_chain(&e)
             );
             sleep(Duration::from_secs(5)).await;
             continue;
+        }
+        if attempt <= 3 || attempt % 10 == 0 {
+            let suspicious = if sync_ms < 500 {
+                " SUSPICIOUS_FAST"
+            } else {
+                ""
+            };
+            tracing::info!(
+                "[TG-MONITOR user={}] attempt={}/120 sync_once OK sync_ms={} budget_ms=10000{}",
+                user_id,
+                attempt,
+                sync_ms,
+                suspicious
+            );
         }
 
         if let Some(room) = client.get_room(room_id) {
@@ -510,14 +1307,39 @@ async fn monitor_telegram_connection(
                 Ok(m) => m,
                 Err(e) => {
                     tracing::warn!(
-                        "Telegram monitor messages error for user {}: {}",
+                        "[TG-MONITOR user={}] attempt={}/120 messages() FAILED chain=[{}]",
                         user_id,
-                        e
+                        attempt,
+                        format_std_err_chain(&e)
                     );
                     sleep(Duration::from_secs(5)).await;
                     continue;
                 }
             };
+
+            // Diagnostic: count events in window and bot-events specifically.
+            let total_events = messages.chunk.len();
+            let bot_events_this_poll = messages
+                .chunk
+                .iter()
+                .filter_map(|m| m.raw().deserialize().ok())
+                .filter(|ev| ev.sender() == bot_user_id)
+                .count();
+            if bot_events_this_poll == 0 {
+                quiet_polls += 1;
+                if quiet_polls == 1 || quiet_polls.is_multiple_of(12) {
+                    tracing::info!(
+                        "[TG-MONITOR user={}] attempt={}/120 QUIET quiet_streak={} total_events_in_window={} bot_events_in_window=0 elapsed_ms={}",
+                        user_id,
+                        attempt,
+                        quiet_polls,
+                        total_events,
+                        monitor_start.elapsed().as_millis()
+                    );
+                }
+            } else {
+                quiet_polls = 0;
+            }
 
             for msg in messages.chunk {
                 let raw_event = msg.raw();
@@ -542,19 +1364,40 @@ async fn monitor_telegram_connection(
                                 _ => continue,
                             };
 
+                            total_bot_msgs_seen += 1;
+                            let body_for_log = truncate_for_log(&content, 500);
+                            tracing::info!(
+                                "[TG-MONITOR user={}] attempt={}/120 bot_msg#{} body={:?}",
+                                user_id,
+                                attempt,
+                                total_bot_msgs_seen,
+                                body_for_log
+                            );
+                            last_bot_body = Some(content.clone());
+
                             // Check for successful login or already logged in
                             if content.contains("Logged in")
                                 || content.contains("You are already logged in")
                             {
                                 tracing::info!(
-                                    "Telegram successfully connected for user {}",
-                                    user_id
+                                    "[TG-MONITOR user={}] SUCCESS detected logged-in pattern elapsed_ms={}",
+                                    user_id,
+                                    monitor_start.elapsed().as_millis()
                                 );
 
                                 // Extract the connected account (username or phone)
                                 let connected_account = extract_connected_account(&content);
                                 if let Some(ref account) = connected_account {
-                                    tracing::info!("Connected as: {}", account);
+                                    tracing::info!(
+                                        "[TG-MONITOR user={}] connected_account={}",
+                                        user_id,
+                                        account
+                                    );
+                                } else {
+                                    tracing::warn!(
+                                        "[TG-MONITOR user={}] could not extract connected_account from success message",
+                                        user_id
+                                    );
                                 }
 
                                 let current_time = std::time::SystemTime::now()
@@ -656,9 +1499,10 @@ async fn monitor_telegram_connection(
                                 .any(|&pattern| content.to_lowercase().contains(pattern))
                             {
                                 tracing::error!(
-                                    "Telegram connection failed for user {}: {}",
+                                    "[TG-MONITOR user={}] FATAL pattern matched body={:?} elapsed_ms={}",
                                     user_id,
-                                    content
+                                    truncate_for_log(&content, 500),
+                                    monitor_start.elapsed().as_millis()
                                 );
                                 state.user_repository.delete_bridge(user_id, "telegram")?;
                                 return Err(anyhow!("Telegram connection failed: {}", content));
@@ -667,11 +1511,28 @@ async fn monitor_telegram_connection(
                     }
                 }
             }
+        } else {
+            tracing::warn!(
+                "[TG-MONITOR user={}] attempt={}/120 client.get_room({}) returned None",
+                user_id,
+                attempt,
+                room_id
+            );
         }
 
         sleep(Duration::from_secs(5)).await;
     }
 
+    tracing::error!(
+        "[TG-MONITOR user={}] TIMEOUT after 10min elapsed_ms={} total_bot_msgs_seen={} last_bot_body={:?}",
+        user_id,
+        monitor_start.elapsed().as_millis(),
+        total_bot_msgs_seen,
+        last_bot_body
+            .as_deref()
+            .map(|b| truncate_for_log(b, 800))
+            .unwrap_or_else(|| "<none>".to_string())
+    );
     state.user_repository.delete_bridge(user_id, "telegram")?;
     Err(anyhow!("Telegram connection timed out after 10 minutes"))
 }

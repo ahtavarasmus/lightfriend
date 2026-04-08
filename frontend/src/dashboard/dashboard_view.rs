@@ -1979,15 +1979,15 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                                 }
                                             }
                                         </div>
-                                        // Hour + minute pickers (hidden once we hit the 4-slot cap)
+                                        // Hour + minute pickers (hidden once we hit the 10-slot cap)
                                         if (*digest_time_display)
                                             .split(',')
                                             .map(|t| t.trim())
                                             .filter(|t| !t.is_empty())
-                                            .count() >= 4
+                                            .count() >= 10
                                         {
                                             <div style="margin-top: 0.4rem; font-size: 0.75rem; color: rgba(255,255,255,0.5); font-style: italic;">
-                                                {"Max 4 digest times per day reached. Remove one to add another."}
+                                                {"Max 10 digest times per day reached. Remove one to add another."}
                                             </div>
                                         } else {
                                             <div class="digest-schedule-row">

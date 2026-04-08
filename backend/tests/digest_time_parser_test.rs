@@ -112,28 +112,41 @@ fn handles_midnight_wrap() {
 }
 
 #[test]
-fn parses_up_to_four_slots() {
-    let (canonical, slots) = parse_digest_times("08:00,12:00,15:00,20:00").unwrap();
-    assert_eq!(canonical, "08:00,12:00,15:00,20:00");
-    assert_eq!(slots, vec![480, 720, 900, 1200]);
+fn parses_up_to_ten_slots() {
+    let (canonical, slots) =
+        parse_digest_times("06:00,08:00,10:00,12:00,14:00,15:00,16:00,18:00,20:00,22:00").unwrap();
+    assert_eq!(
+        canonical,
+        "06:00,08:00,10:00,12:00,14:00,15:00,16:00,18:00,20:00,22:00"
+    );
+    assert_eq!(
+        slots,
+        vec![360, 480, 600, 720, 840, 900, 960, 1080, 1200, 1320]
+    );
 }
 
 #[test]
-fn rejects_more_than_four_slots() {
-    let result = parse_digest_times("08:00,10:00,12:00,15:00,20:00");
-    assert!(result.is_err(), "Should reject more than 4 slots");
+fn rejects_more_than_ten_slots() {
+    let result =
+        parse_digest_times("06:00,07:00,08:00,10:00,12:00,14:00,15:00,16:00,18:00,20:00,22:00");
+    assert!(result.is_err(), "Should reject more than 10 slots");
     let err = result.unwrap_err();
     assert!(
-        err.contains("max 4"),
-        "Error should mention the 4-slot cap, got: {}",
+        err.contains("max 10"),
+        "Error should mention the 10-slot cap, got: {}",
         err
     );
 }
 
 #[test]
 fn cap_applies_after_dedup() {
-    // 5 raw slots but two snap to the same value, so 4 unique → should pass
-    let (canonical, slots) = parse_digest_times("08:00,08:02,12:00,15:00,20:00").unwrap();
-    assert_eq!(canonical, "08:00,12:00,15:00,20:00");
-    assert_eq!(slots.len(), 4);
+    // 11 raw slots but two snap to the same value, so 10 unique → should pass
+    let (canonical, slots) =
+        parse_digest_times("06:00,06:02,08:00,10:00,12:00,14:00,15:00,16:00,18:00,20:00,22:00")
+            .unwrap();
+    assert_eq!(
+        canonical,
+        "06:00,08:00,10:00,12:00,14:00,15:00,16:00,18:00,20:00,22:00"
+    );
+    assert_eq!(slots.len(), 10);
 }

@@ -19,6 +19,47 @@ const COOLDOWN_SECS: i32 = 1800; // 30 minutes per room
 /// 5M / 30 days = ~166K tokens/day. Normal users use 5-20K/day.
 const DAILY_TOKEN_BUDGET_PER_USER: i64 = 166_000;
 
+/// Strip URLs and trailing connector phrases from a notification string.
+/// SMS chars are expensive and tracking links balloon length, so we drop
+/// any whitespace-delimited token starting with http:// or https:// even
+/// if the LLM ignored the prompt.
+fn strip_urls(s: &str) -> String {
+    let cleaned: String = s
+        .split_whitespace()
+        .filter(|tok| {
+            let lower = tok.to_lowercase();
+            !(lower.starts_with("http://") || lower.starts_with("https://"))
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let trimmed = cleaned
+        .trim_end_matches(|c: char| c.is_whitespace() || c == ',' || c == ':' || c == '.')
+        .trim_end();
+    let lower = trimmed.to_lowercase();
+    let connectors = [
+        " recharge now at",
+        " sign in at",
+        " log in at",
+        " click here",
+        " click here:",
+        " visit",
+        " here",
+        " click",
+        " via",
+        " at",
+    ];
+    let mut out = trimmed.to_string();
+    for c in &connectors {
+        if lower.ends_with(c) {
+            let cut = out.len() - c.len();
+            out.truncate(cut);
+            out = out.trim_end().to_string();
+            break;
+        }
+    }
+    out
+}
+
 pub async fn run_system_behaviors(
     state: &Arc<AppState>,
     user_id: i32,
@@ -273,7 +314,13 @@ pub async fn run_system_behaviors(
         to assess urgency. Early patterns are weak hints, not established facts.\n\
         \n\
         If should_notify=false, set notification_message to empty string.\n\
-        If should_notify=true, write a concise notification (max 480 chars, second person).{}",
+        If should_notify=true, write the notification text following these rules:\n\
+        - Sent as SMS, every character costs money. Be brutally short - aim for under 160 chars.\n\
+        - State the actual fact in plain language. No preamble, no rambling, no padding.\n\
+        - NEVER include URLs, links, tracking codes, or 'click here' text. If the source mentions a link, drop it.\n\
+        - Don't repeat the sender name (it's already in the SMS prefix).\n\
+        - Good: 'Twilio balance low - recharge soon.' / 'Mom: dinner moved to 7pm.' / 'Invoice #482 declined.'\n\
+        - Bad: 'Your Twilio account balance is running low. Recharge now at https://...' (too long, has link){}",
         now_formatted, signal_report,
         if tracking_enabled {
             "\n\n\
@@ -361,7 +408,9 @@ pub async fn run_system_behaviors(
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "Concise notification text (max 480 chars, second person). Empty string if should_notify=false."
+                "Brutally concise SMS text (aim under 160 chars). State the fact only - no \
+                 preamble, no padding, no URLs/links, no 'click here'. Drop any links from \
+                 the source. Empty string if should_notify=false."
                     .to_string(),
             ),
             ..Default::default()
@@ -485,6 +534,14 @@ pub async fn run_system_behaviors(
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
 
+                // Hard guarantee: never notify the user about their own
+                // outgoing messages, regardless of what the LLM decided.
+                // The LLM has been correct in practice but a single bad
+                // classification would SMS the user about themselves.
+                // Pass 2 commitment extraction below still runs so
+                // tracked-event matching keeps working for "You" messages.
+                let should_notify = should_notify && sender_name != "You";
+
                 let summary = parsed.get("summary").and_then(|v| v.as_str()).unwrap_or("");
 
                 info!(
@@ -542,10 +599,15 @@ pub async fn run_system_behaviors(
                 }
 
                 if should_notify {
-                    let notification_message = parsed
+                    let raw_message = parsed
                         .get("notification_message")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
+
+                    // Defensive: strip URLs even if the LLM ignored the prompt.
+                    // SMS chars are expensive and tracking links balloon length.
+                    let cleaned = strip_urls(raw_message);
+                    let notification_message = cleaned.trim();
 
                     if !notification_message.is_empty() {
                         // Record cooldown before sending
@@ -562,7 +624,12 @@ pub async fn run_system_behaviors(
                         send_notification(state, user_id, notification_message, content_type, None)
                             .await;
                     }
-                } else {
+                } else if sender_name != "You" {
+                    // Don't surface "Screened message" entries for the
+                    // user's own outgoing messages — they're noise in
+                    // the activity feed. The classification + Pass 2
+                    // commitment extraction above still runs for them
+                    // so tracked-event matching keeps working.
                     let _ = state.user_repository.log_usage(LogUsageParams {
                         user_id,
                         sid: None,
