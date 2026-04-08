@@ -1234,10 +1234,14 @@ pub async fn build_digest_for_user(
         Vec::new()
     };
 
-    // -------- Section 4: FYI (medium urgency) --------
+    // -------- Section 4: FYI (medium + low urgency) --------
+    // We include "low" here too because otherwise users whose emails all get
+    // classified at the non-urgent end (which is most normal traffic: bills,
+    // newsletters, routine updates) would never see anything in a digest and
+    // think the feature is broken. Spam is still filtered by category below.
     let mut fyi_msgs = state
         .ontology_repository
-        .get_pending_messages_by_urgency(user_id, &["medium"], since_window, 30)
+        .get_pending_messages_by_urgency(user_id, &["medium", "low"], since_window, 30)
         .unwrap_or_default();
 
     // -------- Filter: drop messages the user has already seen via bridge read receipts --------
@@ -1419,13 +1423,26 @@ pub async fn build_digest_for_user(
 /// Deliver smart digests: check which users have pending unhandled messages
 /// and deliver a sectioned recap at the user's local digest window.
 async fn deliver_smart_digests(state: &Arc<AppState>) {
-    let users = match state.ontology_repository.get_users_with_pending_digests() {
+    // Iterate EVERY user with digest_enabled=true, not just users with
+    // pending high/medium messages. The old `get_users_with_pending_digests`
+    // gate silently dropped users whose emails all classified as
+    // urgency='low' or 'none' — they would never hit their scheduled
+    // digest time even though new emails were flowing in. The entry gate
+    // must be "is the user opted in", not "does the user have high-urgency
+    // traffic right now".
+    //
+    // `build_digest_for_user` already returns `None` for a truly empty
+    // digest, so this change doesn't produce noise for users with no
+    // activity — it just gives users with any scanned activity a real
+    // shot at receiving their scheduled digest.
+    let all_users = match state.user_core.get_all_users() {
         Ok(u) => u,
         Err(e) => {
-            error!("Failed to get users with pending digests: {}", e);
+            error!("Failed to get all users for digest delivery: {}", e);
             return;
         }
     };
+    let users: Vec<i32> = all_users.into_iter().map(|u| u.id).collect();
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

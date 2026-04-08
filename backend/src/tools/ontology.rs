@@ -120,16 +120,29 @@ fn query_message(
     let sender_filter = param_str(params, "sender_name");
     let query_filter = param_str(params, "query");
 
+    // Single agent-controlled dial: how many of the most-recent messages
+    // to return. Matches Palantir's Object query tool pattern — no
+    // separate time-window dial. If the returned batch doesn't reach far
+    // enough back for the user's question, the LLM can iterate with a
+    // larger `limit`. Clamped 1..=100 so a bad tool call can't DoS the DB.
+    let limit: i64 = params
+        .get("limit")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(20)
+        .clamp(1, 100);
+
+    // since_ts=0 effectively disables the time filter on the shared
+    // `get_recent_messages_filtered` helper; the row ordering and limit
+    // give us the "N most recent" semantics we want.
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i32;
-    let twelve_hours_ago = now - 12 * 3600;
 
     let plat = platform_filter.as_deref().filter(|p| *p != "all");
     let messages: Vec<OntMessage> = state
         .ontology_repository
-        .get_recent_messages_filtered(user_id, plat, twelve_hours_ago, 20)
+        .get_recent_messages_filtered(user_id, plat, 0, limit)
         .map_err(|e| format!("Failed to query messages: {}", e))?;
 
     // Apply sender_name filter
@@ -162,13 +175,32 @@ fn query_message(
         messages
     };
 
-    let messages: Vec<&OntMessage> = messages.iter().take(20).collect();
+    let messages: Vec<&OntMessage> = messages.iter().take(limit as usize).collect();
 
     if messages.is_empty() {
         return Ok("No messages found matching your query.".to_string());
     }
 
-    let mut output = format!("Found {} message(s):\n\n", messages.len());
+    // Format a relative age like "5m ago" / "2h ago" / "3d ago" so the
+    // LLM can tell whether this batch reaches far enough back for the
+    // user's question, or whether to call again with a larger `limit`.
+    let age_str = |created_at: i32| -> String {
+        let secs = (now - created_at).max(0);
+        if secs < 60 {
+            format!("{}s ago", secs)
+        } else if secs < 3600 {
+            format!("{}m ago", secs / 60)
+        } else if secs < 86400 {
+            format!("{}h ago", secs / 3600)
+        } else {
+            format!("{}d ago", secs / 86400)
+        }
+    };
+
+    let mut output = format!(
+        "Found {} message(s), most recent first:\n\n",
+        messages.len()
+    );
 
     for (i, m) in messages.iter().enumerate() {
         let content_preview: String = m.content.chars().take(100).collect();
@@ -180,9 +212,10 @@ fn query_message(
             format!("[from {}]", m.sender_name)
         };
         output.push_str(&format!(
-            "{}. [id={}] {} via {} - \"{}\"",
+            "{}. [id={}] ({}) {} via {} - \"{}\"",
             i + 1,
             m.id,
+            age_str(m.created_at),
             sender_label,
             m.platform,
             content_preview
@@ -191,6 +224,16 @@ fn query_message(
         if i + 1 < messages.len() {
             output.push_str("\n\n");
         }
+    }
+
+    // Tell the LLM explicitly whether it saw all the rows for this
+    // filter set or whether there may be more — important for the
+    // "call me again with a larger limit" pattern to actually work.
+    if messages.len() == limit as usize {
+        output.push_str(&format!(
+            "\n\nResult hit the limit of {}. If you need to reach further back in time, call this tool again with a larger `limit`.",
+            limit
+        ));
     }
 
     Ok(output)

@@ -78,7 +78,15 @@ static MESSAGE_PROPS: &[PropertyDef] = &[
 
 static MESSAGE_DEF: ObjectTypeDef = ObjectTypeDef {
     name: "Message",
-    description: "Query recent messages. All filters are optional - omit to get recent messages.",
+    description: "Query recent messages across ALL platforms — WhatsApp, Telegram, Signal, AND EMAIL. \
+        Use this tool for ANY question about the user's messages, chats, inbox, emails, digests, or \
+        'what came in'. Pass platform='email' to see only emails, or omit platform to see everything. \
+        NEVER answer from conversation history alone — always call this tool fresh, even if a prior \
+        assistant turn in history already contained a digest (that history is stale and may be hours old). \
+        Results are sorted most-recent-first and include a timestamp per row. If the default limit \
+        doesn't reach far enough back for the user's question (e.g. 'yesterday', 'past few days'), \
+        call again with a larger `limit`. Each result includes a stable [id=N] you MUST cite in your \
+        answer — the caller uses it to verify nothing was fabricated.",
     properties: MESSAGE_PROPS,
     linkable_to: &[],
 };
@@ -168,6 +176,28 @@ impl OntologyRegistry {
                 ..Default::default()
             }),
         );
+
+        // Message-specific: let the LLM control how many of the most
+        // recent messages it wants back. Single dial — no separate time
+        // window — matches Palantir's Object query tool pattern. If the
+        // result ends before the user's desired range, the LLM can call
+        // again with a bigger limit.
+        if obj.name == "Message" {
+            properties.insert(
+                "limit".to_string(),
+                Box::new(types::JSONSchemaDefine {
+                    schema_type: Some(types::JSONSchemaType::Number),
+                    description: Some(
+                        "Max messages to return, most recent first (default 20, max 100). \
+                         Increase when the result doesn't reach far enough back for the \
+                         user's question (e.g. 'yesterday' or 'past few days'). Each result \
+                         has a timestamp so you can tell whether to request more."
+                            .to_string(),
+                    ),
+                    ..Default::default()
+                }),
+            );
+        }
 
         // Add "linked_entities" array param from linkable_to
         if !obj.linkable_to.is_empty() {
