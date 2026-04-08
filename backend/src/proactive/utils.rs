@@ -117,7 +117,7 @@ pub async fn send_notification_with_context(
     notification: &str,
     content_type: String,
     first_message: Option<String>,
-    meta: Option<NotificationMeta>,
+    _meta: Option<NotificationMeta>,
 ) {
     let current_time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
