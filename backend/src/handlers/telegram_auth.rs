@@ -766,7 +766,7 @@ async fn connect_telegram(
             if bot_events_this_poll == 0 {
                 quiet_polls += 1;
                 // Log at intervals so we don't spam
-                if quiet_polls == 1 || quiet_polls % 10 == 0 {
+                if quiet_polls == 1 || quiet_polls.is_multiple_of(10) {
                     tracing::info!(
                         "[TG-CONNECT user={}] SUBPHASE=url_poll attempt={}/60 QUIET quiet_streak={} total_events_in_window={} bot_events_in_window=0",
                         user_id,
@@ -1327,7 +1327,7 @@ async fn monitor_telegram_connection(
                 .count();
             if bot_events_this_poll == 0 {
                 quiet_polls += 1;
-                if quiet_polls == 1 || quiet_polls % 12 == 0 {
+                if quiet_polls == 1 || quiet_polls.is_multiple_of(12) {
                     tracing::info!(
                         "[TG-MONITOR user={}] attempt={}/120 QUIET quiet_streak={} total_events_in_window={} bot_events_in_window=0 elapsed_ms={}",
                         user_id,
