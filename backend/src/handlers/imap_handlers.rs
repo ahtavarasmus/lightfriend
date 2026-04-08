@@ -257,6 +257,94 @@ pub fn parse_imap_message(
     })
 }
 
+/// Pure helper: given a sender's envelope `from` email address and
+/// display name, attempt to match it to one of the user's ontology
+/// Persons via the email channel handle. Returns the matched
+/// `person.id` on success or `None` if no match applies.
+///
+/// `own_emails` is the set of email addresses belonging to the user's
+/// own connected IMAP accounts (lowercased). Match behavior:
+///
+/// 1. **Self-sender guard** — if `from_email` matches any of
+///    `own_emails`, return `None`. The sender is the user themselves
+///    (legitimately self-sent, or phishing spoofing their address).
+///    We can't trust the `From:` header to identify a contact.
+///
+/// 2. **Self-handle guard** — skip any channel whose handle matches
+///    one of `own_emails`. Defends against the user misconfiguring a
+///    Person with their own email as the handle, which would
+///    otherwise collapse every incoming email onto that Person via
+///    substring containment.
+///
+/// 3. **Email handle match** — if the handle looks like an email
+///    address (contains `@`), require **exact** (case-insensitive)
+///    equality with `from_email`. No substring containment on
+///    emails — a handle of `"bob@gmail.com"` must not match a
+///    sender `"rob@gmail.com"`, and a handle of `"gmail.com"` must
+///    not match every gmail user.
+///
+/// 4. **Name handle match** — if the handle is a plain name (no
+///    `@`), do case-insensitive substring match against `from_name`
+///    (the envelope's display name). Requires the handle to be at
+///    least 3 characters long, otherwise a one-letter handle like
+///    `"a"` would match almost any name.
+///
+/// Returns the first Person whose channels produce a match, in the
+/// order `persons` were passed. Returns `None` if nothing matches.
+pub fn match_email_sender_to_person(
+    from_email: Option<&str>,
+    from_name: Option<&str>,
+    persons: &[crate::models::ontology_models::PersonWithChannels],
+    own_emails: &std::collections::HashSet<String>,
+) -> Option<i32> {
+    let from_lower = from_email.unwrap_or("").to_lowercase();
+    let from_name_lower = from_name.unwrap_or("").to_lowercase();
+
+    // Self-sender guard: if the sender is the user themselves (real
+    // or spoofed), skip the person match entirely.
+    if !from_lower.is_empty() && own_emails.iter().any(|own| from_lower.contains(own)) {
+        return None;
+    }
+
+    for pwc in persons {
+        for channel in &pwc.channels {
+            if channel.platform != "email" {
+                continue;
+            }
+            let Some(handle) = channel.handle.as_ref() else {
+                continue;
+            };
+            let handle_lower = handle.to_lowercase();
+            if handle_lower.is_empty() {
+                continue;
+            }
+
+            // Self-handle guard: a Person whose channel IS the user's
+            // own email must never match anything.
+            if own_emails.contains(&handle_lower) {
+                continue;
+            }
+
+            // Split matching by field. Emails require exact equality;
+            // plain-text names allow substring.
+            let handle_is_email = handle_lower.contains('@');
+            let email_match = if handle_is_email {
+                !from_lower.is_empty() && from_lower == handle_lower
+            } else {
+                false
+            };
+            let name_match = !handle_is_email
+                && handle_lower.chars().count() >= 3
+                && from_name_lower.contains(&handle_lower);
+
+            if email_match || name_match {
+                return Some(pwc.person.id);
+            }
+        }
+    }
+    None
+}
+
 /// Insert an email preview into `ont_messages` and emit an ontology
 /// change event so rules can react. Idempotent: if a message with the
 /// same `email_<uid>` room_id already exists for this user (e.g. the
@@ -293,27 +381,21 @@ pub async fn insert_email_into_ontology(
         Err(e) => return Err(format!("Failed to check existing email message: {}", e)),
     }
 
-    // Match an ontology Person for the sender based on email channel handle.
-    let mut matched_person_id: Option<i32> = None;
-    let from_lower = preview.from_email.as_deref().unwrap_or("").to_lowercase();
-    let from_name_lower = preview.from.as_deref().unwrap_or("").to_lowercase();
-    for pwc in persons {
-        for channel in &pwc.channels {
-            if channel.platform == "email" {
-                if let Some(ref handle) = channel.handle {
-                    let handle_lower = handle.to_lowercase();
-                    if from_lower.contains(&handle_lower) || from_name_lower.contains(&handle_lower)
-                    {
-                        matched_person_id = Some(pwc.person.id);
-                        break;
-                    }
-                }
-            }
-        }
-        if matched_person_id.is_some() {
-            break;
-        }
-    }
+    // Look up the user's own connected IMAP email addresses so
+    // `match_email_sender_to_person` can refuse self-email matches.
+    let own_emails: std::collections::HashSet<String> = state
+        .user_repository
+        .get_all_imap_credentials(user_id)
+        .ok()
+        .map(|conns| conns.into_iter().map(|c| c.email.to_lowercase()).collect())
+        .unwrap_or_default();
+
+    let matched_person_id = match_email_sender_to_person(
+        preview.from_email.as_deref(),
+        preview.from.as_deref(),
+        persons,
+        &own_emails,
+    );
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
