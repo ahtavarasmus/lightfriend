@@ -1332,19 +1332,32 @@ pub async fn process_sms(
         }
     }
 
-    // id-verifier: strip any line where the model cited an ontology
+    // id-verifier: drop any line where the model cited an ontology
     // [id=N] that doesn't match a row returned by any tool call in
     // this turn. Runs BEFORE truncation so the user-visible footer
-    // (appended when anything is stripped) participates in the SMS
+    // (appended when anything is dropped) participates in the SMS
     // length budget. Runs only on success paths — failure messages
     // are canned strings without ids.
-    let final_response = if !fail {
+    //
+    // Returns two parallel versions:
+    //   - `user_facing`: what to send over SMS. `[id=N]` markers
+    //     stripped, footer appended if any line was dropped.
+    //   - `history`: what to store in conversation history. `[id=N]`
+    //     markers PRESERVED so the LLM sees its own correctly-
+    //     formatted prior turn next time and keeps citing ids. If we
+    //     stored the stripped version, the model would quickly "learn"
+    //     from its own history that citations are optional and drop
+    //     them — which would defeat the verifier on the next turn.
+    //
+    // `history_for_storage` is used later when we build
+    // `assistant_message`. It falls back to `final_response` on the
+    // failure path (no verification ran, so history == user_facing).
+    let (final_response, history_for_storage) = if !fail {
         let valid_ids = crate::utils::id_verifier::collect_tool_result_ids(&loop_messages);
-        let (verified, _stripped) =
-            crate::utils::id_verifier::verify_and_strip(&final_response, &valid_ids);
-        verified
+        let verified = crate::utils::id_verifier::verify(&final_response, &valid_ids);
+        (verified.user_facing, verified.history)
     } else {
-        final_response
+        (final_response.clone(), final_response)
     };
 
     // Ensure response is within SMS character limit (truncate text BEFORE adding media)
@@ -1390,10 +1403,15 @@ pub async fn process_sms(
         .unwrap()
         .as_secs() as i32;
 
+    // History storage uses the verifier's `history` version (tag
+    // markers preserved, no footer, un-truncated). Next turn the LLM
+    // will see its own correctly-cited prior turn and keep citing
+    // ids — if we stored `final_response_with_notice` instead, the
+    // stripped view would train the model to drop citations.
     let assistant_message = crate::pg_models::NewPgMessageHistory {
         user_id: user.id,
         role: "assistant".to_string(),
-        encrypted_content: final_response_with_notice.clone(),
+        encrypted_content: history_for_storage.clone(),
         tool_name: None,
         tool_call_id: None,
         tool_calls_json: None,

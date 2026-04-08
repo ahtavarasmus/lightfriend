@@ -1,14 +1,14 @@
 //! Tests for the id-verifier that post-processes LLM responses.
 //!
-//! The verifier enforces the `[id=N]` citation contract: the model is
-//! instructed (via system prompt + tool description) to cite `[id=N]`
-//! after every item it mentions, and this module catches cases where
-//! the model fabricates an id that no tool call returned. Any line
-//! containing at least one unverified id is stripped entirely and a
-//! short user-visible footer is appended so the user knows something
-//! was redacted.
+//! The verifier enforces the `[id=N]` citation contract. It returns
+//! two parallel versions of each response:
+//!   - `user_facing`: what gets sent over SMS. `[id=N]` tags stripped,
+//!     footer appended if any line was dropped for failing verification.
+//!   - `history`: what gets stored in conversation history. `[id=N]`
+//!     tags preserved so the LLM sees its own correctly-formatted
+//!     prior turn next time and keeps citing ids.
 
-use backend::utils::id_verifier::{collect_tool_result_ids, verify_and_strip, STRIPPED_FOOTER};
+use backend::utils::id_verifier::{collect_tool_result_ids, verify, STRIPPED_FOOTER};
 use openai_api_rs::v1::chat_completion::{ChatCompletionMessage, Content, MessageRole};
 use std::collections::HashSet;
 
@@ -51,38 +51,43 @@ fn collect_ids_extracts_from_tool_messages_only() {
     assert!(!ids.contains(&999));
 }
 
+// =============================================================================
+// user_facing output: tag stripping
+// =============================================================================
+
 #[test]
-fn verify_strips_id_tags_from_surviving_lines() {
+fn verify_strips_id_tags_from_user_facing_when_all_valid() {
     // All ids valid → no line dropped, but the `[id=N]` tags
-    // themselves are silently removed so the user never sees our
-    // internal citation plumbing in the final SMS.
+    // themselves are silently removed from user_facing so the user
+    // never sees our internal citation plumbing.
     let valid: HashSet<i64> = [101, 102].into_iter().collect();
     let resp =
         "You have 2 messages:\n1. Alice - quarterly review [id=101]\n2. Bob - sounds good [id=102]";
-    let (out, dropped) = verify_and_strip(resp, &valid);
-    assert!(!dropped, "no line was dropped for verification");
+    let v = verify(resp, &valid);
+    assert!(!v.dropped_line, "no line was dropped for verification");
     assert!(
-        !out.contains("[id="),
-        "all id tags must be removed from final output, got: {out:?}"
+        !v.user_facing.contains("[id="),
+        "all id tags must be removed from user_facing, got: {:?}",
+        v.user_facing
     );
-    assert!(out.contains("Alice"));
-    assert!(out.contains("Bob"));
-    assert!(out.contains("quarterly review"));
-    assert!(out.contains("sounds good"));
+    assert!(v.user_facing.contains("Alice"));
+    assert!(v.user_facing.contains("Bob"));
+    assert!(v.user_facing.contains("quarterly review"));
+    assert!(v.user_facing.contains("sounds good"));
     // Footer should NOT appear — nothing was dropped.
-    assert!(!out.contains(STRIPPED_FOOTER));
+    assert!(!v.user_facing.contains(STRIPPED_FOOTER));
 }
 
 #[test]
-fn verify_trims_dangling_separator_left_behind_by_tag_removal() {
+fn verify_trims_dangling_separator_after_tag_removal_in_user_facing() {
     // When a line ends with " - [id=N]" or " — [id=N]", removing the
     // tag must not leave a dangling punctuation artifact.
     let valid: HashSet<i64> = [101].into_iter().collect();
     let resp = "1. Alice — [id=101]";
-    let (out, _dropped) = verify_and_strip(resp, &valid);
-    assert!(!out.contains("[id="));
-    assert!(out.contains("Alice"));
-    for line in out.lines() {
+    let v = verify(resp, &valid);
+    assert!(!v.user_facing.contains("[id="));
+    assert!(v.user_facing.contains("Alice"));
+    for line in v.user_facing.lines() {
         let last_char = line.chars().last();
         assert!(
             !matches!(last_char, Some('—') | Some('-') | Some('–') | Some(':')),
@@ -91,17 +96,61 @@ fn verify_trims_dangling_separator_left_behind_by_tag_removal() {
     }
 }
 
+// =============================================================================
+// history output: tags KEPT so the LLM sees its own citations next turn
+// =============================================================================
+
 #[test]
-fn verify_drops_line_with_unknown_id_and_appends_footer() {
+fn verify_history_preserves_tags_when_all_valid() {
+    let valid: HashSet<i64> = [101, 102].into_iter().collect();
+    let resp = "1. Alice [id=101]\n2. Bob [id=102]";
+    let v = verify(resp, &valid);
+    assert!(!v.dropped_line);
+    // history must contain both tags verbatim — this is what the LLM
+    // sees on the next turn as its own prior response.
+    assert!(v.history.contains("[id=101]"));
+    assert!(v.history.contains("[id=102]"));
+    // history must NOT contain the footer — that's system noise not
+    // written by the LLM.
+    assert!(!v.history.contains(STRIPPED_FOOTER));
+}
+
+#[test]
+fn verify_history_drops_invalid_lines_same_as_user_facing() {
+    // Dropped lines are dropped from BOTH versions — we don't want
+    // the LLM seeing its own fabrications in history either,
+    // otherwise it might reuse the fake ids next turn.
+    let valid: HashSet<i64> = [101].into_iter().collect();
+    let resp = "1. Alice [id=101]\n2. Phantom [id=999]";
+    let v = verify(resp, &valid);
+    assert!(v.dropped_line);
+    assert!(v.history.contains("[id=101]"));
+    assert!(v.history.contains("Alice"));
+    assert!(!v.history.contains("[id=999]"));
+    assert!(!v.history.contains("Phantom"));
+    // Footer is user-only, not in history.
+    assert!(!v.history.contains(STRIPPED_FOOTER));
+}
+
+// =============================================================================
+// Line-dropping + footer (user_facing only)
+// =============================================================================
+
+#[test]
+fn verify_drops_line_with_unknown_id_and_appends_footer_to_user_facing() {
     let valid: HashSet<i64> = [101].into_iter().collect();
     let resp = "You have 2 messages:\n1. Alice [id=101]\n2. Phantom [id=999]";
-    let (out, dropped) = verify_and_strip(resp, &valid);
-    assert!(dropped);
-    assert!(out.contains("Alice"));
-    assert!(!out.contains("[id="), "id tags must be stripped: {out:?}");
-    assert!(!out.contains("Phantom"));
-    assert!(!out.contains("999"));
-    assert!(out.contains(STRIPPED_FOOTER));
+    let v = verify(resp, &valid);
+    assert!(v.dropped_line);
+    assert!(v.user_facing.contains("Alice"));
+    assert!(
+        !v.user_facing.contains("[id="),
+        "id tags must be stripped from user_facing: {:?}",
+        v.user_facing
+    );
+    assert!(!v.user_facing.contains("Phantom"));
+    assert!(!v.user_facing.contains("999"));
+    assert!(v.user_facing.contains(STRIPPED_FOOTER));
 }
 
 #[test]
@@ -111,40 +160,57 @@ fn verify_drops_line_even_when_one_id_is_valid() {
     // and fabrication in one sentence.
     let valid: HashSet<i64> = [101].into_iter().collect();
     let resp = "1. See [id=101] and [id=999] together";
-    let (out, dropped) = verify_and_strip(resp, &valid);
-    assert!(dropped);
-    assert!(!out.contains("See"));
-    assert!(!out.contains("[id="));
-    assert!(out.contains(STRIPPED_FOOTER));
+    let v = verify(resp, &valid);
+    assert!(v.dropped_line);
+    assert!(!v.user_facing.contains("See"));
+    assert!(!v.user_facing.contains("[id="));
+    assert!(v.user_facing.contains(STRIPPED_FOOTER));
+    // history also dropped it — and still has no tags left because
+    // the whole line is gone.
+    assert!(!v.history.contains("See"));
+    assert!(!v.history.contains("[id=101]"));
+    assert!(!v.history.contains("[id=999]"));
 }
 
 #[test]
 fn verify_keeps_lines_without_ids() {
     // Headers, counts, and prose lines without `[id=N]` references
-    // are not in scope for verification and pass through unchanged.
-    // Surviving lines WITH ids get their tags stripped.
+    // are not in scope for verification and pass through unchanged
+    // in both versions.
     let valid: HashSet<i64> = [101].into_iter().collect();
     let resp =
         "Summary for today:\n\n1. Alice - review [id=101]\n2. Phantom [id=999]\n\nReply to dig in.";
-    let (out, dropped) = verify_and_strip(resp, &valid);
-    assert!(dropped);
-    assert!(out.contains("Summary for today:"));
-    assert!(out.contains("Alice"));
-    assert!(out.contains("review"));
-    assert!(!out.contains("[id="), "id tags must be stripped: {out:?}");
-    assert!(!out.contains("Phantom"));
-    assert!(out.contains("Reply to dig in."));
-    assert!(out.contains(STRIPPED_FOOTER));
+    let v = verify(resp, &valid);
+    assert!(v.dropped_line);
+
+    // user_facing: header + CTA pass through, tag stripped, footer.
+    assert!(v.user_facing.contains("Summary for today:"));
+    assert!(v.user_facing.contains("Alice"));
+    assert!(v.user_facing.contains("review"));
+    assert!(!v.user_facing.contains("[id="));
+    assert!(!v.user_facing.contains("Phantom"));
+    assert!(v.user_facing.contains("Reply to dig in."));
+    assert!(v.user_facing.contains(STRIPPED_FOOTER));
+
+    // history: same filtering, but [id=101] preserved, no footer.
+    assert!(v.history.contains("Summary for today:"));
+    assert!(v.history.contains("[id=101]"));
+    assert!(v.history.contains("Alice"));
+    assert!(!v.history.contains("Phantom"));
+    assert!(v.history.contains("Reply to dig in."));
+    assert!(!v.history.contains(STRIPPED_FOOTER));
 }
 
 #[test]
-fn verify_empty_response_with_all_invalid_becomes_footer_only() {
+fn verify_empty_response_with_all_invalid_becomes_footer_only_in_user_facing() {
     let valid: HashSet<i64> = HashSet::new();
     let resp = "1. Phantom [id=999]";
-    let (out, dropped) = verify_and_strip(resp, &valid);
-    assert!(dropped);
-    // Footer alone — no preceding whitespace.
-    assert_eq!(out, STRIPPED_FOOTER);
+    let v = verify(resp, &valid);
+    assert!(v.dropped_line);
+    // user_facing: footer alone.
+    assert_eq!(v.user_facing, STRIPPED_FOOTER);
+    // history: empty string (no footer, nothing to preserve).
+    assert_eq!(v.history, "");
 }
 
 #[test]
@@ -153,29 +219,38 @@ fn verify_no_tool_calls_means_any_id_is_unverified() {
     // id must be dropped as fabrication.
     let valid: HashSet<i64> = HashSet::new();
     let resp = "1. Totally real thing [id=42]";
-    let (out, dropped) = verify_and_strip(resp, &valid);
-    assert!(dropped);
-    assert!(!out.contains("[id="));
-    assert!(!out.contains("Totally real thing"));
+    let v = verify(resp, &valid);
+    assert!(v.dropped_line);
+    assert!(!v.user_facing.contains("[id="));
+    assert!(!v.user_facing.contains("Totally real thing"));
+    assert!(!v.history.contains("[id=42]"));
+    assert!(!v.history.contains("Totally real thing"));
 }
 
 #[test]
 fn verify_collapses_triple_newlines_after_dropping() {
     // When dropping a line from a previously well-spaced response,
-    // we shouldn't leave a run of 3+ blank lines behind.
+    // we shouldn't leave a run of 3+ blank lines behind in either
+    // version.
     let valid: HashSet<i64> = [101].into_iter().collect();
     let resp = "Line A [id=101]\n\nLine B [id=999]\n\nLine C [id=101]";
-    let (out, dropped) = verify_and_strip(resp, &valid);
-    assert!(dropped);
-    assert!(!out.contains("\n\n\n"));
-    assert!(!out.contains("[id="));
+    let v = verify(resp, &valid);
+    assert!(v.dropped_line);
+    assert!(!v.user_facing.contains("\n\n\n"));
+    assert!(!v.user_facing.contains("[id="));
+    assert!(!v.history.contains("\n\n\n"));
+    assert!(v.history.contains("[id=101]"));
+    assert!(!v.history.contains("[id=999]"));
 }
 
 #[test]
 fn verify_no_ids_anywhere_is_passthrough() {
+    // A response with zero `[id=N]` anywhere is treated as having no
+    // data claims to verify — both versions equal the original.
     let valid: HashSet<i64> = HashSet::new();
     let resp = "Hello, how are you today?";
-    let (out, dropped) = verify_and_strip(resp, &valid);
-    assert!(!dropped);
-    assert_eq!(out, resp);
+    let v = verify(resp, &valid);
+    assert!(!v.dropped_line);
+    assert_eq!(v.user_facing, resp);
+    assert_eq!(v.history, resp);
 }

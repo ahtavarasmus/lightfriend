@@ -57,83 +57,126 @@ pub fn collect_tool_result_ids(messages: &[ChatCompletionMessage]) -> HashSet<i6
     ids
 }
 
-/// Verify that every `[id=N]` cited in `response` appears in
-/// `valid_ids`, then strip the `[id=N]` markers themselves from
-/// surviving lines so the user never sees our internal citation
-/// plumbing. Any line containing at least one unverified id is
-/// dropped entirely (both verification and tag removal happen in one
-/// pass). If anything was dropped, a user-visible footer is appended.
-/// Lines with no ids at all are preserved as-is (counts, headers,
-/// closing CTAs).
+/// Result of running the id verifier over an LLM response.
 ///
-/// Returns `(verified_response, something_was_stripped_for_verification)`.
+/// The verifier produces two parallel outputs from a single pass over
+/// the response so that the user-facing version and the conversation-
+/// history version can diverge on tag handling without a second walk.
 ///
-/// Note: the returned bool is ONLY true when a LINE was dropped for
-/// failing verification. Stripping the `[id=N]` tags themselves from
-/// kept lines is silent — the user should never know we were citing
-/// ids in the first place.
-pub fn verify_and_strip(response: &str, valid_ids: &HashSet<i64>) -> (String, bool) {
+/// Both versions share the same line filtering: any line containing
+/// at least one `[id=N]` that isn't in the trusted set is dropped
+/// from BOTH outputs. The difference is in what kept lines look like:
+///
+/// - `user_facing` has the `[id=N]` tags stripped (internal plumbing
+///   the user should never see) and, if at least one line was
+///   dropped, an explanatory footer appended.
+/// - `history` keeps the `[id=N]` tags intact so that next turn the
+///   LLM sees its own correctly-formatted prior answer in conversation
+///   history and keeps citing ids. Without this, the model would
+///   quickly "learn" from stripped history that citations are
+///   optional and drift into uncited prose — which defeats the
+///   verifier entirely on the next turn.
+#[derive(Debug, Clone)]
+pub struct VerifiedResponse {
+    /// Send this to the user. `[id=N]` tags stripped, footer appended
+    /// if any line was dropped for failing verification.
+    pub user_facing: String,
+
+    /// Store this in conversation history. `[id=N]` tags preserved
+    /// exactly as the model wrote them on kept lines. No footer —
+    /// footers are system messages, not the LLM's words.
+    pub history: String,
+
+    /// True if at least one line was dropped for failing verification.
+    pub dropped_line: bool,
+}
+
+/// Verify every `[id=N]` cited in `response` against `valid_ids` and
+/// produce both a user-facing and a history-bound version of the text.
+/// See [`VerifiedResponse`] for the rationale behind keeping the two
+/// versions distinct.
+///
+/// Invariants:
+/// - Lines with no ids at all pass through both versions unchanged.
+/// - A line where ANY cited id is not in `valid_ids` is dropped from
+///   both versions (a line mixing real and fake ids can't be trusted
+///   in parts).
+/// - Kept lines' `[id=N]` tags are preserved in `history` and removed
+///   in `user_facing`. Tag removal also trims dangling separators
+///   ("Alice - ", "Alice —") so the user-facing line looks clean.
+/// - Triple newlines left behind by dropping sparse lines are
+///   collapsed to doubles in both versions.
+/// - The footer is appended to `user_facing` only, and only when at
+///   least one line was dropped.
+pub fn verify(response: &str, valid_ids: &HashSet<i64>) -> VerifiedResponse {
     let re = id_re();
     let mut dropped_line = false;
 
-    let kept: Vec<String> = response
-        .lines()
-        .filter_map(|line| {
-            // Collect all ids cited on this line.
-            let ids_on_line: Vec<i64> = re
-                .captures_iter(line)
-                .filter_map(|cap| cap[1].parse::<i64>().ok())
-                .collect();
+    let mut history_lines: Vec<String> = Vec::new();
+    let mut user_lines: Vec<String> = Vec::new();
 
-            if ids_on_line.is_empty() {
-                // No ids on this line — nothing to verify, pass through.
-                return Some(line.to_string());
-            }
+    for line in response.lines() {
+        let ids_on_line: Vec<i64> = re
+            .captures_iter(line)
+            .filter_map(|cap| cap[1].parse::<i64>().ok())
+            .collect();
 
-            // Every id on this line must be in the trusted set.
-            let all_ok = ids_on_line.iter().all(|id| valid_ids.contains(id));
-            if !all_ok {
-                dropped_line = true;
-                return None;
-            }
+        if ids_on_line.is_empty() {
+            // No ids on this line — pass through both versions.
+            history_lines.push(line.to_string());
+            user_lines.push(line.to_string());
+            continue;
+        }
 
-            // Line verified. Strip the `[id=N]` markers themselves
-            // from the user-visible output — internal plumbing, not
-            // noise the user should see. Also collapse any double
-            // spaces or trailing spaces that removing tokens leaves
-            // behind, and trim trailing punctuation artifacts like
-            // " - ." or " —".
-            let cleaned = re.replace_all(line, "");
-            let collapsed = cleaned.split_whitespace().collect::<Vec<&str>>().join(" ");
-            // Trim trailing dangling separators commonly left after
-            // an id was at the end of the line (e.g. "Alice - " or
-            // "Alice —").
-            let trimmed = collapsed
-                .trim_end_matches(|c: char| {
-                    c.is_whitespace() || c == '-' || c == '—' || c == '–' || c == ':'
-                })
-                .to_string();
-            Some(trimmed)
-        })
-        .collect();
+        let all_ok = ids_on_line.iter().all(|id| valid_ids.contains(id));
+        if !all_ok {
+            dropped_line = true;
+            continue; // drop from both
+        }
 
-    let mut result = kept.join("\n");
+        // History version keeps the line exactly as written so the
+        // LLM sees its own [id=N] format on the next turn.
+        history_lines.push(line.to_string());
 
-    // Clean up any run of 3+ newlines left behind by dropping sparse
-    // lines from a previously well-spaced response.
-    while result.contains("\n\n\n") {
-        result = result.replace("\n\n\n", "\n\n");
+        // User-facing version strips the tags and cleans up
+        // dangling separators left behind.
+        let cleaned = re.replace_all(line, "");
+        let collapsed = cleaned.split_whitespace().collect::<Vec<&str>>().join(" ");
+        let trimmed = collapsed
+            .trim_end_matches(|c: char| {
+                c.is_whitespace() || c == '-' || c == '—' || c == '–' || c == ':'
+            })
+            .to_string();
+        user_lines.push(trimmed);
     }
-    result = result.trim_end().to_string();
+
+    // Collapse 3+ blank lines left over from dropping, and trim the
+    // trailing whitespace. Same transform for both versions — they
+    // have the same line structure, only the content of kept lines
+    // differs.
+    fn collapse(lines: Vec<String>) -> String {
+        let mut s = lines.join("\n");
+        while s.contains("\n\n\n") {
+            s = s.replace("\n\n\n", "\n\n");
+        }
+        s.trim_end().to_string()
+    }
+
+    let history = collapse(history_lines);
+    let mut user_facing = collapse(user_lines);
 
     if dropped_line {
-        if !result.is_empty() {
-            result.push_str("\n\n");
+        if !user_facing.is_empty() {
+            user_facing.push_str("\n\n");
         }
-        result.push_str(STRIPPED_FOOTER);
+        user_facing.push_str(STRIPPED_FOOTER);
     }
 
-    (result, dropped_line)
+    VerifiedResponse {
+        user_facing,
+        history,
+        dropped_line,
+    }
 }
 
 // Tests live in `backend/tests/id_verifier_test.rs` — this repo keeps
