@@ -17,6 +17,13 @@ define_sql_function! {
     fn lower(x: Text) -> Text;
 }
 
+fn normalize_phone(phone: &str) -> String {
+    phone
+        .chars()
+        .filter(|c| c.is_ascii_digit() || *c == '+')
+        .collect()
+}
+
 /// Type alias for tier3 settings
 pub type Tier3Settings = (
     Option<String>,
@@ -251,15 +258,16 @@ impl UserCoreOps for UserCore {
 
     fn find_by_phone_number(&self, phone_number: &str) -> Result<Option<User>, DieselError> {
         let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
-        let cleaned_phone = phone_number
-            .chars()
-            .filter(|c| c.is_ascii_digit() || *c == '+')
-            .collect::<String>();
-        let user = users::table
+        let cleaned_phone = normalize_phone(phone_number);
+        let matches = users::table
             .filter(users::phone_number.eq(cleaned_phone))
-            .first::<User>(&mut pg_conn)
-            .optional()?;
-        Ok(user)
+            .limit(2)
+            .load::<User>(&mut pg_conn)?;
+        match matches.len() {
+            0 => Ok(None),
+            1 => Ok(matches.into_iter().next()),
+            _ => Err(DieselError::RollbackTransaction),
+        }
     }
 
     fn find_by_magic_token(&self, token: &str) -> Result<Option<User>, DieselError> {
@@ -644,7 +652,7 @@ impl UserCoreOps for UserCore {
     fn phone_number_exists(&self, search_phone: &str) -> Result<bool, DieselError> {
         let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
         let existing_user: Option<User> = users::table
-            .filter(users::phone_number.eq(search_phone))
+            .filter(users::phone_number.eq(normalize_phone(search_phone)))
             .first::<User>(&mut pg_conn)
             .optional()?;
         Ok(existing_user.is_some())

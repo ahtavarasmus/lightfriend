@@ -12,7 +12,7 @@ pub struct UsageDataPoint {
 
 use crate::{
     pg_models::{NewPgBridge, NewPgImapConnection, NewPgUsageLog, PgBridge},
-    pg_schema::usage_logs,
+    pg_schema::{imap_connection, usage_logs},
     PgDbPool,
 };
 
@@ -200,7 +200,6 @@ impl UserRepository {
         imap_server: Option<&str>,
         imap_port: Option<u16>,
     ) -> Result<i32, diesel::result::Error> {
-        use crate::pg_schema::imap_connection;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Encrypt password
@@ -212,10 +211,23 @@ impl UserRepository {
             .unwrap()
             .as_secs() as i32;
 
+        let normalized_email = email.trim().to_lowercase();
+
+        // Fail closed if this mailbox is already attached to another user.
+        let mailbox_owner = imap_connection::table
+            .filter(imap_connection::description.eq(&normalized_email))
+            .filter(imap_connection::user_id.ne(user_id))
+            .select(imap_connection::user_id)
+            .first::<i32>(&mut conn)
+            .optional()?;
+        if mailbox_owner.is_some() {
+            return Err(diesel::result::Error::RollbackTransaction);
+        }
+
         // Check if this email already exists for this user
         let existing = imap_connection::table
             .filter(imap_connection::user_id.eq(user_id))
-            .filter(imap_connection::description.eq(email))
+            .filter(imap_connection::description.eq(&normalized_email))
             .first::<crate::pg_models::PgImapConnection>(&mut conn)
             .optional()?;
 
@@ -224,7 +236,7 @@ impl UserRepository {
             diesel::update(
                 imap_connection::table
                     .filter(imap_connection::user_id.eq(user_id))
-                    .filter(imap_connection::description.eq(email)),
+                    .filter(imap_connection::description.eq(&normalized_email)),
             )
             .set((
                 imap_connection::encrypted_password.eq(&encrypted_password),
@@ -249,7 +261,7 @@ impl UserRepository {
                 status: "active".to_string(),
                 last_update: current_time,
                 created_on: current_time,
-                description: email.to_string(),
+                description: normalized_email,
                 imap_server: imap_server.map(|s| s.to_string()),
                 imap_port: imap_port.map(|p| p as i32),
             };
@@ -266,17 +278,21 @@ impl UserRepository {
         &self,
         user_id: i32,
     ) -> Result<Option<ImapCredentials>, diesel::result::Error> {
-        use crate::pg_schema::imap_connection;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
-        // Get the active IMAP connection for the user
-        let imap_conn = imap_connection::table
+        // Fail closed if the user has multiple active accounts and the caller
+        // didn't specify which one to use.
+        let mut imap_conns = imap_connection::table
             .filter(imap_connection::user_id.eq(user_id))
             .filter(imap_connection::status.eq("active"))
-            .first::<crate::pg_models::PgImapConnection>(&mut conn)
-            .optional()?;
+            .limit(2)
+            .load::<crate::pg_models::PgImapConnection>(&mut conn)?;
 
-        if let Some(conn) = imap_conn {
+        if imap_conns.len() > 1 {
+            return Err(diesel::result::Error::RollbackTransaction);
+        }
+
+        if let Some(conn) = imap_conns.pop() {
             // Decrypt the password
             match decrypt(&conn.encrypted_password) {
                 Ok(decrypted_password) => Ok(Some((
@@ -435,10 +451,11 @@ impl UserRepository {
     ) -> Result<Option<ImapConnectionInfo>, diesel::result::Error> {
         use crate::pg_schema::imap_connection;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let normalized_email = email.trim().to_lowercase();
 
         let imap_conn = imap_connection::table
             .filter(imap_connection::user_id.eq(user_id))
-            .filter(imap_connection::description.eq(email))
+            .filter(imap_connection::description.eq(normalized_email))
             .filter(imap_connection::status.eq("active"))
             .first::<crate::pg_models::PgImapConnection>(&mut conn)
             .optional()?;
