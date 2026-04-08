@@ -41,6 +41,7 @@ pub mod utils {
     pub mod country;
     pub mod email;
     pub mod encryption;
+    pub mod id_verifier;
     pub mod imap_idle;
     pub mod matrix_auth;
     pub mod notification_utils;

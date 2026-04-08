@@ -85,8 +85,12 @@ static MESSAGE_DEF: ObjectTypeDef = ObjectTypeDef {
         assistant turn in history already contained a digest (that history is stale and may be hours old). \
         Results are sorted most-recent-first and include a timestamp per row. If the default limit \
         doesn't reach far enough back for the user's question (e.g. 'yesterday', 'past few days'), \
-        call again with a larger `limit`. Each result includes a stable [id=N] you MUST cite in your \
-        answer — the caller uses it to verify nothing was fabricated.",
+        call again with a larger `limit`. \
+        Each result row starts with a stable `[id=N]`. When you write your answer to the user, you \
+        MUST copy that `[id=N]` verbatim onto the SAME LINE as the item you reference. Literal square \
+        brackets, lowercase `id=`, digits. No other format works — a post-processor strips any line \
+        whose id doesn't match what this tool returned. One item per line so a bad citation can't drop \
+        a paragraph of good items. Lines without an id (counts, headers, closings) pass through fine.",
     properties: MESSAGE_PROPS,
     linkable_to: &[],
 };

@@ -1332,6 +1332,21 @@ pub async fn process_sms(
         }
     }
 
+    // id-verifier: strip any line where the model cited an ontology
+    // [id=N] that doesn't match a row returned by any tool call in
+    // this turn. Runs BEFORE truncation so the user-visible footer
+    // (appended when anything is stripped) participates in the SMS
+    // length budget. Runs only on success paths — failure messages
+    // are canned strings without ids.
+    let final_response = if !fail {
+        let valid_ids = crate::utils::id_verifier::collect_tool_result_ids(&loop_messages);
+        let (verified, _stripped) =
+            crate::utils::id_verifier::verify_and_strip(&final_response, &valid_ids);
+        verified
+    } else {
+        final_response
+    };
+
     // Ensure response is within SMS character limit (truncate text BEFORE adding media)
     let final_response = if !fail {
         // For successful responses, use LLM condensing if needed
