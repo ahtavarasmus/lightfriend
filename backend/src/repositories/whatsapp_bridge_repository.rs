@@ -80,11 +80,17 @@ impl WhatsAppBridgeRepository {
         Self { pool }
     }
 
-    /// Look up the WhatsApp JID that a Matrix user is logged into the bridge as.
-    /// Returns Ok(None) if the user is not currently logged in.
+    /// Look up the WhatsApp phone number that a Matrix user is logged into the
+    /// bridge as. Returns Ok(None) if the user is not currently logged in.
+    ///
+    /// Note: this returns the value stored in `user_logins.id`, which is
+    /// produced by `waid.MakeUserLoginID` in mautrix-whatsapp and equals just
+    /// the user-part of the JID — i.e. the phone number string like
+    /// "5218127329906", NOT a full JID. The contact lookup below joins
+    /// against `whatsmeow_device` to get the real JID.
     ///
     /// `matrix_user_id` is the full Matrix ID, e.g. "@appuser_xxx:localhost".
-    pub fn get_our_jid_for_matrix_user(
+    pub fn get_login_phone_for_matrix_user(
         &self,
         matrix_user_id: &str,
     ) -> Result<Option<String>, DieselError> {
@@ -99,38 +105,68 @@ impl WhatsAppBridgeRepository {
         Ok(rows.into_iter().next().map(|r| r.id))
     }
 
-    /// Fetch all WhatsApp contacts synced for a given `our_jid`.
-    pub fn get_contacts_by_our_jid(
+    /// Fetch all WhatsApp contacts synced for a user identified by their
+    /// login phone (the value of `user_logins.id`).
+    ///
+    /// The contacts table (`whatsmeow_contacts.our_jid`) is populated by the
+    /// whatsmeow library with the *full* JID of the logged-in device (via
+    /// `types.JID.String()`), which looks like `"{phone}@{server}"` or
+    /// `"{phone}:{device}@{server}"` — NOT just the phone. So we can't match
+    /// by equality on the phone. Instead we JOIN through `whatsmeow_device`
+    /// (the source of truth that `our_jid` has a FK to) and prefix-match the
+    /// `phone` onto `whatsmeow_device.jid` with an explicit boundary char
+    /// after it so `"1234"` can't false-match `"12345@..."` for another
+    /// user.
+    ///
+    /// The two LIKE patterns together cover every shape emitted by whatsmeow's
+    /// `JID.String()`:
+    ///   - `"{phone}@{server}"`            (device == 0)
+    ///   - `"{phone}:{device}@{server}"`   (device >  0)
+    ///
+    /// We don't hardcode the server domain so a future whatsmeow migration
+    /// that renames `s.whatsapp.net` won't silently break this.
+    pub fn get_contacts_by_login_phone(
         &self,
-        our_jid: &str,
+        phone: &str,
     ) -> Result<Vec<WhatsAppContact>, DieselError> {
         let mut conn = self
             .pool
             .get()
             .expect("Failed to get whatsapp_db connection");
         let rows: Vec<ContactRow> = diesel::sql_query(
-            "SELECT their_jid, first_name, full_name, push_name, business_name \
-             FROM whatsmeow_contacts \
-             WHERE our_jid = $1 \
-             ORDER BY COALESCE(full_name, push_name, business_name, their_jid) \
+            "SELECT c.their_jid, c.first_name, c.full_name, c.push_name, c.business_name \
+             FROM whatsmeow_contacts c \
+             INNER JOIN whatsmeow_device d ON c.our_jid = d.jid \
+             WHERE d.jid LIKE $1 || '@%' \
+                OR d.jid LIKE $1 || ':%@%' \
+             ORDER BY COALESCE(c.full_name, c.push_name, c.business_name, c.their_jid) \
              LIMIT 1000",
         )
-        .bind::<Text, _>(our_jid)
+        .bind::<Text, _>(phone)
         .load(&mut conn)?;
+
+        tracing::info!(
+            "whatsapp_bridge: get_contacts_by_login_phone phone_len={} -> {} contacts",
+            phone.len(),
+            rows.len()
+        );
 
         Ok(rows.into_iter().map(row_to_contact).collect())
     }
 
-    /// Convenience: resolve the JID for a Matrix user, then fetch contacts.
-    /// Returns an empty vec if the user isn't logged in.
+    /// Convenience: resolve the login phone for a Matrix user, then fetch
+    /// contacts. Returns an empty vec if the user isn't logged in.
     pub fn get_contacts_for_matrix_user(
         &self,
         matrix_user_id: &str,
     ) -> Result<Vec<WhatsAppContact>, DieselError> {
-        let Some(our_jid) = self.get_our_jid_for_matrix_user(matrix_user_id)? else {
+        let Some(phone) = self.get_login_phone_for_matrix_user(matrix_user_id)? else {
+            tracing::info!(
+                "whatsapp_bridge: no user_logins row for matrix user (not logged in to whatsapp bridge)"
+            );
             return Ok(Vec::new());
         };
-        self.get_contacts_by_our_jid(&our_jid)
+        self.get_contacts_by_login_phone(&phone)
     }
 }
 
