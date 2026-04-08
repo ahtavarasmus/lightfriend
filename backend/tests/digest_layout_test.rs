@@ -457,6 +457,7 @@ fn events_due_on_local_day_excludes_events_with_no_due_date() {
 // =============================================================================
 
 /// Helper: insert a classified message into the ontology in one shot.
+#[allow(clippy::too_many_arguments)]
 fn insert_classified_message(
     state: &std::sync::Arc<backend::AppState>,
     user_id: i32,
