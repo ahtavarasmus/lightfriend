@@ -1005,9 +1005,9 @@ pub fn parse_digest_times(input: &str) -> Result<(String, Vec<u16>), String> {
     if slots.is_empty() {
         return Err("at least one time required".to_string());
     }
-    if slots.len() > 4 {
+    if slots.len() > 10 {
         return Err(format!(
-            "too many digest times: {} (max 4 per day)",
+            "too many digest times: {} (max 10 per day)",
             slots.len()
         ));
     }
