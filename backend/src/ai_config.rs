@@ -84,7 +84,7 @@ impl AiConfig {
             (AiProvider::OpenRouter, ModelPurpose::Default) => "openai/gpt-4o-2024-11-20",
             (AiProvider::Tinfoil, ModelPurpose::Default) => "kimi-k2-5",
             // Voice: fast non-reasoning model for low-latency responses
-            (AiProvider::Tinfoil, ModelPurpose::Voice) => "llama3-3-70b",
+            (AiProvider::Tinfoil, ModelPurpose::Voice) => "gemma4-31b",
             (AiProvider::OpenRouter, ModelPurpose::Voice) => "openai/gpt-4o-2024-11-20",
         }
     }
@@ -119,6 +119,20 @@ impl AiConfig {
                     let sanitized = Self::sanitize_content(&content);
                     msg["content"] = serde_json::Value::String(sanitized);
                 }
+            }
+        }
+    }
+
+    /// Apply model-specific request overrides for providers that expose extra controls.
+    fn apply_model_specific_request_overrides(body: &mut serde_json::Value) {
+        let model = body
+            .get("model")
+            .and_then(|m| m.as_str())
+            .unwrap_or_default();
+
+        if model == "gemma4-31b" {
+            if let Some(obj) = body.as_object_mut() {
+                obj.insert("enable_thinking".into(), serde_json::json!(false));
             }
         }
     }
@@ -165,6 +179,7 @@ impl AiConfig {
                 }
                 // Sanitize message content for Tinfoil
                 Self::sanitize_request_body(&mut body);
+                Self::apply_model_specific_request_overrides(&mut body);
                 client
                     .post(&url)
                     .header("Authorization", format!("Bearer {}", api_key))
@@ -551,6 +566,7 @@ impl AiConfig {
                 obj.remove("max_tokens");
             }
             Self::sanitize_request_body(&mut body);
+            Self::apply_model_specific_request_overrides(&mut body);
 
             let response = client
                 .post(&url)
