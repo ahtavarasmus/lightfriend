@@ -485,6 +485,14 @@ pub async fn run_system_behaviors(
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
 
+                // Hard guarantee: never notify the user about their own
+                // outgoing messages, regardless of what the LLM decided.
+                // The LLM has been correct in practice but a single bad
+                // classification would SMS the user about themselves.
+                // Pass 2 commitment extraction below still runs so
+                // tracked-event matching keeps working for "You" messages.
+                let should_notify = should_notify && sender_name != "You";
+
                 let summary = parsed.get("summary").and_then(|v| v.as_str()).unwrap_or("");
 
                 info!(
@@ -562,7 +570,12 @@ pub async fn run_system_behaviors(
                         send_notification(state, user_id, notification_message, content_type, None)
                             .await;
                     }
-                } else {
+                } else if sender_name != "You" {
+                    // Don't surface "Screened message" entries for the
+                    // user's own outgoing messages — they're noise in
+                    // the activity feed. The classification + Pass 2
+                    // commitment extraction above still runs for them
+                    // so tracked-event matching keeps working.
                     let _ = state.user_repository.log_usage(LogUsageParams {
                         user_id,
                         sid: None,
