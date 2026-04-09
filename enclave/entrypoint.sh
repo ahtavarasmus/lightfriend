@@ -182,6 +182,25 @@ else
     echo "  No VSOCK device - running in direct network mode"
 fi
 
+# ── 0c1. Start VSOCK bridge for Telegram SOCKS5 residential proxy ─────────────
+# The mautrix-telegram bridge needs to reach Telegram's API via a residential
+# SOCKS5 proxy to avoid datacenter IP bans. The host side runs a socat that
+# forwards VSOCK port 8500 to the actual proxy server. Inside the enclave we
+# bridge a local TCP port to that VSOCK endpoint so the bridge config can
+# simply point at 127.0.0.1:1080.
+if [ -e /dev/vsock ]; then
+    echo ""
+    echo "[STEP 0c1] Starting Telegram SOCKS5 proxy VSOCK bridge..."
+    socat TCP-LISTEN:1080,reuseaddr,fork,bind=127.0.0.1 VSOCK-CONNECT:3:8500 &
+    TG_PROXY_PID=$!
+    sleep 0.3
+    if kill -0 $TG_PROXY_PID 2>/dev/null; then
+        echo "  Telegram SOCKS5 bridge running (PID $TG_PROXY_PID, 127.0.0.1:1080 -> host VSOCK:8500 -> residential proxy)"
+    else
+        echo "  WARNING: Telegram SOCKS5 bridge failed to start (PID $TG_PROXY_PID died)"
+    fi
+fi
+
 # ── 0c2. Start tap networking for IMAP/SMTP (gvisor-tap-vsock) ────────────────
 # This gives the enclave a real tap0 network interface over VSOCK for protocols
 # that can't go through the HTTP proxy (IMAP, SMTP, Telegram MTProto, etc.).
@@ -853,25 +872,31 @@ if shared_secret:
     if re.search(login_secret_pattern, text):
         text = re.sub(login_secret_pattern, login_secret_block, text, count=1)
 
-# Patch proxy fields from current .env (config may have stale values from backup)
+# Patch proxy fields from current .env (config may have stale values from backup).
+# Inside the enclave the SOCKS5 residential proxy is reachable via the local VSOCK
+# bridge at 127.0.0.1:1080 (see STEP 0c1), NOT at the original external address.
+# Username/password are forwarded as-is since SOCKS5 auth happens at protocol level.
 proxy_type = os.environ.get("TELEGRAM_PROXY_TYPE", "socks5")
+real_addr = os.environ.get("TELEGRAM_PROXY_ADDRESS", "")
+real_port = os.environ.get("TELEGRAM_PROXY_PORT", "")
+# Use the VSOCK-bridged local endpoint instead of the external address
 proxy_fields = {
     "type": proxy_type,
-    "address": os.environ.get("TELEGRAM_PROXY_ADDRESS", ""),
-    "port": os.environ.get("TELEGRAM_PROXY_PORT", ""),
+    "address": "127.0.0.1",
+    "port": "1080",
     "username": os.environ.get("TELEGRAM_PROXY_USERNAME", ""),
     "password": os.environ.get("TELEGRAM_PROXY_PASSWORD", ""),
 }
 # Always patch proxy type (to allow disabling proxy on existing configs)
 text = re.sub(r"(?m)^(        type:).*$", rf"\1 {proxy_type}", text, count=1)
-if proxy_fields["address"] and proxy_fields["port"] and proxy_type != "disabled":
+if real_addr and real_port and proxy_type != "disabled":
     for field, value in proxy_fields.items():
         if field == "type":
             continue
         pattern = rf"(?m)^(        {field}:).*$"
         replacement = rf"\1 {value}"
         text = re.sub(pattern, replacement, text, count=1)
-    print(f"  Patched proxy: {proxy_type} {proxy_fields['address']}:{proxy_fields['port']}", flush=True)
+    print(f"  Patched proxy: {proxy_type} 127.0.0.1:1080 (VSOCK bridge to {real_addr}:{real_port})", flush=True)
 else:
     print(f"  Proxy: {proxy_type} (direct connection via tap0)", flush=True)
 

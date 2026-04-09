@@ -100,6 +100,57 @@ RestartSec=3
 WantedBy=multi-user.target
 VSOCKEOF
 
+# VSOCK bridge: enclave's VSOCK port 8500 -> Telegram residential SOCKS5 proxy
+# Reads proxy address from .env so the host routes outbound TCP to the real
+# residential proxy server. Inside the enclave, a local socat bridges
+# TCP:1080 -> VSOCK:8500 so the bridge config points at 127.0.0.1:1080.
+cat > /opt/lightfriend/telegram-proxy-bridge.sh <<'SCRIPT'
+#!/bin/bash
+set -eu
+
+LOG="/opt/lightfriend/logs/telegram-proxy-bridge.log"
+mkdir -p /opt/lightfriend/logs
+
+log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) telegram-proxy-bridge: $*" | tee -a "$LOG"; }
+
+while true; do
+    if [ ! -f /opt/lightfriend/.env ]; then
+        sleep 5
+        continue
+    fi
+
+    ADDR=$(grep '^TELEGRAM_PROXY_ADDRESS=' /opt/lightfriend/.env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r')
+    PORT=$(grep '^TELEGRAM_PROXY_PORT=' /opt/lightfriend/.env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r')
+
+    if [ -z "$${ADDR}" ] || [ -z "$${PORT}" ]; then
+        log "TELEGRAM_PROXY_ADDRESS or TELEGRAM_PROXY_PORT not set, sleeping..."
+        sleep 30
+        continue
+    fi
+
+    log "Starting VSOCK:8500 -> TCP:$${ADDR}:$${PORT}"
+    /usr/bin/socat VSOCK-LISTEN:8500,reuseaddr,fork TCP:"$${ADDR}":"$${PORT}" 2>>"$LOG" || true
+    log "socat exited, restarting in 2s..."
+    sleep 2
+done
+SCRIPT
+chmod +x /opt/lightfriend/telegram-proxy-bridge.sh
+
+cat > /etc/systemd/system/vsock-telegram-proxy-bridge.service <<'TGPROXYEOF'
+[Unit]
+Description=VSOCK bridge to Telegram SOCKS5 residential proxy for Nitro Enclave
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/opt/lightfriend/telegram-proxy-bridge.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+TGPROXYEOF
+
 # VSOCK bridge: enclave's VSOCK port 9010 -> Marlin KMS root server TCP endpoint
 cat > /opt/lightfriend/marlin-kms-bridge.sh <<'SCRIPT'
 #!/bin/bash
@@ -432,12 +483,12 @@ GVPROXYEOF
 
 # Enable and start all VSOCK services + gvproxy
 systemctl daemon-reload
-for svc in vsock-proxy-bridge vsock-config-server vsock-marlin-kms-bridge vsock-boot-trace seed-http-server vsock-seed-http vsock-cloudflared-edge vsock-dot-bridge backup-upload-server vsock-backup-upload gvproxy; do
+for svc in vsock-proxy-bridge vsock-config-server vsock-marlin-kms-bridge vsock-telegram-proxy-bridge vsock-boot-trace seed-http-server vsock-seed-http vsock-cloudflared-edge vsock-dot-bridge backup-upload-server vsock-backup-upload gvproxy; do
     systemctl enable "$svc"
     systemctl start "$svc" || echo "WARNING: $svc failed to start"
 done
 
-echo "VSOCK services configured: proxy:8001, config:9000, boot-trace:9007, seed-http:9080, cf-edge:7844, dot:8530, marlin-kms:9010, gvproxy:1024"
+echo "VSOCK services configured: proxy:8001, config:9000, boot-trace:9007, tg-proxy:8500, seed-http:9080, cf-edge:7844, dot:8530, marlin-kms:9010, gvproxy:1024"
 
 # ── Enclave launch script ───────────────────────────────────────────────────
 
@@ -446,7 +497,7 @@ cat > /opt/lightfriend/launch-enclave.sh <<'SCRIPT'
 set -e
 EIF_PATH="/opt/lightfriend/lightfriend.eif"
 VERIFY="/opt/lightfriend/verify-result.json"
-VSOCK_SVCS="vsock-proxy-bridge vsock-config-server vsock-marlin-kms-bridge vsock-boot-trace vsock-seed-http vsock-cloudflared-edge vsock-dot-bridge vsock-backup-upload gvproxy"
+VSOCK_SVCS="vsock-proxy-bridge vsock-config-server vsock-marlin-kms-bridge vsock-telegram-proxy-bridge vsock-boot-trace vsock-seed-http vsock-cloudflared-edge vsock-dot-bridge vsock-backup-upload gvproxy"
 
 echo "[launch] EIF: $(ls -la $EIF_PATH 2>&1)"
 echo "[launch] .env: $(ls -la /opt/lightfriend/.env 2>&1)"
