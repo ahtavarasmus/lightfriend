@@ -721,8 +721,8 @@ async fn full_digest_renders_all_sections() {
 
     // Header counts: 6 messages + 2 today
     assert!(
-        digest_text.contains("6 msgs") && digest_text.contains("2 today"),
-        "header should mention 6 msgs and 2 today, got: {}",
+        digest_text.contains("6 msgs") && digest_text.contains("2 events today"),
+        "header should mention 6 msgs and 2 events today, got: {}",
         digest_text.lines().next().unwrap_or("")
     );
 

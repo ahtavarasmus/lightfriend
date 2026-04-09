@@ -527,11 +527,39 @@ async fn evaluate_flow(
             action_type,
             config,
         } => {
-            // Use LLM-generated message if available, otherwise build a
-            // human-readable fallback from the trigger snapshot.
+            // Pick the message for this action in priority order:
+            //
+            //   1. `prev_message` — LLM-generated output from a parent
+            //      LlmCondition node. Only set when the rule flow has
+            //      an LLM step above this action, in which case the
+            //      LLM's rendered text is the intended body.
+            //
+            //   2. `config["message"]` — the user's literal "notify me"
+            //      text from the rule builder. For rules without an
+            //      LLM step (e.g. a recurring schedule → notify with a
+            //      fixed message), this is the text the user explicitly
+            //      typed and expects to see. Previously this was
+            //      completely ignored and the raw trigger context
+            //      string ("Schedule trigger fired at <timestamp>")
+            //      was sent instead.
+            //
+            //   3. `trigger_snapshot` → `format_snapshot_message` —
+            //      formatted summary of an ontology change event (new
+            //      message, etc.). Applies when the rule is driven by
+            //      a snapshot and neither of the above is set.
+            //
+            //   4. `trigger_context` — raw last-resort fallback. Only
+            //      reached for schedule-triggered rules that have no
+            //      LLM step and no configured message.
             let fallback;
-            let message = if let Some(msg) = prev_message {
+            let message: &str = if let Some(msg) = prev_message {
                 msg
+            } else if let Some(cfg_msg) = config
+                .get("message")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+            {
+                cfg_msg
             } else if let Some(snap) = trigger_snapshot {
                 fallback = format_snapshot_message(snap);
                 &fallback

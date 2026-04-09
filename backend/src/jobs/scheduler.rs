@@ -1405,12 +1405,23 @@ pub async fn build_digest_for_user(
         message_ids.push(m.id);
     }
 
+    // Header wording: disambiguate "msgs" (unread/pending messages from
+    // the last 24h) from "events today" (ontology events with a due_at
+    // timestamp inside the user's local day). Previously the header
+    // said just "1 today" which users read as "1 new thing today" and
+    // got confused about what was being counted.
     let total_messages = critical_msgs.len() + important_msgs.len() + fyi_msgs.len();
     let total_today = today_events.len();
     let header = match (total_messages, total_today) {
-        (0, t) => format!("{} today", t),
+        (0, t) => format!("{} event{} today", t, if t == 1 { "" } else { "s" }),
         (m, 0) => format!("{} msg{}", m, if m == 1 { "" } else { "s" }),
-        (m, t) => format!("{} msg{}, {} today", m, if m == 1 { "" } else { "s" }, t),
+        (m, t) => format!(
+            "{} msg{}, {} event{} today",
+            m,
+            if m == 1 { "" } else { "s" },
+            t,
+            if t == 1 { "" } else { "s" }
+        ),
     };
 
     // CTA: nudge the user to reply for full content of any item.
