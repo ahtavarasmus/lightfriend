@@ -278,10 +278,10 @@ fn pending_messages_by_urgency_excludes_resolved() {
         .update_message_classification(msg.id, "high", "work", None, None, None)
         .unwrap();
 
-    // User replied → resolved for the room
+    // User replied → mark messages as seen
     state
         .ontology_repository
-        .resolve_high_urgency_for_room(user.id, "!r1", now)
+        .mark_messages_seen_in_room(user.id, "!r1", now, now)
         .unwrap();
 
     let pending = state

@@ -406,7 +406,7 @@ fn test_mark_room_digest_delivered() {
 
 #[test]
 #[serial]
-fn test_resolve_high_urgency_for_room() {
+fn test_mark_messages_seen_in_room() {
     use backend::models::ontology_models::NewOntMessage;
 
     let state = create_test_state();
@@ -485,28 +485,27 @@ fn test_resolve_high_urgency_for_room() {
         .update_message_classification(msg4.id, "high", "request", None, None, None)
         .unwrap();
 
-    // Resolve high urgency for room A
+    // Mark room A messages as seen (up to now + 100 covers all 3 messages)
     let affected = state
         .ontology_repository
-        .resolve_high_urgency_for_room(user.id, "!roomA", now + 100)
+        .mark_messages_seen_in_room(user.id, "!roomA", now + 100, now + 100)
         .unwrap();
-    assert_eq!(affected, 2); // critical + high in room A
+    assert_eq!(affected, 3); // critical + high + medium in room A
 
-    // Calling again should affect 0 (already resolved)
+    // Calling again should affect 0 (already seen)
     let affected2 = state
         .ontology_repository
-        .resolve_high_urgency_for_room(user.id, "!roomA", now + 200)
+        .mark_messages_seen_in_room(user.id, "!roomA", now + 200, now + 200)
         .unwrap();
     assert_eq!(affected2, 0);
 
-    // Room B high message should still be unresolved (pending digest check as proxy)
-    // Medium in room A should still be in pending digests
+    // Room B high message should still be unseen (pending by-urgency check)
     let pending = state
         .ontology_repository
-        .get_pending_digest_messages(user.id)
+        .get_pending_messages_by_urgency(user.id, &["critical", "high"], now - 86400, 100)
         .unwrap();
     assert_eq!(pending.len(), 1);
-    assert_eq!(pending[0].id, msg3.id);
+    assert_eq!(pending[0].id, msg4.id);
 }
 
 // =============================================================================

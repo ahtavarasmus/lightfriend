@@ -232,9 +232,7 @@ pub async fn run_system_behaviors(
                 let ts = fmt_ts(m.created_at);
 
                 // Determine seen status: seen_at is set by read receipts and user replies
-                let is_seen = if m.sender_name == "You" {
-                    true
-                } else if m.seen_at.is_some() {
+                let is_seen = if m.sender_name == "You" || m.seen_at.is_some() {
                     true
                 } else if let Some(you_idx) = last_you_idx {
                     i <= you_idx
