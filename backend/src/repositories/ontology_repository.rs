@@ -1551,7 +1551,7 @@ impl OntologyRepository {
             .filter(ont_messages::urgency.eq_any(urgencies_owned))
             .filter(ont_messages::created_at.ge(since))
             .filter(ont_messages::digest_delivered_at.is_null())
-            .filter(ont_messages::resolved_at.is_null())
+            .filter(ont_messages::seen_at.is_null())
             .filter(ont_messages::sender_name.ne("You"))
             .order(ont_messages::created_at.desc())
             .limit(limit)
@@ -1607,11 +1607,13 @@ impl OntologyRepository {
         .execute(&mut conn)
     }
 
-    /// Resolve high/critical urgency messages in a room (user replied, urgency handled).
-    pub fn resolve_high_urgency_for_room(
+    /// Mark messages in a room as seen (user read them on the native platform).
+    /// Sets seen_at on all messages with created_at <= seen_up_to_ts that haven't been marked yet.
+    pub fn mark_messages_seen_in_room(
         &self,
         user_id: i32,
         room_id: &str,
+        seen_up_to_ts: i32,
         now: i32,
     ) -> Result<usize, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1619,27 +1621,38 @@ impl OntologyRepository {
             ont_messages::table
                 .filter(ont_messages::user_id.eq(user_id))
                 .filter(ont_messages::room_id.eq(room_id))
-                .filter(
-                    ont_messages::urgency
-                        .eq("critical")
-                        .or(ont_messages::urgency.eq("high")),
-                )
-                .filter(ont_messages::resolved_at.is_null())
+                .filter(ont_messages::created_at.le(seen_up_to_ts))
+                .filter(ont_messages::seen_at.is_null())
                 .filter(ont_messages::sender_name.ne("You")),
         )
-        .set(ont_messages::resolved_at.eq(now))
+        .set(ont_messages::seen_at.eq(now))
         .execute(&mut conn)
     }
 
+    /// Check if a message in a room has been seen on the native platform.
+    pub fn is_message_seen(&self, user_id: i32, room_id: &str, message_created_at: i32) -> bool {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::room_id.eq(room_id))
+            .filter(ont_messages::created_at.eq(message_created_at))
+            .filter(ont_messages::seen_at.is_not_null())
+            .filter(ont_messages::sender_name.ne("You"))
+            .count()
+            .get_result::<i64>(&mut conn)
+            .unwrap_or(0)
+            > 0
+    }
+
     /// Get all user IDs that have pending digest messages.
-    /// Includes users with any unresolved, undelivered critical/high/medium message
+    /// Includes users with any unseen, undelivered critical/high/medium message
     /// so the sectioned digest can pull from all three urgency levels.
     pub fn get_users_with_pending_digests(&self) -> Result<Vec<i32>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         ont_messages::table
             .filter(ont_messages::urgency.eq_any(&["critical", "high", "medium"]))
             .filter(ont_messages::digest_delivered_at.is_null())
-            .filter(ont_messages::resolved_at.is_null())
+            .filter(ont_messages::seen_at.is_null())
             .filter(ont_messages::sender_name.ne("You"))
             .select(ont_messages::user_id)
             .distinct()

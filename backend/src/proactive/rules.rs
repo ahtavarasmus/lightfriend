@@ -1299,29 +1299,17 @@ async fn check_email_seen(state: &Arc<AppState>, user_id: i32, email_uid: &str) 
         .unwrap_or(false)
 }
 
-/// Check if user saw a bridge message via Matrix read receipts.
+/// Check if user saw a bridge message via the seen_at field on ont_messages.
+/// Populated by read receipt events from bridges and user replies.
 async fn check_bridge_seen(
     state: &Arc<AppState>,
     user_id: i32,
     room_id: &str,
     message_created_at: i32,
 ) -> bool {
-    let client = match crate::utils::matrix_auth::get_cached_client(user_id, state).await {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-    let matrix_room_id = match matrix_sdk::ruma::OwnedRoomId::try_from(room_id) {
-        Ok(id) => id,
-        Err(_) => return false,
-    };
-    let room = match client.get_room(&matrix_room_id) {
-        Some(r) => r,
-        None => return false,
-    };
-    match crate::utils::bridge::get_room_seen_timestamp(&room, &client).await {
-        Some(seen_ts) => seen_ts >= message_created_at as i64,
-        None => false,
-    }
+    state
+        .ontology_repository
+        .is_message_seen(user_id, room_id, message_created_at)
 }
 
 // ---------------------------------------------------------------------------

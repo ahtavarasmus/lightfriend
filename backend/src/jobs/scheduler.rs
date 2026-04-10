@@ -67,6 +67,26 @@ pub async fn initialize_matrix_clients(state: Arc<AppState>) {
                             },
                         );
 
+                        // Read receipt handler: mark ont_messages as seen
+                        {
+                            use matrix_sdk::ruma::events::receipt::ReceiptEventContent;
+                            use matrix_sdk::ruma::events::SyncEphemeralRoomEvent;
+                            let state_for_receipt = Arc::clone(&state);
+                            client.add_event_handler(
+                                move |ev: SyncEphemeralRoomEvent<ReceiptEventContent>,
+                                      room: Room,
+                                      client| {
+                                    let state = Arc::clone(&state_for_receipt);
+                                    async move {
+                                        crate::utils::bridge::handle_read_receipt(
+                                            ev, room, client, state, user_id,
+                                        )
+                                        .await;
+                                    }
+                                },
+                            );
+                        }
+
                         // Create sync task
                         let sync_settings = matrix_sdk::config::SyncSettings::default()
                             .timeout(std::time::Duration::from_secs(30));
@@ -286,6 +306,25 @@ pub async fn check_and_restart_dead_sync_tasks(state: &Arc<AppState>) {
                                 }
                             },
                         );
+                        // Read receipt handler
+                        {
+                            use matrix_sdk::ruma::events::receipt::ReceiptEventContent;
+                            use matrix_sdk::ruma::events::SyncEphemeralRoomEvent;
+                            let state_for_receipt = Arc::clone(state);
+                            c.add_event_handler(
+                                move |ev: SyncEphemeralRoomEvent<ReceiptEventContent>,
+                                      room: Room,
+                                      client| {
+                                    let state = Arc::clone(&state_for_receipt);
+                                    async move {
+                                        crate::utils::bridge::handle_read_receipt(
+                                            ev, room, client, state, user_id,
+                                        )
+                                        .await;
+                                    }
+                                },
+                            );
+                        }
                         // Store in cache
                         state.matrix_clients.lock().await.insert(user_id, c.clone());
                         c
@@ -1244,37 +1283,10 @@ pub async fn build_digest_for_user(
         .get_pending_messages_by_urgency(user_id, &["medium", "low"], since_window, 30)
         .unwrap_or_default();
 
-    // -------- Filter: drop messages the user has already seen via bridge read receipts --------
-    let mut seen_cache: std::collections::HashMap<String, Option<i64>> =
-        std::collections::HashMap::new();
-    let mut seen_lookup_keys: Vec<(String, String)> = Vec::new();
-    for msg in critical_msgs
-        .iter()
-        .chain(important_msgs.iter())
-        .chain(fyi_msgs.iter())
-    {
-        let key = format!("{}|{}", msg.room_id, msg.platform);
-        if !seen_cache.contains_key(&key) {
-            seen_cache.insert(key.clone(), None);
-            seen_lookup_keys.push((msg.room_id.clone(), msg.platform.clone()));
-        }
-    }
-    for (room_id, platform) in &seen_lookup_keys {
-        let key = format!("{}|{}", room_id, platform);
-        let ts =
-            crate::proactive::system_behaviors::get_room_seen_ts(state, user_id, room_id, platform)
-                .await;
-        seen_cache.insert(key, ts);
-    }
-
+    // -------- Filter: drop messages the user has already seen --------
+    // seen_at is populated by read receipt events from bridges and user replies.
     let drop_seen = |msgs: &mut Vec<crate::models::ontology_models::OntMessage>| {
-        msgs.retain(|m| {
-            let key = format!("{}|{}", m.room_id, m.platform);
-            match seen_cache.get(&key).copied().flatten() {
-                Some(seen_ts) => (m.created_at as i64) > seen_ts,
-                None => true,
-            }
-        });
+        msgs.retain(|m| m.seen_at.is_none());
     };
     drop_seen(&mut critical_msgs);
     drop_seen(&mut important_msgs);
