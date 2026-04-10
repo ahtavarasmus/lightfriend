@@ -42,7 +42,7 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
 
 resource "cloudflare_record" "app" {
   zone_id = var.cloudflare_zone_id
-  name    = var.subdomain
+  name    = "@"
   content = "${cloudflare_zero_trust_tunnel_cloudflared.main.id}.cfargotunnel.com"
   type    = "CNAME"
   proxied = true

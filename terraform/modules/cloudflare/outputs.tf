@@ -16,5 +16,5 @@ output "tunnel_cname" {
 
 output "url" {
   description = "Application URL"
-  value       = "https://${var.subdomain}.${var.domain}"
+  value       = "https://${var.domain}"
 }
