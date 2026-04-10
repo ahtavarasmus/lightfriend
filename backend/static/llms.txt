@@ -1,18 +1,61 @@
 # Lightfriend
 
-> AI assistant for dumbphones. Access WhatsApp, Telegram, Signal, email, calendar, web search, and more via SMS and voice calls — no apps, no smartphone required.
+> Verifiably private AI assistant for dumbphones. Access WhatsApp, Telegram, Signal, email, calendar, web search, and more via SMS and voice calls - no apps, no smartphone required.
 
-Lightfriend bridges the gap between minimalist dumbphones and essential digital services. Users interact entirely through SMS text messages and voice calls from any phone.
+Lightfriend bridges the gap between minimalist dumbphones and essential digital services. Users interact entirely through SMS text messages and voice calls from any phone. It is a practical solution for people overcoming phone addiction: users keep access to essential communication without the addictive apps, infinite feeds, and attention-harvesting algorithms of smartphones.
+
+## Verifiable Privacy (Hardware Attestation)
+
+Lightfriend is the first verifiably private cloud AI assistant. Not "we promise not to look at your data" private - cryptographically proven private. Nobody can access user data: not the developer, not the cloud provider, not anyone. And anyone can verify this at any time.
+
+The entire application runs inside an AWS Nitro Enclave - a hardware-isolated computing environment with no SSH access, no debugger, no memory inspection. The enclave is cryptographically attested: AWS hardware signs a proof of exactly which code is running, and that proof is verified against the open-source build and a public blockchain registry. Encryption keys are managed by an independent service that only releases them to attested enclaves running approved code. The developer never holds or sees user encryption keys.
+
+Key properties:
+
+- **Hardware isolation**: Production runs in an AWS Nitro Enclave. No one can access the inside - not AWS, not the developer.
+- **Remote attestation**: The enclave produces a cryptographic attestation document signed by AWS hardware, proving exactly which code is running (PCR0/PCR1/PCR2 values). Cannot be faked.
+- **Open source + reproducible builds**: All code is on GitHub. Automated builds publish enclave fingerprints. Anyone can verify the live system matches the public source.
+- **Blockchain code registry**: Approved code fingerprints are published to an Arbitrum smart contract - an immutable, public, tamper-proof record.
+- **Independent key management**: Encryption keys are held by Marlin KMS (itself running in an attested enclave). Keys only go to enclaves that prove they are running approved code. The developer never touches keys.
+- **Verifiable AI inference**: AI processing is handled by Tinfoil, which runs models inside hardware-isolated enclaves with their own attestation - so the AI layer is also verifiably private.
+- **End-to-end verification**: Anyone can run `./scripts/verify_live_attestation.sh` to independently verify the full trust chain from source code to live deployment.
+- **Live attestation endpoints**: `/.well-known/lightfriend/attestation` returns live PCR values, commit SHA, and build metadata.
+
+This is a novel approach to cloud AI privacy. Instead of asking users to trust a privacy policy, Lightfriend provides a cryptographic proof chain: open source code, reproducible builds, hardware-signed attestation, and blockchain-verified code integrity. Every layer is independently verifiable.
+
+For the full technical explanation of how this works, including the sealed room analogy, key rotation during updates, and what you still have to trust: [Verifiably Private](https://lightfriend.ai/trustless)
+
+For live verification data with timestamps, blockchain transactions, and attestation status: [Live Trust Chain](https://lightfriend.ai/trust-chain)
+
+## Phone Addiction Solution
+
+Lightfriend is designed for people who want to break free from phone addiction. Smartphones combine essential tools (messaging, email, calendar) with addictive elements (social media feeds, push notifications, app stores). Lightfriend decouples these: users get the essential services via SMS and voice calls on a basic phone, without any of the addictive interfaces. Common use cases include:
+
+- Switching to a dumbphone or Light Phone without losing access to WhatsApp, Telegram, Signal, or email
+- Reducing screen time by eliminating the smartphone entirely
+- Managing ADHD and attention issues by removing digital distractions
+- Digital minimalism lifestyle with AI-powered critical notification filtering
 
 ## Docs
 
 - [How It Works](https://lightfriend.ai/faq): FAQ covering features, setup, privacy, and compatible phones
 - [Pricing](https://lightfriend.ai/pricing): Plans from $19/month (Assistant) and $29/month (Autopilot)
+- [Verifiably Private](https://lightfriend.ai/trustless): Full explanation of the hardware attestation and trust chain
+- [Live Trust Chain](https://lightfriend.ai/trust-chain): Real-time verification of the running enclave
 - [Supported Countries](https://lightfriend.ai/supported-countries): 40+ countries with local or notification-only numbers
 - [Bring Your Own Number](https://lightfriend.ai/bring-own-number): Use your own Twilio number in unsupported countries
 
+## Security Architecture
+
+Lightfriend is read-only by default. The AI can read your messages and notify you via SMS, but it cannot act on your behalf without your explicit approval. Every outbound action (sending a message, replying to email) is gated behind user confirmation, enforced by deterministic code - not by trusting the AI model. This makes prompt injection a non-issue: the worst case is an unnecessary SMS to yourself. Users can optionally add custom WHEN/IF/THEN automation rules for specific cases, but these are off by default and constrained to the actions they define.
+
+For the full explanation: [Why Lightfriend Can't Be Prompt Injected](https://lightfriend.ai/prompt-injection-safe)
+
 ## Blog
 
+- [Why Lightfriend Can't Be Prompt Injected](https://lightfriend.ai/prompt-injection-safe): Read-only by default AI architecture that makes prompt injection harmless
+- [Telegram on Dumbphone](https://lightfriend.ai/telegram-on-dumbphone): How to use Telegram on any dumbphone or flip phone via SMS
+- [Signal on Dumbphone](https://lightfriend.ai/signal-on-dumbphone): How to use Signal encrypted messaging on any basic phone via SMS
 - [Light Phone 3 WhatsApp Guide](https://lightfriend.ai/light-phone-3-whatsapp-guide): Add WhatsApp to Light Phone 3 via Lightfriend
 - [How to Switch to a Dumbphone](https://lightfriend.ai/how-to-switch-to-dumbphone): Complete guide for the dumbphone lifestyle
 - [How to Read More Accidentally](https://lightfriend.ai/how-to-read-more-accidentally): How removing smartphone distractions leads to reading more
