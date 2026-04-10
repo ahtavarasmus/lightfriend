@@ -201,9 +201,6 @@ pub async fn run_system_behaviors(
     let msg_signals = MessageSignals::extract(content, &recent_messages, sender_name, now);
     let content_signals_ctx = msg_signals.format_for_prompt();
 
-    // Get room seen timestamp for marking messages as seen/unseen
-    let seen_ts = get_room_seen_ts(state, user_id, room_id, platform).await;
-
     let fmt_ts = |unix: i32| -> String {
         Utc.timestamp_opt(unix as i64, 0)
             .single()
@@ -234,16 +231,15 @@ pub async fn run_system_behaviors(
             .map(|(i, m)| {
                 let ts = fmt_ts(m.created_at);
 
-                // Determine seen status
+                // Determine seen status: seen_at is set by read receipts and user replies
                 let is_seen = if m.sender_name == "You" {
+                    true
+                } else if m.seen_at.is_some() {
                     true
                 } else if let Some(you_idx) = last_you_idx {
                     i <= you_idx
                 } else {
-                    // No "You" messages - use bridge read receipt
-                    seen_ts
-                        .map(|st| (m.created_at as i64) <= st)
-                        .unwrap_or(false)
+                    false
                 };
 
                 let seen_marker = if is_seen { "seen" } else { "unseen" };
@@ -1427,23 +1423,4 @@ pub async fn check_outgoing_event_resolution(
             }
         }
     }
-}
-
-/// Get the room's seen-up-to timestamp from bridge read receipts.
-/// Returns None for email or if the lookup fails.
-pub async fn get_room_seen_ts(
-    state: &Arc<AppState>,
-    user_id: i32,
-    room_id: &str,
-    platform: &str,
-) -> Option<i64> {
-    if platform == "email" {
-        return None;
-    }
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, state)
-        .await
-        .ok()?;
-    let matrix_room_id = matrix_sdk::ruma::OwnedRoomId::try_from(room_id).ok()?;
-    let room = client.get_room(&matrix_room_id)?;
-    crate::utils::bridge::get_room_seen_timestamp(&room, &client).await
 }

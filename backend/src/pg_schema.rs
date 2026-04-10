@@ -437,6 +437,7 @@ diesel::table! {
         classification_prompt -> Nullable<Text>,
         classification_result -> Nullable<Text>,
         resolved_at -> Nullable<Int4>,
+        seen_at -> Nullable<Int4>,
     }
 }
 

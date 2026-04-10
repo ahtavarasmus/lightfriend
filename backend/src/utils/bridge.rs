@@ -1197,50 +1197,60 @@ use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
 use matrix_sdk::RoomMemberships;
 use strsim;
 
-/// Returns the timestamp (in seconds) up to which the user has "seen" messages in this room.
-/// This checks read receipts and user replies to determine what the user has already seen.
-/// Returns None if no seen status can be determined.
-pub async fn get_room_seen_timestamp(room: &Room, client: &MatrixClient) -> Option<i64> {
-    use matrix_sdk::ruma::{
-        api::client::room::get_room_event,
-        events::receipt::{ReceiptThread, ReceiptType},
+/// Handle an incoming read receipt from a bridge.
+/// When the user reads a message on the native platform (WhatsApp/Signal/Telegram),
+/// the bridge forwards the read receipt as a Matrix m.receipt event.
+/// We use this to mark the corresponding ont_messages as seen.
+pub async fn handle_read_receipt(
+    ev: matrix_sdk::ruma::events::SyncEphemeralRoomEvent<
+        matrix_sdk::ruma::events::receipt::ReceiptEventContent,
+    >,
+    room: Room,
+    client: MatrixClient,
+    state: Arc<AppState>,
+    user_id: i32,
+) {
+    use matrix_sdk::ruma::{api::client::room::get_room_event, events::receipt::ReceiptType};
+
+    let own_user_id = match client.user_id() {
+        Some(id) => id.to_owned(),
+        None => return,
     };
 
-    let own_user_id = client.user_id()?;
-    let mut seen_until: Option<i64> = None;
+    // Check if this receipt contains a read receipt from our user
+    let (event_id, _receipt) = match ev.content.user_receipt(&own_user_id, ReceiptType::Read) {
+        Some(r) => r,
+        None => return,
+    };
 
-    // Check read receipt - if user has read messages up to a certain point
-    if let Ok(Some((receipt_event_id, _))) = room
-        .load_user_receipt(ReceiptType::Read, ReceiptThread::Unthreaded, own_user_id)
-        .await
+    let room_id_str = room.room_id().to_string();
+
+    // Fetch the event that was read to get its origin_server_ts
+    let request = get_room_event::v3::Request::new(room.room_id().to_owned(), event_id.to_owned());
+    let event_ts = match client.send(request).await {
+        Ok(response) => match response.event.deserialize_as::<AnySyncTimelineEvent>() {
+            Ok(any_event) => i64::from(any_event.origin_server_ts().as_secs()) as i32,
+            Err(_) => return,
+        },
+        Err(_) => return,
+    };
+
+    let now = chrono::Utc::now().timestamp() as i32;
+    match state
+        .ontology_repository
+        .mark_messages_seen_in_room(user_id, &room_id_str, event_ts, now)
     {
-        let request =
-            get_room_event::v3::Request::new(room.room_id().to_owned(), receipt_event_id.clone());
-        if let Ok(response) = client.send(request).await {
-            if let Ok(any_event) = response.event.deserialize_as::<AnySyncTimelineEvent>() {
-                let receipt_ts = i64::from(any_event.origin_server_ts().as_secs());
-                seen_until = Some(seen_until.unwrap_or(0).max(receipt_ts));
-            }
+        Ok(count) if count > 0 => {
+            tracing::debug!(
+                "Marked {} messages as seen in room {} for user {} (read receipt up to ts={})",
+                count,
+                room_id_str,
+                user_id,
+                event_ts
+            );
         }
+        _ => {}
     }
-
-    // Check for user replies - if user replied, they've seen messages before that
-    let messages = room.messages(MessagesOptions::backward()).await;
-    if let Ok(messages) = messages {
-        for message_event in messages.chunk {
-            if let Ok(AnySyncTimelineEvent::MessageLike(msg_event)) =
-                message_event.raw().deserialize()
-            {
-                if msg_event.sender() == own_user_id {
-                    let reply_ts = i64::from(msg_event.origin_server_ts().as_secs());
-                    seen_until = Some(seen_until.unwrap_or(0).max(reply_ts));
-                    break; // Found the most recent user reply
-                }
-            }
-        }
-    }
-
-    seen_until
 }
 
 pub async fn handle_bridge_message(
@@ -1550,18 +1560,21 @@ pub async fn handle_bridge_message(
 
                     // Auto-resolve: user replied, so clear pending digests and resolve urgency
                     let now = msg.created_at;
+                    // User replied - they've seen all prior messages in this room
+                    if let Err(e) = state_clone.ontology_repository.mark_messages_seen_in_room(
+                        user_id,
+                        &current_room_id,
+                        now,
+                        now,
+                    ) {
+                        tracing::warn!("Failed to mark room messages seen: {}", e);
+                    }
                     if let Err(e) = state_clone.ontology_repository.mark_room_digest_delivered(
                         user_id,
                         &current_room_id,
                         now,
                     ) {
                         tracing::warn!("Failed to mark room digest delivered: {}", e);
-                    }
-                    if let Err(e) = state_clone
-                        .ontology_repository
-                        .resolve_high_urgency_for_room(user_id, &current_room_id, now)
-                    {
-                        tracing::warn!("Failed to resolve high urgency for room: {}", e);
                     }
 
                     // Check if outgoing message completes any tracked events
