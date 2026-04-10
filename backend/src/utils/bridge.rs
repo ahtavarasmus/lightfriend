@@ -1379,9 +1379,9 @@ pub async fn handle_bridge_message(
         };
         // Log bridge bot management room messages for debugging (no more email)
         tracing::info!(
-            "🤖 Bridge bot ({}) management room message: {}",
+            "🤖 Bridge bot ({}) management room message ({} chars)",
             bridge.bridge_type,
-            content
+            content.len()
         );
 
         // Skip health check related messages - these are handled by the health check endpoint
@@ -1391,13 +1391,12 @@ pub async fn handle_bridge_message(
         }
 
         // Check for disconnection patterns using the pure function
-        tracing::info!("📝 Bot message content: {}", content);
+        tracing::info!("📝 Bot message content ({} chars)", content.len());
         if is_disconnection_message(&content) {
             tracing::info!(
-                "🚨 Detected disconnection in {} bridge for user {}: {}",
+                "🚨 Detected disconnection in {} bridge for user {}",
                 bridge.bridge_type,
-                user_id,
-                content
+                user_id
             );
 
             // Record disconnection event
