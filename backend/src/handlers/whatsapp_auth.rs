@@ -243,8 +243,8 @@ async fn connect_whatsapp(
                                 }
                                 MessageType::Notice(text_content) => {
                                     tracing::info!(
-                                        "Received Notice message: {}",
-                                        text_content.body
+                                        "Received Notice message ({} chars)",
+                                        text_content.body.len()
                                     );
                                     if text_content.body.to_lowercase().contains("error") {
                                         return Err(anyhow!(
@@ -254,7 +254,10 @@ async fn connect_whatsapp(
                                     }
                                 }
                                 MessageType::Text(text_content) => {
-                                    tracing::info!("Received Text message: {}", text_content.body);
+                                    tracing::info!(
+                                        "Received Text message ({} chars)",
+                                        text_content.body.len()
+                                    );
                                     if text_content.body.to_lowercase().contains("error") {
                                         return Err(anyhow!(
                                             "Error from bot: {}",
@@ -928,7 +931,7 @@ async fn monitor_whatsapp_connection(
                                 _ => continue,
                             };
 
-                            tracing::info!("📨 Bot message: {}", content);
+                            tracing::info!("📨 Bot message ({} chars)", content.len());
 
                             // Check for successful login first
                             if content.contains("Successfully logged in as") {
@@ -939,8 +942,8 @@ async fn monitor_whatsapp_connection(
 
                                 // Extract the connected account (phone number)
                                 let connected_account = extract_connected_account(&content);
-                                if let Some(ref account) = connected_account {
-                                    tracing::info!("📱 Connected as: {}", account);
+                                if connected_account.is_some() {
+                                    tracing::info!("📱 Connected as: [redacted]");
                                 }
 
                                 // Update bridge status to connected
@@ -1486,7 +1489,7 @@ pub async fn check_whatsapp_health(
                     };
 
                     let content_lower = content.to_lowercase();
-                    tracing::info!("🔍 Most recent bot message: {}", content);
+                    tracing::info!("🔍 Most recent bot message ({} chars)", content.len());
 
                     // Skip non-status messages
                     if content_lower.contains("scan")
@@ -1536,15 +1539,14 @@ pub async fn check_whatsapp_health(
                         || content_lower.contains("already logged in")
                     {
                         tracing::info!(
-                            "✅ WhatsApp health check passed for user {}: {}",
-                            auth_user.user_id,
-                            content
+                            "✅ WhatsApp health check passed for user {}",
+                            auth_user.user_id
                         );
 
                         // Extract and save the connected account (phone number)
                         // Pattern: "Successfully logged in as +358..." or "logged in as +358..."
                         if let Some(account) = extract_connected_account(&content) {
-                            tracing::info!("📱 Extracted connected account: {}", account);
+                            tracing::info!("📱 Extracted connected account: [redacted]");
                             if let Err(e) = state.user_repository.update_bridge_data(
                                 auth_user.user_id,
                                 "whatsapp",

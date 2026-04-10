@@ -1424,7 +1424,7 @@ async fn monitor_telegram_connection(
                                 client.add_event_handler(move |ev: matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent, room: matrix_sdk::room::Room, client| {
                                     let state = Arc::clone(&state_for_handler);
                                     async move {
-                                        tracing::debug!("Received message in room {}: {:?}", room.room_id(), ev);
+                                        tracing::debug!("Received message in room {}", room.room_id());
                                         crate::utils::bridge::handle_bridge_message(ev, room, client, state).await;
                                     }
                                 });
@@ -1928,7 +1928,7 @@ pub async fn check_telegram_health(
                     };
 
                     let content_lower = content.to_lowercase();
-                    tracing::info!("🔍 Most recent bot message: {}", content);
+                    tracing::info!("🔍 Most recent bot message ({} chars)", content.len());
 
                     // Skip non-status messages
                     if content_lower.contains("queued sync")

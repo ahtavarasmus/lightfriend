@@ -30,7 +30,7 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
 
   config {
     ingress_rule {
-      hostname = "${var.subdomain}.${var.domain}"
+      hostname = var.domain
       service  = "http://localhost:3100"
     }
     ingress_rule {

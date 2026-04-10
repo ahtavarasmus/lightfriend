@@ -18,6 +18,22 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::net::TcpStream;
 
+/// Decode RFC 2047 MIME encoded words (e.g. =?UTF-8?Q?...?=) in header values.
+/// Uses mail_parser for correct handling of all charset/encoding variants.
+fn decode_rfc2047(raw: &str) -> String {
+    if !raw.contains("=?") {
+        return raw.to_string();
+    }
+    let fake_msg = format!("Subject: {}\r\n\r\n", raw);
+    let parser = mail_parser::MessageParser::default();
+    if let Some(msg) = parser.parse(fake_msg.as_bytes()) {
+        if let Some(decoded) = msg.subject() {
+            return decoded.to_string();
+        }
+    }
+    raw.to_string()
+}
+
 /// Type alias for the async IMAP session we use throughout this module.
 pub(crate) type ImapSession = Session<TlsStream<TcpStream>>;
 
@@ -167,6 +183,7 @@ pub fn parse_imap_message(
                 .name
                 .as_ref()
                 .and_then(|n| String::from_utf8(n.to_vec()).ok())
+                .map(|n| decode_rfc2047(&n))
                 .unwrap_or_default();
             let email = addr
                 .mailbox
@@ -187,7 +204,8 @@ pub fn parse_imap_message(
     let subject = envelope
         .subject
         .as_ref()
-        .and_then(|s| String::from_utf8(s.to_vec()).ok());
+        .and_then(|s| String::from_utf8(s.to_vec()).ok())
+        .map(|s| decode_rfc2047(&s));
 
     let raw_date = envelope
         .date
@@ -801,7 +819,7 @@ pub async fn respond_to_email(
         let original_subject = envelope
             .subject
             .as_ref()
-            .map(|s| String::from_utf8_lossy(s).into_owned())
+            .map(|s| decode_rfc2047(&String::from_utf8_lossy(s)))
             .unwrap_or_else(|| String::from("No subject"));
 
         // Drain remaining stream items so we can drop it cleanly before logout
@@ -1318,6 +1336,7 @@ async fn fetch_single_email_from_account(
                 .name
                 .as_ref()
                 .and_then(|n| String::from_utf8(n.to_vec()).ok())
+                .map(|n| decode_rfc2047(&n))
                 .unwrap_or_default();
             let email = format!(
                 "{}@{}",
@@ -1356,7 +1375,8 @@ async fn fetch_single_email_from_account(
     let subject = envelope
         .subject
         .as_ref()
-        .and_then(|s| String::from_utf8(s.to_vec()).ok());
+        .and_then(|s| String::from_utf8(s.to_vec()).ok())
+        .map(|s| decode_rfc2047(&s));
     let date = envelope
         .date
         .as_ref()

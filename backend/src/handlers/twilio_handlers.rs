@@ -59,7 +59,7 @@ pub async fn twilio_status_callback(
         StatusCallbackInput, TwilioStatusService, TwilioStatusServiceConfig,
     };
 
-    tracing::info!("Twilio status callback raw body: {}", body);
+    tracing::info!("Twilio status callback received ({} bytes)", body.len());
 
     // Parse form data manually
     let payload: TwilioStatusCallback = match serde_urlencoded::from_str(&body) {

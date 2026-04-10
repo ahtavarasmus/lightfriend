@@ -139,7 +139,7 @@ pub async fn test_fetch_messages(
                 println!("\n{} Room: {}", message_type_icon, msg.room_name);
                 println!("👤 {}", msg.sender_display_name);
                 println!("🕒 {}", msg.formatted_timestamp);
-                println!("📄 {}", msg.content);
+                println!("📄 ({} chars)", msg.content.len());
                 println!("─────────────────────────────────────");
             }
 
@@ -148,15 +148,11 @@ pub async fn test_fetch_messages(
             // Also keep the debug logging for the first 5 messages
             for (i, msg) in messages.iter().enumerate().take(5) {
                 tracing::info!(
-                    "Message {}: room={}, sender={}, content={}",
+                    "Message {}: room={}, sender={}, content=({} chars)",
                     i,
                     msg.room_name,
                     msg.sender,
-                    if msg.content.chars().count() > 30 {
-                        format!("{}...", msg.content.chars().take(30).collect::<String>())
-                    } else {
-                        msg.content.clone()
-                    }
+                    msg.content.len()
                 );
             }
 

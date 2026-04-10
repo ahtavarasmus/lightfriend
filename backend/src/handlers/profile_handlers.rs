@@ -2002,7 +2002,7 @@ pub async fn web_chat_with_image(
                         Json(json!({"error": format!("Failed to read message: {}", e)})),
                     )
                 })?;
-                tracing::debug!("Received message text: '{}'", message);
+                tracing::debug!("Received message text ({} chars)", message.len());
             }
             "image" => {
                 let content_type = field
@@ -2132,8 +2132,8 @@ pub async fn web_chat_with_image(
     // Create mock Twilio payload with image support
     // If there's an image but no text, provide a default prompt
     tracing::info!(
-        "web_chat_with_image - message: '{}', has_image: {}",
-        message,
+        "web_chat_with_image - message: ({} chars), has_image: {}",
+        message.len(),
         image_data_url.is_some()
     );
     let body = if message.trim().is_empty() && image_data_url.is_some() {
@@ -2141,7 +2141,7 @@ pub async fn web_chat_with_image(
     } else {
         message
     };
-    tracing::info!("web_chat_with_image - final body: '{}'", body);
+    tracing::info!("web_chat_with_image - final body: ({} chars)", body.len());
 
     let mock_payload = crate::api::twilio_sms::TwilioWebhookPayload {
         from: user.phone_number.clone(),

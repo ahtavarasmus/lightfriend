@@ -293,7 +293,7 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
             .map(|s| s.trim())
             .find_map(|cookie| {
                 let cookie_parts: Vec<&str> = cookie.splitn(2, '=').collect();
-                tracing::debug!("Parsing cookie part: {:?}", cookie_parts);
+                tracing::debug!("Parsing cookie part: {}", cookie_parts[0]);
                 if cookie_parts.len() == 2 && cookie_parts[0] == "access_token" {
                     Some(cookie_parts[1])
                 } else {

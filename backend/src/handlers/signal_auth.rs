@@ -266,7 +266,7 @@ async fn connect_signal(client: &MatrixClient, bridge_bot: &str) -> Result<(Owne
                             };
                             match event_content.msgtype {
                                 MessageType::Image(image_content) => {
-                                    tracing::info!("Received Image message: {:#?}", image_content);
+                                    tracing::info!("Received Image message (Signal QR code)");
                                     if let matrix_sdk::ruma::events::room::MediaSource::Plain(url) =
                                         &image_content.source
                                     {
@@ -698,8 +698,8 @@ async fn monitor_signal_connection(
 
                                 // Extract the connected account (phone number)
                                 let connected_account = extract_connected_account(&content);
-                                if let Some(ref account) = connected_account {
-                                    tracing::info!("📱 Connected as: {}", account);
+                                if connected_account.is_some() {
+                                    tracing::info!("📱 Connected as: [redacted]");
                                 }
 
                                 // Update bridge status to connected
@@ -1269,7 +1269,7 @@ pub async fn check_signal_health(
                     };
 
                     let content_lower = content.to_lowercase();
-                    tracing::info!("🔍 Most recent bot message: {}", content);
+                    tracing::info!("🔍 Most recent bot message ({} chars)", content.len());
 
                     // Skip non-status messages
                     if content_lower.contains("scan")
