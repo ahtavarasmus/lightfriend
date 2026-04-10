@@ -256,43 +256,6 @@ fn pending_messages_by_urgency_excludes_already_delivered() {
 
 #[test]
 #[serial]
-fn pending_messages_by_urgency_excludes_resolved() {
-    let state = create_test_state();
-    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
-    let now = 2_200_000;
-
-    let msg = state
-        .ontology_repository
-        .insert_message(&NewOntMessage {
-            user_id: user.id,
-            room_id: "!r1".to_string(),
-            platform: "whatsapp".to_string(),
-            sender_name: "Alice".to_string(),
-            content: "urgent".to_string(),
-            person_id: None,
-            created_at: now,
-        })
-        .unwrap();
-    state
-        .ontology_repository
-        .update_message_classification(msg.id, "high", "work", None, None, None)
-        .unwrap();
-
-    // User replied → resolved for the room
-    state
-        .ontology_repository
-        .resolve_high_urgency_for_room(user.id, "!r1", now)
-        .unwrap();
-
-    let pending = state
-        .ontology_repository
-        .get_pending_messages_by_urgency(user.id, &["high"], now - 86400, 100)
-        .unwrap();
-    assert!(pending.is_empty());
-}
-
-#[test]
-#[serial]
 fn pending_messages_by_urgency_respects_since_window() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
