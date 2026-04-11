@@ -67,67 +67,12 @@ fn short_hash(hash: &str, len: usize) -> String {
     }
 }
 
-fn relative_time(iso: &str) -> String {
+fn format_date(iso: &str) -> String {
     let date = js_sys::Date::new(&JsValue::from_str(iso));
-    let now = js_sys::Date::new_0();
-    let diff_ms = now.get_time() - date.get_time();
-    if diff_ms < 0.0 {
-        return "just now".to_string();
-    }
-    let secs = (diff_ms / 1000.0) as u64;
-    let mins = secs / 60;
-    let hours = mins / 60;
-    let days = hours / 24;
-    if secs < 60 {
-        "just now".to_string()
-    } else if mins < 60 {
-        format!("{} min ago", mins)
-    } else if hours < 24 {
-        format!("{}h ago", hours)
-    } else {
-        format!("{}d ago", days)
-    }
-}
-
-fn format_ts(iso: &str) -> String {
-    let date = js_sys::Date::new(&JsValue::from_str(iso));
-    format!(
-        "{}-{:02}-{:02} {:02}:{:02} UTC",
-        date.get_utc_full_year(),
-        date.get_utc_month() + 1,
-        date.get_utc_date(),
-        date.get_utc_hours(),
-        date.get_utc_minutes()
-    )
-}
-
-// Collapsible details component
-#[derive(Properties, PartialEq)]
-struct DetailsProps {
-    pub summary: String,
-    pub children: Children,
-}
-
-#[function_component(Details)]
-fn details(props: &DetailsProps) -> Html {
-    let open = use_state(|| false);
-    let toggle = {
-        let open = open.clone();
-        Callback::from(move |_: MouseEvent| open.set(!*open))
-    };
-    html! {
-        <div class={classes!("tc-details", (*open).then(|| "open"))}>
-            <button class="tc-details-toggle" onclick={toggle}>
-                <i class={classes!("fa-solid", if *open {"fa-chevron-down"} else {"fa-chevron-right"})}></i>
-                <span>{&props.summary}</span>
-            </button>
-            if *open {
-                <div class="tc-details-content">
-                    {for props.children.iter()}
-                </div>
-            }
-        </div>
-    }
+    let months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    let m = date.get_utc_month() as usize;
+    let month = months.get(m).unwrap_or(&"???");
+    format!("{} {} {}", date.get_utc_date(), month, date.get_utc_full_year())
 }
 
 // -- Main page --
@@ -184,10 +129,19 @@ pub fn trust_chain_page() -> Html {
         <div class="tc-page">
             <div class="tc-header">
                 <h1>{"Trust Chain"}</h1>
-                <p class="tc-intro">
-                    {"Your data is encrypted inside a sealed computer that nobody can peek inside - not even us. "}
-                    {"This page shows the live proof. Every link opens a third-party site you can check yourself."}
+            </div>
+
+            <div class="tc-intro-box">
+                <p class="tc-intro-text">
+                    {"Your messages are processed inside a sealed hardware enclave. Not even Lightfriend can access your data."}
                 </p>
+                <p class="tc-intro-hw">
+                    {"Hardware attested by "}
+                    <strong>{"AWS Nitro"}</strong>
+                </p>
+                <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer" class="tc-intro-link">
+                    <i class="fa-brands fa-github"></i>{" github.com"}
+                </a>
             </div>
 
             if *loading {
@@ -195,17 +149,19 @@ pub fn trust_chain_page() -> Html {
                     <i class="fa-solid fa-spinner fa-spin"></i>{" Loading..."}
                 </div>
             } else if let Some(ref d) = d {
-                {render_diagram(d)}
+                {render_diagram()}
+                <PillarsSection data={d.clone()} />
+                {render_history_chain(d)}
                 {render_verify_section(d)}
             } else {
                 <div class="tc-loading">
-                    {"Could not load trust chain data. This page works best when connected to a live Lightfriend instance."}
+                    {"Could not load trust chain data."}
                 </div>
             }
 
             <div class="tc-footer-links">
                 <Link<Route> to={Route::Trustless}>
-                    {"Want the full explanation? Read how it all works"}
+                    {"Full explanation: how it all works"}
                     {" "}<i class="fa-solid fa-arrow-right"></i>
                 </Link<Route>>
             </div>
@@ -227,581 +183,403 @@ pub fn trust_chain_page() -> Html {
 // DIAGRAM
 // =============================================
 
-fn render_diagram(d: &TrustChainData) -> Html {
-    let past_builds: Vec<&HistoricalBuild> = d.history.iter()
-        .filter(|b| !b.is_current)
-        .take(1)
-        .collect();
-
+fn render_diagram() -> Html {
     html! {
         <div class="tc-diagram">
-            // Left column: Sealed computers
-            <div class="tc-col-enclaves">
-                <div class="col-header">
-                    <i class="fa-solid fa-cloud"></i>
-                    {" Sealed Computers"}
+            <div class="tc-proof-boundary">
+                <div class="tc-proof-badge">
+                    <i class="fa-solid fa-shield-halved"></i>
+                    {" Attestation Proof"}
                 </div>
-                <p class="col-desc">{"Your data lives inside sealed rooms nobody can peek inside. Data leaves only encrypted."}</p>
 
-                {render_live_enclave(d)}
-                {render_data_flow_between()}
-                if let Some(build) = past_builds.first() {
-                    {render_past_enclave(build, d)}
+                <div class="tc-diagram-layout">
+                    <div class="tc-node tc-kms-node">
+                        <div class="tc-node-title">
+                            <i class="fa-solid fa-key"></i>
+                            {" Marlin KMS"}
+                        </div>
+                        <ul class="tc-node-points">
+                            <li>{"Verifies attestation"}</li>
+                            <li>{"Manages encryption keys"}</li>
+                        </ul>
+                    </div>
+
+                    <div class="tc-node tc-server-node">
+                        <div class="tc-node-title">
+                            <i class="fa-solid fa-server"></i>
+                            {" Lightfriend Server"}
+                        </div>
+                        <ul class="tc-node-points">
+                            <li>{"Cannot access user data"}</li>
+                            <li>{"Cannot see inside the enclave"}</li>
+                        </ul>
+
+                        <div class="tc-node tc-enclave-node">
+                            <div class="tc-node-title">
+                                <i class="fa-solid fa-lock"></i>
+                                {" Nitro Enclave"}
+                            </div>
+                            <p class="tc-node-desc">
+                                {"Messages processed in sealed hardware, isolated from the server."}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+// =============================================
+// PILLARS (interactive verification boxes)
+// =============================================
+
+#[derive(Properties, PartialEq)]
+struct PillarsProps {
+    pub data: TrustChainData,
+}
+
+#[function_component(PillarsSection)]
+fn pillars_section(props: &PillarsProps) -> Html {
+    let selected = use_state(|| Option::<usize>::None);
+    let show_extra = use_state(|| false);
+    let d = &props.data;
+
+    let make_cb = {
+        let selected = selected.clone();
+        let show_extra = show_extra.clone();
+        move |idx: usize| {
+            let selected = selected.clone();
+            let show_extra = show_extra.clone();
+            Callback::from(move |_: MouseEvent| {
+                if *selected == Some(idx) {
+                    selected.set(None);
                 } else {
-                    {render_placeholder_enclave()}
+                    selected.set(Some(idx));
+                    show_extra.set(false);
                 }
-            </div>
+            })
+        }
+    };
 
-            // Right column: Verification + key management
-            <div class="tc-col-governance">
-                <div class="col-header">
-                    <i class="fa-solid fa-diagram-project"></i>
-                    {" Verification & Key Management"}
-                </div>
-                <p class="col-desc">{"How anyone can verify the code running inside, and how the encryption key is protected."}</p>
-
-                {render_dev_node()}
-                {render_gov_arrow("commits code")}
-                {render_github_node(d)}
-                {render_gov_arrow("image ID")}
-                {render_arbitrum_node(d)}
-                {render_gov_arrow_up("Marlin reads contract")}
-                {render_marlin_sealed(d)}
-            </div>
-        </div>
-    }
-}
-
-// ---- Live enclave ----
-
-fn render_live_enclave(d: &TrustChainData) -> Html {
-    let commit = d.commit_sha.as_deref().unwrap_or("unknown");
-    let commit_short = short_hash(commit, 8);
-    let pcr0 = d.pcr0.as_deref().unwrap_or("unavailable");
-    let pcr1 = d.pcr1.as_deref().unwrap_or("unavailable");
-    let pcr2 = d.pcr2.as_deref().unwrap_or("unavailable");
+    let toggle_extra = {
+        let show_extra = show_extra.clone();
+        Callback::from(move |_: MouseEvent| show_extra.set(!*show_extra))
+    };
 
     html! {
-        <div class="enclave-wrapper">
-            <div class="live-indicator">
-                <span class="live-dot"></span>
-                <span class="live-text">{"Running now"}</span>
+        <div class="tc-pillars">
+            <div class="tc-pillar-boxes">
+                <button class={classes!("tc-pillar-box", (*selected == Some(0)).then(|| "selected"))}
+                        onclick={make_cb(0)}>
+                    <span class="tc-check"><i class="fa-solid fa-circle-check"></i></span>
+                    <span class="tc-pillar-label">{"Code is"}<br/>{"Auditable"}</span>
+                    <i class="fa-solid fa-terminal tc-pillar-icon"></i>
+                </button>
+                <button class={classes!("tc-pillar-box", (*selected == Some(1)).then(|| "selected"))}
+                        onclick={make_cb(1)}>
+                    <span class="tc-check"><i class="fa-solid fa-circle-check"></i></span>
+                    <span class="tc-pillar-label">{"Runtime is"}<br/>{"Isolated"}</span>
+                    <i class="fa-solid fa-shield-halved tc-pillar-icon"></i>
+                </button>
+                <button class={classes!("tc-pillar-box", (*selected == Some(2)).then(|| "selected"))}
+                        onclick={make_cb(2)}>
+                    <span class="tc-check"><i class="fa-solid fa-circle-check"></i></span>
+                    <span class="tc-pillar-label">{"Data is"}<br/>{"Encrypted"}</span>
+                    <i class="fa-solid fa-lock tc-pillar-icon"></i>
+                </button>
             </div>
-            <div class="enclave-cloud live">
-                <div class="edge-bar edge-top-bar">
-                    <i class="fa-solid fa-lock ld-icon"></i>
-                    <span>{"Encrypted data"}</span>
+
+            if let Some(idx) = *selected {
+                <div class="tc-pillar-detail">
+                    {match idx {
+                        0 => render_pillar_auditable(d, *show_extra, toggle_extra.clone()),
+                        1 => render_pillar_isolated(d, *show_extra, toggle_extra.clone()),
+                        _ => render_pillar_encrypted(d, *show_extra, toggle_extra.clone()),
+                    }}
                 </div>
-
-                <div class="cloud-inner">
-                    <div class="vert-flow">
-                        <div class="stack-arrow"><i class="fa-solid fa-arrow-up"></i></div>
-                        <div class="eq-item key-source-inline">
-                            <i class="fa-solid fa-key ks-icon"></i>
-                            <span>{"from Marlin"}</span>
-                        </div>
-                        <span class="eq-op">{"+"}</span>
-                        <div class="eq-item">
-                            <i class="fa-solid fa-lock-open eq-icon eq-green"></i>
-                            <span class="eq-text">{"data"}</span>
-                        </div>
-                    </div>
-                    <div class="pathway-label">{"export"}</div>
-
-                    <div class="cloud-code-label">
-                        <i class="fa-solid fa-code"></i>
-                        <span>{"lightfriend's code"}</span>
-                        if let Some(ref ts) = d.built_at {
-                            <span class="cloud-time">{" - built "}{relative_time(ts)}</span>
-                        }
-                    </div>
-
-                    <Details summary="Attestation values (fingerprints)">
-                        <div class="cloud-attestation">
-                            <div class="att-row">
-                                <span class="att-label">{"PCR0"}</span>
-                                <code class="att-val">{short_hash(pcr0, 16)}</code>
-                            </div>
-                            <div class="att-row">
-                                <span class="att-label">{"PCR1"}</span>
-                                <code class="att-val">{short_hash(pcr1, 16)}</code>
-                            </div>
-                            <div class="att-row">
-                                <span class="att-label">{"PCR2"}</span>
-                                <code class="att-val">{short_hash(pcr2, 16)}</code>
-                            </div>
-                            <div class="att-row">
-                                <span class="att-label">{"Commit"}</span>
-                                <code class="att-val">{&commit_short}</code>
-                            </div>
-                        </div>
-                        <div class="cloud-links">
-                            <a href="/.well-known/lightfriend/attestation" target="_blank" rel="noopener noreferrer">
-                                <i class="fa-solid fa-certificate"></i>{" Live attestation endpoint"}
-                            </a>
-                            <a href={format!("https://github.com/ahtavarasmus/lightfriend/tree/{}/tools/attestation-verifier", commit)} target="_blank" rel="noopener noreferrer">
-                                <i class="fa-solid fa-magnifying-glass"></i>{" Verification tool source code"}
-                            </a>
-                        </div>
-                    </Details>
-
-                    <Details summary="Audit source code">
-                        <div class="source-audit-intro">
-                            {"Read the exact code running in this enclave. Every file links to commit "}
-                            <code>{&commit_short}</code>
-                            {"."}
-                        </div>
-                        <div class="source-audit-list">
-                            <div class="source-audit-group">
-                                <span class="source-audit-group-label">{"Email (IMAP)"}</span>
-                                <a href={format!("https://github.com/ahtavarasmus/lightfriend/blob/{}/backend/src/handlers/imap_auth.rs", commit)} target="_blank" rel="noopener noreferrer">
-                                    {"imap_auth.rs"}<span class="source-audit-hint">{" - login, credential storage"}</span>
-                                </a>
-                                <a href={format!("https://github.com/ahtavarasmus/lightfriend/blob/{}/backend/src/handlers/imap_handlers.rs", commit)} target="_blank" rel="noopener noreferrer">
-                                    {"imap_handlers.rs"}<span class="source-audit-hint">{" - fetching, sending"}</span>
-                                </a>
-                                <a href={format!("https://github.com/ahtavarasmus/lightfriend/blob/{}/backend/src/repositories/user_repository.rs#L182", commit)} target="_blank" rel="noopener noreferrer">
-                                    {"user_repository.rs"}<span class="source-audit-hint">{" - encrypt/store/delete credentials"}</span>
-                                </a>
-                            </div>
-                            <div class="source-audit-group">
-                                <span class="source-audit-group-label">{"AI classification"}</span>
-                                <a href={format!("https://github.com/ahtavarasmus/lightfriend/blob/{}/backend/src/proactive/system_behaviors.rs#L249", commit)} target="_blank" rel="noopener noreferrer">
-                                    {"system_behaviors.rs"}<span class="source-audit-hint">{" - notification prompts"}</span>
-                                </a>
-                                <a href={format!("https://github.com/ahtavarasmus/lightfriend/blob/{}/backend/src/proactive/signal_extraction.rs", commit)} target="_blank" rel="noopener noreferrer">
-                                    {"signal_extraction.rs"}<span class="source-audit-hint">{" - urgency scoring"}</span>
-                                </a>
-                            </div>
-                            <div class="source-audit-group">
-                                <span class="source-audit-group-label">{"Messaging bridges"}</span>
-                                <a href={format!("https://github.com/ahtavarasmus/lightfriend/blob/{}/backend/src/utils/bridge.rs", commit)} target="_blank" rel="noopener noreferrer">
-                                    {"bridge.rs"}<span class="source-audit-hint">{" - message handling"}</span>
-                                </a>
-                                <a href={format!("https://github.com/ahtavarasmus/lightfriend/blob/{}/backend/src/handlers/whatsapp_auth.rs", commit)} target="_blank" rel="noopener noreferrer">
-                                    {"whatsapp_auth.rs"}
-                                </a>
-                                <a href={format!("https://github.com/ahtavarasmus/lightfriend/blob/{}/backend/src/handlers/signal_auth.rs", commit)} target="_blank" rel="noopener noreferrer">
-                                    {"signal_auth.rs"}
-                                </a>
-                                <a href={format!("https://github.com/ahtavarasmus/lightfriend/blob/{}/backend/src/handlers/telegram_auth.rs", commit)} target="_blank" rel="noopener noreferrer">
-                                    {"telegram_auth.rs"}
-                                </a>
-                            </div>
-                        </div>
-                    </Details>
-
-                    <div class="pathway-label">{"import"}</div>
-                    <div class="vert-flow">
-                        <div class="eq-item">
-                            <i class="fa-solid fa-lock-open eq-icon eq-green"></i>
-                            <span class="eq-text">{"data"}</span>
-                        </div>
-                        <div class="stack-arrow"><i class="fa-solid fa-arrow-up"></i></div>
-                        <div class="eq-item key-source-inline">
-                            <i class="fa-solid fa-key ks-icon"></i>
-                            <span>{"from Marlin"}</span>
-                        </div>
-                        <span class="eq-op">{"+"}</span>
-                    </div>
-                </div>
-
-                <div class="edge-bar edge-bottom-bar">
-                    <i class="fa-solid fa-lock ld-icon"></i>
-                    <span>{"Encrypted data"}</span>
-                </div>
-            </div>
-        </div>
-    }
-}
-
-// ---- Data flow between enclaves ----
-
-fn render_data_flow_between() -> Html {
-    html! {
-        <div class="inter-flow">
-            <div class="inter-flow-cols">
-                <div class="flow-data-col">
-                    <div class="flow-vline orange"></div>
-                    <div class="flow-badge data-badge">
-                        <i class="fa-solid fa-lock"></i>
-                        {" Encrypted data"}
-                    </div>
-                    <div class="flow-note">{"old export \u{2192} new import"}</div>
-                    <div class="flow-vline orange"></div>
-                </div>
-            </div>
-        </div>
-    }
-}
-
-// ---- Past enclave with expandable details ----
-
-fn render_past_enclave(build: &HistoricalBuild, d: &TrustChainData) -> Html {
-    let commit_short = short_hash(&build.commit_hash, 8);
-    let commit_url = format!("https://github.com/ahtavarasmus/lightfriend/commit/{}", build.commit_hash);
-    let image_id_short = short_hash(&build.image_id, 12);
-    let contract_addr = d.kms_contract_address.as_deref()
-        .unwrap_or("0x2e51F48F7440b415D9De30b4D73a18C8E9428982");
-
-    html! {
-        <div class="enclave-wrapper">
-            <div class="past-indicator">
-                <span class="past-text">{"Previous version"}</span>
-                if let Some(ref ts) = build.propose_timestamp {
-                    <span class="past-time">{" - "}{relative_time(ts)}</span>
-                }
-            </div>
-            <div class="enclave-cloud past">
-                <div class="edge-bar edge-top-bar">
-                    <i class="fa-solid fa-lock ld-icon"></i>
-                    <span>{"Encrypted data"}</span>
-                </div>
-                <div class="cloud-inner">
-                    <div class="vert-flow">
-                        <div class="stack-arrow"><i class="fa-solid fa-arrow-up"></i></div>
-                        <div class="eq-item key-source-inline">
-                            <i class="fa-solid fa-key ks-icon"></i>
-                            <span>{"from Marlin"}</span>
-                        </div>
-                        <span class="eq-op">{"+"}</span>
-                        <div class="eq-item">
-                            <i class="fa-solid fa-lock-open eq-icon eq-green"></i>
-                            <span class="eq-text">{"data"}</span>
-                        </div>
-                    </div>
-                    <div class="pathway-label">{"export"}</div>
-
-                    <div class="cloud-code-label">
-                        <i class="fa-solid fa-code"></i>
-                        <span>{"lightfriend's code"}</span>
-                    </div>
-
-                    <Details summary={format!("Details - commit {}", commit_short)}>
-                        <div class="past-details-links">
-                            <a href={commit_url} target="_blank" rel="noopener noreferrer">
-                                <i class="fa-solid fa-code-commit"></i>{format!(" View commit {} on GitHub", commit_short)}
-                            </a>
-                            if !build.propose_tx.is_empty() {
-                                <a href={format!("https://arbiscan.io/tx/{}", build.propose_tx)} target="_blank" rel="noopener noreferrer">
-                                    <i class="fa-solid fa-link-slash"></i>{" Blockchain approval transaction"}
-                                </a>
-                            }
-                            if let Some(ref tx) = build.activate_tx {
-                                <a href={format!("https://arbiscan.io/tx/{}", tx)} target="_blank" rel="noopener noreferrer">
-                                    <i class="fa-solid fa-circle-check"></i>{" Activation transaction"}
-                                </a>
-                            }
-                            <a href={format!("https://arbiscan.io/address/{}#events", contract_addr)} target="_blank" rel="noopener noreferrer">
-                                <i class="fa-solid fa-list"></i>{" All approved builds on Arbiscan"}
-                            </a>
-                        </div>
-                        <div class="cloud-attestation">
-                            <div class="att-row">
-                                <span class="att-label">{"Image ID"}</span>
-                                <code class="att-val">{&image_id_short}</code>
-                            </div>
-                            if let Some(ref ts) = build.propose_timestamp {
-                                <div class="att-row">
-                                    <span class="att-label">{"Proposed"}</span>
-                                    <code class="att-val">{format_ts(ts)}</code>
-                                </div>
-                            }
-                        </div>
-                    </Details>
-
-                    <div class="pathway-label">{"import"}</div>
-                    <div class="vert-flow">
-                        <div class="eq-item">
-                            <i class="fa-solid fa-lock-open eq-icon eq-green"></i>
-                            <span class="eq-text">{"data"}</span>
-                        </div>
-                        <div class="stack-arrow"><i class="fa-solid fa-arrow-up"></i></div>
-                        <div class="eq-item key-source-inline">
-                            <i class="fa-solid fa-key ks-icon"></i>
-                            <span>{"from Marlin"}</span>
-                        </div>
-                        <span class="eq-op">{"+"}</span>
-                    </div>
-                </div>
-                <div class="edge-bar edge-bottom-bar">
-                    <i class="fa-solid fa-lock ld-icon"></i>
-                    <span>{"Encrypted data"}</span>
-                </div>
-            </div>
-        </div>
-    }
-}
-
-fn render_placeholder_enclave() -> Html {
-    html! {
-        <div class="enclave-wrapper">
-            <div class="past-indicator">
-                <span class="past-text">{"Previous version"}</span>
-            </div>
-            <div class="enclave-cloud past placeholder">
-                <div class="edge-bar edge-top-bar">
-                    <i class="fa-solid fa-lock ld-icon"></i>
-                    <span>{"Encrypted data"}</span>
-                </div>
-                <div class="cloud-inner">
-                    <div class="cloud-code-label">
-                        <i class="fa-solid fa-code"></i>
-                        <span>{"lightfriend's code"}</span>
-                    </div>
-                </div>
-                <div class="edge-bar edge-bottom-bar">
-                    <i class="fa-solid fa-lock ld-icon"></i>
-                    <span>{"Encrypted data"}</span>
-                </div>
-            </div>
-        </div>
-    }
-}
-
-// ---- Governance nodes ----
-
-fn render_dev_node() -> Html {
-    html! {
-        <div class="gov-node dev-node">
-            <i class="fa-solid fa-user-gear node-icon"></i>
-            <div class="node-content">
-                <span class="node-title">{"Developer"}</span>
-                <span class="node-detail">{"writes and pushes code"}</span>
-            </div>
-        </div>
-    }
-}
-
-fn render_github_node(d: &TrustChainData) -> Html {
-    let commit = d.commit_sha.as_deref().unwrap_or("unknown");
-    let commit_short = short_hash(commit, 8);
-    let pcr0 = d.pcr0.as_deref().unwrap_or("unavailable");
-    let image_id = d.image_id.as_deref().unwrap_or("unavailable");
-    let commit_url = format!("https://github.com/ahtavarasmus/lightfriend/commit/{}", commit);
-    let actions_url = d.workflow_run_id.as_ref().map(|id|
-        format!("https://github.com/ahtavarasmus/lightfriend/actions/runs/{}", id)
-    );
-
-    html! {
-        <div class="gov-node github-node">
-            <div class="node-header">
-                <i class="fa-brands fa-github node-icon"></i>
-                <span class="node-title">{"GitHub"}</span>
-            </div>
-            <p class="node-desc">{"All code is public. A robot built it and published the fingerprint."}</p>
-            <div class="node-links">
-                <a href={commit_url} target="_blank" rel="noopener noreferrer">
-                    <i class="fa-solid fa-code-commit"></i>
-                    {format!(" Commit {}", commit_short)}
-                </a>
-                if let Some(ref url) = actions_url {
-                    <a href={url.clone()} target="_blank" rel="noopener noreferrer">
-                        <i class="fa-solid fa-gears"></i>
-                        {" Build job (GitHub Actions)"}
-                    </a>
-                }
-                if let Some(ref url) = d.build_metadata_url {
-                    <a href={url.clone()} target="_blank" rel="noopener noreferrer">
-                        <i class="fa-solid fa-file-code"></i>
-                        {" Published metadata"}
-                    </a>
-                }
-            </div>
-            <Details summary="Fingerprints from this build">
-                <div class="node-values">
-                    <div class="nv-row">
-                        <span class="nv-label">{"PCR0"}</span>
-                        <code class="nv-val">{short_hash(pcr0, 16)}</code>
-                    </div>
-                    <div class="nv-row">
-                        <span class="nv-label">{"PCR1"}</span>
-                        <code class="nv-val">{short_hash(d.pcr1.as_deref().unwrap_or("unavailable"), 16)}</code>
-                    </div>
-                    <div class="nv-row">
-                        <span class="nv-label">{"PCR2"}</span>
-                        <code class="nv-val">{short_hash(d.pcr2.as_deref().unwrap_or("unavailable"), 16)}</code>
-                    </div>
-                    <div class="nv-row">
-                        <span class="nv-label">{"Image ID"}</span>
-                        <code class="nv-val">{short_hash(image_id, 16)}</code>
-                    </div>
-                </div>
-            </Details>
-            if let Some(ref ts) = d.built_at {
-                <div class="cloud-time">{"Built "}{relative_time(ts)}</div>
             }
         </div>
     }
 }
 
-fn render_arbitrum_node(d: &TrustChainData) -> Html {
-    let contract_addr = d.kms_contract_address.as_deref()
-        .unwrap_or("0x2e51F48F7440b415D9De30b4D73a18C8E9428982");
-    let image_id = d.image_id.as_deref().unwrap_or("unavailable");
-    let bc = d.blockchain.as_ref();
-    let approved = bc.map_or(false, |b| b.approved);
-
-    html! {
-        <div class="gov-node arbitrum-node">
-            <div class="node-header">
-                <i class="fa-solid fa-link-slash node-icon"></i>
-                <span class="node-title">{"Arbitrum"}</span>
-                if approved {
-                    <span class="node-status approved">
-                        <i class="fa-solid fa-circle-check"></i>{" approved"}
-                    </span>
-                }
-            </div>
-            <p class="node-desc">{"Public blockchain record of which builds are approved. Anyone can check."}</p>
-            <Details summary="Contract values and links">
-                <div class="node-values">
-                    <div class="nv-row">
-                        <span class="nv-label">{"Image ID"}</span>
-                        <code class="nv-val">{short_hash(image_id, 16)}</code>
-                    </div>
-                    <div class="nv-row">
-                        <span class="nv-label">{"Contract"}</span>
-                        <code class="nv-val">{short_hash(contract_addr, 16)}</code>
-                    </div>
-                    <div class="nv-row">
-                        <span class="nv-label">{"Approved"}</span>
-                        if approved {
-                            <span class="nv-approved"><i class="fa-solid fa-circle-check"></i>{" true"}</span>
-                        } else {
-                            <code class="nv-val">{"false"}</code>
-                        }
-                    </div>
-                </div>
-                if let Some(ref b) = bc {
-                    if let Some(ref tx) = b.propose_tx {
-                        <div class="node-txs">
-                            <a href={format!("https://arbiscan.io/tx/{}", tx)} target="_blank" rel="noopener noreferrer" class="tx-link">
-                                {"Proposed: "}{short_hash(tx, 8)}
-                            </a>
-                            if let Some(ref ts) = b.propose_timestamp {
-                                <span class="tx-time" title={format_ts(ts)}>{relative_time(ts)}</span>
-                            }
-                        </div>
-                    }
-                    if let Some(ref tx) = b.activate_tx {
-                        <div class="node-txs">
-                            <a href={format!("https://arbiscan.io/tx/{}", tx)} target="_blank" rel="noopener noreferrer" class="tx-link">
-                                {"Activated: "}{short_hash(tx, 8)}
-                            </a>
-                            if let Some(ref ts) = b.activate_timestamp {
-                                <span class="tx-time" title={format_ts(ts)}>{relative_time(ts)}</span>
-                            }
-                        </div>
-                    }
-                }
-                <div class="node-links">
-                    <a href={format!("https://arbiscan.io/address/{}#events", contract_addr)} target="_blank" rel="noopener noreferrer">
-                        <i class="fa-solid fa-magnifying-glass"></i>
-                        {format!(" Check approvedImages[{}]", short_hash(image_id, 8))}
-                    </a>
-                    <a href={format!("https://arbiscan.io/address/{}#code", contract_addr)} target="_blank" rel="noopener noreferrer">
-                        <i class="fa-solid fa-file-contract"></i>
-                        {format!(" View contract source ({})", short_hash(contract_addr, 8))}
-                    </a>
-                </div>
-            </Details>
-        </div>
-    }
-}
-
-// ---- Marlin sealed computer ----
-
-fn render_marlin_sealed(d: &TrustChainData) -> Html {
-    let pcr0 = d.pcr0.as_deref().unwrap_or("unavailable");
+fn render_pillar_encrypted(d: &TrustChainData, show_extra: bool, toggle: Callback<MouseEvent>) -> Html {
     let image_id = d.image_id.as_deref().unwrap_or("unavailable");
     let approved = d.blockchain.as_ref().map_or(false, |b| b.approved);
-    let has_data = pcr0 != "unavailable";
+    let contract_addr = d.kms_contract_address.as_deref()
+        .unwrap_or("0x2e51F48F7440b415D9De30b4D73a18C8E9428982");
 
     html! {
-        <div class="enclave-cloud marlin-cloud">
-            <div class="marlin-header">
-                <span class="cloud-tag marlin-tag">{"MARLIN"}</span>
-                <span class="marlin-badge">{"independent"}</span>
-            </div>
-
-            <p class="marlin-explain">
-                {"Key guardian. Runs in its own sealed computer. Verifies the enclave's identity before releasing the encryption key."}
+        <>
+            <h3 class="tc-detail-title">{"Data is encrypted"}</h3>
+            <p class="tc-detail-desc">
+                {"Your data is encrypted using a key managed by Marlin KMS. It only releases the encryption key after verifying this exact Image ID is approved on-chain."}
             </p>
 
-            <Details summary="How Marlin verifies">
-                <div class="verify-check">
-                    <div class="verify-label">
-                        <i class="fa-solid fa-arrow-right vl-arrow"></i>
-                        <span>{"Reads enclave attestation"}</span>
-                    </div>
-                    <div class="verify-value-row">
-                        <code>{"PCR0: "}{short_hash(pcr0, 12)}</code>
-                        if has_data {
-                            <i class="fa-solid fa-circle-check v-match"></i>
-                        }
-                    </div>
+            <div class="tc-fingerprint">
+                <i class="fa-solid fa-fingerprint tc-fp-icon"></i>
+                <div class="tc-fp-info">
+                    <span class="tc-fp-label">{"Image ID - verified on-chain"}</span>
+                    <code class="tc-fp-value">{short_hash(image_id, 20)}</code>
                 </div>
-
-                <div class="verify-check">
-                    <div class="verify-label">
-                        <i class="fa-solid fa-arrow-right vl-arrow"></i>
-                        <span>{"Reads Arbitrum contract"}</span>
-                    </div>
-                    <div class="verify-value-row">
-                        <code>{"approvedImages["}{short_hash(image_id, 8)}{"]"}</code>
-                        if approved {
-                            <span class="v-approved">{"= true"}</span>
-                            <i class="fa-solid fa-circle-check v-match"></i>
-                        } else {
-                            <span class="v-pending">{"= ?"}</span>
-                        }
-                    </div>
-                </div>
-
-                if has_data || approved {
-                    <div class="verify-result-line">
-                        <i class="fa-solid fa-circle-check v-match"></i>
-                        {" Values match - key released into sealed computer"}
-                    </div>
+                if approved {
+                    <span class="tc-fp-status">{"Approved "}<i class="fa-solid fa-check"></i></span>
                 }
-            </Details>
-
-            <div class="pathway key-export-path">
-                <div class="path-gate">
-                    <i class="fa-solid fa-key gate-icon gate-key"></i>
-                </div>
-                <span class="path-label">{"export"}</span>
-                <i class="fa-solid fa-arrow-right path-arrow"></i>
-                <span class="key-dest">{"into Lightfriend sealed computer"}</span>
             </div>
 
-            <div class="marlin-links">
-                <a href="https://github.com/marlinprotocol/oyster-monorepo" target="_blank" rel="noopener noreferrer">
-                    <i class="fa-brands fa-github"></i>
-                    {" Open source code"}
+            <div class="tc-fp-source">
+                <a href={format!("https://arbiscan.io/address/{}#readContract", contract_addr)} target="_blank" rel="noopener noreferrer">
+                    {"Check approvedImages on Arbiscan "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
                 </a>
             </div>
-        </div>
+
+            <button class="tc-extra-toggle" onclick={toggle}>
+                {if show_extra { "Hide additional info" } else { "Show additional info" }}
+            </button>
+
+            if show_extra {
+                <div class="tc-extra-content">
+                    <div class="tc-extra-card">
+                        <span class="tc-extra-title">{"Marlin KMS"}</span>
+                        <p>{"An independent key guardian running in its own sealed computer. Verifies enclave attestation and checks the Arbitrum blockchain before releasing the encryption key."}</p>
+                        <a href="https://github.com/marlinprotocol/oyster-monorepo" target="_blank" rel="noopener noreferrer">
+                            {"Marlin source code "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                        </a>
+                    </div>
+                    <div class="tc-extra-card">
+                        <span class="tc-extra-title">{"Arbitrum Contract"}</span>
+                        <code>{short_hash(contract_addr, 20)}</code>
+                        <div class="tc-extra-links">
+                            <a href={format!("https://arbiscan.io/address/{}#events", contract_addr)} target="_blank" rel="noopener noreferrer">
+                                {"View on Arbiscan "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            }
+        </>
     }
 }
 
-fn render_gov_arrow(label: &str) -> Html {
+fn render_pillar_auditable(d: &TrustChainData, show_extra: bool, toggle: Callback<MouseEvent>) -> Html {
+    let image_id = d.image_id.as_deref().unwrap_or("unavailable");
+    let commit = d.commit_sha.as_deref().unwrap_or("unknown");
+
     html! {
-        <div class="gov-arrow">
-            <div class="gov-arrow-line"></div>
-            <span class="gov-arrow-label">{label}</span>
-            <div class="gov-arrow-head"><i class="fa-solid fa-arrow-down"></i></div>
-        </div>
+        <>
+            <h3 class="tc-detail-title">{"Code is auditable"}</h3>
+            <p class="tc-detail-desc">
+                {"All code processing your data is open source. GitHub Actions builds it deterministically and publishes this Image ID as the build fingerprint."}
+            </p>
+
+            <div class="tc-fingerprint">
+                <i class="fa-solid fa-fingerprint tc-fp-icon"></i>
+                <div class="tc-fp-info">
+                    <span class="tc-fp-label">{"Image ID - from build pipeline"}</span>
+                    <code class="tc-fp-value">{short_hash(image_id, 20)}</code>
+                </div>
+                <span class="tc-fp-status">{"Verified "}<i class="fa-solid fa-check"></i></span>
+            </div>
+
+            <div class="tc-fp-source">
+                if let Some(ref run_id) = d.workflow_run_id {
+                    <a href={format!("https://github.com/ahtavarasmus/lightfriend/actions/runs/{}", run_id)} target="_blank" rel="noopener noreferrer">
+                        {"View build that produced this fingerprint "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                    </a>
+                }
+            </div>
+
+            <button class="tc-extra-toggle" onclick={toggle}>
+                {if show_extra { "Hide additional info" } else { "Show additional info" }}
+            </button>
+
+            if show_extra {
+                <div class="tc-extra-content">
+                    <div class="tc-extra-card">
+                        <span class="tc-extra-title">{"Source Commit"}</span>
+                        <p>{"The build was produced from this exact commit. Anyone can audit the code and reproduce the build."}</p>
+                        <code>{short_hash(commit, 12)}</code>
+                        <div class="tc-extra-links">
+                            <a href={format!("https://github.com/ahtavarasmus/lightfriend/commit/{}", commit)} target="_blank" rel="noopener noreferrer">
+                                {"View commit on GitHub "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                            </a>
+                        </div>
+                    </div>
+                    if let Some(ref url) = d.build_metadata_url {
+                        <div class="tc-extra-card">
+                            <span class="tc-extra-title">{"Published Metadata"}</span>
+                            <div class="tc-extra-links">
+                                <a href={url.clone()} target="_blank" rel="noopener noreferrer">
+                                    {"View build metadata "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                                </a>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </>
     }
 }
 
-fn render_gov_arrow_up(label: &str) -> Html {
+fn render_pillar_isolated(d: &TrustChainData, show_extra: bool, toggle: Callback<MouseEvent>) -> Html {
+    let image_id = d.image_id.as_deref().unwrap_or("unavailable");
+    let pcr0 = d.pcr0.as_deref().unwrap_or("unavailable");
+    let pcr1 = d.pcr1.as_deref().unwrap_or("unavailable");
+    let pcr2 = d.pcr2.as_deref().unwrap_or("unavailable");
+    let has_attestation = d.attestation.as_ref().map_or(false, |a| a.available);
+    let commit = d.commit_sha.as_deref().unwrap_or("unknown");
+
     html! {
-        <div class="gov-arrow">
-            <div class="gov-arrow-head"><i class="fa-solid fa-arrow-up"></i></div>
-            <span class="gov-arrow-label">{label}</span>
-            <div class="gov-arrow-line"></div>
+        <>
+            <h3 class="tc-detail-title">{"Runtime is isolated"}</h3>
+            <p class="tc-detail-desc">
+                {"The secure hardware enclave that processes your data has been attested by AWS. The live attestation confirms this exact Image ID is running."}
+            </p>
+
+            <div class="tc-fingerprint">
+                <i class="fa-solid fa-fingerprint tc-fp-icon"></i>
+                <div class="tc-fp-info">
+                    <span class="tc-fp-label">{"Image ID - from live attestation"}</span>
+                    <code class="tc-fp-value">{short_hash(image_id, 20)}</code>
+                </div>
+                if has_attestation {
+                    <span class="tc-fp-status">{"Attested "}<i class="fa-solid fa-check"></i></span>
+                }
+            </div>
+
+            <div class="tc-fp-source">
+                <a href="/.well-known/lightfriend/attestation" target="_blank" rel="noopener noreferrer">
+                    {"View live attestation endpoint "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                </a>
+            </div>
+
+            <button class="tc-extra-toggle" onclick={toggle}>
+                {if show_extra { "Hide additional info" } else { "Show additional info" }}
+            </button>
+
+            if show_extra {
+                <div class="tc-extra-content">
+                    <div class="tc-extra-card">
+                        <span class="tc-extra-title">{"Hardware Attestation"}</span>
+                        <p>{"The enclave produces a cryptographic attestation document signed by AWS, certifying the hardware environment and the exact code running inside."}</p>
+                        <div class="tc-extra-links">
+                            <a href={format!("https://github.com/ahtavarasmus/lightfriend/tree/{}/tools/attestation-verifier", commit)} target="_blank" rel="noopener noreferrer">
+                                {"Verification tool source "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                            </a>
+                        </div>
+                    </div>
+                    <div class="tc-extra-card">
+                        <span class="tc-extra-title">{"Platform Configuration Registers"}</span>
+                        <p>{"Low-level enclave measurements. PCR0 is derived from the Image ID."}</p>
+                        <div class="tc-pcr-list">
+                            <div class="tc-pcr-row">
+                                <span>{"PCR0"}</span>
+                                <code>{short_hash(pcr0, 16)}</code>
+                            </div>
+                            <div class="tc-pcr-row">
+                                <span>{"PCR1"}</span>
+                                <code>{short_hash(pcr1, 16)}</code>
+                            </div>
+                            <div class="tc-pcr-row">
+                                <span>{"PCR2"}</span>
+                                <code>{short_hash(pcr2, 16)}</code>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </>
+    }
+}
+
+// =============================================
+// HISTORY CHAIN
+// =============================================
+
+fn render_history_chain(d: &TrustChainData) -> Html {
+    let mut builds: Vec<&HistoricalBuild> = d.history.iter().collect();
+    if builds.is_empty() {
+        return html! {};
+    }
+
+    // Sort by propose_timestamp ascending (oldest first)
+    builds.sort_by(|a, b| {
+        a.propose_timestamp.as_deref().unwrap_or("")
+            .cmp(&b.propose_timestamp.as_deref().unwrap_or(""))
+    });
+
+    let contract_addr = d.kms_contract_address.as_deref()
+        .unwrap_or("0x2e51F48F7440b415D9De30b4D73a18C8E9428982");
+
+    html! {
+        <div class="tc-history">
+            <h2>{"On-chain build history"}</h2>
+            <p class="tc-history-desc">
+                {"Every version of Lightfriend is permanently recorded on the Arbitrum blockchain. Each entry links to its source code and on-chain proof."}
+            </p>
+
+            <div class="tc-history-chain">
+                {for builds.iter().enumerate().map(|(i, build)| {
+                    let commit_short = short_hash(&build.commit_hash, 7);
+                    let image_id_short = short_hash(&build.image_id, 12);
+                    let is_last = i == builds.len() - 1;
+                    let is_current = build.is_current;
+                    let commit_url = format!("https://github.com/ahtavarasmus/lightfriend/commit/{}", build.commit_hash);
+
+                    html! {
+                        <div class="tc-history-entry">
+                            <div class={classes!("tc-history-node", is_current.then(|| "current"))}>
+                                <div class="tc-history-dot">
+                                    if is_current {
+                                        <i class="fa-solid fa-circle-check"></i>
+                                    } else {
+                                        <i class="fa-solid fa-circle"></i>
+                                    }
+                                </div>
+
+                                <div class="tc-history-card">
+                                    if is_current {
+                                        <span class="tc-history-badge">{"running"}</span>
+                                    }
+
+                                    <div class="tc-history-fp">
+                                        <i class="fa-solid fa-fingerprint"></i>
+                                        <code>{&image_id_short}</code>
+                                    </div>
+
+                                    <div class="tc-history-links">
+                                        <a href={commit_url} target="_blank" rel="noopener noreferrer" title="View source code">
+                                            <i class="fa-solid fa-code-commit"></i>
+                                            {format!(" {}", commit_short)}
+                                        </a>
+                                        if !build.propose_tx.is_empty() {
+                                            <a href={format!("https://arbiscan.io/tx/{}", build.propose_tx)} target="_blank" rel="noopener noreferrer" title="View on-chain proof">
+                                                <i class="fa-solid fa-link"></i>
+                                                {" arbiscan"}
+                                            </a>
+                                        }
+                                    </div>
+
+                                    if let Some(ref ts) = build.propose_timestamp {
+                                        <span class="tc-history-date">{format_date(ts)}</span>
+                                    }
+                                </div>
+                            </div>
+                            if !is_last {
+                                <div class="tc-history-connector">
+                                    <i class="fa-solid fa-arrow-right"></i>
+                                </div>
+                            }
+                        </div>
+                    }
+                })}
+            </div>
+
+            <div class="tc-history-footer">
+                <a href={format!("https://arbiscan.io/address/{}#events", contract_addr)} target="_blank" rel="noopener noreferrer">
+                    {"View all events on Arbiscan "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                </a>
+            </div>
         </div>
     }
 }
@@ -815,14 +593,30 @@ fn render_verify_section(d: &TrustChainData) -> Html {
 
     html! {
         <div class="tc-verify">
-            <h2><i class="fa-solid fa-shield-halved"></i>{" Verify It Yourself"}</h2>
-            <p class="verify-desc">
-                {"Run the open-source verification tool on your own machine. It checks Amazon's signature, compares fingerprints, and queries the blockchain independently."}
-            </p>
-            <pre class="verify-cmd">{format!("git clone https://github.com/ahtavarasmus/lightfriend\ncd lightfriend\ncargo run --manifest-path tools/attestation-verifier/Cargo.toml -- \\\n  https://lightfriend.ai --rpc-url https://arb1.arbitrum.io/rpc")}</pre>
-            <a href={format!("https://github.com/ahtavarasmus/lightfriend/tree/{}/tools/attestation-verifier", commit)} target="_blank" rel="noopener noreferrer" class="verify-source-link">
-                {"Read the tool's source code "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
-            </a>
+            <h2>{"Verify it yourself"}</h2>
+
+            <div class="tc-verify-block">
+                <h3>{"Run the verification tool"}</h3>
+                <p class="tc-verify-desc">
+                    {"Check Amazon's signature, compare fingerprints, and query the blockchain - all on your own machine."}
+                </p>
+                <pre class="tc-verify-cmd">{format!("git clone https://github.com/ahtavarasmus/lightfriend\ncd lightfriend\ncargo run --manifest-path tools/attestation-verifier/Cargo.toml -- \\\n  https://lightfriend.ai --rpc-url https://arb1.arbitrum.io/rpc")}</pre>
+                <a href={format!("https://github.com/ahtavarasmus/lightfriend/tree/{}/tools/attestation-verifier", commit)} target="_blank" rel="noopener noreferrer" class="tc-verify-link">
+                    {"Read the tool's source code "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                </a>
+            </div>
+
+            <div class="tc-verify-block">
+                <h3>{"Audit the code with AI"}</h3>
+                <p class="tc-verify-desc">
+                    {"Pull the codebase and use an AI assistant to review the security. Ask it anything - how data is encrypted, what the enclave can access, where credentials are stored."}
+                </p>
+                <pre class="tc-verify-cmd">{"git clone https://github.com/ahtavarasmus/lightfriend\ncd lightfriend\nclaude"}</pre>
+                <p class="tc-verify-hint">
+                    {"Works with "}<a href="https://claude.ai/download" target="_blank" rel="noopener noreferrer">{"Claude Code"}</a>
+                    {", Cursor, or any AI coding tool."}
+                </p>
+            </div>
         </div>
     }
 }
@@ -833,405 +627,466 @@ fn render_verify_section(d: &TrustChainData) -> Html {
 
 const STYLES: &str = r#"
 .tc-page {
-    max-width: 1000px;
+    max-width: 700px;
     margin: 0 auto;
     padding: 5rem 1.5rem 3rem;
     color: #e0e0e0;
 }
-.tc-header { text-align: center; margin-bottom: 2.5rem; }
-.tc-header h1 { font-size: 1.8rem; font-weight: 600; margin: 0 0 0.75rem; color: #f0f0f0; }
-.tc-intro { color: rgba(255,255,255,0.55); font-size: 0.9rem; line-height: 1.6; margin: 0 auto; max-width: 600px; }
+
+/* Header */
+.tc-header { text-align: center; margin-bottom: 1.5rem; }
+.tc-header h1 { font-size: 1.6rem; font-weight: 600; margin: 0; color: #f0f0f0; }
+
+/* Intro box */
+.tc-intro-box {
+    border: 1px solid rgba(76, 175, 80, 0.2);
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 2rem;
+    background: rgba(76, 175, 80, 0.03);
+}
+.tc-intro-text {
+    color: rgba(76, 175, 80, 0.85);
+    font-size: 0.9rem;
+    line-height: 1.6;
+    margin: 0 0 0.5rem;
+}
+.tc-intro-hw {
+    color: rgba(255,255,255,0.6);
+    font-size: 0.85rem;
+    margin: 0 0 0.4rem;
+}
+.tc-intro-hw strong { color: rgba(255,255,255,0.8); }
+.tc-intro-link {
+    color: rgba(76, 175, 80, 0.7);
+    font-size: 0.8rem;
+    text-decoration: none;
+}
+.tc-intro-link:hover { text-decoration: underline; }
+
 .tc-loading { text-align: center; padding: 3rem; color: rgba(255,255,255,0.3); }
 
-/* ---- Diagram grid ---- */
-.tc-diagram {
+/* ---- Diagram ---- */
+.tc-diagram { margin-bottom: 2rem; }
+
+.tc-proof-boundary {
+    position: relative;
+    border: 2px dashed rgba(255,255,255,0.12);
+    border-radius: 16px;
+    padding: 2.5rem 1.5rem 1.5rem;
+}
+.tc-proof-badge {
+    position: absolute;
+    top: -0.65rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1a1a1a;
+    padding: 0 0.75rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: rgba(76, 175, 80, 0.8);
+    white-space: nowrap;
+}
+.tc-proof-badge i { font-size: 0.75rem; }
+
+.tc-diagram-layout {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 2rem;
+    grid-template-columns: auto 1fr;
+    gap: 1.5rem;
     align-items: start;
 }
-.col-header {
-    font-size: 0.7rem; font-weight: 500; text-transform: uppercase;
-    letter-spacing: 0.1em; color: rgba(255,255,255,0.3);
-    margin-bottom: 0.3rem;
+
+.tc-node {
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    background: rgba(255,255,255,0.025);
 }
-.col-header i { margin-right: 0.3rem; }
-.col-desc {
-    font-size: 0.8rem; color: rgba(255,255,255,0.4); line-height: 1.4;
+.tc-node-title {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: #e0e0e0;
+    margin-bottom: 0.4rem;
+}
+.tc-node-title i { font-size: 0.8rem; color: rgba(255,255,255,0.35); }
+.tc-node-points {
+    list-style: disc;
+    padding-left: 1.2rem;
+    margin: 0;
+    color: rgba(255,255,255,0.45);
+    font-size: 0.82rem;
+    line-height: 1.6;
+}
+.tc-node-desc {
+    color: rgba(255,255,255,0.45);
+    font-size: 0.82rem;
+    line-height: 1.5;
+    margin: 0;
+}
+
+.tc-server-node { grid-column: 2; }
+.tc-enclave-node {
+    margin-top: 0.75rem;
+    border-color: rgba(76, 175, 80, 0.15);
+    background: rgba(76, 175, 80, 0.02);
+}
+.tc-enclave-node .tc-node-title i { color: rgba(76, 175, 80, 0.5); }
+
+.tc-kms-node {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: end;
+}
+.tc-kms-node .tc-node-title i { color: rgba(255, 215, 0, 0.5); }
+
+/* ---- Pillars ---- */
+.tc-pillars { margin-bottom: 2.5rem; }
+
+.tc-pillar-boxes {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+.tc-pillar-box {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 1rem 0.5rem;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    background: rgba(255,255,255,0.025);
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    color: #e0e0e0;
+    font-family: inherit;
+}
+.tc-pillar-box:hover {
+    border-color: rgba(255,255,255,0.18);
+    background: rgba(255,255,255,0.04);
+}
+.tc-pillar-box.selected {
+    border-color: rgba(76, 175, 80, 0.3);
+    background: rgba(76, 175, 80, 0.03);
+}
+
+.tc-check {
+    position: absolute;
+    top: -0.4rem;
+    right: -0.4rem;
+    color: #4CAF50;
+    font-size: 0.85rem;
+    background: #1a1a1a;
+    border-radius: 50%;
+}
+.tc-pillar-label {
+    font-size: 0.82rem;
+    text-align: center;
+    line-height: 1.3;
+    color: rgba(255,255,255,0.7);
+}
+.tc-pillar-icon {
+    font-size: 1rem;
+    color: rgba(255,255,255,0.2);
+}
+
+/* Pillar detail card */
+.tc-pillar-detail {
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 1.5rem;
+    background: rgba(255,255,255,0.02);
+}
+.tc-detail-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem;
+    color: #e0e0e0;
+}
+.tc-detail-desc {
+    color: rgba(255,255,255,0.5);
+    font-size: 0.85rem;
+    line-height: 1.6;
     margin: 0 0 1rem;
 }
 
-.tc-col-enclaves { display: flex; flex-direction: column; align-items: stretch; }
-
-/* ---- Collapsible details ---- */
-.tc-details { margin: 0.3rem 0; }
-.tc-details-toggle {
-    display: flex; align-items: center; gap: 0.35rem;
-    background: none; border: none; color: #1E90FF;
-    font-size: 0.78rem; cursor: pointer; padding: 0.2rem 0;
-}
-.tc-details-toggle:hover { color: #4da6ff; }
-.tc-details-toggle i { font-size: 0.55rem; width: 0.7rem; }
-.tc-details-content {
-    padding: 0.4rem 0 0.2rem 1rem;
-    border-left: 1px solid rgba(255,255,255,0.06);
-    margin-top: 0.2rem;
-}
-
-/* ---- Sealed computer ---- */
-.enclave-cloud {
-    position: relative;
+/* Fingerprint card */
+.tc-fingerprint {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
     background: rgba(255,255,255,0.02);
-    border: 2px solid rgba(255,255,255,0.12);
-    border-radius: 12px;
-    padding: 0; margin: 0;
-    overflow: hidden;
-    /* Double border via outline */
-    outline: 2px solid rgba(255,255,255,0.06);
-    outline-offset: 3px;
-    /* Recessed inner shadow */
-    box-shadow: inset 0 0 20px rgba(0,0,0,0.3);
+    margin-bottom: 1rem;
 }
-/* Corner lock icons */
-.enclave-cloud::before,
-.enclave-cloud::after {
-    font-family: 'Font Awesome 6 Free'; font-weight: 900;
-    content: '\f023';
-    position: absolute;
-    font-size: 0.5rem;
-    color: rgba(255, 215, 0, 0.3);
-    z-index: 2;
-    pointer-events: none;
+.tc-fp-icon { font-size: 1.2rem; color: rgba(255,255,255,0.2); }
+.tc-fp-info { display: flex; flex-direction: column; gap: 0.1rem; flex: 1; }
+.tc-fp-label { font-size: 0.72rem; color: rgba(255,255,255,0.35); }
+.tc-fp-value {
+    font-family: monospace; font-size: 0.78rem;
+    color: rgba(255,255,255,0.6);
 }
-.enclave-cloud::before { top: 6px; left: 8px; }
-.enclave-cloud::after { top: 6px; right: 8px; }
-.cloud-inner { padding: 0.75rem 1.15rem; }
-.enclave-wrapper { margin: 8px 0; }
+.tc-fp-status {
+    font-size: 0.78rem;
+    color: rgba(76, 175, 80, 0.8);
+    white-space: nowrap;
+}
+.tc-fp-status i { font-size: 0.7rem; }
 
-/* Live indicator */
-.live-indicator {
-    display: flex; align-items: center; gap: 0.4rem;
-    justify-content: center; margin-bottom: 0.4rem;
+/* Source link under fingerprint */
+.tc-fp-source {
+    margin-bottom: 0.75rem;
 }
-.live-dot {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: #4CAF50;
-    box-shadow: 0 0 6px #4CAF50;
-    animation: pulse-glow 2s ease-in-out infinite;
+.tc-fp-source a {
+    font-size: 0.78rem;
+    color: rgba(76, 175, 80, 0.7);
+    text-decoration: none;
 }
-@keyframes pulse-glow {
-    0%, 100% { box-shadow: 0 0 4px #4CAF50; }
-    50% { box-shadow: 0 0 12px #4CAF50, 0 0 20px rgba(76,175,80,0.3); }
-}
-.live-text { font-size: 0.75rem; font-weight: 600; color: #4CAF50; }
+.tc-fp-source a:hover { text-decoration: underline; }
 
-/* Past indicator */
-.past-indicator {
-    display: flex; align-items: center; gap: 0.2rem;
-    justify-content: center; margin-bottom: 0.3rem;
+/* Extra toggle button */
+.tc-extra-toggle {
+    display: block;
+    width: 100%;
+    padding: 0.6rem;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    background: rgba(255,255,255,0.02);
+    color: rgba(255,255,255,0.5);
+    font-size: 0.82rem;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.2s;
 }
-.past-text { font-size: 0.7rem; color: rgba(255,255,255,0.35); }
-.past-time { font-size: 0.65rem; color: rgba(255,255,255,0.25); }
+.tc-extra-toggle:hover { background: rgba(255,255,255,0.04); }
 
-.enclave-cloud.live {
-    background: rgba(255,255,255,0.03);
-    border-color: rgba(76, 175, 80, 0.25);
-    outline-color: rgba(76, 175, 80, 0.1);
+/* Extra content */
+.tc-extra-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
 }
-.enclave-cloud.live::before,
-.enclave-cloud.live::after { color: rgba(76, 175, 80, 0.35); }
-.marlin-cloud {
-    background: rgba(255,255,255,0.025);
-    padding: 1rem 1.25rem;
-    border-color: rgba(156, 39, 176, 0.2);
-    outline-color: rgba(156, 39, 176, 0.08);
+.tc-extra-card {
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    background: rgba(255,255,255,0.015);
 }
-.marlin-cloud::before,
-.marlin-cloud::after { color: rgba(156, 39, 176, 0.3); }
-.enclave-cloud.past { opacity: 0.6; }
-.enclave-cloud.placeholder { opacity: 0.35; }
-
-/* Tags */
-.cloud-tag {
-    font-size: 0.6rem; font-weight: 600; text-transform: uppercase;
-    letter-spacing: 0.08em; padding: 0.1rem 0.5rem; border-radius: 4px;
-}
-.cloud-tag-outer {
-    display: block; text-align: center;
-    font-size: 0.6rem; font-weight: 600; text-transform: uppercase;
-    letter-spacing: 0.1em; color: rgba(255,255,255,0.35);
+.tc-extra-title {
+    display: block;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: rgba(76, 175, 80, 0.7);
     margin-bottom: 0.3rem;
 }
-.live-tag { color: rgba(255,255,255,0.4); }
-.marlin-tag { color: rgba(255,255,255,0.5); font-weight: 600; }
-.marlin-badge {
-    font-size: 0.55rem; color: rgba(255,255,255,0.3);
-    padding: 0.1rem 0.4rem; margin-left: auto;
+.tc-extra-card p {
+    font-size: 0.8rem;
+    color: rgba(255,255,255,0.4);
+    line-height: 1.5;
+    margin: 0 0 0.4rem;
+}
+.tc-extra-card code {
+    font-family: monospace;
+    font-size: 0.72rem;
+    color: rgba(255,255,255,0.55);
+    display: block;
+    margin-bottom: 0.3rem;
+    word-break: break-all;
+}
+.tc-extra-links {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+.tc-extra-card a, .tc-extra-links a {
+    font-size: 0.78rem;
+    color: rgba(76, 175, 80, 0.7);
+    text-decoration: none;
+}
+.tc-extra-card a:hover, .tc-extra-links a:hover {
+    text-decoration: underline;
 }
 
-/* Code label */
-.cloud-code-label {
-    display: flex; align-items: center; gap: 0.4rem;
-    font-size: 0.88rem; color: rgba(255,255,255,0.8); margin-bottom: 0.3rem;
+/* PCR values */
+.tc-pcr-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    margin-top: 0.3rem;
 }
-.cloud-code-label i { color: #1E90FF; font-size: 0.75rem; }
-
-/* Values */
-.cloud-attestation {
-    background: rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05);
-    border-radius: 6px; padding: 0.45rem 0.55rem; margin-bottom: 0.4rem;
-    display: flex; flex-direction: column; gap: 0.12rem;
+.tc-pcr-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
 }
-.att-row { display: flex; align-items: center; gap: 0.4rem; }
-.att-label { font-size: 0.6rem; color: rgba(255,255,255,0.3); min-width: 50px; text-align: right; }
-.att-val { font-family: monospace; font-size: 0.72rem; color: rgba(255,255,255,0.7); word-break: break-all; }
-.cloud-time { font-size: 0.72rem; color: rgba(255,255,255,0.3); }
-.cloud-links {
-    display: flex; flex-direction: column; gap: 0.15rem; margin-top: 0.3rem;
-}
-.cloud-links a {
-    font-size: 0.78rem; color: #1E90FF; text-decoration: none;
-}
-.cloud-links a:hover { text-decoration: underline; }
-
-/* Source audit */
-.source-audit-intro {
-    font-size: 0.78rem; color: #888; margin-bottom: 0.6rem; line-height: 1.4;
-}
-.source-audit-intro code {
-    background: rgba(255,255,255,0.08); padding: 0.1rem 0.3rem; border-radius: 3px;
-    font-size: 0.75rem; color: #aaa;
-}
-.source-audit-list {
-    display: flex; flex-direction: column; gap: 0.5rem;
-}
-.source-audit-group {
-    display: flex; flex-direction: column; gap: 0.15rem;
-}
-.source-audit-group-label {
-    font-size: 0.7rem; color: #666; text-transform: uppercase; letter-spacing: 0.05em;
-    margin-bottom: 0.1rem;
-}
-.source-audit-list a {
-    font-size: 0.78rem; color: #60a5fa; text-decoration: none; font-family: monospace;
-    padding: 0.15rem 0;
-}
-.source-audit-list a:hover { text-decoration: underline; }
-.source-audit-hint {
-    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-    color: #555; font-size: 0.72rem;
+.tc-pcr-row span { color: rgba(255,255,255,0.3); min-width: 35px; }
+.tc-pcr-row code {
+    font-family: monospace;
+    font-size: 0.7rem;
+    color: rgba(255,255,255,0.55);
+    margin: 0;
 }
 
-/* Past enclave details */
-.past-details-links {
-    display: flex; flex-direction: column; gap: 0.15rem; margin-bottom: 0.4rem;
+/* ---- History chain ---- */
+.tc-history {
+    margin-bottom: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid rgba(255,255,255,0.06);
 }
-.past-details-links a {
-    font-size: 0.78rem; color: #1E90FF; text-decoration: none;
-    display: inline-flex; align-items: center; gap: 0.3rem;
+.tc-history h2 { font-size: 1rem; margin: 0 0 0.3rem; color: #e0e0e0; font-weight: 500; }
+.tc-history-desc {
+    color: rgba(255,255,255,0.4); font-size: 0.82rem; line-height: 1.5; margin: 0 0 1rem;
 }
-.past-details-links a:hover { text-decoration: underline; }
 
-/* ---- Pathways ---- */
-.pathway {
-    display: flex; align-items: center; gap: 0.5rem;
-    padding: 0.55rem 0.75rem; border-radius: 8px;
-    background: rgba(0,0,0,0.1); border: 1px solid rgba(255,255,255,0.04);
-    margin: 0.35rem 0;
+.tc-history-chain {
+    display: flex;
+    align-items: flex-start;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+    gap: 0;
 }
-.key-export-path { border-left: 2px solid rgba(255, 215, 0, 0.5); }
-.path-gate { flex-shrink: 0; }
-.gate-icon { font-size: 0.85rem; }
-.gate-key { color: rgba(255, 215, 0, 0.7); }
-.path-label { font-size: 0.75rem; color: rgba(255,255,255,0.4); }
-.path-arrow { font-size: 0.65rem; color: rgba(255,255,255,0.2); }
-.key-dest { font-size: 0.72rem; color: rgba(255, 215, 0, 0.5); }
+.tc-history-entry {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+.tc-history-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 120px;
+}
+.tc-history-dot {
+    font-size: 0.65rem;
+    color: rgba(255,255,255,0.2);
+}
+.tc-history-node.current .tc-history-dot {
+    color: #4CAF50;
+    font-size: 0.75rem;
+}
 
-.eq-item { display: inline-flex; align-items: center; gap: 0.25rem; }
-.eq-icon { font-size: 0.75rem; }
-.eq-green { color: #4CAF50; }
-.eq-text { font-size: 0.75rem; color: rgba(255,255,255,0.5); }
-.eq-op {
-    font-size: 0.8rem; font-weight: 500; color: rgba(255,255,255,0.2);
-    padding: 0 0.1rem;
+.tc-history-card {
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 0.6rem 0.75rem;
+    background: rgba(255,255,255,0.02);
+    text-align: center;
+    min-width: 110px;
 }
-.pathway-label {
-    font-size: 0.6rem; font-weight: 500; text-transform: uppercase;
-    letter-spacing: 0.1em; color: rgba(255,255,255,0.2);
-    margin: 0.3rem 0 0.1rem 0; text-align: center;
+.tc-history-node.current .tc-history-card {
+    border-color: rgba(76, 175, 80, 0.25);
+    background: rgba(76, 175, 80, 0.03);
 }
-.vert-flow {
-    display: flex; flex-direction: column; align-items: center;
-    gap: 0.15rem; padding: 0.2rem 0;
-}
-.stack-arrow { color: rgba(255,255,255,0.2); font-size: 0.65rem; }
 
-/* Edge bar */
-.edge-bar {
-    display: flex; align-items: center; justify-content: center; gap: 0.3rem;
-    width: 100%;
-    background: rgba(255, 152, 0, 0.06);
-    padding: 0.4rem 1rem;
-    font-size: 0.7rem; color: rgba(255, 152, 0, 0.6);
+.tc-history-badge {
+    display: inline-block;
+    font-size: 0.55rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #4CAF50;
+    margin-bottom: 0.25rem;
 }
-.edge-bar .ld-icon { font-size: 0.6rem; color: rgba(255, 152, 0, 0.5); }
-.edge-top-bar { border-bottom: 1px solid rgba(255, 152, 0, 0.1); }
-.edge-bottom-bar { border-top: 1px solid rgba(255, 152, 0, 0.1); }
 
-.locked-data-inline {
-    display: inline-flex; align-items: center; gap: 0.25rem;
-    background: rgba(255, 152, 0, 0.06); border: 1px solid rgba(255, 152, 0, 0.12);
-    border-radius: 6px; padding: 0.15rem 0.5rem;
-    font-size: 0.68rem; color: rgba(255, 152, 0, 0.6);
+.tc-history-fp {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    margin-bottom: 0.3rem;
 }
-.ld-icon { font-size: 0.55rem; color: rgba(255, 152, 0, 0.5); }
-.key-source-inline {
-    display: inline-flex; align-items: center; gap: 0.25rem;
-    background: rgba(255, 215, 0, 0.06); border: 1px solid rgba(255, 215, 0, 0.12);
-    border-radius: 6px; padding: 0.15rem 0.5rem;
-    font-size: 0.68rem; color: rgba(255, 215, 0, 0.6);
+.tc-history-fp i { font-size: 0.6rem; color: rgba(255,255,255,0.2); }
+.tc-history-fp code {
+    font-family: monospace;
+    font-size: 0.65rem;
+    color: rgba(255,255,255,0.55);
 }
-.ks-icon { font-size: 0.55rem; color: rgba(255, 215, 0, 0.5); }
 
-/* ---- Inter-enclave flow ---- */
-.inter-flow { padding: 0.25rem 0; }
-.inter-flow-cols { display: flex; justify-content: center; }
-.flow-data-col { display: flex; flex-direction: column; align-items: center; gap: 0.1rem; }
-.flow-vline { width: 1px; height: 10px; }
-.flow-vline.orange { background: rgba(255, 152, 0, 0.2); }
-.flow-badge {
-    font-size: 0.65rem; display: flex; align-items: center; gap: 0.25rem;
-    padding: 0.15rem 0.5rem; border-radius: 6px;
-    color: rgba(255, 152, 0, 0.5); border: 1px solid rgba(255, 152, 0, 0.12);
+.tc-history-links {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    margin-bottom: 0.2rem;
 }
-.flow-badge i { font-size: 0.55rem; }
-.data-badge { color: rgba(255, 152, 0, 0.5); }
-.flow-note { font-size: 0.55rem; color: rgba(255,255,255,0.2); }
+.tc-history-links a {
+    font-size: 0.68rem;
+    color: rgba(76, 175, 80, 0.7);
+    text-decoration: none;
+}
+.tc-history-links a:hover { text-decoration: underline; }
 
-/* ---- Governance column ---- */
-.tc-col-governance { display: flex; flex-direction: column; align-items: stretch; }
-.gov-node {
-    border-radius: 10px; padding: 0.8rem 1rem;
-    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+.tc-history-date {
+    font-size: 0.6rem;
+    color: rgba(255,255,255,0.25);
 }
-.node-header {
-    display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.2rem;
-}
-.node-icon { font-size: 0.85rem; color: rgba(255,255,255,0.5); }
-.node-title { font-size: 0.95rem; font-weight: 600; color: #fff; }
-.node-desc { font-size: 0.78rem; color: rgba(255,255,255,0.4); line-height: 1.4; margin: 0 0 0.4rem; }
-.node-status { font-size: 0.65rem; margin-left: auto; color: rgba(255,255,255,0.3); }
-.node-status.approved { color: #4CAF50; }
 
-.dev-node {
-    display: flex; align-items: center; gap: 0.6rem;
-    padding: 0.5rem 1rem; border-color: rgba(255,255,255,0.05);
+.tc-history-connector {
+    color: rgba(255,255,255,0.12);
+    font-size: 0.55rem;
+    padding: 0 0.25rem;
+    margin-top: 0.5rem;
 }
-.node-content { display: flex; flex-direction: column; }
-.node-detail { font-size: 0.72rem; color: rgba(255,255,255,0.3); }
 
-.node-links { display: flex; flex-direction: column; gap: 0.12rem; margin-top: 0.3rem; }
-.node-links a {
-    font-size: 0.78rem; color: #1E90FF; text-decoration: none;
-    display: inline-flex; align-items: center; gap: 0.3rem;
+.tc-history-footer {
+    margin-top: 0.75rem;
 }
-.node-links a:hover { text-decoration: underline; }
-
-.node-values {
-    margin-top: 0.2rem;
-    background: rgba(0,0,0,0.12); border: 1px solid rgba(255,255,255,0.04);
-    border-radius: 5px; padding: 0.35rem 0.5rem;
-    display: flex; flex-direction: column; gap: 0.1rem;
+.tc-history-footer a {
+    font-size: 0.78rem;
+    color: rgba(76, 175, 80, 0.7);
+    text-decoration: none;
 }
-.nv-row { display: flex; align-items: center; gap: 0.4rem; }
-.nv-label { font-size: 0.6rem; color: rgba(255,255,255,0.3); min-width: 50px; text-align: right; }
-.nv-val { font-family: monospace; font-size: 0.7rem; color: rgba(255,255,255,0.7); word-break: break-all; }
-.nv-approved { font-size: 0.65rem; color: #4CAF50; display: flex; align-items: center; gap: 0.2rem; }
-
-.node-txs { margin-top: 0.25rem; display: flex; align-items: center; gap: 0.4rem; }
-.tx-link { font-size: 0.65rem; color: rgba(30, 144, 255, 0.8); text-decoration: none; font-family: monospace; }
-.tx-link:hover { text-decoration: underline; }
-.tx-time { font-size: 0.6rem; color: rgba(255,255,255,0.25); }
-
-/* Gov arrows */
-.gov-arrow { display: flex; flex-direction: column; align-items: center; padding: 0.15rem 0; }
-.gov-arrow-line { width: 1px; height: 6px; background: rgba(255,255,255,0.1); }
-.gov-arrow-label { font-size: 0.6rem; color: rgba(255,255,255,0.25); padding: 0.1rem 0; }
-.gov-arrow-head { color: rgba(255,255,255,0.18); font-size: 0.55rem; }
-
-/* ---- Marlin ---- */
-.marlin-header {
-    display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem;
-}
-.marlin-explain {
-    font-size: 0.78rem; color: rgba(255,255,255,0.4);
-    line-height: 1.4; margin: 0 0 0.4rem;
-}
-.verify-check {
-    background: rgba(0,0,0,0.12); border: 1px solid rgba(255,255,255,0.04);
-    border-radius: 6px; padding: 0.45rem 0.6rem; margin-bottom: 0.3rem;
-}
-.verify-label {
-    display: flex; align-items: center; gap: 0.3rem;
-    font-size: 0.7rem; color: rgba(255,255,255,0.4); margin-bottom: 0.2rem;
-}
-.vl-arrow { font-size: 0.55rem; color: rgba(255,255,255,0.25); }
-.verify-value-row {
-    display: flex; align-items: center; gap: 0.35rem; padding-left: 0.4rem;
-}
-.verify-value-row code {
-    font-size: 0.65rem; color: rgba(255,255,255,0.6);
-    background: rgba(255,255,255,0.04); padding: 0.1rem 0.25rem; border-radius: 3px;
-}
-.v-match { color: #4CAF50; font-size: 0.7rem; }
-.v-approved { color: #4CAF50; font-size: 0.65rem; }
-.v-pending { color: rgba(255,255,255,0.25); font-size: 0.65rem; }
-.verify-result-line {
-    display: flex; align-items: center; gap: 0.35rem;
-    font-size: 0.72rem; color: rgba(76, 175, 80, 0.7);
-    padding: 0.3rem 0 0.15rem;
-}
-.marlin-links { margin-top: 0.35rem; }
-.marlin-links a {
-    font-size: 0.78rem; color: #1E90FF; text-decoration: none;
-}
-.marlin-links a:hover { text-decoration: underline; }
+.tc-history-footer a:hover { text-decoration: underline; }
 
 /* ---- Verify section ---- */
 .tc-verify {
-    margin-top: 3rem; padding-top: 2rem;
+    margin-top: 2rem;
+    padding-top: 1.5rem;
     border-top: 1px solid rgba(255,255,255,0.06);
 }
-.tc-verify h2 { font-size: 1.1rem; margin: 0 0 0.5rem; color: #e0e0e0; }
-.tc-verify h2 i { color: rgba(255,255,255,0.4); font-size: 0.9rem; }
-.verify-desc { color: rgba(255,255,255,0.4); font-size: 0.8rem; line-height: 1.5; margin: 0 0 1rem; }
-.verify-cmd {
+.tc-verify h2 { font-size: 1rem; margin: 0 0 1rem; color: #e0e0e0; font-weight: 500; }
+.tc-verify-block { margin-bottom: 1.25rem; }
+.tc-verify-block h3 { font-size: 0.88rem; margin: 0 0 0.3rem; color: rgba(255,255,255,0.75); font-weight: 500; }
+.tc-verify-desc { color: rgba(255,255,255,0.4); font-size: 0.82rem; line-height: 1.5; margin: 0 0 0.75rem; }
+.tc-verify-hint { font-size: 0.75rem; color: rgba(255,255,255,0.3); margin: 0.4rem 0 0; }
+.tc-verify-hint a { color: rgba(76, 175, 80, 0.7); text-decoration: none; }
+.tc-verify-hint a:hover { text-decoration: underline; }
+.tc-verify-cmd {
     background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.06);
-    padding: 0.75rem 1rem; border-radius: 6px; font-size: 0.72rem;
+    padding: 0.75rem 1rem; border-radius: 8px; font-size: 0.72rem;
     color: rgba(255,255,255,0.55); overflow-x: auto; white-space: pre;
     font-family: monospace; margin: 0 0 0.5rem;
 }
-.verify-source-link { font-size: 0.75rem; color: #1E90FF; text-decoration: none; }
-.verify-source-link:hover { text-decoration: underline; }
+.tc-verify-link { font-size: 0.75rem; color: rgba(76, 175, 80, 0.7); text-decoration: none; }
+.tc-verify-link:hover { text-decoration: underline; }
 
 /* ---- Footer ---- */
 .tc-footer-links { margin-top: 2.5rem; text-align: center; }
 .tc-footer-links a {
-    color: #1E90FF; text-decoration: none; font-size: 0.85rem;
+    color: rgba(76, 175, 80, 0.7); text-decoration: none; font-size: 0.85rem;
 }
 .tc-footer-links a:hover { text-decoration: underline; }
 .tc-page .legal-links {
     margin-top: 1.5rem; text-align: center; font-size: 0.75rem; color: rgba(255,255,255,0.25);
 }
 .tc-page .legal-links a { color: rgba(255,255,255,0.35); text-decoration: none; }
-.tc-page .legal-links a:hover { color: #1E90FF; }
+.tc-page .legal-links a:hover { color: rgba(76, 175, 80, 0.7); }
 
-@media (max-width: 768px) {
-    .tc-page { padding: 3rem 1rem 2rem; }
-    .tc-header h1 { font-size: 1.4rem; }
-    .tc-diagram { grid-template-columns: 1fr; gap: 2rem; }
-    .att-row { flex-direction: column; gap: 0.05rem; align-items: flex-start; }
-    .att-label { min-width: auto; text-align: left; }
-    .inter-flow-cols { flex-direction: column; gap: 0.3rem; }
+@media (max-width: 640px) {
+    .tc-page { padding: 5rem 1rem 2rem; }
+    .tc-header h1 { font-size: 1.3rem; }
+    .tc-diagram-layout { grid-template-columns: 1fr; }
+    .tc-kms-node { grid-column: 1; grid-row: auto; }
+    .tc-server-node { grid-column: 1; }
+    .tc-pillar-boxes { gap: 0.5rem; }
+    .tc-pillar-label { font-size: 0.75rem; }
+    .tc-fingerprint { flex-direction: column; align-items: flex-start; text-align: left; }
+    .tc-fp-status { align-self: flex-end; }
 }
 "#;

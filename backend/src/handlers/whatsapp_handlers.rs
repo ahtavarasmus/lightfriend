@@ -120,30 +120,18 @@ pub async fn test_fetch_messages(
         Ok(messages) => {
             tracing::info!("Found {} messages", messages.len());
 
-            // Print message details in a readable format for testing
-            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-
             for msg in messages.iter() {
-                let message_type_icon = match msg.message_type.as_str() {
-                    "text" => "💬",
-                    "notice" => "📢",
-                    "image" => "🖼️",
-                    "video" => "🎥",
-                    "file" => "📎",
-                    "audio" => "🔊",
-                    "location" => "📍",
-                    "emote" => "🎭",
-                    _ => "📝",
-                };
-
-                println!("\n{} Room: {}", message_type_icon, msg.room_name);
-                println!("👤 {}", msg.sender_display_name);
-                println!("🕒 {}", msg.formatted_timestamp);
-                println!("📄 ({} chars)", msg.content.len());
-                println!("─────────────────────────────────────");
+                tracing::debug!(
+                    "Message: room={}, type={}, sender={}, timestamp={}, content_len={}",
+                    msg.room_name,
+                    msg.message_type,
+                    msg.sender_display_name,
+                    msg.formatted_timestamp,
+                    msg.content.len()
+                );
             }
 
-            println!("\nTotal messages: {}\n", messages.len());
+            tracing::debug!("Total messages: {}", messages.len());
 
             // Also keep the debug logging for the first 5 messages
             for (i, msg) in messages.iter().enumerate().take(5) {
@@ -213,11 +201,10 @@ pub async fn search_whatsapp_rooms_handler(
     .await
     {
         Ok(rooms) => {
-            println!("Found {} matching WhatsApp rooms", rooms.len());
+            tracing::debug!("Found {} matching WhatsApp rooms", rooms.len());
 
-            // Print detailed information about each matching room
             for (i, room) in rooms.iter().enumerate() {
-                println!(
+                tracing::debug!(
                     "Room {}: ID='{}', Name='{}'",
                     i + 1,
                     room.room_id,

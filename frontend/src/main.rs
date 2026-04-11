@@ -553,7 +553,7 @@ pub fn nav(props: &NavProps) -> Html {
                                             <i class="fa-brands fa-github"></i>
                                             <span>{"Open Source"}</span>
                                         </a>
-                                        <Link<Route> to={Route::Trustless} classes="nav-trust-badge">
+                                        <Link<Route> to={Route::TrustChain} classes="nav-trust-badge">
                                             <i class="fa-solid fa-shield-halved"></i>
                                             <span>{"Verifiably Private"}</span>
                                         </Link<Route>>
@@ -580,9 +580,14 @@ pub fn nav(props: &NavProps) -> Html {
                                     }
                                 });
                                 html! {
-                                    <button {onclick} class="nav-link">
-                                        {"Settings"}
-                                    </button>
+                                    <>
+                                        <Link<Route> to={Route::TrustChain} classes="nav-trust-icon">
+                                            <i class="fa-solid fa-shield-halved"></i>
+                                        </Link<Route>>
+                                        <button {onclick} class="nav-link">
+                                            {"Settings"}
+                                        </button>
+                                    </>
                                 }
                             },
                             AuthState::Checking => html! {},

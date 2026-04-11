@@ -11,7 +11,16 @@ use std::error::Error;
 
 use diesel::dsl::sql;
 use diesel::sql_types::BigInt;
+use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Hash a magic token with SHA-256 so that only the digest is stored in the database,
+/// not the raw token that appears in the email link.
+fn hash_magic_token(token: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    hex::encode(hasher.finalize())
+}
 
 define_sql_function! {
     fn lower(x: Text) -> Text;
@@ -271,9 +280,10 @@ impl UserCoreOps for UserCore {
     }
 
     fn find_by_magic_token(&self, token: &str) -> Result<Option<User>, DieselError> {
+        let hashed = hash_magic_token(token);
         let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
         let user = users::table
-            .filter(users::magic_token.eq(token))
+            .filter(users::magic_token.eq(&hashed))
             .first::<User>(&mut pg_conn)
             .optional()?;
         Ok(user)
@@ -284,9 +294,10 @@ impl UserCoreOps for UserCore {
         token: &str,
         now_ts: i32,
     ) -> Result<Option<User>, DieselError> {
+        let hashed = hash_magic_token(token);
         let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
         let user = users::table
-            .filter(users::magic_token.eq(token))
+            .filter(users::magic_token.eq(&hashed))
             .filter(users::magic_token_expires_at.is_not_null())
             .filter(users::magic_token_expires_at.gt(now_ts))
             .first::<User>(&mut pg_conn)
@@ -295,6 +306,7 @@ impl UserCoreOps for UserCore {
     }
 
     fn set_magic_token(&self, user_id: i32, token: &str) -> Result<(), DieselError> {
+        let hashed = hash_magic_token(token);
         let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
         let expiry = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -303,7 +315,7 @@ impl UserCoreOps for UserCore {
             + (24 * 60 * 60);
         diesel::update(users::table.find(user_id))
             .set((
-                users::magic_token.eq(Some(token)),
+                users::magic_token.eq(Some(&hashed)),
                 users::magic_token_expires_at.eq(Some(expiry)),
             ))
             .execute(&mut pg_conn)?;
