@@ -594,13 +594,29 @@ fn render_verify_section(d: &TrustChainData) -> Html {
     html! {
         <div class="tc-verify">
             <h2>{"Verify it yourself"}</h2>
-            <p class="tc-verify-desc">
-                {"Run the open-source verification tool on your own machine. It checks Amazon's signature, compares fingerprints, and queries the blockchain."}
-            </p>
-            <pre class="tc-verify-cmd">{format!("git clone https://github.com/ahtavarasmus/lightfriend\ncd lightfriend\ncargo run --manifest-path tools/attestation-verifier/Cargo.toml -- \\\n  https://lightfriend.ai --rpc-url https://arb1.arbitrum.io/rpc")}</pre>
-            <a href={format!("https://github.com/ahtavarasmus/lightfriend/tree/{}/tools/attestation-verifier", commit)} target="_blank" rel="noopener noreferrer" class="tc-verify-link">
-                {"Read the tool's source code "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
-            </a>
+
+            <div class="tc-verify-block">
+                <h3>{"Run the verification tool"}</h3>
+                <p class="tc-verify-desc">
+                    {"Check Amazon's signature, compare fingerprints, and query the blockchain - all on your own machine."}
+                </p>
+                <pre class="tc-verify-cmd">{format!("git clone https://github.com/ahtavarasmus/lightfriend\ncd lightfriend\ncargo run --manifest-path tools/attestation-verifier/Cargo.toml -- \\\n  https://lightfriend.ai --rpc-url https://arb1.arbitrum.io/rpc")}</pre>
+                <a href={format!("https://github.com/ahtavarasmus/lightfriend/tree/{}/tools/attestation-verifier", commit)} target="_blank" rel="noopener noreferrer" class="tc-verify-link">
+                    {"Read the tool's source code "}<i class="fa-solid fa-arrow-up-right-from-square"></i>
+                </a>
+            </div>
+
+            <div class="tc-verify-block">
+                <h3>{"Audit the code with AI"}</h3>
+                <p class="tc-verify-desc">
+                    {"Pull the codebase and use an AI assistant to review the security. Ask it anything - how data is encrypted, what the enclave can access, where credentials are stored."}
+                </p>
+                <pre class="tc-verify-cmd">{"git clone https://github.com/ahtavarasmus/lightfriend\ncd lightfriend\nclaude"}</pre>
+                <p class="tc-verify-hint">
+                    {"Works with "}<a href="https://claude.ai/download" target="_blank" rel="noopener noreferrer">{"Claude Code"}</a>
+                    {", Cursor, or any AI coding tool."}
+                </p>
+            </div>
         </div>
     }
 }
@@ -1034,8 +1050,13 @@ const STYLES: &str = r#"
     padding-top: 1.5rem;
     border-top: 1px solid rgba(255,255,255,0.06);
 }
-.tc-verify h2 { font-size: 1rem; margin: 0 0 0.4rem; color: #e0e0e0; font-weight: 500; }
+.tc-verify h2 { font-size: 1rem; margin: 0 0 1rem; color: #e0e0e0; font-weight: 500; }
+.tc-verify-block { margin-bottom: 1.25rem; }
+.tc-verify-block h3 { font-size: 0.88rem; margin: 0 0 0.3rem; color: rgba(255,255,255,0.75); font-weight: 500; }
 .tc-verify-desc { color: rgba(255,255,255,0.4); font-size: 0.82rem; line-height: 1.5; margin: 0 0 0.75rem; }
+.tc-verify-hint { font-size: 0.75rem; color: rgba(255,255,255,0.3); margin: 0.4rem 0 0; }
+.tc-verify-hint a { color: rgba(76, 175, 80, 0.7); text-decoration: none; }
+.tc-verify-hint a:hover { text-decoration: underline; }
 .tc-verify-cmd {
     background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.06);
     padding: 0.75rem 1rem; border-radius: 8px; font-size: 0.72rem;

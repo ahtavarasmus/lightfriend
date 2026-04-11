@@ -1541,8 +1541,8 @@ pub async fn resync_telegram(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
-    println!(
-        "🔄 Starting Telegram resync process for user {}",
+    tracing::debug!(
+        "Starting Telegram resync process for user {}",
         auth_user.user_id
     );
 
@@ -1585,7 +1585,7 @@ pub async fn resync_telegram(
     })?;
 
     if let Some(room) = client.get_room(&room_id) {
-        println!("📱 Setting up Matrix event handler");
+        tracing::debug!("Setting up Matrix event handler");
 
         // Set up event handler for the Matrix client
         client.add_event_handler(|ev: SyncRoomMessageEvent| async move {
@@ -1594,7 +1594,7 @@ pub async fn resync_telegram(
                     // Add more specific message handling logic here if needed
                 }
                 SyncRoomMessageEvent::Redacted(_) => {
-                    println!("🗑️ Received redacted message event");
+                    tracing::debug!("Received redacted message event");
                 }
             }
         });
