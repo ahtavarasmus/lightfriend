@@ -1771,6 +1771,9 @@ pub async fn handle_bridge_message(
                 if let Some(ref pn) = person_name {
                     snapshot["person_name"] = serde_json::Value::String(pn.clone());
                 }
+                if let Some(pid) = person_id {
+                    snapshot["person_id"] = serde_json::json!(pid);
+                }
                 crate::proactive::rules::emit_ontology_change(
                     &state_clone,
                     user_id,
