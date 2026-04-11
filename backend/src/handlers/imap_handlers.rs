@@ -454,7 +454,7 @@ pub async fn insert_email_into_ontology(
             .mark_messages_seen_in_room(user_id, &room_id, now, now);
     }
 
-    let snapshot = json!({
+    let mut snapshot = json!({
         "message_id": created.id,
         "platform": "email",
         "sender": sender_name,
@@ -462,6 +462,9 @@ pub async fn insert_email_into_ontology(
         "content": content,
         "room_id": room_id,
     });
+    if let Some(pid) = matched_person_id {
+        snapshot["person_id"] = json!(pid);
+    }
 
     crate::proactive::rules::emit_ontology_change(
         state,
