@@ -2,6 +2,7 @@ use crate::AppState;
 use crate::UserCoreOps;
 
 use chrono::Offset;
+use futures_util::TryStreamExt;
 use std::sync::Arc;
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{debug, error};
@@ -997,6 +998,21 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .await
         .expect("Failed to add digest delivery job to scheduler");
 
+    // Every 10 minutes: sync email read receipts from IMAP \Seen flags
+    let state_clone = Arc::clone(&state);
+    let email_read_sync_job = Job::new_async("30 */10 * * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            sync_email_read_receipts(&state).await;
+        })
+    })
+    .expect("Failed to create email read receipt sync job");
+
+    sched
+        .add(email_read_sync_job)
+        .await
+        .expect("Failed to add email read receipt sync job to scheduler");
+
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");
 }
@@ -1609,6 +1625,140 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
             } else {
                 "auto"
             }
+        );
+    }
+}
+
+/// Sync email read receipts: check IMAP \Seen flags for recent unseen email
+/// ont_messages and mark them as seen if the user read them in their mail client.
+async fn sync_email_read_receipts(state: &Arc<AppState>) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i32;
+    let since = now - 48 * 3600; // check emails from last 48 hours
+
+    let all_users = match state.user_core.get_all_users() {
+        Ok(u) => u,
+        Err(e) => {
+            error!("Failed to get users for email read receipt sync: {}", e);
+            return;
+        }
+    };
+
+    for user in all_users {
+        let user_id = user.id;
+
+        let unseen = match state
+            .ontology_repository
+            .get_unseen_email_messages(user_id, since)
+        {
+            Ok(msgs) => msgs,
+            Err(_) => continue,
+        };
+        if unseen.is_empty() {
+            continue;
+        }
+
+        // Get all active IMAP connections for this user
+        let creds = match state.user_repository.get_all_imap_credentials(user_id) {
+            Ok(c) if !c.is_empty() => c,
+            _ => continue,
+        };
+
+        // Extract UIDs from room_ids (format: "email_{uid}")
+        let uid_msg_pairs: Vec<(String, i64)> = unseen
+            .iter()
+            .filter_map(|m| {
+                m.room_id
+                    .strip_prefix("email_")
+                    .map(|uid| (uid.to_string(), m.id))
+            })
+            .collect();
+
+        if uid_msg_pairs.is_empty() {
+            continue;
+        }
+
+        // Wall-clock timeout per user: 60s total for all IMAP connections.
+        // Prevents a single slow server from blocking the entire sync.
+        let per_user = sync_email_receipts_for_user(state, user_id, &creds, &uid_msg_pairs, now);
+        if tokio::time::timeout(std::time::Duration::from_secs(60), per_user)
+            .await
+            .is_err()
+        {
+            tracing::warn!(
+                "Email read receipt sync timed out for user {} after 60s",
+                user_id
+            );
+        }
+    }
+}
+
+async fn sync_email_receipts_for_user(
+    state: &Arc<AppState>,
+    user_id: i32,
+    creds: &[crate::repositories::user_repository::ImapConnectionInfo],
+    uid_msg_pairs: &[(String, i64)],
+    now: i32,
+) {
+    for cred in creds {
+        let server = match &cred.imap_server {
+            Some(s) => s.clone(),
+            None => continue,
+        };
+        let port = cred.imap_port.unwrap_or(993) as u16;
+
+        let session_result = tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            imap_handlers::open_imap_session(&server, port, &cred.email, &cred.password),
+        )
+        .await;
+
+        let mut session = match session_result {
+            Ok(Ok(s)) => s,
+            _ => continue,
+        };
+
+        if session.select("INBOX").await.is_err() {
+            let _ = session.logout().await;
+            continue;
+        }
+
+        let uid_set: String = uid_msg_pairs
+            .iter()
+            .map(|(uid, _)| uid.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+
+        {
+            let fetch_result = tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                session.uid_fetch(&uid_set, "FLAGS"),
+            )
+            .await;
+
+            if let Ok(Ok(mut stream)) = fetch_result {
+                while let Ok(Some(msg)) = stream.try_next().await {
+                    if let Some(uid) = msg.uid {
+                        let uid_str = uid.to_string();
+                        if msg.flags().any(|f| f == async_imap::types::Flag::Seen) {
+                            if let Some((_, msg_id)) =
+                                uid_msg_pairs.iter().find(|(u, _)| u == &uid_str)
+                            {
+                                let _ = state.ontology_repository.mark_message_seen(*msg_id, now);
+                            }
+                        }
+                    }
+                }
+            }
+        } // drop stream before logout
+
+        let _ = session.logout().await;
+
+        debug!(
+            "Synced email read receipts for user {} via {}",
+            user_id, cred.email
         );
     }
 }

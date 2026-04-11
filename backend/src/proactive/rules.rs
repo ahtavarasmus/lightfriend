@@ -1227,7 +1227,7 @@ pub(crate) async fn check_message_seen(
     room_id: &str,
     message_created_at: i32,
 ) -> bool {
-    match platform {
+    let seen = match platform {
         "email" => {
             // Check IMAP \Seen flag for this email
             let uid = room_id.strip_prefix("email_").unwrap_or(room_id);
@@ -1235,7 +1235,20 @@ pub(crate) async fn check_message_seen(
         }
         // Bridge platforms: check Matrix read receipts + user reply history
         _ => check_bridge_seen(state, user_id, room_id, message_created_at).await,
+    };
+
+    // Persist the seen status so digest/dashboard reflect it immediately
+    if seen {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i32;
+        let _ = state
+            .ontology_repository
+            .mark_messages_seen_in_room(user_id, room_id, now, now);
     }
+
+    seen
 }
 
 /// Check if user read the email in their actual email app via IMAP \Seen flag.
