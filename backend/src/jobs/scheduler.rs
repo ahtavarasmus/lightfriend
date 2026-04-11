@@ -1522,18 +1522,19 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
                 }
             }
         } else {
+            // Auto mode: deliver from predicted wake hour through waking hours
+            // (~14h window). The 3-hour cooldown rate-limits to ~4-5 digests/day.
             let predicted = state
                 .ontology_repository
                 .compute_user_wake_hour(user_id, tz_offset_secs);
-            let target_hours: Vec<usize> = predicted.into_iter().collect();
-            let target_hours = if target_hours.is_empty() {
-                vec![8] // default 8 AM
+            let wake_hour = predicted.unwrap_or(8);
+            let sleep_hour = (wake_hour + 15) % 24; // ~15h awake window
+            if wake_hour < sleep_hour {
+                current_hour >= wake_hour && current_hour < sleep_hour
             } else {
-                target_hours
-            };
-            target_hours
-                .iter()
-                .any(|&h| current_hour == h || current_hour == (h + 1) % 24)
+                // wraps midnight (e.g. wake at 22, sleep at 13)
+                current_hour >= wake_hour || current_hour < sleep_hour
+            }
         };
 
         // Cooldown: don't send more than one digest per N seconds.

@@ -1518,7 +1518,8 @@ impl OntologyRepository {
         Ok(())
     }
 
-    /// Get pending digest items: medium/low-urgency messages not yet delivered, for a user.
+    /// Get pending digest items: medium/low-urgency messages not yet delivered
+    /// and not yet seen by the user on the native platform.
     pub fn get_pending_digest_messages(
         &self,
         user_id: i32,
@@ -1528,6 +1529,7 @@ impl OntologyRepository {
             .filter(ont_messages::user_id.eq(user_id))
             .filter(ont_messages::urgency.eq_any(&["medium", "low"]))
             .filter(ont_messages::digest_delivered_at.is_null())
+            .filter(ont_messages::seen_at.is_null())
             .filter(ont_messages::sender_name.ne("You"))
             .order(ont_messages::created_at.desc())
             .limit(20)
