@@ -255,7 +255,7 @@ async fn fetch_event_logs(
         "params": [{
             "address": contract,
             "topics": topics,
-            "fromBlock": "earliest",
+            "fromBlock": "0x0",
             "toBlock": "latest"
         }],
         "id": 1
@@ -270,14 +270,27 @@ async fn fetch_event_logs(
     {
         Ok(r) => match r.json().await {
             Ok(v) => v,
-            Err(_) => return vec![],
+            Err(e) => {
+                tracing::warn!("trust_chain: failed to parse eth_getLogs response: {}", e);
+                return vec![];
+            }
         },
-        Err(_) => return vec![],
+        Err(e) => {
+            tracing::warn!("trust_chain: eth_getLogs request failed: {}", e);
+            return vec![];
+        }
     };
 
     match resp.result {
         Some(serde_json::Value::Array(logs)) => logs,
-        _ => vec![],
+        Some(other) => {
+            tracing::warn!("trust_chain: eth_getLogs returned non-array: {:?}", other);
+            vec![]
+        }
+        None => {
+            tracing::warn!("trust_chain: eth_getLogs returned no result (error in RPC response)");
+            vec![]
+        }
     }
 }
 
