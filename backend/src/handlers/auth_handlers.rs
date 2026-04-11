@@ -3,7 +3,7 @@ use crate::UserCoreOps;
 use axum::{extract::State, http::StatusCode, response::Response, Json};
 use chrono::{Duration, Utc};
 use governor::{Quota, RateLimiter};
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use rand::Rng;
 use serde::Deserialize;
 use serde_json::json;
@@ -546,7 +546,7 @@ pub async fn refresh_token(
     };
 
     // Validate refresh token
-    let validation = Validation::default();
+    let validation = Validation::new(Algorithm::HS256);
     let token_data = decode::<serde_json::Value>(
         &refresh_token,
         &DecodingKey::from_secret(

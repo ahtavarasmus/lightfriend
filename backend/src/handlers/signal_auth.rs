@@ -191,7 +191,7 @@ async fn connect_signal(client: &MatrixClient, bridge_bot: &str) -> Result<(Owne
     for _ in 0..15 {
         // Reduced from 30 to 15
         attempt += 1;
-        println!("🔍 Check attempt {}/15 for bot join status", attempt);
+        tracing::debug!("Check attempt {}/15 for bot join status", attempt);
         let members = room.members(matrix_sdk::RoomMemberships::JOIN).await?;
         if members.iter().any(|m| m.user_id() == bot_user_id) {
             tracing::debug!("✅ Bot has joined the room");
@@ -203,7 +203,7 @@ async fn connect_signal(client: &MatrixClient, bridge_bot: &str) -> Result<(Owne
     // Quick membership check
     let members = room.members(matrix_sdk::RoomMemberships::empty()).await?;
     if !members.iter().any(|m| m.user_id() == bot_user_id) {
-        println!("❌ Bot failed to join room after all attempts");
+        tracing::debug!("Bot failed to join room after all attempts");
         return Err(anyhow!("Bot {} failed to join room", bot_user_id));
     }
     // Send login command
@@ -221,7 +221,7 @@ async fn connect_signal(client: &MatrixClient, bridge_bot: &str) -> Result<(Owne
     let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_millis(1500));
     for attempt in 1..=60 {
         // 60 attempts * ~2s = ~2 minutes max wait
-        println!("📡 Sync attempt #{}/60", attempt);
+        tracing::debug!("Sync attempt #{}/60", attempt);
 
         // Don't fail on sync errors - just log and retry
         match client.sync_once(sync_settings.clone()).await {
@@ -719,17 +719,8 @@ async fn monitor_signal_connection(
                                 state.user_repository.delete_bridge(user_id, "signal")?;
                                 state.user_repository.create_bridge(new_bridge)?;
 
-                                // TODO: Re-enable E2EE when mautrix bridges config supports encryption
-                                // // Enable E2EE for this user when connecting a bridge
-                                // if let Err(e) =
-                                //     state.user_repository.set_matrix_e2ee_enabled(user_id, true)
-                                // {
-                                //     tracing::warn!(
-                                //         "Failed to enable E2EE for user {}: {}",
-                                //         user_id,
-                                //         e
-                                //     );
-                                // }
+                                // Bridge-level E2EE is unnecessary: both the Matrix server and bridges run
+                                // inside the enclave, so data never leaves unencrypted.
 
                                 // Add client to app state and start sync
                                 let mut matrix_clients = state.matrix_clients.lock().await;
@@ -837,8 +828,8 @@ pub async fn resync_signal(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
-    println!(
-        "🔄 Starting Signal resync process for user {}",
+    tracing::debug!(
+        "Starting Signal resync process for user {}",
         auth_user.user_id
     );
     // Get the bridge information first
@@ -876,7 +867,7 @@ pub async fn resync_signal(
         )
     })?;
     if let Some(room) = client.get_room(&room_id) {
-        println!("📱 Setting up Matrix event handler");
+        tracing::debug!("Setting up Matrix event handler");
 
         // Set up event handler for the Matrix client
         client.add_event_handler(|ev: SyncRoomMessageEvent| async move {
@@ -885,7 +876,7 @@ pub async fn resync_signal(
                     // Add more specific message handling logic here if needed
                 }
                 SyncRoomMessageEvent::Redacted(_) => {
-                    println!("🗑️ Received redacted message event");
+                    tracing::debug!("Received redacted message event");
                 }
             }
         });

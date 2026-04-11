@@ -304,6 +304,22 @@ body {
     color: rgba(126, 178, 255, 0.4);
 }
 
+.nav-trust-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(126, 178, 255, 0.4);
+    font-size: 0.85rem;
+    padding: 0.5rem;
+    border-radius: 50%;
+    transition: all 0.3s ease;
+    text-decoration: none;
+}
+.nav-trust-icon:hover {
+    color: rgba(126, 178, 255, 0.7);
+    background: rgba(126, 178, 255, 0.06);
+}
+
 .nav-link,
 .nav-profile-link {
     color: white;
