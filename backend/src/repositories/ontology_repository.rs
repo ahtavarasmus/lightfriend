@@ -1518,7 +1518,8 @@ impl OntologyRepository {
         Ok(())
     }
 
-    /// Get pending digest items: medium-urgency messages not yet delivered, for a user.
+    /// Get pending digest items: medium/low-urgency messages not yet delivered
+    /// and not yet seen by the user on the native platform.
     pub fn get_pending_digest_messages(
         &self,
         user_id: i32,
@@ -1526,8 +1527,9 @@ impl OntologyRepository {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         ont_messages::table
             .filter(ont_messages::user_id.eq(user_id))
-            .filter(ont_messages::urgency.eq("medium"))
+            .filter(ont_messages::urgency.eq_any(&["medium", "low"]))
             .filter(ont_messages::digest_delivered_at.is_null())
+            .filter(ont_messages::seen_at.is_null())
             .filter(ont_messages::sender_name.ne("You"))
             .order(ont_messages::created_at.desc())
             .limit(20)
@@ -1629,6 +1631,37 @@ impl OntologyRepository {
         .execute(&mut conn)
     }
 
+    /// Get unseen email ont_messages for a user, created since the given timestamp.
+    /// Used by the periodic email read-receipt sync job.
+    pub fn get_unseen_email_messages(
+        &self,
+        user_id: i32,
+        since: i32,
+    ) -> Result<Vec<OntMessage>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::platform.eq("email"))
+            .filter(ont_messages::seen_at.is_null())
+            .filter(ont_messages::created_at.ge(since))
+            .filter(ont_messages::sender_name.ne("You"))
+            .order(ont_messages::created_at.desc())
+            .limit(50)
+            .load::<OntMessage>(&mut conn)
+    }
+
+    /// Mark a single message as seen by its ID.
+    pub fn mark_message_seen(&self, message_id: i64, now: i32) -> Result<usize, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(
+            ont_messages::table
+                .filter(ont_messages::id.eq(message_id))
+                .filter(ont_messages::seen_at.is_null()),
+        )
+        .set(ont_messages::seen_at.eq(now))
+        .execute(&mut conn)
+    }
+
     /// Check if a message in a room has been seen on the native platform.
     pub fn is_message_seen(&self, user_id: i32, room_id: &str, message_created_at: i32) -> bool {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1645,12 +1678,11 @@ impl OntologyRepository {
     }
 
     /// Get all user IDs that have pending digest messages.
-    /// Includes users with any unseen, undelivered critical/high/medium message
-    /// so the sectioned digest can pull from all three urgency levels.
+    /// Includes users with any unseen, undelivered message at any urgency level.
     pub fn get_users_with_pending_digests(&self) -> Result<Vec<i32>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         ont_messages::table
-            .filter(ont_messages::urgency.eq_any(&["critical", "high", "medium"]))
+            .filter(ont_messages::urgency.eq_any(&["critical", "high", "medium", "low"]))
             .filter(ont_messages::digest_delivered_at.is_null())
             .filter(ont_messages::seen_at.is_null())
             .filter(ont_messages::sender_name.ne("You"))

@@ -58,7 +58,7 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
                 <h2>{"Step-by-Step Setup Guide"}</h2>
                 <ol>
                     <li>{"Sign up for Lightfriend and connect your WhatsApp account via the web dashboard"}</li>
-                    <li>{"Set up priority contacts and notification preferences"}</li>
+                    <li>{"Set up notification preferences and custom rules"}</li>
                     <li>{"Add Lightfriend's number to your Light Phone 3 contacts"}</li>
                     <li>{"Test by sending 'Check WhatsApp' via SMS or voice call"}</li>
                     <li>{"Customize AI monitoring for your needs"}</li>
@@ -105,6 +105,14 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
                 <h2>{"Common Questions"}</h2>
                 <p>{"Q: Does this work with Light Phone 3's international versions? A: Yes, as long as SMS/voice is available."}</p>
                 <p>{"Q: How private is my WhatsApp data? A: No trust required. Lightfriend runs in a hardware-isolated enclave - no one, not even the developer, can see your data. The codebase is fully open source and privacy is cryptographically verifiable."}</p>
+
+                <h2>{"Also Works With"}</h2>
+                <p>{"Lightfriend bridges all major messaging platforms to SMS:"}</p>
+                <ul>
+                    <li><Link<Route> to={Route::TelegramOnDumbphone}>{"Telegram on dumbphone"}</Link<Route>></li>
+                    <li><Link<Route> to={Route::SignalOnDumbphone}>{"Signal on dumbphone"}</Link<Route>></li>
+                    <li>{"Email (any provider)"}</li>
+                </ul>
 
                 <div class="blog-cta">
                     <h3>{"Ready to Add WhatsApp to Your Light Phone 3?"}</h3>

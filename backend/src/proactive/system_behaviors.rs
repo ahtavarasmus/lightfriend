@@ -60,7 +60,9 @@ fn strip_urls(s: &str) -> String {
     out
 }
 
-pub async fn run_system_behaviors(
+/// Classify urgency of an incoming message and notify user if needed.
+/// Runs after a delay, only for unseen messages.
+pub async fn run_urgency_classification(
     state: &Arc<AppState>,
     user_id: i32,
     entity_snapshot: &serde_json::Value,
@@ -70,25 +72,7 @@ pub async fn run_system_behaviors(
         return Ok(());
     }
 
-    // Check daily token budget before doing any LLM work
-    let day_start = {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32;
-        (now / 86400) * 86400
-    };
-    let used_today = state
-        .llm_usage_repository
-        .get_user_tokens_since(user_id, day_start)
-        .unwrap_or(0);
-    if used_today >= DAILY_TOKEN_BUDGET_PER_USER {
-        tracing::warn!(
-            "User {} exceeded daily token budget ({}/{}), skipping system_important",
-            user_id,
-            used_today,
-            DAILY_TOKEN_BUDGET_PER_USER
-        );
+    if exceeds_daily_token_budget(state, user_id, "urgency_classification") {
         return Ok(());
     }
 
@@ -232,9 +216,7 @@ pub async fn run_system_behaviors(
                 let ts = fmt_ts(m.created_at);
 
                 // Determine seen status: seen_at is set by read receipts and user replies
-                let is_seen = if m.sender_name == "You" {
-                    true
-                } else if m.seen_at.is_some() {
+                let is_seen = if m.sender_name == "You" || m.seen_at.is_some() {
                     true
                 } else if let Some(you_idx) = last_you_idx {
                     i <= you_idx
@@ -270,9 +252,7 @@ pub async fn run_system_behaviors(
         )
     };
 
-    let tracking_enabled = settings.auto_track_items_system;
-
-    // Step 3: Build structured signal report (no tracked items - those are Pass 2 only)
+    // Build structured signal report
     let signal_report = build_signal_report(&SignalReportInput {
         sender_name,
         sender_context: &sender_context,
@@ -282,59 +262,25 @@ pub async fn run_system_behaviors(
         user_waiting: &user_waiting,
     });
 
-    // Step 4: Multi-dimensional classification prompt
+    // Urgency classification prompt - provides rich context, lets the AI decide
     let system_prompt = format!(
-        "You are evaluating whether an incoming message requires the user's immediate attention.\n\
-        The user has muted all phone notifications and relies on you to catch time-critical messages. \
-        If you miss something important, they won't see it for hours.\n\
+        "You are a message triage system. The user has muted all phone notifications and relies \
+        on you to catch messages that need their attention. If you miss something important, \
+        they won't see it for hours.\n\
         \n\
         Current time: {}\n\
         \n\
         {}\n\
         \n\
         The last message in the conversation is being evaluated. Each message is marked [seen] or \
-        [unseen] - unseen messages have not been read by the user yet. Use the conversation history, \
-        timestamps, and seen status to understand context and urgency. Compare mentioned times against \
-        the current time.\n\
+        [unseen]. Use the full conversation history, timestamps, and seen status to understand context.\n\
         \n\
-        Classify the urgency level:\n\
-        - critical: immediate danger, medical emergency, security breach\n\
-        - high: 2-hour delay would cause real consequences (missed meeting, financial loss, time-sensitive decision)\n\
-        - medium: important but can wait a few hours (friend asking to meet later today, non-urgent work question)\n\
-        - low: routine updates, casual conversation\n\
-        - none: spam, automated messages, irrelevant\n\
-        \n\
-        Set should_notify=true only for critical or high urgency.\n\
-        Use the signal report to calibrate - sender relationship, timing patterns, and content signals all matter. \
-        When behavioral signals show limited data or are absent, rely primarily on message content and timing \
-        to assess urgency. Early patterns are weak hints, not established facts.\n\
-        \n\
-        If should_notify=false, set notification_message to empty string.\n\
-        If should_notify=true, write the notification text following these rules:\n\
-        - Sent as SMS, every character costs money. Be brutally short - aim for under 160 chars.\n\
-        - State the actual fact in plain language. No preamble, no rambling, no padding.\n\
-        - NEVER include URLs, links, tracking codes, or 'click here' text. If the source mentions a link, drop it.\n\
-        - Don't repeat the sender name (it's already in the SMS prefix).\n\
-        - Good: 'Twilio balance low - recharge soon.' / 'Mom: dinner moved to 7pm.' / 'Invoice #482 declined.'\n\
-        - Bad: 'Your Twilio account balance is running low. Recharge now at https://...' (too long, has link){}",
-        now_formatted, signal_report,
-        if tracking_enabled {
-            "\n\n\
-            COMMITMENT TRACKING:\n\
-            Also detect if this message contains a concrete commitment or obligation that the user \
-            could forget and would benefit from being reminded about. Examples: paying a bill, booking \
-            something, confirming attendance, sending a document, following up by a date.\n\
-            - Set contains_commitment=true only for specific, actionable obligations with a timeframe.\n\
-            - Do NOT track vague intentions (\"we should hang out\") or past-tense actions already done.\n\
-            - Detect commitments both TO the user (\"I'll send you the invoice\") and BY the user (\"I'll call you back\").\n\
-            - If a tracked item already exists for this commitment (see signal report), set existing_event_id instead of creating a duplicate.\n\
-            - If the message updates a tracked item's deadline or status, set existing_event_id with the new details."
-        } else {
-            ""
-        }
+        Classify the urgency:\n\
+        - high: delay would cause real consequences\n\
+        - medium: important but can wait hours\n\
+        - low: routine, casual, or spam",
+        now_formatted, signal_report
     );
-
-    let user_msg = conversation.clone();
 
     let messages = vec![
         chat_completion::ChatCompletionMessage {
@@ -346,26 +292,23 @@ pub async fn run_system_behaviors(
         },
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::user,
-            content: chat_completion::Content::Text(user_msg),
+            content: chat_completion::Content::Text(conversation.clone()),
             name: None,
             tool_calls: None,
             tool_call_id: None,
         },
     ];
 
-    // Step 4: Multi-dimensional tool schema
     let mut properties = HashMap::new();
     properties.insert(
         "urgency".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Urgency level: critical, high, medium, low, or none".to_string()),
+            description: Some("Urgency level".to_string()),
             enum_values: Some(vec![
-                "critical".to_string(),
                 "high".to_string(),
                 "medium".to_string(),
                 "low".to_string(),
-                "none".to_string(),
             ]),
             ..Default::default()
         }),
@@ -374,10 +317,7 @@ pub async fn run_system_behaviors(
         "category".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some(
-                "Message category: emergency, financial, health, relationship, work, logistics, social, or spam"
-                    .to_string(),
-            ),
+            description: Some("Message category".to_string()),
             enum_values: Some(vec![
                 "emergency".to_string(),
                 "financial".to_string(),
@@ -392,92 +332,35 @@ pub async fn run_system_behaviors(
         }),
     );
     properties.insert(
-        "should_notify".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Boolean),
-            description: Some("true only for critical or high urgency messages".to_string()),
-            ..Default::default()
-        }),
-    );
-    properties.insert(
-        "notification_message".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some(
-                "Brutally concise SMS text (aim under 160 chars). State the fact only - no \
-                 preamble, no padding, no URLs/links, no 'click here'. Drop any links from \
-                 the source. Empty string if should_notify=false."
-                    .to_string(),
-            ),
-            ..Default::default()
-        }),
-    );
-    properties.insert(
         "summary".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "Very short teaser of what the message is about, for the SMS digest (max 60 chars). \
-                 Do NOT restate the sender's name — they're already labeled separately. \
-                 Write what the message is about, not who sent it. \
-                 Examples: 'asking about dinner tonight', 'payment of $1200 declined', \
-                 'PRD review needed by EOD'. Always fill this."
+                "Concise summary of the message (under 160 chars, no URLs). Don't restate sender name. \
+                 Used for SMS notification if urgent, digest teaser otherwise."
                     .to_string(),
             ),
             ..Default::default()
         }),
     );
 
-    // Pass 1 only classifies commitment type - extraction happens in Pass 2
-    if tracking_enabled {
-        properties.insert(
-            "message_type".to_string(),
-            Box::new(types::JSONSchemaDefine {
-                schema_type: Some(types::JSONSchemaType::String),
-                description: Some(
-                    "Commitment type: commitment_to_user (someone promised user something), \
-                     commitment_by_user (user promised to do something), \
-                     deadline_update (changes a tracked item's deadline), \
-                     completion_signal (indicates a tracked item was completed), \
-                     none (no commitment detected)"
-                        .to_string(),
-                ),
-                enum_values: Some(vec![
-                    "commitment_to_user".to_string(),
-                    "commitment_by_user".to_string(),
-                    "deadline_update".to_string(),
-                    "completion_signal".to_string(),
-                    "none".to_string(),
-                ]),
-                ..Default::default()
-            }),
-        );
-    }
-
     let tool = chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
-            name: "system_behavior_result".to_string(),
-            description: Some(
-                "Return message importance classification with urgency, category, and notification decision"
-                    .to_string(),
-            ),
+            name: "urgency_result".to_string(),
+            description: Some("Return urgency classification".to_string()),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),
                 required: Some(vec![
                     "urgency".to_string(),
                     "category".to_string(),
-                    "should_notify".to_string(),
-                    "notification_message".to_string(),
                     "summary".to_string(),
                 ]),
             },
         },
     };
 
-    // Use fast non-reasoning model for classification (not kimi-k2-5 which wastes
-    // tokens on reasoning). llama3-3-70b is cheaper and fast enough for urgency classification.
     let classification_model = state
         .ai_config
         .model(ctx.provider, crate::ModelPurpose::Voice)
@@ -493,7 +376,7 @@ pub async fn run_system_behaviors(
         .ai_config
         .chat_completion(ctx.provider, &request)
         .await
-        .map_err(|e| format!("System behavior LLM call failed: {}", e))?;
+        .map_err(|e| format!("Urgency classification LLM call failed: {}", e))?;
 
     crate::ai_config::log_llm_usage(
         &state.llm_usage_repository,
@@ -503,7 +386,7 @@ pub async fn run_system_behaviors(
             crate::AiProvider::OpenRouter => "openrouter",
         },
         &classification_model,
-        "system_important",
+        "urgency_classification",
         &result,
     );
 
@@ -511,141 +394,114 @@ pub async fn run_system_behaviors(
 
     if let Some(ref tool_calls) = choice.message.tool_calls {
         for tc in tool_calls {
-            let fn_name = tc.function.name.as_deref().unwrap_or("");
-            if fn_name == "system_behavior_result" {
-                let args = tc.function.arguments.as_deref().unwrap_or("{}");
-                let parsed: serde_json::Value = serde_json::from_str(args)
-                    .map_err(|e| format!("Failed to parse system_behavior_result: {}", e))?;
-
-                let urgency = parsed
-                    .get("urgency")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("none");
-                let category = parsed
-                    .get("category")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("social");
-                let should_notify = parsed
-                    .get("should_notify")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-
-                // Hard guarantee: never notify the user about their own
-                // outgoing messages, regardless of what the LLM decided.
-                // The LLM has been correct in practice but a single bad
-                // classification would SMS the user about themselves.
-                // Pass 2 commitment extraction below still runs so
-                // tracked-event matching keeps working for "You" messages.
-                let should_notify = should_notify && sender_name != "You";
-
-                let summary = parsed.get("summary").and_then(|v| v.as_str()).unwrap_or("");
-
-                info!(
-                    "System behavior classification for user {}: urgency={}, category={}, notify={}",
-                    user_id, urgency, category, should_notify
-                );
-
-                // Store classification + full prompt/result on the message
-                if let Some(mid) = message_id {
-                    if let Err(e) = state.ontology_repository.update_message_classification(
-                        mid,
-                        urgency,
-                        category,
-                        if summary.is_empty() {
-                            None
-                        } else {
-                            Some(summary)
-                        },
-                        Some(&signal_report),
-                        Some(args),
-                    ) {
-                        tracing::warn!("Failed to store classification for message {}: {}", mid, e);
-                    }
-                }
-
-                // Pass 2: Commitment extraction (separate focused LLM call)
-                if tracking_enabled {
-                    let message_type = parsed
-                        .get("message_type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("none");
-
-                    if message_type != "none" {
-                        let auto_confirm = true; // always auto-create when tracking is enabled
-                                                 // Fetch active events only when Pass 2 needs them
-                        let active_events = state
-                            .ontology_repository
-                            .get_active_and_proposed_events(user_id)
-                            .unwrap_or_default();
-                        run_commitment_pass2(
-                            state,
-                            &ctx,
-                            user_id,
-                            message_id,
-                            message_type,
-                            &conversation,
-                            sender_name,
-                            &active_events,
-                            &now_formatted,
-                            now,
-                            auto_confirm,
-                        )
-                        .await;
-                    }
-                }
-
-                if should_notify {
-                    let raw_message = parsed
-                        .get("notification_message")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-
-                    // Defensive: strip URLs even if the LLM ignored the prompt.
-                    // SMS chars are expensive and tracking links balloon length.
-                    let cleaned = strip_urls(raw_message);
-                    let notification_message = cleaned.trim();
-
-                    if !notification_message.is_empty() {
-                        // Record cooldown before sending
-                        state
-                            .system_notify_cooldowns
-                            .insert((user_id, room_id.to_string()), now);
-
-                        // Use urgency to determine notification method
-                        let content_type = match urgency {
-                            "critical" => "critical".to_string(),
-                            _ => "system_important".to_string(),
-                        };
-
-                        send_notification(state, user_id, notification_message, content_type, None)
-                            .await;
-                    }
-                } else if sender_name != "You" {
-                    // Don't surface "Screened message" entries for the
-                    // user's own outgoing messages — they're noise in
-                    // the activity feed. The classification + Pass 2
-                    // commitment extraction above still runs for them
-                    // so tracked-event matching keeps working.
-                    let _ = state.user_repository.log_usage(LogUsageParams {
-                        user_id,
-                        sid: None,
-                        activity_type: "system_screened".to_string(),
-                        credits: None,
-                        time_consumed: None,
-                        success: Some(true),
-                        reason: Some(format!("{} on {} - not urgent", sender_name, platform)),
-                        status: None,
-                        recharge_threshold_timestamp: None,
-                        zero_credits_timestamp: None,
-                    });
-                }
-
-                return Ok(());
+            if tc.function.name.as_deref() != Some("urgency_result") {
+                continue;
             }
+            let args = tc.function.arguments.as_deref().unwrap_or("{}");
+            let parsed: serde_json::Value = serde_json::from_str(args)
+                .map_err(|e| format!("Failed to parse urgency_result: {}", e))?;
+
+            let urgency = parsed
+                .get("urgency")
+                .and_then(|v| v.as_str())
+                .unwrap_or("low");
+            let category = parsed
+                .get("category")
+                .and_then(|v| v.as_str())
+                .unwrap_or("social");
+            let summary = parsed.get("summary").and_then(|v| v.as_str()).unwrap_or("");
+
+            // high = notify, unless it's our own outgoing message
+            let should_notify = urgency == "high" && sender_name != "You";
+
+            info!(
+                "Urgency classification for user {}: urgency={}, category={}, notify={}",
+                user_id, urgency, category, should_notify
+            );
+
+            // Store classification on the message
+            if let Some(mid) = message_id {
+                if let Err(e) = state.ontology_repository.update_message_classification(
+                    mid,
+                    urgency,
+                    category,
+                    if summary.is_empty() {
+                        None
+                    } else {
+                        Some(summary)
+                    },
+                    Some(&signal_report),
+                    Some(args),
+                ) {
+                    tracing::warn!("Failed to store classification for message {}: {}", mid, e);
+                }
+            }
+
+            if should_notify {
+                let cleaned = strip_urls(summary);
+                let notification_message = cleaned.trim();
+
+                if !notification_message.is_empty() {
+                    state
+                        .system_notify_cooldowns
+                        .insert((user_id, room_id.to_string()), now);
+
+                    // Route: known contact + not email = call + SMS, otherwise just SMS
+                    let content_type = if person_id.is_some() && platform != "email" {
+                        "system_important_call".to_string()
+                    } else {
+                        "system_important".to_string()
+                    };
+
+                    send_notification(state, user_id, notification_message, content_type, None)
+                        .await;
+                }
+            } else if sender_name != "You" {
+                let _ = state.user_repository.log_usage(LogUsageParams {
+                    user_id,
+                    sid: None,
+                    activity_type: "system_screened".to_string(),
+                    credits: None,
+                    time_consumed: None,
+                    success: Some(true),
+                    reason: Some(format!("{} on {} - not urgent", sender_name, platform)),
+                    status: None,
+                    recharge_threshold_timestamp: None,
+                    zero_credits_timestamp: None,
+                });
+            }
+
+            return Ok(());
         }
     }
 
     Ok(())
+}
+
+/// Check if user has exceeded daily token budget. Returns true if exceeded.
+fn exceeds_daily_token_budget(state: &Arc<AppState>, user_id: i32, label: &str) -> bool {
+    let day_start = {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+        (now / 86400) * 86400
+    };
+    let used_today = state
+        .llm_usage_repository
+        .get_user_tokens_since(user_id, day_start)
+        .unwrap_or(0);
+    if used_today >= DAILY_TOKEN_BUDGET_PER_USER {
+        tracing::warn!(
+            "User {} exceeded daily token budget ({}/{}), skipping {}",
+            user_id,
+            used_today,
+            DAILY_TOKEN_BUDGET_PER_USER,
+            label
+        );
+        return true;
+    }
+    false
 }
 
 struct SignalReportInput<'a> {
@@ -718,207 +574,109 @@ fn detect_user_waiting(
     }
 }
 
-/// Pass 2: Focused commitment extraction with a separate LLM call.
-/// Only runs when Pass 1 detected a commitment-related message_type.
-#[allow(clippy::too_many_arguments)]
-async fn run_commitment_pass2(
+/// Detect and extract commitments from an incoming message.
+/// Runs immediately on every message (no delay, no seen-check).
+/// Independent of urgency classification.
+pub async fn run_commitment_detection(
     state: &Arc<AppState>,
-    ctx: &crate::context::AgentContext,
     user_id: i32,
-    message_id: Option<i64>,
-    message_type: &str,
-    conversation: &str,
-    sender_name: &str,
-    active_events: &[crate::models::ontology_models::OntEvent],
-    now_formatted: &str,
-    now: i32,
-    auto_confirm: bool,
-) {
-    // For completion signals, check if an incoming message indicates a tracked event is done
-    if message_type == "completion_signal" && !active_events.is_empty() {
-        let conv_lower = conversation.to_lowercase();
-        let mut cs_scored: Vec<(f64, &crate::models::ontology_models::OntEvent)> = active_events
-            .iter()
-            .map(|e| {
-                let score = strsim::jaro_winkler(&conv_lower, &e.description.to_lowercase());
-                (score, e)
-            })
-            .collect();
-        cs_scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        let cs_candidates: Vec<String> = cs_scored
-            .iter()
-            .map(|(_, e)| format!("[id={}] {}", e.id, e.description))
-            .collect();
-        let cs_events_text = cs_candidates.join("\n");
-
-        let cs_system_prompt = format!(
-            "An incoming message suggests a tracked event may be completed.\n\
-            Sender: {}\n\
-            Current time: {}\n\
-            \n\
-            Tracked events:\n{}\n\
-            \n\
-            Rules - be STRICT:\n\
-            - Only mark completed if the sender clearly indicates the action is DONE/FINISHED/PAST TENSE.\n\
-            - \"I sent the report\" -> complete\n\
-            - \"Payment is done\" -> complete\n\
-            - \"I'll send it tomorrow\" -> NOT complete (promise)\n\
-            - \"ok\" -> NOT complete\n\
-            - When in doubt, do NOT mark as completed.\n\
-            \n\
-            Return the IDs of events that are now completed. Return empty array if none.",
-            sender_name, now_formatted, cs_events_text
-        );
-
-        let mut cs_properties = HashMap::new();
-        cs_properties.insert(
-            "completed_ids".to_string(),
-            Box::new(types::JSONSchemaDefine {
-                schema_type: Some(types::JSONSchemaType::Array),
-                description: Some(
-                    "IDs of tracked events that are now completed. Empty array if none."
-                        .to_string(),
-                ),
-                items: Some(Box::new(types::JSONSchemaDefine {
-                    schema_type: Some(types::JSONSchemaType::Number),
-                    ..Default::default()
-                })),
-                ..Default::default()
-            }),
-        );
-
-        let cs_tool = chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: "event_resolution".to_string(),
-                description: Some("Report which tracked events are completed".to_string()),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(cs_properties),
-                    required: Some(vec!["completed_ids".to_string()]),
-                },
-            },
-        };
-
-        let cs_messages = vec![
-            chat_completion::ChatCompletionMessage {
-                role: chat_completion::MessageRole::system,
-                content: chat_completion::Content::Text(cs_system_prompt),
-                name: None,
-                tool_calls: None,
-                tool_call_id: None,
-            },
-            chat_completion::ChatCompletionMessage {
-                role: chat_completion::MessageRole::user,
-                content: chat_completion::Content::Text(conversation.to_string()),
-                name: None,
-                tool_calls: None,
-                tool_call_id: None,
-            },
-        ];
-
-        let cs_model = state
-            .ai_config
-            .model(ctx.provider, crate::ModelPurpose::Voice)
-            .to_string();
-        let cs_request = chat_completion::ChatCompletionRequest::new(cs_model.clone(), cs_messages)
-            .tools(vec![cs_tool])
-            .tool_choice(chat_completion::ToolChoiceType::Required)
-            .temperature(0.0);
-
-        let cs_result = match state
-            .ai_config
-            .chat_completion(ctx.provider, &cs_request)
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!("Completion signal LLM call failed: {}", e);
-                return;
-            }
-        };
-
-        crate::ai_config::log_llm_usage(
-            &state.llm_usage_repository,
-            user_id,
-            match ctx.provider {
-                crate::AiProvider::Tinfoil => "tinfoil",
-                crate::AiProvider::OpenRouter => "openrouter",
-            },
-            &cs_model,
-            "completion_signal_resolution",
-            &cs_result,
-        );
-
-        if let Some(choice) = cs_result.choices.first() {
-            if let Some(ref tool_calls) = choice.message.tool_calls {
-                let valid_ids: std::collections::HashSet<i32> =
-                    active_events.iter().map(|e| e.id).collect();
-
-                for tc in tool_calls {
-                    if tc.function.name.as_deref() != Some("event_resolution") {
-                        continue;
-                    }
-                    let args = tc.function.arguments.as_deref().unwrap_or("{}");
-                    let parsed: serde_json::Value = match serde_json::from_str(args) {
-                        Ok(v) => v,
-                        Err(_) => continue,
-                    };
-
-                    let completed_ids: Vec<i32> = parsed
-                        .get("completed_ids")
-                        .and_then(|v| v.as_array())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|v| v.as_f64().map(|n| n as i32))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-
-                    for event_id in completed_ids {
-                        if !valid_ids.contains(&event_id) {
-                            continue;
-                        }
-                        if let Err(e) = state.ontology_repository.update_event_status(
-                            user_id,
-                            event_id,
-                            "completed",
-                        ) {
-                            tracing::warn!(
-                                "Failed to mark event {} completed via completion signal: {}",
-                                event_id,
-                                e
-                            );
-                            continue;
-                        }
-                        if let Some(mid) = message_id {
-                            let _ = state.ontology_repository.create_link(
-                                user_id,
-                                "Event",
-                                event_id,
-                                "Message",
-                                mid as i32,
-                                "resolve_message",
-                                None,
-                            );
-                        }
-                        let desc = active_events
-                            .iter()
-                            .find(|e| e.id == event_id)
-                            .map(|e| e.description.as_str())
-                            .unwrap_or("unknown");
-                        info!(
-                            "Auto-completed event {} for user {} via completion signal: {}",
-                            event_id, user_id, desc
-                        );
-                    }
-                }
-            }
-        }
-        return;
+    entity_snapshot: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let settings = state.user_core.get_user_settings(user_id)?;
+    if !settings.auto_track_items_system {
+        return Ok(());
     }
 
-    // Build candidate list for dedup, sorted by text similarity to the message
+    if exceeds_daily_token_budget(state, user_id, "commitment_detection") {
+        return Ok(());
+    }
+
+    let sender_name = entity_snapshot
+        .get("sender_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Unknown");
+    let platform = entity_snapshot
+        .get("platform")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let room_id = entity_snapshot
+        .get("room_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let message_id = entity_snapshot.get("message_id").and_then(|v| v.as_i64());
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i32;
+
+    let ctx = ContextBuilder::for_user(state, user_id).build().await?;
+
+    let tz_offset = ctx
+        .timezone
+        .as_ref()
+        .map(|t| t.fixed_offset)
+        .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).unwrap());
+
+    let fmt_ts = |unix: i32| -> String {
+        Utc.timestamp_opt(unix as i64, 0)
+            .single()
+            .map(|dt| {
+                dt.with_timezone(&tz_offset)
+                    .format("%b %d %H:%M")
+                    .to_string()
+            })
+            .unwrap_or_else(|| "??:??".to_string())
+    };
+
+    let now_formatted = fmt_ts(now);
+
+    // Build conversation context from the chatroom
+    let recent_messages = state
+        .ontology_repository
+        .get_messages_for_room(user_id, room_id, 10)
+        .unwrap_or_default();
+
+    let conversation = if recent_messages.len() > 1 {
+        let mut chronological: Vec<_> = recent_messages.iter().collect();
+        chronological.reverse();
+        let lines: Vec<String> = chronological
+            .iter()
+            .enumerate()
+            .map(|(i, m)| {
+                let ts = fmt_ts(m.created_at);
+                let eval_marker = if i == chronological.len() - 1 {
+                    " <-- evaluate this"
+                } else {
+                    ""
+                };
+                format!("[{}] {}: {}{}", ts, m.sender_name, m.content, eval_marker)
+            })
+            .collect();
+        format!(
+            "Conversation on {} (latest message is being evaluated):\n{}",
+            platform,
+            lines.join("\n")
+        )
+    } else {
+        format!(
+            "[{}] Message from {} on {}:\n{}",
+            fmt_ts(now),
+            sender_name,
+            platform,
+            entity_snapshot
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+        )
+    };
+
+    // Fetch existing events for dedup, sorted by similarity to conversation
+    let active_events = state
+        .ontology_repository
+        .get_active_and_proposed_events(user_id)
+        .unwrap_or_default();
+
     let conv_lower = conversation.to_lowercase();
     let mut scored: Vec<(f64, &crate::models::ontology_models::OntEvent)> = active_events
         .iter()
@@ -928,39 +686,65 @@ async fn run_commitment_pass2(
         })
         .collect();
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    let candidates: Vec<String> = scored
-        .iter()
-        .map(|(_, e)| format!("[id={}] {}", e.id, e.description))
-        .collect();
-    let candidates_text = if candidates.is_empty() {
+    let events_context = if active_events.is_empty() {
         "No existing tracked items.".to_string()
     } else {
-        format!("Existing tracked items:\n{}", candidates.join("\n"))
+        let items: Vec<String> = scored
+            .iter()
+            .map(|(_, e)| format!("[id={}] {}", e.id, e.description))
+            .collect();
+        format!("Existing tracked items:\n{}", items.join("\n"))
     };
 
+    // Single LLM call: detect + extract in one shot
     let system_prompt = format!(
-        "Extract the commitment or obligation from this message.\n\
+        "You are analyzing a message for commitments or obligations.\n\
         Current time: {}\n\
         Sender: {}\n\
-        Message type: {}\n\
         \n\
         {}\n\
         \n\
-        Rules:\n\
-        - description: short actionable text (e.g. \"Pay electricity bill\", \"Send project files to Jake\")\n\
-        - deadline: RFC 3339 datetime if mentioned or implied. Null if no deadline.\n\
-        - who: \"sender\" if someone promised the user something, \"user\" if user committed to do something\n\
-        - confidence: \"high\" if explicit commitment with clear action, \"medium\" if implied, \"low\" if ambiguous\n\
-        - existing_match_id: set to the ID if this updates an existing tracked item, null if new",
-        now_formatted, sender_name, message_type, candidates_text
+        Detect if the latest message contains a concrete commitment, obligation, or completion signal.\n\
+        - Commitments TO the user: someone promised to do something (send invoice, call back, deliver)\n\
+        - Commitments BY the user: user promised to do something (pay, book, confirm, follow up)\n\
+        - Completion signals: past-tense indication that a tracked item is done\n\
+        - Deadline updates: changes to an existing tracked item's timeline\n\
+        \n\
+        Only track specific, actionable obligations the user could forget. \
+        Not vague intentions or past-tense actions already completed.",
+        now_formatted, sender_name, events_context
     );
 
     let mut properties = HashMap::new();
     properties.insert(
+        "has_commitment".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some(
+                "Whether a commitment, obligation, or completion signal was detected".to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "commitment_type".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Type of commitment detected".to_string()),
+            enum_values: Some(vec![
+                "commitment_to_user".to_string(),
+                "commitment_by_user".to_string(),
+                "completion_signal".to_string(),
+                "deadline_update".to_string(),
+            ]),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
         "description".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Short description of the obligation".to_string()),
+            description: Some("Short actionable description (e.g. 'Pay electricity bill', 'Send project files to Jake')".to_string()),
             ..Default::default()
         }),
     );
@@ -969,7 +753,7 @@ async fn run_commitment_pass2(
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "RFC 3339 datetime for the deadline (e.g. 2026-04-04T17:00:00). Null if no deadline."
+                "RFC 3339 datetime for the deadline if mentioned or implied. Null if none."
                     .to_string(),
             ),
             ..Default::default()
@@ -988,7 +772,10 @@ async fn run_commitment_pass2(
         "confidence".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Confidence level".to_string()),
+            description: Some(
+                "How confident: high = explicit commitment, medium = implied, low = ambiguous"
+                    .to_string(),
+            ),
             enum_values: Some(vec![
                 "high".to_string(),
                 "medium".to_string(),
@@ -1002,7 +789,7 @@ async fn run_commitment_pass2(
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::Number),
             description: Some(
-                "ID of existing tracked item this updates. Null if new commitment.".to_string(),
+                "ID of existing tracked item this updates or completes. Null if new.".to_string(),
             ),
             ..Default::default()
         }),
@@ -1011,19 +798,20 @@ async fn run_commitment_pass2(
     let tool = chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
-            name: "commitment_extraction".to_string(),
-            description: Some("Extract structured commitment details".to_string()),
+            name: "commitment_result".to_string(),
+            description: Some("Return commitment detection and extraction result".to_string()),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),
-                required: Some(vec![
-                    "description".to_string(),
-                    "who".to_string(),
-                    "confidence".to_string(),
-                ]),
+                required: Some(vec!["has_commitment".to_string()]),
             },
         },
     };
+
+    let classification_model = state
+        .ai_config
+        .model(ctx.provider, crate::ModelPurpose::Voice)
+        .to_string();
 
     let messages = vec![
         chat_completion::ChatCompletionMessage {
@@ -1035,17 +823,12 @@ async fn run_commitment_pass2(
         },
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::user,
-            content: chat_completion::Content::Text(conversation.to_string()),
+            content: chat_completion::Content::Text(conversation),
             name: None,
             tool_calls: None,
             tool_call_id: None,
         },
     ];
-
-    let classification_model = state
-        .ai_config
-        .model(ctx.provider, crate::ModelPurpose::Voice)
-        .to_string();
 
     let request =
         chat_completion::ChatCompletionRequest::new(classification_model.clone(), messages)
@@ -1053,17 +836,11 @@ async fn run_commitment_pass2(
             .tool_choice(chat_completion::ToolChoiceType::Required)
             .temperature(0.0);
 
-    let result = match state
+    let result = state
         .ai_config
         .chat_completion(ctx.provider, &request)
         .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!("Pass 2 commitment extraction failed: {}", e);
-            return;
-        }
-    };
+        .map_err(|e| format!("Commitment detection LLM call failed: {}", e))?;
 
     crate::ai_config::log_llm_usage(
         &state.llm_usage_repository,
@@ -1073,18 +850,18 @@ async fn run_commitment_pass2(
             crate::AiProvider::OpenRouter => "openrouter",
         },
         &classification_model,
-        "commitment_extraction",
+        "commitment_detection",
         &result,
     );
 
     let choice = match result.choices.first() {
         Some(c) => c,
-        None => return,
+        None => return Ok(()),
     };
 
     if let Some(ref tool_calls) = choice.message.tool_calls {
         for tc in tool_calls {
-            if tc.function.name.as_deref() != Some("commitment_extraction") {
+            if tc.function.name.as_deref() != Some("commitment_result") {
                 continue;
             }
             let args = tc.function.arguments.as_deref().unwrap_or("{}");
@@ -1093,6 +870,19 @@ async fn run_commitment_pass2(
                 Err(_) => continue,
             };
 
+            let has_commitment = parsed
+                .get("has_commitment")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            if !has_commitment {
+                return Ok(());
+            }
+
+            let commitment_type = parsed
+                .get("commitment_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("commitment_by_user");
             let description = parsed
                 .get("description")
                 .and_then(|v| v.as_str())
@@ -1104,107 +894,186 @@ async fn run_commitment_pass2(
                 .and_then(|v| v.as_i64())
                 .map(|v| v as i32);
 
-            if description.is_empty() {
+            if description.is_empty() && commitment_type != "completion_signal" {
                 continue;
             }
 
-            // Parse RFC 3339 deadline
             let deadline_ts = deadline_str.and_then(|s| {
                 chrono::DateTime::parse_from_rfc3339(s)
                     .ok()
                     .map(|dt| dt.timestamp() as i32)
             });
             let due_at = deadline_ts;
-            let remind_at = deadline_ts.map(|d| (d - 86400).max(now)); // remind 1 day before, but not in the past
+            let remind_at = deadline_ts.map(|d| (d - 86400).max(now));
 
-            if let Some(event_id) = existing_match_id {
-                // Update existing event
-                let old_event = state.ontology_repository.get_event(user_id, event_id).ok();
+            let valid_ids: std::collections::HashSet<i32> =
+                active_events.iter().map(|e| e.id).collect();
 
-                if let Err(e) = state.ontology_repository.update_event(
-                    user_id,
-                    event_id,
-                    Some(&format!("Update: {}", description)),
-                    None,
-                    remind_at,
-                    due_at,
-                ) {
-                    tracing::warn!("Failed to update tracked event {}: {}", event_id, e);
-                } else {
-                    // Link update message to event
-                    if let Some(mid) = message_id {
-                        let _ = state.ontology_repository.create_link(
-                            user_id,
-                            "Event",
-                            event_id,
-                            "Message",
-                            mid as i32,
-                            "update_message",
-                            None,
-                        );
-                    }
-                    // Notify if deadline changed
-                    if let Some(old) = old_event {
-                        let old_due = old.due_at.unwrap_or(0);
-                        if let Some(new_due) = due_at {
-                            if old_due != new_due && old_due != 0 {
-                                let change_msg = format!(
-                                    "Tracked item updated: \"{}\"\nDeadline changed based on new message from {}.",
-                                    old.description, sender_name
+            match commitment_type {
+                "completion_signal" => {
+                    // Mark matching event as completed
+                    if let Some(event_id) = existing_match_id {
+                        if valid_ids.contains(&event_id) {
+                            if let Err(e) = state.ontology_repository.update_event_status(
+                                user_id,
+                                event_id,
+                                "completed",
+                            ) {
+                                tracing::warn!(
+                                    "Failed to mark event {} completed: {}",
+                                    event_id,
+                                    e
                                 );
-                                crate::proactive::utils::send_notification(
-                                    state,
-                                    user_id,
-                                    &change_msg,
-                                    "tracked_item_update".to_string(),
-                                    None,
-                                )
-                                .await;
+                            } else {
+                                if let Some(mid) = message_id {
+                                    let _ = state.ontology_repository.create_link(
+                                        user_id,
+                                        "Event",
+                                        event_id,
+                                        "Message",
+                                        mid as i32,
+                                        "resolve_message",
+                                        None,
+                                    );
+                                }
+                                let desc = active_events
+                                    .iter()
+                                    .find(|e| e.id == event_id)
+                                    .map(|e| e.description.as_str())
+                                    .unwrap_or("unknown");
+                                info!(
+                                    "Auto-completed event {} for user {}: {}",
+                                    event_id, user_id, desc
+                                );
                             }
                         }
                     }
                 }
-            } else {
-                // Create new event
-                let status = if auto_confirm { "active" } else { "proposed" };
-                let new_event = crate::models::ontology_models::NewOntEvent {
-                    user_id,
-                    description: description.clone(),
-                    remind_at,
-                    due_at,
-                    status: status.to_string(),
-                    created_at: now,
-                    updated_at: now,
-                };
-                match state.ontology_repository.create_event(&new_event) {
-                    Ok(created) => {
-                        if let Some(mid) = message_id {
-                            let _ = state.ontology_repository.create_link(
+                "deadline_update" => {
+                    if let Some(event_id) = existing_match_id {
+                        if valid_ids.contains(&event_id) {
+                            let old_event =
+                                state.ontology_repository.get_event(user_id, event_id).ok();
+                            let update_desc = if description.is_empty() {
+                                None
+                            } else {
+                                Some(format!("Update: {}", description))
+                            };
+                            if let Err(e) = state.ontology_repository.update_event(
                                 user_id,
-                                "Event",
-                                created.id,
-                                "Message",
-                                mid as i32,
-                                "source_message",
+                                event_id,
+                                update_desc.as_deref(),
                                 None,
-                            );
+                                remind_at,
+                                due_at,
+                            ) {
+                                tracing::warn!("Failed to update event {}: {}", event_id, e);
+                            } else {
+                                if let Some(mid) = message_id {
+                                    let _ = state.ontology_repository.create_link(
+                                        user_id,
+                                        "Event",
+                                        event_id,
+                                        "Message",
+                                        mid as i32,
+                                        "update_message",
+                                        None,
+                                    );
+                                }
+                                // Notify if deadline changed
+                                if let Some(old) = old_event {
+                                    let old_due = old.due_at.unwrap_or(0);
+                                    if let Some(new_due) = due_at {
+                                        if old_due != new_due && old_due != 0 {
+                                            let change_msg = format!(
+                                                "Tracked item updated: \"{}\"\nDeadline changed based on new message from {}.",
+                                                old.description, sender_name
+                                            );
+                                            send_notification(
+                                                state,
+                                                user_id,
+                                                &change_msg,
+                                                "tracked_item_update".to_string(),
+                                                None,
+                                            )
+                                            .await;
+                                        }
+                                    }
+                                }
+                            }
                         }
-                        info!(
-                            "Auto-created tracked event {} ({}) for user {}: {}",
-                            created.id, status, user_id, created.description
-                        );
                     }
-                    Err(e) => {
-                        tracing::warn!(
-                            "Failed to create tracked event for user {}: {}",
+                }
+                _ => {
+                    // commitment_to_user or commitment_by_user
+                    if let Some(event_id) = existing_match_id {
+                        // Update existing event
+                        if valid_ids.contains(&event_id) {
+                            if let Err(e) = state.ontology_repository.update_event(
+                                user_id,
+                                event_id,
+                                Some(&format!("Update: {}", description)),
+                                None,
+                                remind_at,
+                                due_at,
+                            ) {
+                                tracing::warn!("Failed to update event {}: {}", event_id, e);
+                            } else if let Some(mid) = message_id {
+                                let _ = state.ontology_repository.create_link(
+                                    user_id,
+                                    "Event",
+                                    event_id,
+                                    "Message",
+                                    mid as i32,
+                                    "update_message",
+                                    None,
+                                );
+                            }
+                        }
+                    } else {
+                        // Create new event (always auto-confirm)
+                        let new_event = crate::models::ontology_models::NewOntEvent {
                             user_id,
-                            e
-                        );
+                            description: description.clone(),
+                            remind_at,
+                            due_at,
+                            status: "active".to_string(),
+                            created_at: now,
+                            updated_at: now,
+                        };
+                        match state.ontology_repository.create_event(&new_event) {
+                            Ok(created) => {
+                                if let Some(mid) = message_id {
+                                    let _ = state.ontology_repository.create_link(
+                                        user_id,
+                                        "Event",
+                                        created.id,
+                                        "Message",
+                                        mid as i32,
+                                        "source_message",
+                                        None,
+                                    );
+                                }
+                                info!(
+                                    "Auto-created event {} for user {}: {}",
+                                    created.id, user_id, created.description
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Failed to create event for user {}: {}",
+                                    user_id,
+                                    e
+                                );
+                            }
+                        }
                     }
                 }
             }
         }
     }
+
+    Ok(())
 }
 
 /// Check if the user's outgoing message indicates a tracked event is already done.

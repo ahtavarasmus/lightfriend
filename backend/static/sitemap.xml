@@ -55,6 +55,36 @@
         <priority>0.7</priority>
     </url>
     <url>
+        <loc>https://lightfriend.ai/trustless</loc>
+        <lastmod>2026-04-10</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.9</priority>
+    </url>
+    <url>
+        <loc>https://lightfriend.ai/trust-chain</loc>
+        <lastmod>2026-04-10</lastmod>
+        <changefreq>weekly</changefreq>
+        <priority>0.8</priority>
+    </url>
+    <url>
+        <loc>https://lightfriend.ai/prompt-injection-safe</loc>
+        <lastmod>2026-04-10</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.8</priority>
+    </url>
+    <url>
+        <loc>https://lightfriend.ai/telegram-on-dumbphone</loc>
+        <lastmod>2026-04-10</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.8</priority>
+    </url>
+    <url>
+        <loc>https://lightfriend.ai/signal-on-dumbphone</loc>
+        <lastmod>2026-04-10</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.8</priority>
+    </url>
+    <url>
         <loc>https://lightfriend.ai/bring-own-number</loc>
         <lastmod>2026-02-27</lastmod>
         <changefreq>monthly</changefreq>

@@ -39,7 +39,10 @@ mod pages {
     pub mod landing;
     pub mod lightphone3_whatsapp_guide;
     pub mod money;
+    pub mod prompt_injection_safe;
+    pub mod signal_on_dumbphone;
     pub mod subscription_success;
+    pub mod telegram_on_dumbphone;
     pub mod termsprivacy;
     pub mod trust_chain;
     pub mod trustless;
@@ -101,7 +104,10 @@ use pages::{
     home::Home,
     lightphone3_whatsapp_guide::LightPhone3WhatsappGuide,
     money::UnifiedPricing,
+    prompt_injection_safe::PromptInjectionSafe,
+    signal_on_dumbphone::SignalOnDumbphone,
     subscription_success::SubscriptionSuccess,
+    telegram_on_dumbphone::TelegramOnDumbphone,
     termsprivacy::{PrivacyPolicy, TermsAndConditions},
     trust_chain::TrustChainPage,
     trustless::TrustlessVerification,
@@ -141,6 +147,12 @@ pub enum Route {
     SwitchToDumbphoneGuide,
     #[at("/how-to-read-more-accidentally")]
     ReadMoreAccidentallyGuide,
+    #[at("/telegram-on-dumbphone")]
+    TelegramOnDumbphone,
+    #[at("/signal-on-dumbphone")]
+    SignalOnDumbphone,
+    #[at("/prompt-injection-safe")]
+    PromptInjectionSafe,
     #[at("/set-password")]
     SetPassword,
     #[at("/set-password/:token")]
@@ -213,6 +225,18 @@ fn switch(routes: Route) -> Html {
         Route::ReadMoreAccidentallyGuide => {
             info!("Rendering ReadMoreAccidentallyGuide page");
             html! { <ReadMoreAccidentallyGuide /> }
+        }
+        Route::TelegramOnDumbphone => {
+            info!("Rendering TelegramOnDumbphone page");
+            html! { <TelegramOnDumbphone /> }
+        }
+        Route::SignalOnDumbphone => {
+            info!("Rendering SignalOnDumbphone page");
+            html! { <SignalOnDumbphone /> }
+        }
+        Route::PromptInjectionSafe => {
+            info!("Rendering PromptInjectionSafe page");
+            html! { <PromptInjectionSafe /> }
         }
         Route::SetPassword => {
             info!("Rendering SetPassword page");
@@ -529,7 +553,7 @@ pub fn nav(props: &NavProps) -> Html {
                                             <i class="fa-brands fa-github"></i>
                                             <span>{"Open Source"}</span>
                                         </a>
-                                        <Link<Route> to={Route::Trustless} classes="nav-trust-badge">
+                                        <Link<Route> to={Route::TrustChain} classes="nav-trust-badge">
                                             <i class="fa-solid fa-shield-halved"></i>
                                             <span>{"Verifiably Private"}</span>
                                         </Link<Route>>
@@ -556,9 +580,14 @@ pub fn nav(props: &NavProps) -> Html {
                                     }
                                 });
                                 html! {
-                                    <button {onclick} class="nav-link">
-                                        {"Settings"}
-                                    </button>
+                                    <>
+                                        <Link<Route> to={Route::TrustChain} classes="nav-trust-icon">
+                                            <i class="fa-solid fa-shield-halved"></i>
+                                        </Link<Route>>
+                                        <button {onclick} class="nav-link">
+                                            {"Settings"}
+                                        </button>
+                                    </>
                                 }
                             },
                             AuthState::Checking => html! {},

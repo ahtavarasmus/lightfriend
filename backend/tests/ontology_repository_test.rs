@@ -404,6 +404,110 @@ fn test_mark_room_digest_delivered() {
     assert_eq!(pending[0].room_id, "!roomB");
 }
 
+#[test]
+#[serial]
+fn test_mark_messages_seen_in_room() {
+    use backend::models::ontology_models::NewOntMessage;
+
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let now = 1000000;
+
+    // Insert critical message in room A
+    let msg1 = state
+        .ontology_repository
+        .insert_message(&NewOntMessage {
+            user_id: user.id,
+            room_id: "!roomA".to_string(),
+            platform: "whatsapp".to_string(),
+            sender_name: "Alice".to_string(),
+            content: "emergency!".to_string(),
+            person_id: None,
+            created_at: now,
+        })
+        .unwrap();
+    state
+        .ontology_repository
+        .update_message_classification(msg1.id, "critical", "request", None, None, None)
+        .unwrap();
+
+    // Insert high message in room A
+    let msg2 = state
+        .ontology_repository
+        .insert_message(&NewOntMessage {
+            user_id: user.id,
+            room_id: "!roomA".to_string(),
+            platform: "whatsapp".to_string(),
+            sender_name: "Alice".to_string(),
+            content: "need help".to_string(),
+            person_id: None,
+            created_at: now + 10,
+        })
+        .unwrap();
+    state
+        .ontology_repository
+        .update_message_classification(msg2.id, "high", "request", None, None, None)
+        .unwrap();
+
+    // Insert medium message in room A (should NOT be resolved)
+    let msg3 = state
+        .ontology_repository
+        .insert_message(&NewOntMessage {
+            user_id: user.id,
+            room_id: "!roomA".to_string(),
+            platform: "whatsapp".to_string(),
+            sender_name: "Alice".to_string(),
+            content: "btw".to_string(),
+            person_id: None,
+            created_at: now + 20,
+        })
+        .unwrap();
+    state
+        .ontology_repository
+        .update_message_classification(msg3.id, "medium", "chat", None, None, None)
+        .unwrap();
+
+    // Insert high message in room B (should NOT be resolved)
+    let msg4 = state
+        .ontology_repository
+        .insert_message(&NewOntMessage {
+            user_id: user.id,
+            room_id: "!roomB".to_string(),
+            platform: "whatsapp".to_string(),
+            sender_name: "Bob".to_string(),
+            content: "urgent too".to_string(),
+            person_id: None,
+            created_at: now,
+        })
+        .unwrap();
+    state
+        .ontology_repository
+        .update_message_classification(msg4.id, "high", "request", None, None, None)
+        .unwrap();
+
+    // Mark room A messages as seen (up to now + 100 covers all 3 messages)
+    let affected = state
+        .ontology_repository
+        .mark_messages_seen_in_room(user.id, "!roomA", now + 100, now + 100)
+        .unwrap();
+    assert_eq!(affected, 3); // critical + high + medium in room A
+
+    // Calling again should affect 0 (already seen)
+    let affected2 = state
+        .ontology_repository
+        .mark_messages_seen_in_room(user.id, "!roomA", now + 200, now + 200)
+        .unwrap();
+    assert_eq!(affected2, 0);
+
+    // Room B high message should still be unseen (pending by-urgency check)
+    let pending = state
+        .ontology_repository
+        .get_pending_messages_by_urgency(user.id, &["critical", "high"], now - 86400, 100)
+        .unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].id, msg4.id);
+}
+
 // =============================================================================
 // Recently completed events
 // =============================================================================

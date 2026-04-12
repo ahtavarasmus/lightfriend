@@ -1227,7 +1227,7 @@ pub(crate) async fn check_message_seen(
     room_id: &str,
     message_created_at: i32,
 ) -> bool {
-    match platform {
+    let seen = match platform {
         "email" => {
             // Check IMAP \Seen flag for this email
             let uid = room_id.strip_prefix("email_").unwrap_or(room_id);
@@ -1235,7 +1235,20 @@ pub(crate) async fn check_message_seen(
         }
         // Bridge platforms: check Matrix read receipts + user reply history
         _ => check_bridge_seen(state, user_id, room_id, message_created_at).await,
+    };
+
+    // Persist the seen status so digest/dashboard reflect it immediately
+    if seen {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i32;
+        let _ = state
+            .ontology_repository
+            .mark_messages_seen_in_room(user_id, room_id, now, now);
     }
+
+    seen
 }
 
 /// Check if user read the email in their actual email app via IMAP \Seen flag.
@@ -1343,46 +1356,68 @@ pub async fn emit_ontology_change(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     if entity_type == "Message" && !is_group {
-        let state_sys = Arc::clone(state);
-        let snap_sys = entity_snapshot.clone();
-        let platform_sys = entity_snapshot
-            .get("platform")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let room_id_sys = entity_snapshot
-            .get("room_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let created_at_sys = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i32;
+        // Commitment detection: fires immediately, no delay, no seen-check
+        {
+            let state_commit = Arc::clone(state);
+            let snap_commit = entity_snapshot.clone();
+            tokio::spawn(async move {
+                if let Err(e) = crate::proactive::system_behaviors::run_commitment_detection(
+                    &state_commit,
+                    user_id,
+                    &snap_commit,
+                )
+                .await
+                {
+                    error!("Commitment detection failed for user {}: {}", user_id, e);
+                }
+            });
+        }
 
-        tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
+        // Urgency classification: 5-min delay + seen-check (no point notifying about read messages)
+        {
+            let state_urgency = Arc::clone(state);
+            let snap_urgency = entity_snapshot.clone();
+            let platform_sys = entity_snapshot
+                .get("platform")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let room_id_sys = entity_snapshot
+                .get("room_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let created_at_sys = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i32;
 
-            if check_message_seen(
-                &state_sys,
-                user_id,
-                &platform_sys,
-                &room_id_sys,
-                created_at_sys,
-            )
-            .await
-            {
-                return;
-            }
+            tokio::spawn(async move {
+                tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
 
-            if let Err(e) = crate::proactive::system_behaviors::run_system_behaviors(
-                &state_sys, user_id, &snap_sys,
-            )
-            .await
-            {
-                error!("System behaviors failed for user {}: {}", user_id, e);
-            }
-        });
+                if check_message_seen(
+                    &state_urgency,
+                    user_id,
+                    &platform_sys,
+                    &room_id_sys,
+                    created_at_sys,
+                )
+                .await
+                {
+                    return;
+                }
+
+                if let Err(e) = crate::proactive::system_behaviors::run_urgency_classification(
+                    &state_urgency,
+                    user_id,
+                    &snap_urgency,
+                )
+                .await
+                {
+                    error!("Urgency classification failed for user {}: {}", user_id, e);
+                }
+            });
+        }
     }
 
     // === Custom rules ===

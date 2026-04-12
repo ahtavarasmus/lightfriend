@@ -31,6 +31,27 @@ pub fn blog() -> Html {
                 <p>{"Latest updates, guides, and insights on minimalist living with Lightfriend"}</p>
             </section>
             <section class="blog-list-section">
+                <div class="blog-post-preview">
+                    <Link<Route> to={Route::PromptInjectionSafe}>
+                        <h2>{"Why Lightfriend Can't Be Prompt Injected"}</h2>
+                        <p>{"Most AI assistants are powerful enough to be dangerous. Lightfriend is read-only by default - actions require your explicit approval."}</p>
+                        <span class="blog-date">{"April 10, 2026"}</span>
+                    </Link<Route>>
+                </div>
+                <div class="blog-post-preview">
+                    <Link<Route> to={Route::TelegramOnDumbphone}>
+                        <h2>{"How to Use Telegram on a Dumbphone"}</h2>
+                        <p>{"Send and receive Telegram messages from any basic phone via SMS. No apps, no smartphone needed."}</p>
+                        <span class="blog-date">{"April 10, 2026"}</span>
+                    </Link<Route>>
+                </div>
+                <div class="blog-post-preview">
+                    <Link<Route> to={Route::SignalOnDumbphone}>
+                        <h2>{"How to Use Signal on a Dumbphone"}</h2>
+                        <p>{"Use Signal encrypted messaging on any flip phone or basic phone. Lightfriend bridges Signal to SMS."}</p>
+                        <span class="blog-date">{"April 10, 2026"}</span>
+                    </Link<Route>>
+                </div>
 
                 <div class="blog-post-preview">
                     <Link<Route> to={Route::ReadMoreAccidentallyGuide}>
