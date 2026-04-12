@@ -136,6 +136,13 @@ pub mod ontology {
 }
 pub mod ai_config;
 pub use ai_config::{AiConfig, AiProvider, ModelPurpose};
+pub mod blog {
+    pub mod content;
+    pub mod handlers;
+    pub mod linking;
+    pub mod schema;
+    pub mod templates;
+}
 
 // Test utilities for integration tests
 pub mod test_utils;
@@ -240,6 +247,7 @@ pub struct AppState {
     pub tool_registry: tools::registry::ToolRegistry,
     pub pending_rule_tests: Arc<DashMap<String, handlers::rule_handlers::PendingRuleTest>>,
     pub maintenance_mode: Arc<AtomicBool>,
+    pub blog_store: Arc<blog::content::BlogStore>,
     // (user_id, room_id) -> unix timestamp of last system_important notification
     pub system_notify_cooldowns: DashMap<(i32, String), i32>,
     // user_id -> unix timestamp of last digest delivery

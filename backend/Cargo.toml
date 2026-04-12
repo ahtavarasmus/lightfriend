@@ -66,6 +66,8 @@ hickory-resolver = "0.25"
 phonenumber = "0.3"  # Google libphonenumber port for Rust - handles E.164 parsing and country detection
 rubato = "0.16"  # Audio resampling for voice pipeline (8kHz<->16kHz<->24kHz)
 rocksdb = { version = "0.24", optional = true }
+pulldown-cmark = "0.12"
+serde_yaml = "0.9"
 
 [features]
 default = []

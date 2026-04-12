@@ -165,6 +165,10 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         system_notify_cooldowns: dashmap::DashMap::new(),
         digest_cooldowns: dashmap::DashMap::new(),
         activity_feed_tx: tokio::sync::broadcast::channel(64).0,
+        blog_store: Arc::new(
+            crate::blog::content::BlogStore::load("/nonexistent")
+                .unwrap_or_else(|_| crate::blog::content::BlogStore::empty()),
+        ),
     })
 }
 

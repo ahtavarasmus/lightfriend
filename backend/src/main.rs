@@ -26,7 +26,7 @@ use tracing::Level;
 // Import modules and types from library crate
 use api::{twilio_sms, voice_pipeline};
 use backend::{
-    api, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState, LlmUsageRepository,
+    api, blog, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState, LlmUsageRepository,
     TotpRepository, UserCore, UserCoreOps, UserRepository, WebauthnRepository,
 };
 use handlers::{
@@ -524,6 +524,15 @@ async fn main() {
         tool_registry: backend::build_tool_registry(),
         pending_rule_tests: Arc::new(DashMap::new()),
         maintenance_mode: Arc::new(AtomicBool::new(false)),
+        blog_store: Arc::new(
+            blog::content::BlogStore::load("content/blog").unwrap_or_else(|e| {
+                tracing::warn!(
+                    "Failed to load blog content: {}. Starting with empty blog.",
+                    e
+                );
+                blog::content::BlogStore::load("/dev/null").unwrap()
+            }),
+        ),
         system_notify_cooldowns: DashMap::new(),
         digest_cooldowns: DashMap::new(),
         activity_feed_tx: tokio::sync::broadcast::channel(64).0,
@@ -1305,6 +1314,10 @@ async fn main() {
         .route("/public/{*path}", any(proxy_telegram_public))
         .route("/public", any(proxy_telegram_public))
         .nest_service("/uploads", ServeDir::new("uploads"))
+        .route("/blog/{slug}.md", get(blog::handlers::blog_post_md_handler))
+        .route("/blog/{slug}", get(blog::handlers::blog_post_handler))
+        .route("/blog", get(blog::handlers::blog_index_handler))
+        .route("/sitemap.xml", get(blog::handlers::sitemap_handler))
         .fallback_service(
             ServeDir::new("public").not_found_service(ServeFile::new("public/index.html")),
         )
