@@ -26,8 +26,8 @@ echo "--- backend stderr (last 80 lines) ---"
 tail -80 /var/log/supervisor/lightfriend-err.log 2>/dev/null || echo "  empty"
 echo ""
 
-echo "--- backend stdout (last 200 lines) ---"
-tail -200 /var/log/supervisor/lightfriend.log 2>/dev/null || echo "  empty"
+echo "--- backend stdout (last 100 lines, excluding IDLE noise) ---"
+tail -500 /var/log/supervisor/lightfriend.log 2>/dev/null | grep -v "IDLE established\|Spawned IDLE task\|Job creator created\|Uninited" | tail -100 || echo "  empty"
 echo ""
 
 echo "--- cloudflared stderr (last 40 lines) ---"
@@ -55,12 +55,12 @@ echo "--- mautrix-signal stderr (last 20 lines, sanitized) ---"
 tail -20 /var/log/supervisor/signal-err.log 2>/dev/null | sanitize_bridge_log || echo "  empty"
 echo ""
 
-echo "--- mautrix-telegram stdout (last 40 lines, sanitized) ---"
-tail -40 /var/log/supervisor/telegram.log 2>/dev/null | sanitize_bridge_log || echo "  empty"
+echo "--- mautrix-telegram stdout (last 80 lines, sanitized) ---"
+tail -80 /var/log/supervisor/telegram.log 2>/dev/null | sanitize_bridge_log || echo "  empty"
 echo ""
 
-echo "--- mautrix-telegram stderr (last 20 lines, sanitized) ---"
-tail -20 /var/log/supervisor/telegram-err.log 2>/dev/null | sanitize_bridge_log || echo "  empty"
+echo "--- mautrix-telegram stderr (last 40 lines, sanitized) ---"
+tail -40 /var/log/supervisor/telegram-err.log 2>/dev/null | sanitize_bridge_log || echo "  empty"
 echo ""
 
 echo "--- tuwunel stdout (last 40 lines) ---"
@@ -89,6 +89,12 @@ echo ""
 
 echo "--- supervisorctl status ---"
 supervisorctl status 2>&1
+echo ""
+
+echo "--- telegram SOCKS5 proxy check ---"
+echo "socat 1080 listener: $(ss -tlnp 2>/dev/null | grep ':1080' || echo 'NOT LISTENING')"
+echo "socat 1080 processes: $(pgrep -la socat 2>/dev/null | grep 1080 || echo 'none')"
+echo "VSOCK 8500 connections: $(ss -tnp 2>/dev/null | grep '8500' | wc -l)"
 echo ""
 
 echo "--- env check ---"

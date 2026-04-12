@@ -182,24 +182,14 @@ else
     echo "  No VSOCK device - running in direct network mode"
 fi
 
-# ── 0c1. Start VSOCK bridge for Telegram SOCKS5 residential proxy ─────────────
-# The mautrix-telegram bridge needs to reach Telegram's API via a residential
-# SOCKS5 proxy to avoid datacenter IP bans. The host side runs a socat that
-# forwards VSOCK port 8500 to the actual proxy server. Inside the enclave we
-# bridge a local TCP port to that VSOCK endpoint so the bridge config can
-# simply point at 127.0.0.1:1080.
-if [ -e /dev/vsock ]; then
-    echo ""
-    echo "[STEP 0c1] Starting Telegram SOCKS5 proxy VSOCK bridge..."
-    socat TCP-LISTEN:1080,reuseaddr,fork,bind=127.0.0.1 VSOCK-CONNECT:3:8500 &
-    TG_PROXY_PID=$!
-    sleep 0.3
-    if kill -0 $TG_PROXY_PID 2>/dev/null; then
-        echo "  Telegram SOCKS5 bridge running (PID $TG_PROXY_PID, 127.0.0.1:1080 -> host VSOCK:8500 -> residential proxy)"
-    else
-        echo "  WARNING: Telegram SOCKS5 bridge failed to start (PID $TG_PROXY_PID died)"
-    fi
-fi
+# ── 0c1. Telegram SOCKS5 proxy VSOCK bridge ───────────────────────────────────
+# Now managed by supervisord (vsock-bridge-telegram-proxy) so it auto-restarts.
+# The mautrix-telegram bridge connects to 127.0.0.1:1080, which socat forwards
+# over VSOCK:8500 to the host, where another socat forwards to the residential
+# SOCKS5 proxy. Previously this was a background process that died when exec
+# supervisord replaced the entrypoint shell.
+echo ""
+echo "[STEP 0c1] Telegram SOCKS5 proxy VSOCK bridge: managed by supervisord (vsock-bridge-telegram-proxy)"
 
 # ── 0c2. Start tap networking for IMAP/SMTP (gvisor-tap-vsock) ────────────────
 # This gives the enclave a real tap0 network interface over VSOCK for protocols
