@@ -672,7 +672,7 @@ async fn full_digest_renders_all_sections() {
     let imp_pos = digest_text
         .find("Important:")
         .expect("Important section missing");
-    let fyi_pos = digest_text.find("FYI (").expect("FYI section missing");
+    let fyi_pos = digest_text.find("FYI:").expect("FYI section missing");
     let new_pos = digest_text.find("New:").expect("New section missing");
     let done_pos = digest_text.find("Done:").expect("Done section missing");
     let cta_pos = digest_text
@@ -708,12 +708,10 @@ async fn full_digest_renders_all_sections() {
     assert!(!digest_text.contains("WIN A FREE IPHONE"));
     assert!(!digest_text.contains("Spammer"));
 
-    // FYI is collapsed to a single sender list
-    assert!(digest_text.contains("Sarah"));
-    assert!(digest_text.contains("John"));
-    assert!(digest_text.contains("Newsletter"));
-    // FYI has the count format "FYI (3 msgs):"
-    assert!(digest_text.contains("FYI (3 msgs)"));
+    // FYI shows per-item summaries like high-signal sections
+    assert!(digest_text.contains("- Sarah:"));
+    assert!(digest_text.contains("- John:"));
+    assert!(digest_text.contains("- Newsletter:"));
 
     // Recently added + Just done are inline single-line lists
     assert!(digest_text.contains("Buy birthday gift"));
@@ -730,10 +728,10 @@ async fn full_digest_renders_all_sections() {
     // the visible count, so they don't reappear next cycle.
     assert_eq!(message_ids.len(), 6);
 
-    // Sanity: total length should comfortably fit in 4 segments (640 chars)
+    // Sanity: total length should fit in 5 segments (800 chars)
     assert!(
-        digest_text.len() < 640,
-        "digest should fit in 4 segments, got {} chars",
+        digest_text.len() < 800,
+        "digest should fit in 5 segments, got {} chars",
         digest_text.len()
     );
 }
@@ -806,9 +804,9 @@ async fn digest_skips_critical_section_when_pushes_enabled() {
     // No Critical or Important section - those went via instant SMS
     assert!(!digest_text.contains("Critical:"));
     assert!(!digest_text.contains("Important:"));
-    // FYI section still present (collapsed list format)
-    assert!(digest_text.contains("FYI ("));
-    assert!(digest_text.contains("Friend"));
+    // FYI section still present with per-item summaries
+    assert!(digest_text.contains("FYI:"));
+    assert!(digest_text.contains("- Friend:"));
     // Mom and Boss were filtered (their content shouldn't appear)
     assert!(!digest_text.contains("- Mom"));
     assert!(!digest_text.contains("- Boss"));
@@ -903,18 +901,18 @@ async fn digest_stays_compact_on_busy_day() {
         "8 imp → 3 shown + '+5 more'"
     );
 
-    // FYI shows count + sender list (no per-item lines)
-    assert!(digest_text.contains("FYI (25 msgs)"));
-    // Sender list capped at 5 names + "+N more"
+    // FYI shows per-item summaries capped at 5
+    assert!(digest_text.contains("FYI:"));
     assert!(
-        digest_text.contains("+7 more"),
-        "12 unique senders → 5 shown + '+7 more'"
+        digest_text.contains("+ 20 more"),
+        "25 fyi → 5 shown + '+20 more'"
     );
 
-    // Stays comfortably under 4 segments even with 38 total messages
+    // With per-item FYI summaries the digest is larger, but should still
+    // stay under 6 segments (960 chars) even on a busy day.
     assert!(
-        digest_text.len() < 640,
-        "busy digest should still fit in 4 segments, got {} chars",
+        digest_text.len() < 960,
+        "busy digest should fit in 6 segments, got {} chars",
         digest_text.len()
     );
 

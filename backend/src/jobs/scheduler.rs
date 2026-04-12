@@ -1192,42 +1192,26 @@ fn render_high_signal_section(
     Some(block)
 }
 
-/// Render a low-signal section as a single inline sender list:
-/// "FYI from Sarah, John, Newsletter (+2 more)".
-/// Used for FYI to keep the digest from blowing up when there are many
-/// medium-urgency messages.
+/// How many FYI items to show individually before collapsing to counts.
+const FYI_CAP: usize = 5;
+
+/// Render FYI section with per-item summaries, similar to high-signal sections
+/// but with a higher cap since these are shorter teasers.
 fn render_fyi_inline(messages: &[crate::models::ontology_models::OntMessage]) -> Option<String> {
     if messages.is_empty() {
         return None;
     }
     let total = messages.len();
-    // Dedupe sender names while preserving order
-    let mut seen = std::collections::HashSet::new();
-    let mut names: Vec<String> = Vec::new();
-    for m in messages {
-        if seen.insert(m.sender_name.clone()) {
-            names.push(m.sender_name.clone());
-            if names.len() >= NAMES_LIST_CAP {
-                break;
-            }
-        }
-    }
-    let unique_total = messages
+    let shown: Vec<String> = messages
         .iter()
-        .map(|m| &m.sender_name)
-        .collect::<std::collections::HashSet<_>>()
-        .len();
-    let names_str = names.join(", ");
-    let suffix = if unique_total > names.len() {
-        format!(" +{} more", unique_total - names.len())
-    } else {
-        String::new()
-    };
-    let count_label = if total == 1 { "msg" } else { "msgs" };
-    Some(format!(
-        "FYI ({} {}): {}{}",
-        total, count_label, names_str, suffix
-    ))
+        .take(FYI_CAP)
+        .map(format_digest_message)
+        .collect();
+    let mut block = format!("FYI:\n{}", shown.join("\n"));
+    if total > FYI_CAP {
+        block.push_str(&format!("\n+ {} more", total - FYI_CAP));
+    }
+    Some(block)
 }
 
 /// Build a sectioned digest for a single user.
