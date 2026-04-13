@@ -84,13 +84,18 @@ jobs:
       - name: Startup smoke test
         working-directory: backend
         env:
+          # Core vars (validate_env in main.rs)
+          JWT_SECRET_KEY: ci-test-jwt-secret-key-000000000
+          JWT_REFRESH_KEY: ci-test-jwt-refresh-key-00000000
           PG_DATABASE_URL: postgres://lightfriend:test@localhost:5432/lightfriend_test
           ENCRYPTION_KEY: ci-test-key-not-real-000000000000
-          JWT_SECRET: ci-test-jwt-secret
+          MATRIX_SHARED_SECRET: ci-test-matrix-secret
+          # App startup vars
           ADMIN_EMAILS: ci-test@example.com
           BOOTSTRAP_ADMIN_PASSWORD: ci-test-password
           TINFOIL_API_KEY: ci-test-not-real
           SERVER_URL: http://localhost:3199
+          ENVIRONMENT: development
           PORT: 3199
         run: |
           # Build the binary (should be cached from test compilation)
@@ -112,7 +117,7 @@ jobs:
           if curl -sf --max-time 5 http://localhost:3199/api/health >/dev/null 2>&1; then
             echo "Startup smoke test passed: health check OK"
           else
-            echo "WARNING: Health endpoint not reachable (may need more env vars) but process is alive - no panic"
+            echo "WARNING: Health endpoint not reachable but process is alive - no startup panic"
           fi
 
           kill $PID 2>/dev/null || true
