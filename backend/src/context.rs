@@ -452,7 +452,7 @@ pub fn convert_history(
                 }
             }
 
-            let context_content = format!("[Previous result: {}]", msg.encrypted_content);
+            let context_content = msg.encrypted_content.clone();
             out.push(ChatCompletionMessage {
                 role: chat_completion::MessageRole::assistant,
                 content: chat_completion::Content::Text(context_content),
