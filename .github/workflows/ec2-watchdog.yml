@@ -104,3 +104,107 @@ jobs:
             --ssl-reqd
 
           echo "Alert email sent to rasmus@lightfriend.ai"
+
+  check-backup-health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Check backup health
+        env:
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          S3_BUCKET: lightfriend-prod-backups
+        run: |
+          set -euo pipefail
+
+          ALERT=""
+          NOW=$(date +%s)
+
+          # ── Check backup-health.json for recent failures ──
+          HEALTH=$(aws s3 cp "s3://$S3_BUCKET/backups/backup-health.json" - 2>/dev/null || echo "")
+          if [ -n "$HEALTH" ]; then
+            LAST_FAILURE=$(echo "$HEALTH" | jq -r '.last_failure // "none"')
+            LAST_SUCCESS=$(echo "$HEALTH" | jq -r '.last_success // "none"')
+            EXIT_CODE=$(echo "$HEALTH" | jq -r '.exit_code // "unknown"')
+
+            if [ "$LAST_FAILURE" != "none" ] && [ "$LAST_FAILURE" != "null" ]; then
+              # Check if the failure is recent (within last 2 hours)
+              FAIL_EPOCH=$(date -d "$LAST_FAILURE" +%s 2>/dev/null || echo "0")
+              FAIL_AGE_MIN=$(( (NOW - FAIL_EPOCH) / 60 ))
+
+              if [ "$FAIL_AGE_MIN" -lt 120 ]; then
+                ALERT="BACKUP FAILURE DETECTED\n\n"
+                ALERT="${ALERT}The enclave reported a backup failure.\n\n"
+                ALERT="${ALERT}  Failure time: $LAST_FAILURE ($FAIL_AGE_MIN minutes ago)\n"
+                ALERT="${ALERT}  Exit code: $EXIT_CODE\n"
+                ALERT="${ALERT}  Last success: $LAST_SUCCESS\n"
+              fi
+            fi
+          else
+            echo "No backup health marker found"
+          fi
+
+          # ── Check if latest hourly backup is stale ──
+          LATEST_BACKUP=$(aws s3 ls "s3://$S3_BUCKET/backups/hourly/" 2>/dev/null | sort -k1,2 | tail -1)
+          if [ -n "$LATEST_BACKUP" ]; then
+            BACKUP_DATE=$(echo "$LATEST_BACKUP" | awk '{print $1 " " $2}')
+            BACKUP_KEY=$(echo "$LATEST_BACKUP" | awk '{print $4}')
+            BACKUP_SIZE=$(echo "$LATEST_BACKUP" | awk '{print $3}')
+            BACKUP_EPOCH=$(date -d "$BACKUP_DATE" +%s 2>/dev/null || echo "0")
+            BACKUP_AGE_MIN=$(( (NOW - BACKUP_EPOCH) / 60 ))
+
+            echo "Latest backup: $BACKUP_KEY ($BACKUP_SIZE bytes, $BACKUP_AGE_MIN min ago)"
+
+            if [ "$BACKUP_AGE_MIN" -gt 120 ]; then
+              STALE_MSG="STALE BACKUP ALERT\n\n"
+              STALE_MSG="${STALE_MSG}No successful backup in the last $BACKUP_AGE_MIN minutes (threshold: 120 min).\n\n"
+              STALE_MSG="${STALE_MSG}  Latest backup: $BACKUP_KEY\n"
+              STALE_MSG="${STALE_MSG}  Backup time: $BACKUP_DATE\n"
+              STALE_MSG="${STALE_MSG}  Backup size: $BACKUP_SIZE bytes\n"
+              STALE_MSG="${STALE_MSG}  Age: $BACKUP_AGE_MIN minutes\n"
+              ALERT="${ALERT}${STALE_MSG}"
+            fi
+          else
+            ALERT="${ALERT}NO BACKUPS FOUND\n\nNo hourly backups exist in s3://$S3_BUCKET/backups/hourly/\n"
+          fi
+
+          # ── Send alert if anything is wrong ──
+          if [ -z "$ALERT" ]; then
+            echo "OK: Backups healthy"
+            exit 0
+          fi
+
+          echo -e "ALERT:\n$ALERT"
+
+          SUBJECT="ALERT: Lightfriend backup health check failed"
+          BODY="Lightfriend Backup Health Watchdog\n\n${ALERT}\n"
+          BODY="${BODY}Check the enclave logs and S3 backup bucket.\n"
+          BODY="${BODY}If the enclave disk is full, trigger a disaster-recovery deploy.\n"
+
+          cat > /tmp/email.txt <<EOF
+          From: Lightfriend Watchdog <notifications@lightfriend.ai>
+          To: rasmus@lightfriend.ai
+          Subject: ${SUBJECT}
+          Content-Type: text/plain; charset=utf-8
+
+          $(echo -e "$BODY")
+          EOF
+
+          sed -i 's/^          //' /tmp/email.txt
+
+          curl -s --url "smtps://smtp.resend.com:465" \
+            --mail-from "notifications@lightfriend.ai" \
+            --mail-rcpt "rasmus@lightfriend.ai" \
+            --upload-file /tmp/email.txt \
+            --user "${SMTP_USERNAME}:${SMTP_PASSWORD}" \
+            --ssl-reqd
+
+          echo "Backup alert email sent to rasmus@lightfriend.ai"
+
+          # Fail the workflow so it shows red in GitHub Actions
+          exit 1
