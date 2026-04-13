@@ -421,6 +421,16 @@ jobs:
 
           aws s3 rm "s3://$S3_BUCKET/deploy/deploy-state.json" 2>/dev/null || true
 
+          # Clean stale export trigger from host filesystem
+          # (S3 cleanup above only cleans S3, not the host file that the export-watcher polls)
+          if [ -n "$CURRENT_LIVE" ]; then
+            echo "Cleaning stale export trigger from host..."
+            aws ssm send-command --instance-ids "$CURRENT_LIVE" \
+              --document-name "AWS-RunShellScript" \
+              --parameters 'commands=["rm -f /opt/lightfriend/seed/export-request.json"]' \
+              --timeout-seconds 15 2>/dev/null || true
+          fi
+
       # ── Step 0: Ensure launch template is up to date ──
       # Skipped until TF_API_TOKEN is configured. Run terraform apply manually
       # when user_data.sh changes. See DEPLOY_CLEANUP.md for details.
@@ -597,8 +607,8 @@ jobs:
               BACKUP_S3_KEY="backups/deploy/lightfriend-full-backup-${BACKUP_TIMESTAMP}.tar.gz.enc"
               COMPLETE_S3_KEY="deploy/export-complete.json"
 
-              PRESIGNED_PUT_BACKUP=$(python3 -c "import boto3; print(boto3.client('s3').generate_presigned_url('put_object', Params={'Bucket':'$S3_BUCKET','Key':'$BACKUP_S3_KEY','ContentType':'application/octet-stream'}, ExpiresIn=3600))")
-              PRESIGNED_PUT_COMPLETE=$(python3 -c "import boto3; print(boto3.client('s3').generate_presigned_url('put_object', Params={'Bucket':'$S3_BUCKET','Key':'$COMPLETE_S3_KEY','ContentType':'application/json'}, ExpiresIn=3600))")
+              PRESIGNED_PUT_BACKUP=$(python3 -c "import boto3; print(boto3.client('s3').generate_presigned_url('put_object', Params={'Bucket':'$S3_BUCKET','Key':'$BACKUP_S3_KEY','ContentType':'application/octet-stream'}, ExpiresIn=900))")
+              PRESIGNED_PUT_COMPLETE=$(python3 -c "import boto3; print(boto3.client('s3').generate_presigned_url('put_object', Params={'Bucket':'$S3_BUCKET','Key':'$COMPLETE_S3_KEY','ContentType':'application/json'}, ExpiresIn=900))")
 
               echo "Generated presigned URLs (valid 1 hour)"
               echo "  Backup key: $BACKUP_S3_KEY"
@@ -648,7 +658,10 @@ jobs:
                     LIVE_EXPORT_OK=true
                     break
                   elif [ "$COMPLETE_STATUS" = "FAILED" ]; then
-                    echo "WARNING: Live export failed inside enclave, will fall back to S3 backup"
+                    echo "WARNING: Live export failed inside enclave"
+                    echo "Exit code: $(echo "$COMPLETE_JSON" | jq -r '.exit_code // "unknown"')"
+                    echo "Error (URLs redacted):"
+                    echo "$COMPLETE_JSON" | jq -r '.error // "no details"' | sed 's|https://[^ ]*|[REDACTED]|g'
                     break
                   fi
                 fi
@@ -881,6 +894,14 @@ jobs:
           aws s3 rm "s3://$S3_BUCKET/deploy/restore-$NEW_INSTANCE.json" 2>/dev/null || true
           aws s3 rm "s3://$S3_BUCKET/deploy/export-complete.json" 2>/dev/null || true
           aws s3 rm "s3://$S3_BUCKET/deploy/export-request.json" 2>/dev/null || true
+
+          # Clean stale export trigger from host so export-watcher doesn't re-process it
+          if [ -n "$OLD_INSTANCE" ]; then
+            aws ssm send-command --instance-ids "$OLD_INSTANCE" \
+              --document-name "AWS-RunShellScript" \
+              --parameters 'commands=["rm -f /opt/lightfriend/seed/export-request.json"]' \
+              --timeout-seconds 15 2>/dev/null || true
+          fi
 
           echo "## ROLLBACK - old instance $OLD_INSTANCE restored" >> $GITHUB_STEP_SUMMARY
 
