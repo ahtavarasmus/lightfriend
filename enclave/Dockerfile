@@ -217,6 +217,7 @@ RUN --mount=from=marlin-builder,target=/marlin-img \
         ls -la /usr/local/bin/keygen-x25519 /usr/local/bin/oyster-attestation-server /usr/local/bin/kms-derive-server; \
     fi
 COPY --from=frontend-builder /app/dist ./public/
+COPY backend/content ./content/
 
 # Create runtime directories
 RUN mkdir -p \

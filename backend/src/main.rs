@@ -530,7 +530,7 @@ async fn main() {
                     "Failed to load blog content: {}. Starting with empty blog.",
                     e
                 );
-                blog::content::BlogStore::load("/dev/null").unwrap()
+                blog::content::BlogStore::empty()
             }),
         ),
         system_notify_cooldowns: DashMap::new(),
