@@ -89,6 +89,9 @@ impl WhatsAppBridgeRepository {
     /// "5218127329906", NOT a full JID. The contact lookup below joins
     /// against `whatsmeow_device` to get the real JID.
     ///
+    /// Tries both `user_logins` (pre-megabridge) and `user_login` (megabridge/
+    /// bridgev2) table names since the mautrix-whatsapp version may vary.
+    ///
     /// `matrix_user_id` is the full Matrix ID, e.g. "@appuser_xxx:localhost".
     pub fn get_login_phone_for_matrix_user(
         &self,
@@ -98,11 +101,56 @@ impl WhatsAppBridgeRepository {
             .pool
             .get()
             .expect("Failed to get whatsapp_db connection");
-        let rows: Vec<JidRow> =
+        // Try plural table name first (pre-megabridge mautrix-whatsapp)
+        let rows: Result<Vec<JidRow>, _> =
             diesel::sql_query("SELECT id FROM user_logins WHERE user_mxid = $1 LIMIT 1")
                 .bind::<Text, _>(matrix_user_id)
-                .load(&mut conn)?;
-        Ok(rows.into_iter().next().map(|r| r.id))
+                .load(&mut conn);
+        match rows {
+            Ok(r) if !r.is_empty() => {
+                tracing::info!(
+                    "whatsapp_bridge: found login phone in user_logins for {}",
+                    matrix_user_id
+                );
+                return Ok(Some(r.into_iter().next().unwrap().id));
+            }
+            Ok(_) => {
+                tracing::info!(
+                    "whatsapp_bridge: user_logins exists but no row for {}",
+                    matrix_user_id
+                );
+            }
+            Err(e) => {
+                tracing::info!(
+                    "whatsapp_bridge: user_logins query failed ({}), trying user_login (singular)",
+                    e
+                );
+            }
+        }
+        // Try singular table name (megabridge/bridgev2 mautrix-whatsapp)
+        let rows: Result<Vec<JidRow>, _> =
+            diesel::sql_query("SELECT id FROM user_login WHERE user_mxid = $1 LIMIT 1")
+                .bind::<Text, _>(matrix_user_id)
+                .load(&mut conn);
+        match rows {
+            Ok(r) if !r.is_empty() => {
+                tracing::info!(
+                    "whatsapp_bridge: found login phone in user_login (singular) for {}",
+                    matrix_user_id
+                );
+                return Ok(Some(r.into_iter().next().unwrap().id));
+            }
+            Ok(_) => {
+                tracing::info!(
+                    "whatsapp_bridge: user_login exists but no row for {}",
+                    matrix_user_id
+                );
+            }
+            Err(e) => {
+                tracing::info!("whatsapp_bridge: user_login query also failed ({})", e);
+            }
+        }
+        Ok(None)
     }
 
     /// Fetch all WhatsApp contacts synced for a user identified by their
@@ -154,19 +202,75 @@ impl WhatsAppBridgeRepository {
         Ok(rows.into_iter().map(row_to_contact).collect())
     }
 
+    /// Fetch all contacts directly without user filtering.
+    /// Safe for single-user enclave setups where only one user's contacts exist.
+    pub fn get_all_contacts(&self) -> Result<Vec<WhatsAppContact>, DieselError> {
+        let mut conn = self
+            .pool
+            .get()
+            .expect("Failed to get whatsapp_db connection");
+        let rows: Vec<ContactRow> = diesel::sql_query(
+            "SELECT their_jid, first_name, full_name, push_name, business_name \
+             FROM whatsmeow_contacts \
+             WHERE their_jid LIKE '%@s.whatsapp.net' \
+             ORDER BY COALESCE(full_name, push_name, business_name, their_jid) \
+             LIMIT 1000",
+        )
+        .load(&mut conn)?;
+
+        tracing::info!(
+            "whatsapp_bridge: get_all_contacts -> {} contacts",
+            rows.len()
+        );
+
+        Ok(rows.into_iter().map(row_to_contact).collect())
+    }
+
     /// Convenience: resolve the login phone for a Matrix user, then fetch
-    /// contacts. Returns an empty vec if the user isn't logged in.
+    /// contacts. Falls back to fetching all contacts if user lookup fails
+    /// (safe in single-user enclave).
     pub fn get_contacts_for_matrix_user(
         &self,
         matrix_user_id: &str,
     ) -> Result<Vec<WhatsAppContact>, DieselError> {
-        let Some(phone) = self.get_login_phone_for_matrix_user(matrix_user_id)? else {
-            tracing::info!(
-                "whatsapp_bridge: no user_logins row for matrix user (not logged in to whatsapp bridge)"
-            );
-            return Ok(Vec::new());
-        };
-        self.get_contacts_by_login_phone(&phone)
+        // Try the proper path: user_login(s) -> phone -> contacts via device JOIN
+        match self.get_login_phone_for_matrix_user(matrix_user_id) {
+            Ok(Some(phone)) => {
+                let contacts = self.get_contacts_by_login_phone(&phone)?;
+                if !contacts.is_empty() {
+                    tracing::info!(
+                        "WHATSAPP_CONTACT_RESULT: method=login_phone, count={}, matrix_user={}",
+                        contacts.len(),
+                        matrix_user_id
+                    );
+                    return Ok(contacts);
+                }
+                tracing::info!(
+                    "whatsapp_bridge: phone lookup returned 0 contacts, trying direct query"
+                );
+            }
+            Ok(None) => {
+                tracing::info!(
+                    "whatsapp_bridge: no login row for {}, trying direct contact query",
+                    matrix_user_id
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "whatsapp_bridge: login lookup failed for {}: {}, trying direct contact query",
+                    matrix_user_id,
+                    e
+                );
+            }
+        }
+        // Fallback: query all contacts directly (safe for single-user enclave)
+        let contacts = self.get_all_contacts()?;
+        tracing::info!(
+            "WHATSAPP_CONTACT_RESULT: method=direct_all_contacts, count={}, matrix_user={}",
+            contacts.len(),
+            matrix_user_id
+        );
+        Ok(contacts)
     }
 }
 

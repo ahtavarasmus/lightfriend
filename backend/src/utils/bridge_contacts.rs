@@ -34,8 +34,8 @@ pub struct ContactOption {
 /// logged but the caller always gets a Vec it can iterate over.
 pub async fn get_whatsapp_contacts(state: &Arc<AppState>, user_id: i32) -> Vec<ContactOption> {
     let Some(repo) = state.whatsapp_bridge_repository.as_ref() else {
-        tracing::debug!(
-            "get_whatsapp_contacts: user {} - bridge repository not configured",
+        tracing::warn!(
+            "get_whatsapp_contacts: user {} - bridge repository not configured (WHATSAPP_BRIDGE_DATABASE_URL unset or pool failed)",
             user_id
         );
         return Vec::new();
