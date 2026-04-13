@@ -272,7 +272,8 @@
       "Bash(do echo:*)",
       "Read(//Users/ahtavarasmus/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/async-imap-0.10.4/src/**)",
       "Read(//Users/ahtavarasmus/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/async-imap-0.10.4/examples/**)",
-      "Read(//Users/ahtavarasmus/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/async-imap-0.10.4/**)"
+      "Read(//Users/ahtavarasmus/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/async-imap-0.10.4/**)",
+      "Bash(gh run:*)"
     ],
     "deny": [
       "Read(.env)",
