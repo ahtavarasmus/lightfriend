@@ -360,8 +360,8 @@ pub fn render_blog_index(
             // Show hubs first, then recent posts, cap at 6 per cluster on the index
             let mut sorted_slugs = cluster_slugs.clone();
             sorted_slugs.sort_by(|a, b| {
-                let a_hub = posts.get(a).map_or(false, |p| p.frontmatter.cluster_hub);
-                let b_hub = posts.get(b).map_or(false, |p| p.frontmatter.cluster_hub);
+                let a_hub = posts.get(a).is_some_and(|p| p.frontmatter.cluster_hub);
+                let b_hub = posts.get(b).is_some_and(|p| p.frontmatter.cluster_hub);
                 b_hub.cmp(&a_hub).then_with(|| {
                     let da = posts.get(a).map(|p| &p.frontmatter.date);
                     let db = posts.get(b).map(|p| &p.frontmatter.date);

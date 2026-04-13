@@ -154,12 +154,12 @@ impl BlogStore {
                 // Skip _data directory
                 if path
                     .file_name()
-                    .map_or(false, |n| n.to_str() == Some("_data"))
+                    .is_some_and(|n| n.to_str() == Some("_data"))
                 {
                     continue;
                 }
                 Self::load_dir(&path, posts)?;
-            } else if path.extension().map_or(false, |e| e == "md") {
+            } else if path.extension().is_some_and(|e| e == "md") {
                 match Self::load_post(&path) {
                     Ok(post) => {
                         posts.insert(post.frontmatter.slug.clone(), post);
