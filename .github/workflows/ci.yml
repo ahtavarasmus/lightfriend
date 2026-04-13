@@ -89,6 +89,7 @@ jobs:
           JWT_SECRET: ci-test-jwt-secret
           ADMIN_EMAILS: ci-test@example.com
           BOOTSTRAP_ADMIN_PASSWORD: ci-test-password
+          TINFOIL_API_KEY: ci-test-not-real
           PORT: 3199
         run: |
           # Build the binary (should be cached from test compilation)
