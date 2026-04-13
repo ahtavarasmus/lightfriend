@@ -81,6 +81,48 @@ jobs:
           TEST_PG_DATABASE_URL: postgres://lightfriend:test@localhost:5432/lightfriend_test
         run: cargo test --test migration_test
 
+      - name: Startup smoke test
+        working-directory: backend
+        env:
+          # Core vars (validate_env in main.rs)
+          JWT_SECRET_KEY: ci-test-jwt-secret-key-000000000
+          JWT_REFRESH_KEY: ci-test-jwt-refresh-key-00000000
+          PG_DATABASE_URL: postgres://lightfriend:test@localhost:5432/lightfriend_test
+          ENCRYPTION_KEY: ci-test-key-not-real-000000000000
+          MATRIX_SHARED_SECRET: ci-test-matrix-secret
+          # App startup vars
+          ADMIN_EMAILS: ci-test@example.com
+          BOOTSTRAP_ADMIN_PASSWORD: ci-test-password
+          TINFOIL_API_KEY: ci-test-not-real
+          SERVER_URL: http://localhost:3199
+          ENVIRONMENT: development
+          PORT: 3199
+        run: |
+          # Build the binary (should be cached from test compilation)
+          cargo build --bin backend --quiet
+
+          # Start the backend and check if it boots without panicking
+          timeout 15 ./target/debug/backend &
+          PID=$!
+          sleep 5
+
+          # Check if process is still alive (panics would have killed it)
+          if ! kill -0 $PID 2>/dev/null; then
+            echo "FATAL: Backend crashed on startup"
+            wait $PID 2>/dev/null || true
+            exit 1
+          fi
+
+          # Try the health endpoint
+          if curl -sf --max-time 5 http://localhost:3199/api/health >/dev/null 2>&1; then
+            echo "Startup smoke test passed: health check OK"
+          else
+            echo "WARNING: Health endpoint not reachable but process is alive - no startup panic"
+          fi
+
+          kill $PID 2>/dev/null || true
+          wait $PID 2>/dev/null || true
+
   # Frontend WASM check - runs in parallel with backend
   wasm-check:
     name: Frontend WASM Check

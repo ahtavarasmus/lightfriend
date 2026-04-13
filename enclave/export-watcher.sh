@@ -46,7 +46,7 @@ while true; do
             echo "export-watcher: ${EXPORT_TYPE} export FAILED (exit ${EXIT_CODE}) at ${FINISHED_AT}"
 
             # Try to upload failure status via presigned URL (use jq for safe JSON encoding)
-            ERROR_TAIL=$(tail -40 /tmp/export-watcher-last-run.log 2>/dev/null | tr '\n' ' ' | head -c 4000 || echo "no output")
+            ERROR_TAIL=$(tail -40 /tmp/export-watcher-last-run.log 2>/dev/null | sed 's|https://[^ ]*|[REDACTED_URL]|g' | tr '\n' ' ' | head -c 4000 || echo "no output")
 
             # For deploy: write failure to completion URL
             if [ -n "${PRESIGNED_PUT_COMPLETE}" ]; then
