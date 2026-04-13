@@ -231,7 +231,7 @@ fn query_message(
     // "call me again with a larger limit" pattern to actually work.
     if messages.len() == limit as usize {
         output.push_str(&format!(
-            "\n\nResult hit the limit of {}. If you need to reach further back in time, call this tool again with a larger `limit`.",
+            "\n\nResult hit the limit of {}. There may be older messages not shown.",
             limit
         ));
     }

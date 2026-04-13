@@ -1354,7 +1354,88 @@ pub async fn process_sms(
     // failure path (no verification ran, so history == user_facing).
     let (final_response, history_for_storage) = if !fail {
         let valid_ids = crate::utils::id_verifier::collect_tool_result_ids(&loop_messages);
-        let verified = crate::utils::id_verifier::verify(&final_response, &valid_ids);
+        let mut verified = crate::utils::id_verifier::verify(&final_response, &valid_ids);
+
+        // If the verifier stripped hallucinated content, retry the LLM
+        // with a correction hint. Up to 3 retries. If it still fails,
+        // silently drop the bad lines (no user-visible disclaimer).
+        if verified.dropped_line {
+            for retry in 1..=3 {
+                tracing::info!("Id verifier stripped content, retry {}/3", retry);
+                options.emit_status(ChatStatus::Retrying {
+                    attempt: retry,
+                    max: 3,
+                });
+
+                loop_messages.push(chat_completion::ChatCompletionMessage {
+                    role: chat_completion::MessageRole::assistant,
+                    content: chat_completion::Content::Text(final_response.clone()),
+                    name: None,
+                    tool_calls: None,
+                    tool_call_id: None,
+                });
+                loop_messages.push(chat_completion::ChatCompletionMessage {
+                    role: chat_completion::MessageRole::system,
+                    content: chat_completion::Content::Text(
+                        "Your previous response contained fabricated information that was automatically detected and rejected. Rewrite your answer based strictly on what the tools actually returned. Do not make anything up.".to_string()
+                    ),
+                    name: None,
+                    tool_calls: None,
+                    tool_call_id: None,
+                });
+
+                match llm_call_with_retry(
+                    state,
+                    ctx.provider,
+                    &model,
+                    &loop_messages,
+                    &tools,
+                    &reasoning_tx,
+                    &mut options,
+                    MAX_RETRIES,
+                    user.id,
+                )
+                .await
+                {
+                    Ok(r) => {
+                        if let Some(text) = &r.choices[0].message.content {
+                            let retry_verified =
+                                crate::utils::id_verifier::verify(text, &valid_ids);
+                            // Remove the correction messages for next iteration
+                            loop_messages.pop();
+                            loop_messages.pop();
+                            if !retry_verified.dropped_line {
+                                verified = retry_verified;
+                                break;
+                            }
+                            verified = retry_verified;
+                        } else {
+                            loop_messages.pop();
+                            loop_messages.pop();
+                            break;
+                        }
+                    }
+                    Err(_) => {
+                        loop_messages.pop();
+                        loop_messages.pop();
+                        break;
+                    }
+                }
+            }
+
+            // After retries, if still dropping lines, silently strip
+            // without the footer - assume there's no valid content for
+            // those items
+            if verified.dropped_line {
+                tracing::info!("Id verifier still stripping after 3 retries, silently dropping");
+                verified.user_facing = verified
+                    .user_facing
+                    .replace(crate::utils::id_verifier::STRIPPED_FOOTER, "")
+                    .trim_end()
+                    .to_string();
+            }
+        }
+
         (verified.user_facing, verified.history)
     } else {
         (final_response.clone(), final_response)
