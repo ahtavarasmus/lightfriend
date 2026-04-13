@@ -1314,7 +1314,7 @@ async fn main() {
         .route("/public/{*path}", any(proxy_telegram_public))
         .route("/public", any(proxy_telegram_public))
         .nest_service("/uploads", ServeDir::new("uploads"))
-        .route("/blog/{slug}.md", get(blog::handlers::blog_post_md_handler))
+        .route("/blog/md/{slug}", get(blog::handlers::blog_post_md_handler))
         .route("/blog/{slug}", get(blog::handlers::blog_post_handler))
         .route("/blog", get(blog::handlers::blog_index_handler))
         .route("/sitemap.xml", get(blog::handlers::sitemap_handler))
