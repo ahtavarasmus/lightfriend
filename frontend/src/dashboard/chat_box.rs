@@ -8,6 +8,14 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlTextAreaElement;
 use yew::prelude::*;
 
+fn render_markdown(text: &str) -> Html {
+    use pulldown_cmark::{Parser, Options, html::push_html};
+    let parser = Parser::new_ext(text, Options::empty());
+    let mut html_output = String::new();
+    push_html(&mut html_output, parser);
+    Html::from_html_unchecked(AttrValue::from(html_output))
+}
+
 // @mention system - available mentions
 const MENTION_OPTIONS: &[(&str, &str, &str)] = &[
     ("tesla", "Tesla Controls", "fa-car"),
@@ -53,6 +61,16 @@ const CHAT_STYLES: &str = r#"
     margin-right: auto;
     border-bottom-left-radius: 4px;
 }
+.chat-msg.markdown p { margin: 0.3em 0; }
+.chat-msg.markdown p:first-child { margin-top: 0; }
+.chat-msg.markdown p:last-child { margin-bottom: 0; }
+.chat-msg.markdown ul, .chat-msg.markdown ol { margin: 0.3em 0; padding-left: 1.3em; }
+.chat-msg.markdown li { margin: 0.15em 0; }
+.chat-msg.markdown strong { color: #fff; }
+.chat-msg.markdown code { background: rgba(255,255,255,0.1); padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
+.chat-msg.markdown pre { background: rgba(0,0,0,0.2); padding: 0.5em; border-radius: 4px; overflow-x: auto; margin: 0.3em 0; }
+.chat-msg.markdown pre code { background: none; padding: 0; }
+.chat-msg.markdown h1, .chat-msg.markdown h2, .chat-msg.markdown h3 { margin: 0.4em 0 0.2em; font-size: 1em; color: #fff; }
 .chat-msg.loading {
     opacity: 0.6;
 }
@@ -1172,7 +1190,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                         match ((*chat_user_msg).clone(), (*chat_bot_reply).clone(), *chat_loading) {
                             // Task edit mode: only show bot reply (must come before wildcard)
                             (None, Some(bot_reply), false) => html! {
-                                <div class="chat-msg assistant">{bot_reply}</div>
+                                <div class="chat-msg assistant markdown">{render_markdown(&bot_reply)}</div>
                             },
                             // Loading state in task edit mode (no user message shown)
                             (None, None, true) => html! {
@@ -1191,7 +1209,7 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             (Some(user_msg), Some(bot_reply), _) => html! {
                                 <>
                                     <div class="chat-msg user">{user_msg}</div>
-                                    <div class="chat-msg assistant">{bot_reply}</div>
+                                    <div class="chat-msg assistant markdown">{render_markdown(&bot_reply)}</div>
                                 </>
                             },
                             // Regular chat: user message, no response yet
