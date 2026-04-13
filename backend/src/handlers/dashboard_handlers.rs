@@ -979,13 +979,27 @@ pub async fn get_senders(
 
     // 3. All bridge rooms (fills in chats not yet in ont_messages + identifies groups)
     let services = ["signal", "whatsapp", "telegram"];
-    let matrix_clients = state.matrix_clients.lock().await;
-    if let Some(client) = matrix_clients.get(&user_id) {
-        let total_joined = client.joined_rooms().len();
+    // Clone the Arc so we can drop the lock before the potentially slow sync
+    let client_arc = {
+        let matrix_clients = state.matrix_clients.lock().await;
+        matrix_clients.get(&user_id).cloned()
+    };
+    if let Some(client) = client_arc {
+        let before_sync = client.joined_rooms().len();
+        // Sync to pick up rooms created/joined since last sync (bridges create rooms lazily)
+        if let Err(e) = client
+            .sync_once(matrix_sdk::config::SyncSettings::new())
+            .await
+        {
+            tracing::warn!("get_senders: user {} sync_once failed: {}", user_id, e);
+        }
+        let after_sync = client.joined_rooms().len();
         tracing::info!(
-            "get_senders: user {} matrix client has {} joined rooms",
+            "ROOM_SYNC_RESULT: user={}, before={}, after={}, new_rooms={}",
             user_id,
-            total_joined
+            before_sync,
+            after_sync,
+            after_sync.saturating_sub(before_sync)
         );
         for service in &services {
             let bridge_ok = state
@@ -1003,7 +1017,7 @@ pub async fn get_senders(
                 );
                 continue;
             }
-            match crate::utils::bridge::get_service_rooms(client, service).await {
+            match crate::utils::bridge::get_service_rooms(&client, service).await {
                 Ok(rooms) => {
                     tracing::info!(
                         "get_senders: user {} {} returned {} rooms",
@@ -1053,7 +1067,6 @@ pub async fn get_senders(
     } else {
         tracing::warn!("get_senders: user {} has no matrix client cached", user_id);
     }
-    drop(matrix_clients);
 
     // 4. WhatsApp contacts from bridge DB (catches DMs without Matrix rooms yet).
     // No-op if WHATSAPP_BRIDGE_DATABASE_URL is unset (e.g. dev). Failures are
@@ -1061,12 +1074,13 @@ pub async fn get_senders(
     // branch can never break the rest of the endpoint.
     if state.whatsapp_bridge_repository.is_some() {
         let contacts = crate::utils::bridge_contacts::get_whatsapp_contacts(&state, user_id).await;
+        let total_from_db = contacts.len();
         let mut added = 0usize;
-        for c in contacts {
+        for c in &contacts {
             let key = format!("chat:{}:whatsapp", c.name.to_lowercase());
             if seen.insert(key) {
                 options.push(SenderOption {
-                    name: c.name,
+                    name: c.name.clone(),
                     platform: Some("whatsapp".to_string()),
                     source: "chat".to_string(),
                     msg_count: None,
@@ -1076,9 +1090,15 @@ pub async fn get_senders(
             }
         }
         tracing::info!(
-            "get_senders: user {} added {} contacts from whatsapp bridge DB",
+            "get_senders: user {} whatsapp bridge DB returned {} contacts, {} new (rest deduped)",
             user_id,
+            total_from_db,
             added
+        );
+    } else {
+        tracing::info!(
+            "get_senders: user {} whatsapp bridge repository not configured (WHATSAPP_BRIDGE_DATABASE_URL unset)",
+            user_id
         );
     }
 

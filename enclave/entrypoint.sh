@@ -1190,8 +1190,10 @@ echo "Registering bridge bots..."
 cd /app && bash register-bridge-bots.sh http://localhost:8008 2>&1 || true
 
 echo "Starting bridges..."
-echo "[DEBUG] whatsapp_db user_logins count: $(psql -h localhost -U whatsapp_user -d whatsapp_db -t -A -c "SELECT count(*) FROM user_logins" 2>/dev/null || echo 'query failed')"
-echo "[DEBUG] whatsapp_db whatsmeow_device count: $(psql -h localhost -U whatsapp_user -d whatsapp_db -t -A -c "SELECT count(*) FROM whatsmeow_device" 2>/dev/null || echo 'query failed or table missing')"
+echo "[DEBUG] whatsapp_db user_logins count: $(psql -h localhost -U whatsapp_user -d whatsapp_db -t -A -c "SELECT count(*) FROM user_logins" 2>/dev/null || echo 'table missing')"
+echo "[DEBUG] whatsapp_db user_login (singular) count: $(psql -h localhost -U whatsapp_user -d whatsapp_db -t -A -c "SELECT count(*) FROM user_login" 2>/dev/null || echo 'table missing')"
+echo "[DEBUG] whatsapp_db whatsmeow_device count: $(psql -h localhost -U whatsapp_user -d whatsapp_db -t -A -c "SELECT count(*) FROM whatsmeow_device" 2>/dev/null || echo 'table missing')"
+echo "[DEBUG] whatsapp_db whatsmeow_contacts count: $(psql -h localhost -U whatsapp_user -d whatsapp_db -t -A -c "SELECT count(*) FROM whatsmeow_contacts" 2>/dev/null || echo 'table missing')"
 echo "[DEBUG] lightfriend_db bridges count: $(psql -h localhost -U postgres -d lightfriend_db -t -A -c "SELECT count(*) FROM bridges" 2>/dev/null || echo 'query failed')"
 echo "[DEBUG] lightfriend_db bridges rows: $(psql -h localhost -U postgres -d lightfriend_db -t -A -c "SELECT id, user_id, bridge_type, status FROM bridges" 2>/dev/null || echo 'query failed')"
 echo "[DEBUG] lightfriend_db user_secrets matrix data (user 1): $(psql -h localhost -U postgres -d lightfriend_db -t -A -c "SELECT matrix_username IS NOT NULL as has_mx_user, matrix_device_id IS NOT NULL as has_device, encrypted_matrix_access_token IS NOT NULL as has_token FROM user_secrets WHERE user_id = 1" 2>/dev/null || echo 'query failed')"
