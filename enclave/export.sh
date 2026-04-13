@@ -501,6 +501,15 @@ fi
 
 echo "Phase E complete."
 
+# ── Cleanup: remove local encrypted file after successful upload ─────────────
+# Without this, each hourly backup leaves a ~33MB file in /data/seed/ inside
+# the enclave. After ~30 hours the enclave's filesystem fills up and future
+# exports fail with "error writing output file" during encryption.
+echo "Cleaning up local encrypted file..."
+rm -f "${ENCRYPTED}" 2>/dev/null || true
+# Also clean any old export artifacts left by previous runs
+find /data/seed -name 'lightfriend-full-backup-*.tar.gz.enc' -mmin +60 -delete 2>/dev/null || true
+
 # ── Write local success status ────────────────────────────────────────────────
 
 write_status "SUCCESS" "${ENCRYPTED_SIZE}" "${USER_COUNT}"
