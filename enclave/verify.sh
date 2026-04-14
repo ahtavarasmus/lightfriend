@@ -95,6 +95,16 @@ else
     record_check "tuwunel_health" "false" "curl to /_matrix/client/versions failed"
 fi
 
+echo "Check 4b: Tuwunel appservice manager..."
+if tail -120 /var/log/supervisor/tuwunel.log 2>/dev/null \
+    | grep -q 'service "appservice" aborted\|Invalid id in config appservice'; then
+    echo "  FAIL: Tuwunel appservice manager aborted"
+    record_check "tuwunel_appservice_manager" "false" "appservice manager aborted; bridge tokens will be rejected"
+else
+    echo "  OK: no appservice manager abort found"
+    record_check "tuwunel_appservice_manager" "true"
+fi
+
 # ── 5. Bridge processes alive ──────────────────────────────────────────────
 
 echo "Check 5: bridge processes..."
@@ -107,10 +117,17 @@ for bridge in mautrix-whatsapp mautrix-signal mautrix-telegram; do
         echo "  FAIL: ${bridge} not running"
     fi
 done
+
+if tail -200 /var/log/supervisor/whatsapp.log /var/log/supervisor/signal.log /var/log/supervisor/telegram-err.log 2>/dev/null \
+    | grep -q 'as_token was not accepted\|M_UNKNOWN_TOKEN'; then
+    BRIDGE_OK=false
+    echo "  FAIL: one or more bridges are rejecting Matrix appservice tokens"
+fi
+
 if [ "${BRIDGE_OK}" = "true" ]; then
     record_check "bridge_processes" "true"
 else
-    record_check "bridge_processes" "false" "one or more bridges not RUNNING"
+    record_check "bridge_processes" "false" "one or more bridges not healthy"
 fi
 
 # ── 6. Data integrity spot-check ───────────────────────────────────────────

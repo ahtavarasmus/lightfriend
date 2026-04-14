@@ -26,6 +26,7 @@ allow_federation = false
 # Appservices - tokens extracted from bridge registration files
 
 [global.appservice.whatsapp]
+id = "whatsapp"
 url = "http://localhost:29318"
 as_token = "${WHATSAPP_AS_TOKEN}"
 hs_token = "${WHATSAPP_HS_TOKEN}"
@@ -39,6 +40,7 @@ exclusive = true
 regex = "@whatsapp_.*:localhost"
 
 [global.appservice.signal]
+id = "signal"
 url = "http://localhost:29328"
 as_token = "${SIGNAL_AS_TOKEN}"
 hs_token = "${SIGNAL_HS_TOKEN}"
@@ -52,6 +54,7 @@ exclusive = true
 regex = "@signal_.*:localhost"
 
 [global.appservice.telegram]
+id = "telegram"
 url = "http://localhost:29317"
 as_token = "${TELEGRAM_AS_TOKEN}"
 hs_token = "${TELEGRAM_HS_TOKEN}"
@@ -65,6 +68,7 @@ exclusive = true
 regex = "@telegram_.*:localhost"
 
 [global.appservice.doublepuppet]
+id = "doublepuppet"
 as_token = "${DOUBLE_PUPPET_SECRET}"
 hs_token = "${DOUBLE_PUPPET_SECRET}"
 sender_localpart = "doublepuppetbot"
