@@ -8,6 +8,8 @@
 #    to health checks (Tokio runtime frozen), restart it.
 # 3. Storage health: if temp/log/data space is low, clean expendable files
 #    before Postgres starts failing writes.
+# 4. Memory health: track per-service RSS growth and warn if a process is on
+#    pace to exhaust available memory within the configured horizon.
 
 STOPPED_COUNT=0
 STOPPED_THRESHOLD=4  # 4 checks * 30s = 2 minutes
@@ -18,6 +20,8 @@ UNHEALTHY_THRESHOLD=3  # 3 consecutive failures * 30s = 90 seconds before restar
 PORT="${PORT:-3100}"
 STORAGE_WARN_COUNT=0
 STORAGE_WARN_THRESHOLD=2
+MEMORY_WARN_COUNT=0
+MEMORY_WARN_THRESHOLD=2
 
 storage_report() {
     if [ -x /app/storage-health.sh ]; then
@@ -25,6 +29,15 @@ storage_report() {
     else
         df -h 2>&1 || true
         df -i 2>&1 || true
+    fi
+}
+
+memory_report() {
+    if [ -x /app/memory-health.sh ]; then
+        /app/memory-health.sh report 2>&1
+    else
+        free -h 2>&1 || true
+        ps -eo pid,ppid,rss,comm,args --sort=-rss 2>/dev/null | head -25 || true
     fi
 }
 
@@ -45,6 +58,22 @@ while true; do
         fi
     else
         STORAGE_WARN_COUNT=0
+    fi
+
+    # ── Check 0b: Memory pressure / growth trend ──
+    if [ -x /app/memory-health.sh ]; then
+        if ! /app/memory-health.sh check >/tmp/memory-health-check.log 2>&1; then
+            MEMORY_WARN_COUNT=$((MEMORY_WARN_COUNT + 1))
+            echo "WATCHDOG: Memory growth check failed ($MEMORY_WARN_COUNT/$MEMORY_WARN_THRESHOLD)"
+            cat /tmp/memory-health-check.log 2>/dev/null || true
+            if [ "$MEMORY_WARN_COUNT" -ge "$MEMORY_WARN_THRESHOLD" ]; then
+                echo "WATCHDOG: Memory growth risk persisted. Full memory report:"
+                memory_report
+                MEMORY_WARN_COUNT=0
+            fi
+        else
+            MEMORY_WARN_COUNT=0
+        fi
     fi
 
     # ── Check 1: Services stuck in STOPPED state ──
@@ -98,6 +127,8 @@ while true; do
                 supervisorctl status 2>&1
                 echo "WATCHDOG: storage report before restart:"
                 storage_report
+                echo "WATCHDOG: memory report before restart:"
+                memory_report
                 supervisorctl restart lightfriend 2>/dev/null || true
                 echo "WATCHDOG: Backend restarted at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
                 UNHEALTHY_COUNT=0

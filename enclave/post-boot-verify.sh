@@ -43,6 +43,8 @@ if [ "$BACKEND_READY" = "false" ]; then
     tail -10 /var/log/supervisor/postgresql-err.log 2>/dev/null
     echo "=== storage health ==="
     /app/storage-health.sh report 2>&1 || true
+    echo "=== memory health ==="
+    /app/memory-health.sh report 2>&1 || true
 fi
 
 # Ensure cloudflared is running

@@ -9,7 +9,15 @@ set -uo pipefail
 
 MIN_FREE_KB="${MIN_FREE_KB:-262144}"          # 256 MiB
 MIN_FREE_INODES="${MIN_FREE_INODES:-1024}"
+HISTORY_FILE="${STORAGE_HEALTH_HISTORY_FILE:-/tmp/storage-health-history.log}"
+MAX_HISTORY_BYTES="${STORAGE_MAX_HISTORY_BYTES:-1048576}"
 PATHS="/ /tmp /var/lib/postgresql /var/log /data/seed /var/lib/tuwunel /app"
+
+rotate_history_if_needed() {
+    if [ -f "$HISTORY_FILE" ] && [ "$(stat -c%s "$HISTORY_FILE" 2>/dev/null || echo 0)" -gt "$MAX_HISTORY_BYTES" ]; then
+        tail -c $((MAX_HISTORY_BYTES / 2)) "$HISTORY_FILE" > "${HISTORY_FILE}.tmp" 2>/dev/null && mv "${HISTORY_FILE}.tmp" "$HISTORY_FILE"
+    fi
+}
 
 print_report() {
     echo "=== Storage Health $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
@@ -50,6 +58,8 @@ check_path() {
 
 check_storage() {
     local rc=0
+    rotate_history_if_needed
+    print_report >> "$HISTORY_FILE" 2>&1
     for path in /tmp /var/lib/postgresql /var/log /data/seed; do
         check_path "$path" || rc=1
     done

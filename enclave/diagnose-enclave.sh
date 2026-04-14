@@ -78,9 +78,22 @@ echo ""
 echo "--- storage health ---"
 if [ -x /app/storage-health.sh ]; then
     /app/storage-health.sh report 2>&1
+    echo "--- storage health history (last 80 lines) ---"
+    tail -80 /tmp/storage-health-history.log 2>/dev/null || echo "  no history yet"
 else
     df -h 2>&1 || true
     df -i 2>&1 || true
+fi
+echo ""
+
+echo "--- memory health ---"
+if [ -x /app/memory-health.sh ]; then
+    /app/memory-health.sh report 2>&1
+    echo "--- memory health history (last 80 lines) ---"
+    tail -80 /tmp/memory-health-history.log 2>/dev/null || echo "  no history yet"
+else
+    free -h 2>&1 || true
+    ps -eo pid,ppid,rss,comm,args --sort=-rss 2>/dev/null | head -25 || true
 fi
 echo ""
 
