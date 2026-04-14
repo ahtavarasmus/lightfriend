@@ -97,6 +97,12 @@ else
 fi
 echo ""
 
+echo "--- host health upload ---"
+tail -80 /tmp/health-upload-last.log 2>/dev/null || echo "  no upload attempt recorded yet"
+echo "--- enclave health upload history (last 80 lines) ---"
+tail -80 /tmp/enclave-health-history.log 2>/dev/null || echo "  no persistent health history yet"
+echo ""
+
 echo "--- export-watcher-last-run.log (last 80 lines) ---"
 tail -80 /tmp/export-watcher-last-run.log 2>/dev/null || echo "  not found (no export has run yet)"
 echo ""

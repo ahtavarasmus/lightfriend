@@ -308,25 +308,34 @@ SEEDHTTPVSOCKEOF
 # Backup upload receiver (port 9081) - accepts HTTP PUT from enclave
 cat > /opt/lightfriend/backup-upload-server.py <<'PYEOF'
 #!/usr/bin/env python3
-"""Simple HTTP server that accepts PUT uploads to /upload/<filename>."""
+"""Simple HTTP server that accepts PUT uploads from the enclave."""
 import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 BACKUP_DIR = "/opt/lightfriend/backups"
+LOG_DIR = "/opt/lightfriend/logs"
 os.makedirs(BACKUP_DIR, exist_ok=True)
+os.makedirs(LOG_DIR, exist_ok=True)
 
 class UploadHandler(BaseHTTPRequestHandler):
     def do_PUT(self):
-        if not self.path.startswith("/upload/"):
+        if self.path.startswith("/upload-log/"):
+            target_dir = LOG_DIR
+            filename = os.path.basename(self.path[len("/upload-log/"):])
+            kind = "log"
+        elif self.path.startswith("/upload/"):
+            target_dir = BACKUP_DIR
+            filename = os.path.basename(self.path[len("/upload/"):])
+            kind = "backup"
+        else:
             self.send_response(404)
             self.end_headers()
             return
-        filename = os.path.basename(self.path[8:])
         if not filename:
             self.send_response(400)
             self.end_headers()
             return
-        dest = os.path.join(BACKUP_DIR, filename)
+        dest = os.path.join(target_dir, filename)
         length = int(self.headers.get("Content-Length", 0))
         with open(dest, "wb") as f:
             remaining = length
@@ -340,7 +349,7 @@ class UploadHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(f"OK {size} bytes\n".encode())
-        print(f"Received {filename}: {size} bytes")
+        print(f"Received {kind} {filename}: {size} bytes")
 
     def log_message(self, format, *args):
         pass  # silence per-request logs
@@ -389,7 +398,7 @@ mkdir -p /opt/lightfriend/logs
 
 rotate_log_if_needed() {
     if [ -f "$LOG" ] && [ "$(stat -c%s "$LOG" 2>/dev/null || echo 0)" -gt 5242880 ]; then
-        tail -c 1048576 "$LOG" > "${LOG}.tmp" 2>/dev/null && mv "${LOG}.tmp" "$LOG"
+        tail -c 1048576 "$LOG" > "$${LOG}.tmp" 2>/dev/null && mv "$${LOG}.tmp" "$LOG"
     fi
 }
 
@@ -642,6 +651,18 @@ echo "  https://lightfriend.ai -> HTTP $HTTP_CODE"
 echo ""
 echo "--- 9. Enclave Internal Diagnostics (VSOCK 9008) ---"
 timeout 15 socat -T10 - VSOCK-CONNECT:16:9008 2>/dev/null || echo "  Could not connect to enclave diagnostic port"
+
+echo ""
+echo "--- 10. Persistent Enclave Health Snapshots ---"
+for f in /opt/lightfriend/logs/enclave-health-latest.txt /opt/lightfriend/logs/enclave-health-history.log /opt/lightfriend/logs/health-s3-sync.log; do
+    if [ -f "$f" ]; then
+        SIZE=$(stat -c%s "$f" 2>/dev/null || echo "?")
+        echo "  $f ($SIZE bytes)"
+        tail -40 "$f"
+    else
+        echo "  $f missing"
+    fi
+done
 
 echo ""
 echo "========================================"
@@ -923,10 +944,99 @@ RandomizedDelaySec=300
 WantedBy=timers.target
 BACKUPTIMEREOF
 
+# ── Persistent enclave health snapshot S3 archival ─────────────────────────
+
+cat > /opt/lightfriend/health-s3-sync.sh <<'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+LOG="/opt/lightfriend/logs/health-s3-sync.log"
+LATEST="/opt/lightfriend/logs/enclave-health-latest.txt"
+HISTORY="/opt/lightfriend/logs/enclave-health-history.log"
+STAMP_FILE="/opt/lightfriend/logs/.health-s3-last-archive-hour"
+mkdir -p /opt/lightfriend/logs
+
+exec >> "$LOG" 2>&1
+echo "=== health-s3-sync $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+
+BUCKET=$(grep '^S3_BACKUP_BUCKET=' /opt/lightfriend/.env 2>/dev/null | tail -1 | cut -d= -f2- || true)
+if [ -z "$BUCKET" ]; then
+    BUCKET=$(aws ssm get-parameter --name /lightfriend/s3-bucket --query Parameter.Value --output text 2>/dev/null || true)
+fi
+if [ -z "$BUCKET" ] || [ "$BUCKET" = "None" ]; then
+    echo "S3 backup bucket not found"
+    exit 0
+fi
+
+TOKEN=$(curl -sf --max-time 2 -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)
+if [ -n "$TOKEN" ]; then
+    INSTANCE_ID=$(curl -sf --max-time 2 -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id || hostname)
+else
+    INSTANCE_ID=$(hostname)
+fi
+
+PREFIX="diagnostics/enclave-health/$${INSTANCE_ID}"
+
+if [ -s "$LATEST" ]; then
+    aws s3 cp "$LATEST" "s3://$${BUCKET}/$${PREFIX}/latest.txt"
+    echo "Uploaded latest snapshot"
+else
+    echo "No latest snapshot yet"
+fi
+
+if [ -s "$HISTORY" ]; then
+    aws s3 cp "$HISTORY" "s3://$${BUCKET}/$${PREFIX}/history-latest.log"
+    echo "Uploaded rolling history"
+
+    HOUR=$(date -u +%Y%m%dT%H)
+    LAST_HOUR=$(cat "$STAMP_FILE" 2>/dev/null || true)
+    if [ "$HOUR" != "$LAST_HOUR" ]; then
+        TS=$(date -u +%Y%m%dT%H%M%SZ)
+        aws s3 cp "$HISTORY" "s3://$${BUCKET}/$${PREFIX}/history/enclave-health-$${TS}.log"
+        echo "$HOUR" > "$STAMP_FILE"
+        echo "Archived hourly history snapshot"
+    fi
+else
+    echo "No history snapshot yet"
+fi
+
+if [ -f "$LOG" ] && [ "$(stat -c%s "$LOG" 2>/dev/null || echo 0)" -gt 1048576 ]; then
+    tail -c 524288 "$LOG" > "$${LOG}.tmp" && mv "$${LOG}.tmp" "$LOG"
+fi
+SCRIPT
+chmod +x /opt/lightfriend/health-s3-sync.sh
+
+cat > /etc/systemd/system/health-s3-sync.service <<'HEALTHS3SVCEOF'
+[Unit]
+Description=Archive Lightfriend enclave health snapshots to S3
+After=network-online.target backup-upload-server.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/lightfriend/health-s3-sync.sh
+HEALTHS3SVCEOF
+
+cat > /etc/systemd/system/health-s3-sync.timer <<'HEALTHS3TIMEREOF'
+[Unit]
+Description=Archive Lightfriend enclave health snapshots to S3 every 5 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+Persistent=true
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target
+HEALTHS3TIMEREOF
+
 systemctl daemon-reload
 systemctl enable scheduled-backup.timer
 systemctl start scheduled-backup.timer
 echo "Hourly backup timer enabled: $(systemctl is-active scheduled-backup.timer)"
+systemctl enable health-s3-sync.timer
+systemctl start health-s3-sync.timer
+echo "Health S3 sync timer enabled: $(systemctl is-active health-s3-sync.timer)"
 
 chown -R ec2-user:ec2-user /opt/lightfriend
 

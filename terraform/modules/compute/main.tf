@@ -210,6 +210,17 @@ resource "aws_s3_bucket_lifecycle_configuration" "backups" {
   }
 
   rule {
+    id     = "retain-enclave-health-diagnostics-30-days"
+    status = "Enabled"
+    filter {
+      prefix = "diagnostics/enclave-health/"
+    }
+    expiration {
+      days = 30
+    }
+  }
+
+  rule {
     id     = "cleanup-deploy-artifacts-7-days"
     status = "Enabled"
     filter {

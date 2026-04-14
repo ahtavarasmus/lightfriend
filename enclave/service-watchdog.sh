@@ -22,6 +22,8 @@ STORAGE_WARN_COUNT=0
 STORAGE_WARN_THRESHOLD=2
 MEMORY_WARN_COUNT=0
 MEMORY_WARN_THRESHOLD=2
+HEALTH_UPLOAD_INTERVAL_LOOPS="${HEALTH_UPLOAD_INTERVAL_LOOPS:-10}" # 10 checks * 30s = 5 minutes
+HEALTH_UPLOAD_COUNT=0
 
 storage_report() {
     if [ -x /app/storage-health.sh ]; then
@@ -41,10 +43,22 @@ memory_report() {
     fi
 }
 
+upload_health_snapshot() {
+    if [ -x /app/health-upload.sh ]; then
+        /app/health-upload.sh >/tmp/health-upload-last.log 2>&1 || true
+    fi
+}
+
 while true; do
     sleep 30
 
     STATUS=$(supervisorctl status 2>/dev/null || echo "")
+
+    HEALTH_UPLOAD_COUNT=$((HEALTH_UPLOAD_COUNT + 1))
+    if [ "$HEALTH_UPLOAD_COUNT" -ge "$HEALTH_UPLOAD_INTERVAL_LOOPS" ]; then
+        upload_health_snapshot
+        HEALTH_UPLOAD_COUNT=0
+    fi
 
     # ── Check 0: Storage pressure ──
     if [ -x /app/storage-health.sh ] && ! /app/storage-health.sh check >/tmp/storage-health-check.log 2>&1; then
@@ -54,6 +68,7 @@ while true; do
         if [ "$STORAGE_WARN_COUNT" -ge "$STORAGE_WARN_THRESHOLD" ]; then
             echo "WATCHDOG: Running storage cleanup"
             /app/storage-health.sh cleanup 2>&1 || true
+            upload_health_snapshot
             STORAGE_WARN_COUNT=0
         fi
     else
@@ -69,6 +84,7 @@ while true; do
             if [ "$MEMORY_WARN_COUNT" -ge "$MEMORY_WARN_THRESHOLD" ]; then
                 echo "WATCHDOG: Memory growth risk persisted. Full memory report:"
                 memory_report
+                upload_health_snapshot
                 MEMORY_WARN_COUNT=0
             fi
         else
@@ -129,6 +145,7 @@ while true; do
                 storage_report
                 echo "WATCHDOG: memory report before restart:"
                 memory_report
+                upload_health_snapshot
                 supervisorctl restart lightfriend 2>/dev/null || true
                 echo "WATCHDOG: Backend restarted at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
                 UNHEALTHY_COUNT=0

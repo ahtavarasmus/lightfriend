@@ -249,6 +249,7 @@ COPY enclave/export.sh /app/export.sh
 COPY enclave/export-watcher.sh /app/export-watcher.sh
 COPY enclave/storage-health.sh /app/storage-health.sh
 COPY enclave/memory-health.sh /app/memory-health.sh
+COPY enclave/health-upload.sh /app/health-upload.sh
 COPY enclave/verify.sh /app/verify.sh
 COPY enclave/post-boot-verify.sh /app/post-boot-verify.sh
 COPY enclave/cloudflared-wrapper.sh /app/cloudflared-wrapper.sh
@@ -260,7 +261,7 @@ COPY enclave/service-watchdog.sh /app/service-watchdog.sh
 # so we can't modify it here. Store a template and copy at container start.
 RUN echo "nameserver 127.0.0.1" > /etc/resolv.conf.enclave
 
-RUN chmod +x /entrypoint.sh /usr/local/bin/derive-backup-key.sh /usr/local/bin/start-marlin-kms.sh /app/export.sh /app/export-watcher.sh /app/storage-health.sh /app/memory-health.sh /app/verify.sh /app/post-boot-verify.sh /app/cloudflared-wrapper.sh /app/cloudflared-monitor.sh /app/enter-maintenance.sh /app/service-watchdog.sh /app/diagnose-enclave.sh
+RUN chmod +x /entrypoint.sh /usr/local/bin/derive-backup-key.sh /usr/local/bin/start-marlin-kms.sh /app/export.sh /app/export-watcher.sh /app/storage-health.sh /app/memory-health.sh /app/health-upload.sh /app/verify.sh /app/post-boot-verify.sh /app/cloudflared-wrapper.sh /app/cloudflared-monitor.sh /app/enter-maintenance.sh /app/service-watchdog.sh /app/diagnose-enclave.sh
 
 # Copy bridge bot registration script
 COPY enclave/register-bridge-bots.sh /app/register-bridge-bots.sh
