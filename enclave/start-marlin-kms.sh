@@ -8,20 +8,6 @@ LOCAL_DERIVE_PORT="1101"
 
 mkdir -p "${RUN_DIR}"
 
-cap_log() {
-    local file="$1"
-    [ -f "$file" ] || return 0
-    if [ "$(stat -c%s "$file" 2>/dev/null || echo 0)" -gt 1048576 ]; then
-        tail -c 524288 "$file" > "${file}.tmp" 2>/dev/null && mv "${file}.tmp" "$file"
-    fi
-}
-
-cap_marlin_logs() {
-    for log in "${RUN_DIR}"/*.log; do
-        [ -f "$log" ] && cap_log "$log"
-    done
-}
-
 # Verify binaries exist
 for bin in keygen-x25519 oyster-attestation-server kms-derive-server; do
     if [ ! -x "/usr/local/bin/${bin}" ]; then
@@ -44,9 +30,7 @@ start_bg() {
         fi
     fi
 
-    local log_file="${RUN_DIR}/$(basename "${pid_file}").log"
-    cap_log "$log_file"
-    "$@" >"$log_file" 2>&1 &
+    "$@" >"${RUN_DIR}/$(basename "${pid_file}").log" 2>&1 &
     echo $! > "${pid_file}"
 }
 
@@ -69,7 +53,6 @@ if [ ! -f "${RUN_DIR}/id.sec" ] || [ ! -f "${RUN_DIR}/id.pub" ]; then
     /usr/local/bin/keygen-x25519 --secret "${RUN_DIR}/id.sec" --public "${RUN_DIR}/id.pub"
     chmod 600 "${RUN_DIR}/id.sec" "${RUN_DIR}/id.pub"
 fi
-cap_marlin_logs
 
 printf '%s\n' "${MARLIN_KMS_CONTRACT_ADDRESS}" > "${RUN_DIR}/contract-address"
 chmod 600 "${RUN_DIR}/contract-address"
