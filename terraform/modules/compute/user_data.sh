@@ -100,7 +100,11 @@ fi
 
 # Failed restore artifacts are full encrypted backups. Keep only recent evidence.
 find "$RESTORE_FAILED_DIR" -type f -mtime +3 -delete 2>/dev/null || true
-ls -1t "$RESTORE_FAILED_DIR"/* 2>/dev/null | tail -n +4 | xargs -r rm -f
+find "$RESTORE_FAILED_DIR" -maxdepth 1 -type f -printf '%T@ %p\n' 2>/dev/null \
+    | sort -rn \
+    | tail -n +4 \
+    | cut -d' ' -f2- \
+    | xargs -r rm -f
 SCRIPT
 chmod +x /opt/lightfriend/host-log-maintenance.sh
 
