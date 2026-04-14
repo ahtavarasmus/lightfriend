@@ -1296,11 +1296,20 @@ if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
     done
 fi
 
-# Run verification
-echo "Running verify.sh..."
-/app/verify.sh
-VERIFY_RC=$?
-echo "verify.sh exited with rc=$VERIFY_RC"
+# Run verification. Bridges can take a little longer than the backend to
+# settle after a full restore, so retry before failing the blue-green deploy.
+VERIFY_RC=1
+for attempt in 1 2 3; do
+    echo "Running verify.sh (attempt $attempt/3)..."
+    /app/verify.sh
+    VERIFY_RC=$?
+    echo "verify.sh exited with rc=$VERIFY_RC"
+    [ $VERIFY_RC -eq 0 ] && break
+    echo "Verify failed. Supervisor status:"
+    supervisorctl status 2>&1
+    echo "Waiting 30s before retry..."
+    sleep 30
+done
 
 # Send verify result to host via HTTP (port 9081 VSOCK bridge, managed by supervisord)
 if [ -f /data/seed/verify-result.json ]; then
