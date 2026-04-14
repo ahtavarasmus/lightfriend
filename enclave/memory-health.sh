@@ -52,7 +52,7 @@ descendant_pids() {
             queue="${queue#* }"
         fi
 
-        children=$(pgrep -P "$current" 2>/dev/null | tr '\n' ' ' || true)
+        children=$(children_for_pid "$current" | tr '\n' ' ' || true)
         for child in $children; do
             all="$all $child"
             queue="$queue $child"
@@ -62,13 +62,54 @@ descendant_pids() {
     echo "$all"
 }
 
+children_for_pid() {
+    local parent="$1"
+
+    if command -v pgrep >/dev/null 2>&1; then
+        pgrep -P "$parent" 2>/dev/null || true
+        return
+    fi
+
+    for stat in /proc/[0-9]*/stat; do
+        [ -r "$stat" ] || continue
+        awk -v want="$parent" '
+            {
+                # /proc/<pid>/stat field 2 can contain spaces inside parens.
+                close = match($0, /\) /)
+                if (close == 0) next
+                rest = substr($0, close + 2)
+                split(rest, fields, " ")
+                if (fields[2] == want) {
+                    split(FILENAME, parts, "/")
+                    print parts[3]
+                }
+            }' "$stat" 2>/dev/null
+    done
+}
+
+rss_for_pid_kb() {
+    local pid="$1"
+    local rss_pages page_kb
+
+    if [ -r "/proc/$pid/statm" ]; then
+        rss_pages=$(awk '{print $2}' "/proc/$pid/statm" 2>/dev/null)
+        page_kb=$(getconf PAGESIZE 2>/dev/null | awk '{print int($1 / 1024)}')
+        if [ -n "$rss_pages" ] && [ -n "$page_kb" ] && [ "$page_kb" -gt 0 ]; then
+            echo $((rss_pages * page_kb))
+            return
+        fi
+    fi
+
+    awk '/^VmRSS:/ {print $2}' "/proc/$pid/status" 2>/dev/null || true
+}
+
 rss_for_tree_kb() {
     local root="$1"
     local total=0
     local rss pid
 
     for pid in $(descendant_pids "$root"); do
-        rss=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{print $1}')
+        rss=$(rss_for_pid_kb "$pid")
         if [ -n "$rss" ]; then
             total=$((total + rss))
         fi
