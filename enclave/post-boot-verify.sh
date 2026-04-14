@@ -41,6 +41,8 @@ if [ "$BACKEND_READY" = "false" ]; then
     tail -30 /var/log/supervisor/lightfriend.log 2>/dev/null
     echo "=== postgresql stderr (last 10 lines) ==="
     tail -10 /var/log/supervisor/postgresql-err.log 2>/dev/null
+    echo "=== storage health ==="
+    /app/storage-health.sh report 2>&1 || true
 fi
 
 # Ensure cloudflared is running

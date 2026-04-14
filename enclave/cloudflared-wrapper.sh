@@ -11,6 +11,10 @@ TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 log() { echo "[$TIMESTAMP] $*" >> "$LOG"; }
 logn() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" >> "$LOG"; }
 
+if [ -f "$LOG" ] && [ "$(stat -c%s "$LOG" 2>/dev/null || echo 0)" -gt 1048576 ]; then
+    tail -c 524288 "$LOG" > "${LOG}.tmp" 2>/dev/null && mv "${LOG}.tmp" "$LOG"
+fi
+
 echo "" >> "$LOG"
 echo "================================================================" >> "$LOG"
 log "=== cloudflared-wrapper starting ==="
@@ -114,7 +118,7 @@ if [ -z "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
 fi
 
 log "=== Starting cloudflared ==="
-log "Command: cloudflared tunnel --protocol http2 --no-autoupdate --edge-ip-version 4 --retries 10 --grace-period 60s --loglevel debug run --token <redacted>"
+log "Command: cloudflared tunnel --protocol http2 --no-autoupdate --edge-ip-version 4 --retries 10 --grace-period 60s --loglevel info run --token <redacted>"
 log "================================================================"
 
 # Exec cloudflared with:
@@ -122,12 +126,12 @@ log "================================================================"
 #   --edge-ip-version 4: force IPv4 (no IPv6 in enclave)
 #   --retries 10: retry edge connections more aggressively
 #   --grace-period 60s: longer grace for in-flight requests on reconnect
-#   --loglevel debug: maximum verbosity for debugging
+#   --loglevel info: keep tunnel events without filling the enclave filesystem
 exec /usr/local/bin/cloudflared tunnel \
     --protocol http2 \
     --no-autoupdate \
     --edge-ip-version 4 \
     --retries 10 \
     --grace-period 60s \
-    --loglevel debug \
+    --loglevel info \
     run --token "${CLOUDFLARE_TUNNEL_TOKEN}"

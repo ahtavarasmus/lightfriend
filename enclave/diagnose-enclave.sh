@@ -75,6 +75,15 @@ echo "--- startup-services.log (last 100 lines) ---"
 tail -100 /data/seed/startup-services.log 2>/dev/null || echo "  not found"
 echo ""
 
+echo "--- storage health ---"
+if [ -x /app/storage-health.sh ]; then
+    /app/storage-health.sh report 2>&1
+else
+    df -h 2>&1 || true
+    df -i 2>&1 || true
+fi
+echo ""
+
 echo "--- export-watcher-last-run.log (last 80 lines) ---"
 tail -80 /tmp/export-watcher-last-run.log 2>/dev/null || echo "  not found (no export has run yet)"
 echo ""

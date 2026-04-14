@@ -17,6 +17,15 @@ LAST_PROCESSED=""
 
 echo "export-watcher: starting (poll every ${POLL_INTERVAL}s)"
 
+storage_report_compact() {
+    if [ -x /app/storage-health.sh ]; then
+        /app/storage-health.sh report 2>&1 | sed 's|https://[^ ]*|[REDACTED_URL]|g' | tail -120
+    else
+        df -h 2>&1 || true
+        df -i 2>&1 || true
+    fi
+}
+
 while true; do
     REQUEST=$(curl -sf --max-time 5 "${POLL_URL}" 2>/dev/null || true)
 
@@ -44,14 +53,17 @@ while true; do
             echo "export-watcher: ${EXPORT_TYPE} export succeeded at ${FINISHED_AT}"
         else
             echo "export-watcher: ${EXPORT_TYPE} export FAILED (exit ${EXIT_CODE}) at ${FINISHED_AT}"
+            echo "export-watcher: storage report after failure:"
+            storage_report_compact | tee -a /tmp/export-watcher-last-run.log >/dev/null
 
             # Try to upload failure status via presigned URL (use jq for safe JSON encoding)
             ERROR_TAIL=$(tail -40 /tmp/export-watcher-last-run.log 2>/dev/null | sed 's|https://[^ ]*|[REDACTED_URL]|g' | tr '\n' ' ' | head -c 4000 || echo "no output")
+            STORAGE_TAIL=$(storage_report_compact | tr '\n' ' ' | head -c 4000 || echo "no storage report")
 
             # For deploy: write failure to completion URL
             if [ -n "${PRESIGNED_PUT_COMPLETE}" ]; then
-                jq -n --arg error "$ERROR_TAIL" --argjson code "${EXIT_CODE}" \
-                    '{"status":"FAILED","exit_code":$code,"error":$error}' | \
+                jq -n --arg error "$ERROR_TAIL" --arg storage "$STORAGE_TAIL" --argjson code "${EXIT_CODE}" \
+                    '{"status":"FAILED","exit_code":$code,"error":$error,"storage":$storage}' | \
                     curl -sf --max-time 30 -X PUT -H "Content-Type: application/json" \
                     --data-binary @- -x http://127.0.0.1:3128 \
                     "${PRESIGNED_PUT_COMPLETE}" 2>/dev/null || true
@@ -59,8 +71,8 @@ while true; do
 
             # For hourly: write failure to health URL
             if [ -n "${PRESIGNED_PUT_HEALTH}" ]; then
-                jq -n --arg ts "${TIMESTAMP}" --argjson code "${EXIT_CODE}" \
-                    '{"last_failure":$ts,"step":"export","exit_code":$code}' | \
+                jq -n --arg ts "${TIMESTAMP}" --arg storage "$STORAGE_TAIL" --argjson code "${EXIT_CODE}" \
+                    '{"last_failure":$ts,"step":"export","exit_code":$code,"storage":$storage}' | \
                     curl -sf --max-time 30 -X PUT -H "Content-Type: application/json" \
                     --data-binary @- -x http://127.0.0.1:3128 \
                     "${PRESIGNED_PUT_HEALTH}" 2>/dev/null || true

@@ -387,8 +387,15 @@ cat > /opt/lightfriend/cloudflared-edge-bridge.sh <<'SCRIPT'
 LOG="/opt/lightfriend/logs/cloudflared-edge.log"
 mkdir -p /opt/lightfriend/logs
 
+rotate_log_if_needed() {
+    if [ -f "$LOG" ] && [ "$(stat -c%s "$LOG" 2>/dev/null || echo 0)" -gt 5242880 ]; then
+        tail -c 1048576 "$LOG" > "${LOG}.tmp" 2>/dev/null && mv "${LOG}.tmp" "$LOG"
+    fi
+}
+
 log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ): $*" >> "$LOG"; }
 
+rotate_log_if_needed
 log "=== Starting cloudflared edge bridge on VSOCK:7844 ==="
 log "PID: $$"
 log "Resolving region1.v2.argotunnel.com..."
@@ -398,7 +405,7 @@ EDGE_IPS2=$(getent hosts region2.v2.argotunnel.com 2>&1 || echo "DNS FAILED")
 log "  region2 IPs: $EDGE_IPS2"
 
 # socat options:
-#   -d -d -d: maximum debug verbosity (logs connection lifecycle)
+#   -d -d: connection lifecycle without unbounded byte-transfer logs
 #   VSOCK-LISTEN: accept connections from enclave
 #   reuseaddr: allow rebind after restart
 #   fork: handle multiple connections (cloudflared opens 4)
@@ -409,7 +416,7 @@ log "  region2 IPs: $EDGE_IPS2"
 #   keepintvl=5: retry every 5s
 #   keepcnt=3: give up after 3 failed probes (25s total to detect dead conn)
 log "Starting socat bridge..."
-exec socat -d -d -d \
+exec socat -d -d \
     VSOCK-LISTEN:7844,reuseaddr,fork \
     TCP:region1.v2.argotunnel.com:7844,nodelay,keepalive,keepidle=10,keepintvl=5,keepcnt=3 \
     2>>"$LOG"

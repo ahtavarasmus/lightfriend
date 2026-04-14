@@ -6,6 +6,12 @@
 LOG="/var/log/supervisor/cloudflared-monitor-detail.log"
 ITERATION=0
 
+rotate_log_if_needed() {
+    if [ -f "$LOG" ] && [ "$(stat -c%s "$LOG" 2>/dev/null || echo 0)" -gt 1048576 ]; then
+        tail -c 524288 "$LOG" > "${LOG}.tmp" 2>/dev/null && mv "${LOG}.tmp" "$LOG"
+    fi
+}
+
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] [iter=$ITERATION] $*" >> "$LOG"; }
 
 echo "" >> "$LOG"
@@ -13,6 +19,7 @@ log "=== cloudflared-monitor started (PID $$) ==="
 
 while true; do
     ITERATION=$((ITERATION + 1))
+    rotate_log_if_needed
 
     # ── Bridge 7844 status ──
     BRIDGE_7844_LISTEN=$(ss -tlnp 2>/dev/null | grep ':7844' | head -1)

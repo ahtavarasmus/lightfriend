@@ -6,6 +6,8 @@
 #    stay STOPPED forever. Restart after 2 minutes.
 # 2. Backend health: if the backend process is running but not responding
 #    to health checks (Tokio runtime frozen), restart it.
+# 3. Storage health: if temp/log/data space is low, clean expendable files
+#    before Postgres starts failing writes.
 
 STOPPED_COUNT=0
 STOPPED_THRESHOLD=4  # 4 checks * 30s = 2 minutes
@@ -14,11 +16,36 @@ UNHEALTHY_COUNT=0
 UNHEALTHY_THRESHOLD=3  # 3 consecutive failures * 30s = 90 seconds before restart
 
 PORT="${PORT:-3100}"
+STORAGE_WARN_COUNT=0
+STORAGE_WARN_THRESHOLD=2
+
+storage_report() {
+    if [ -x /app/storage-health.sh ]; then
+        /app/storage-health.sh report 2>&1
+    else
+        df -h 2>&1 || true
+        df -i 2>&1 || true
+    fi
+}
 
 while true; do
     sleep 30
 
     STATUS=$(supervisorctl status 2>/dev/null || echo "")
+
+    # ── Check 0: Storage pressure ──
+    if [ -x /app/storage-health.sh ] && ! /app/storage-health.sh check >/tmp/storage-health-check.log 2>&1; then
+        STORAGE_WARN_COUNT=$((STORAGE_WARN_COUNT + 1))
+        echo "WATCHDOG: Storage health check failed ($STORAGE_WARN_COUNT/$STORAGE_WARN_THRESHOLD)"
+        cat /tmp/storage-health-check.log 2>/dev/null || true
+        if [ "$STORAGE_WARN_COUNT" -ge "$STORAGE_WARN_THRESHOLD" ]; then
+            echo "WATCHDOG: Running storage cleanup"
+            /app/storage-health.sh cleanup 2>&1 || true
+            STORAGE_WARN_COUNT=0
+        fi
+    else
+        STORAGE_WARN_COUNT=0
+    fi
 
     # ── Check 1: Services stuck in STOPPED state ──
     HAS_STOPPED=false
@@ -69,6 +96,8 @@ while true; do
                 echo "WATCHDOG: Backend unresponsive for >90s - restarting lightfriend"
                 echo "WATCHDOG: supervisorctl status before restart:"
                 supervisorctl status 2>&1
+                echo "WATCHDOG: storage report before restart:"
+                storage_report
                 supervisorctl restart lightfriend 2>/dev/null || true
                 echo "WATCHDOG: Backend restarted at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
                 UNHEALTHY_COUNT=0

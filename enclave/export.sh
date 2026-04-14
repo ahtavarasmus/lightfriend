@@ -69,12 +69,15 @@ echo "Timestamp: ${TIMESTAMP}"
 
 # ── Disk usage snapshot (for debugging space issues) ─────────────────────────
 echo "=== Disk Usage ==="
-df -h / /tmp /data/seed 2>/dev/null || df -h 2>/dev/null || echo "df unavailable"
-echo "  /data/seed contents:"
-ls -lhS /data/seed/ 2>/dev/null | head -10
-echo "  /tmp usage: $(du -sh /tmp 2>/dev/null | awk '{print $1}' || echo unknown)"
-echo "  Top 10 largest dirs:"
-du -sh /var/lib/postgresql /var/lib/tuwunel /app/matrix_store /app/uploads /var/log /data/bridges 2>/dev/null | sort -rh | head -10
+/app/storage-health.sh report 2>/dev/null || {
+    df -h / /tmp /data/seed 2>/dev/null || df -h 2>/dev/null || echo "df unavailable"
+    df -i / /tmp /data/seed 2>/dev/null || true
+    echo "  /data/seed contents:"
+    ls -lhS /data/seed/ 2>/dev/null | head -10
+    echo "  /tmp usage: $(du -sh /tmp 2>/dev/null | awk '{print $1}' || echo unknown)"
+    echo "  Top 10 largest dirs:"
+    du -sh /var/lib/postgresql /var/lib/tuwunel /app/matrix_store /app/uploads /var/log /data/bridges 2>/dev/null | sort -rh | head -10
+}
 echo "================"
 
 # ── Preflight ────────────────────────────────────────────────────────────────
