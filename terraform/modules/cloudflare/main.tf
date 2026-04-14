@@ -39,12 +39,3 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
     }
   }
 }
-
-resource "cloudflare_record" "app" {
-  zone_id = var.cloudflare_zone_id
-  name    = "@"
-  content = "${cloudflare_zero_trust_tunnel_cloudflared.main.id}.cfargotunnel.com"
-  type    = "CNAME"
-  proxied = true
-  comment = "Lightfriend - ${var.environment}"
-}

@@ -44,7 +44,7 @@ resource "aws_iam_role_policy_attachment" "ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-# Launch template - used by both initial terraform apply and CI blue-green deploys
+# Launch template - CI uses this for blue-green deploys.
 resource "aws_launch_template" "enclave" {
   name = "${var.project_name}-${var.environment}-enclave"
 
@@ -88,23 +88,8 @@ resource "aws_launch_template" "enclave" {
   }
 }
 
-# Initial EC2 instance - created by terraform, subsequent instances created by CI
-resource "aws_instance" "enclave" {
-  subnet_id = var.public_subnet_id
-
-  launch_template {
-    id      = aws_launch_template.enclave.id
-    version = "$Latest"
-  }
-
-  tags = {
-    Name = "${var.project_name}-${var.environment}-enclave"
-  }
-
-  lifecycle {
-    ignore_changes = [ami, launch_template] # CI manages subsequent instances
-  }
-}
+# /lightfriend/instance-id is intentionally not managed by Terraform. CI creates
+# and updates it during deploy and disaster recovery cutovers.
 
 # ── S3 bucket for encrypted backups ──────────────────────────────────────────
 
@@ -221,6 +206,20 @@ resource "aws_s3_bucket_lifecycle_configuration" "backups" {
   }
 
   rule {
+    id     = "retain-deploy-backups-14-days"
+    status = "Enabled"
+    filter {
+      prefix = "backups/deploy/"
+    }
+    expiration {
+      days = 14
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 7
+    }
+  }
+
+  rule {
     id     = "cleanup-deploy-artifacts-7-days"
     status = "Enabled"
     filter {
@@ -255,8 +254,8 @@ resource "aws_iam_role_policy" "enclave_ssm_parameters" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect = "Allow"
-      Action = ["ssm:GetParameter"]
+      Effect   = "Allow"
+      Action   = ["ssm:GetParameter"]
       Resource = "arn:aws:ssm:*:*:parameter/lightfriend/*"
     }]
   })
@@ -360,8 +359,8 @@ resource "aws_iam_role_policy" "github_deploy_ec2" {
         Resource = "*"
       },
       {
-        Effect = "Allow"
-        Action = "iam:PassRole"
+        Effect   = "Allow"
+        Action   = "iam:PassRole"
         Resource = aws_iam_role.enclave.arn
       },
       {
@@ -395,14 +394,4 @@ resource "aws_ssm_parameter" "s3_bucket" {
   name  = "/lightfriend/s3-bucket"
   type  = "String"
   value = aws_s3_bucket.backups.bucket
-}
-
-resource "aws_ssm_parameter" "instance_id" {
-  name  = "/lightfriend/instance-id"
-  type  = "String"
-  value = aws_instance.enclave.id
-
-  lifecycle {
-    ignore_changes = [value] # CI updates this during blue-green deploys
-  }
 }

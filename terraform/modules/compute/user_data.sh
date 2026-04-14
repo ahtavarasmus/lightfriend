@@ -53,6 +53,79 @@ mkdir -p /opt/lightfriend/{backups,restore,seed}
 
 chown -R ec2-user:ec2-user /opt/lightfriend
 
+# ── Host log/artifact maintenance ────────────────────────────────────────────
+
+cat > /opt/lightfriend/host-log-maintenance.sh <<'SCRIPT'
+#!/bin/bash
+set -uo pipefail
+
+LOG_DIR="/opt/lightfriend/logs"
+RESTORE_FAILED_DIR="/opt/lightfriend/restore/failed"
+mkdir -p "$LOG_DIR" "$RESTORE_FAILED_DIR"
+
+cap_file() {
+    local file="$1"
+    local max_bytes="$2"
+    local keep_bytes="$3"
+    [ -f "$file" ] || return 0
+    local size
+    size=$(stat -c%s "$file" 2>/dev/null || echo 0)
+    if [ "$size" -gt "$max_bytes" ]; then
+        tail -c "$keep_bytes" "$file" > "$file.tmp" 2>/dev/null && cat "$file.tmp" > "$file"
+        rm -f "$file.tmp" 2>/dev/null || true
+    fi
+}
+
+for f in \
+    "$LOG_DIR/gvproxy.log" \
+    "$LOG_DIR/gvproxy-err.log" \
+    "$LOG_DIR/scheduled-backup.log" \
+    "$LOG_DIR/cloudflared-edge-stdout.log" \
+    "$LOG_DIR/cloudflared-edge-stderr.log" \
+    "$LOG_DIR/telegram-proxy-bridge.log" \
+    "$LOG_DIR/config-server.log" \
+    "$LOG_DIR/dot-bridge.log"; do
+    cap_file "$f" 5242880 1048576
+done
+
+cap_file /tmp/restore-enclave-debug.log 5242880 1048576
+cap_file /tmp/launch.log 5242880 1048576
+cap_file /tmp/eif-download.log 2097152 524288
+
+# Boot traces are useful during failed deploys, but each launch creates a new file.
+find "$LOG_DIR" -maxdepth 1 -type f -name 'boot-trace-*.log' -mtime +7 -delete 2>/dev/null || true
+if [ -d "$LOG_DIR" ]; then
+    ls -1t "$LOG_DIR"/boot-trace-*.log 2>/dev/null | tail -n +11 | xargs -r rm -f
+fi
+
+# Failed restore artifacts are full encrypted backups. Keep only recent evidence.
+find "$RESTORE_FAILED_DIR" -type f -mtime +3 -delete 2>/dev/null || true
+ls -1t "$RESTORE_FAILED_DIR"/* 2>/dev/null | tail -n +4 | xargs -r rm -f
+SCRIPT
+chmod +x /opt/lightfriend/host-log-maintenance.sh
+
+cat > /etc/systemd/system/lightfriend-log-maintenance.service <<'LOGMAINTSVCEOF'
+[Unit]
+Description=Lightfriend host log and artifact maintenance
+
+[Service]
+Type=oneshot
+ExecStart=/opt/lightfriend/host-log-maintenance.sh
+LOGMAINTSVCEOF
+
+cat > /etc/systemd/system/lightfriend-log-maintenance.timer <<'LOGMAINTTIMEREOF'
+[Unit]
+Description=Run Lightfriend host log maintenance every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+LOGMAINTTIMEREOF
+
 # ── Install HTTP forward proxy for enclave outbound traffic ──────────────────
 
 echo "Installing squid, socat, jq, and boto3 for enclave networking + presigned URLs..."
@@ -314,6 +387,13 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 
 BACKUP_DIR = "/opt/lightfriend/backups"
 LOG_DIR = "/opt/lightfriend/logs"
+LOG_ALLOWLIST = {
+    "enclave-health-latest.txt": 256 * 1024,
+    "enclave-health-history.log": 2 * 1024 * 1024,
+}
+UPLOAD_ALLOWLIST = {
+    "verify-result.json": 256 * 1024,
+}
 os.makedirs(BACKUP_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
@@ -323,20 +403,26 @@ class UploadHandler(BaseHTTPRequestHandler):
             target_dir = LOG_DIR
             filename = os.path.basename(self.path[len("/upload-log/"):])
             kind = "log"
+            allowed = LOG_ALLOWLIST
         elif self.path.startswith("/upload/"):
             target_dir = BACKUP_DIR
             filename = os.path.basename(self.path[len("/upload/"):])
             kind = "backup"
+            allowed = UPLOAD_ALLOWLIST
         else:
             self.send_response(404)
             self.end_headers()
             return
-        if not filename:
+        if not filename or filename not in allowed:
             self.send_response(400)
             self.end_headers()
             return
         dest = os.path.join(target_dir, filename)
         length = int(self.headers.get("Content-Length", 0))
+        if length < 1 or length > allowed[filename]:
+            self.send_response(413)
+            self.end_headers()
+            return
         with open(dest, "wb") as f:
             remaining = length
             while remaining > 0:
@@ -487,7 +573,7 @@ After=network.target
 
 [Service]
 ExecStartPre=/bin/sh -c '[ -S /tmp/network.sock ] && rm -f /tmp/network.sock || true'
-ExecStart=/usr/local/bin/gvproxy -listen vsock://:1024 -listen unix:///tmp/network.sock -debug
+ExecStart=/usr/local/bin/gvproxy -listen vsock://:1024 -listen unix:///tmp/network.sock
 Restart=always
 RestartSec=3
 StandardOutput=append:/opt/lightfriend/logs/gvproxy.log
@@ -499,6 +585,9 @@ GVPROXYEOF
 
 # Enable and start all VSOCK services + gvproxy
 systemctl daemon-reload
+systemctl enable lightfriend-log-maintenance.timer
+systemctl start lightfriend-log-maintenance.timer
+/opt/lightfriend/host-log-maintenance.sh || true
 for svc in vsock-proxy-bridge vsock-config-server vsock-marlin-kms-bridge vsock-telegram-proxy-bridge vsock-boot-trace seed-http-server vsock-seed-http vsock-cloudflared-edge vsock-dot-bridge backup-upload-server vsock-backup-upload gvproxy; do
     systemctl enable "$svc"
     systemctl start "$svc" || echo "WARNING: $svc failed to start"

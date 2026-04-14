@@ -70,17 +70,26 @@ cleanup_storage() {
     echo "=== Storage Cleanup $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 
     rm -rf /tmp/backup-staging /tmp/verify.tar.gz /tmp/lightfriend-full-backup-*.tar.gz 2>/dev/null || true
+    rm -rf /tmp/backup-restore 2>/dev/null || true
     find /data/seed -name 'lightfriend-full-backup-*.tar.gz.enc' -mmin +30 -delete 2>/dev/null || true
 
     # The tunnel and bridge logs can grow quickly during scans/outages. Keep
     # recent logs, but cap any single supervisor log to the last 1 MiB.
-    find /var/log/supervisor -type f -size +5M -print 2>/dev/null | while read -r log; do
+    find /var/log/supervisor /tmp/marlin-kms -type f -size +5M -print 2>/dev/null | while read -r log; do
         tmp="${log}.tmp"
         tail -c 1048576 "$log" > "$tmp" 2>/dev/null && cat "$tmp" > "$log"
         rm -f "$tmp" 2>/dev/null || true
     done
 
     find /var/log/supervisor -type f \( -name '*.1' -o -name '*.2' -o -name '*.3' \) -mtime +1 -delete 2>/dev/null || true
+    for log in /var/log/gvforwarder.log /data/seed/boot-trace.log /data/seed/startup-services.log /data/seed/startup-signal.log /tmp/export-watcher-last-run.log; do
+        [ -f "$log" ] || continue
+        if [ "$(stat -c%s "$log" 2>/dev/null || echo 0)" -gt 5242880 ]; then
+            tmp="${log}.tmp"
+            tail -c 1048576 "$log" > "$tmp" 2>/dev/null && cat "$tmp" > "$log"
+            rm -f "$tmp" 2>/dev/null || true
+        fi
+    done
     print_report
 }
 

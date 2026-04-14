@@ -33,35 +33,35 @@ terraform {
 module "networking" {
   source = "./modules/networking"
 
-  environment    = var.environment
-  vpc_cidr       = var.vpc_cidr
-  aws_region     = var.aws_region
-  project_name   = var.project_name
+  environment  = var.environment
+  vpc_cidr     = var.vpc_cidr
+  aws_region   = var.aws_region
+  project_name = var.project_name
 }
 
 # Compute: EC2 instance with Nitro Enclave support
 module "compute" {
   source = "./modules/compute"
 
-  environment          = var.environment
-  instance_type        = var.instance_type
-  project_name         = var.project_name
-  vpc_id               = module.networking.vpc_id
-  public_subnet_id     = module.networking.public_subnet_id
-  security_group_id    = module.networking.security_group_id
-  domain               = var.cloudflare_domain
-  subdomain            = var.subdomain
-  github_repo          = var.github_repo
+  environment       = var.environment
+  instance_type     = var.instance_type
+  project_name      = var.project_name
+  vpc_id            = module.networking.vpc_id
+  public_subnet_id  = module.networking.public_subnet_id
+  security_group_id = module.networking.security_group_id
+  domain            = var.cloudflare_domain
+  subdomain         = var.subdomain
+  github_repo       = var.github_repo
 }
 
 # Cloudflare: Zero Trust tunnel and DNS
 module "cloudflare" {
   source = "./modules/cloudflare"
 
-  environment         = var.environment
-  cloudflare_zone_id  = var.cloudflare_zone_id
+  environment           = var.environment
+  cloudflare_zone_id    = var.cloudflare_zone_id
   cloudflare_account_id = var.cloudflare_account_id
-  domain              = var.cloudflare_domain
-  subdomain           = var.subdomain
-  project_name        = var.project_name
+  domain                = var.cloudflare_domain
+  subdomain             = var.subdomain
+  project_name          = var.project_name
 }

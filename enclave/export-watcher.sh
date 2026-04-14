@@ -14,6 +14,8 @@ set -uo pipefail
 POLL_URL="http://127.0.0.1:9080/export-request.json"
 POLL_INTERVAL=5
 LAST_PROCESSED=""
+LAST_RUN_LOG="/tmp/export-watcher-last-run.log"
+MAX_LAST_RUN_BYTES=1048576
 
 echo "export-watcher: starting (poll every ${POLL_INTERVAL}s)"
 
@@ -23,6 +25,13 @@ storage_report_compact() {
     else
         df -h 2>&1 || true
         df -i 2>&1 || true
+    fi
+}
+
+cap_last_run_log() {
+    [ -f "$LAST_RUN_LOG" ] || return 0
+    if [ "$(stat -c%s "$LAST_RUN_LOG" 2>/dev/null || echo 0)" -gt "$MAX_LAST_RUN_BYTES" ]; then
+        tail -c "$MAX_LAST_RUN_BYTES" "$LAST_RUN_LOG" > "${LAST_RUN_LOG}.tmp" 2>/dev/null && mv "${LAST_RUN_LOG}.tmp" "$LAST_RUN_LOG"
     fi
 }
 
@@ -44,8 +53,9 @@ while true; do
         export PROMOTE_JSON=$(echo "${REQUEST}" | jq -c '.promote // []')
 
         # Run export
-        /app/export.sh 2>&1 | tee /tmp/export-watcher-last-run.log
+        /app/export.sh 2>&1 | tee "$LAST_RUN_LOG"
         EXIT_CODE=${PIPESTATUS[0]}
+        cap_last_run_log
 
         FINISHED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
@@ -54,10 +64,11 @@ while true; do
         else
             echo "export-watcher: ${EXPORT_TYPE} export FAILED (exit ${EXIT_CODE}) at ${FINISHED_AT}"
             echo "export-watcher: storage report after failure:"
-            storage_report_compact | tee -a /tmp/export-watcher-last-run.log >/dev/null
+            storage_report_compact | tee -a "$LAST_RUN_LOG" >/dev/null
+            cap_last_run_log
 
             # Try to upload failure status via presigned URL (use jq for safe JSON encoding)
-            ERROR_TAIL=$(tail -40 /tmp/export-watcher-last-run.log 2>/dev/null | sed 's|https://[^ ]*|[REDACTED_URL]|g' | tr '\n' ' ' | head -c 4000 || echo "no output")
+            ERROR_TAIL=$(tail -40 "$LAST_RUN_LOG" 2>/dev/null | sed 's|https://[^ ]*|[REDACTED_URL]|g' | tr '\n' ' ' | head -c 4000 || echo "no output")
             STORAGE_TAIL=$(storage_report_compact | tr '\n' ' ' | head -c 4000 || echo "no storage report")
 
             # For deploy: write failure to completion URL

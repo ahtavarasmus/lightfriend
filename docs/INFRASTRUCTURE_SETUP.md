@@ -18,6 +18,11 @@ See [INFRASTRUCTURE_PLAN.md](./INFRASTRUCTURE_PLAN.md) for architecture details 
 
 Terraform Cloud provides shared state management so multiple contributors can work on infrastructure without conflicts.
 
+Production uses split ownership: Terraform manages base infrastructure and the
+launch template, while GitHub Actions manages live EC2 instance cutovers. See
+[Terraform and CI Ownership](./TERRAFORM_CI_OWNERSHIP.md) before applying
+changes in production.
+
 ### 1.1 Create Organization
 
 1. Sign up at [app.terraform.io](https://app.terraform.io)

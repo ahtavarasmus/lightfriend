@@ -500,6 +500,7 @@ if [ -n "${FULL_BACKUP}" ]; then
     echo "=== Full encrypted backup detected: $(basename "${FULL_BACKUP}") ==="
     RESTORE_STATUS="/data/seed/restore-status.json"
     RESTORE_TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
+    DECRYPT_DIR=""
 
     write_restore_status() {
         local status="$1"
@@ -522,6 +523,9 @@ REOF
         local step="$2"
         echo "RESTORE FAILED: ${msg} (step: ${step})"
         write_restore_status "FAILED" "${msg}" "${step}"
+        if [ -n "${DECRYPT_DIR}" ]; then
+            rm -rf "${DECRYPT_DIR}" 2>/dev/null || true
+        fi
         # Write failure to verify-result.json (post-boot-verify will upload it via HTTP)
         echo "{\"status\": \"RESTORE_FAILED\", \"restore_type\": \"full_restore\", \"error\": \"${msg}\", \"step\": \"${step}\", \"user_count\": 0}" > /data/seed/verify-result.json
         echo "Old enclave is still running. Fix the issue and retry."
@@ -537,6 +541,7 @@ REOF
     # Decrypt
     echo "Decrypting backup..."
     DECRYPT_DIR="/tmp/backup-restore"
+    rm -rf "${DECRYPT_DIR}" 2>/dev/null || true
     mkdir -p "${DECRYPT_DIR}"
     openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
         -pass env:BACKUP_ENCRYPTION_KEY \
