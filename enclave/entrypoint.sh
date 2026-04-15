@@ -882,17 +882,25 @@ proxy_fields = {
     "username": os.environ.get("TELEGRAM_PROXY_USERNAME", ""),
     "password": os.environ.get("TELEGRAM_PROXY_PASSWORD", ""),
 }
-# Always patch proxy type (to allow disabling proxy on existing configs)
-text = re.sub(r"(?m)^(        type:).*$", rf"\1 {proxy_type}", text, count=1)
-if real_addr and real_port and proxy_type != "disabled":
+# Patch the proxy block as a unit to avoid matching fields in other sections
+# (e.g. telegram.server.port appears before telegram.proxy.port and the old
+# count=1 regex would replace the wrong one).
+def patch_proxy_block(m):
+    block = m.group(0)
     for field, value in proxy_fields.items():
-        if field == "type":
-            continue
-        pattern = rf"(?m)^(        {field}:).*$"
-        replacement = rf"\1 {value}"
-        text = re.sub(pattern, replacement, text, count=1)
-    print(f"  Patched proxy: {proxy_type} 127.0.0.1:1080 (VSOCK bridge to {real_addr}:{real_port})", flush=True)
+        block = re.sub(rf"(?m)^(        {field}:).*$", rf"\1 {value}", block, count=1)
+    return block
+
+proxy_block_re = r"(?ms)^    proxy:\n(?:        \S.*\n)+"
+if real_addr and real_port and proxy_type != "disabled":
+    text, n = re.subn(proxy_block_re, patch_proxy_block, text, count=1)
+    if n:
+        print(f"  Patched proxy: {proxy_type} 127.0.0.1:1080 (VSOCK bridge to {real_addr}:{real_port})", flush=True)
+    else:
+        print(f"  WARNING: proxy block not found in config, could not patch", flush=True)
 else:
+    # Still patch the type field to allow disabling proxy
+    text = re.subn(proxy_block_re, patch_proxy_block, text, count=1)[0]
     print(f"  Proxy: {proxy_type} (direct connection via tap0)", flush=True)
 
 path.write_text(text)
