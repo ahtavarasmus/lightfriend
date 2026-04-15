@@ -3,7 +3,11 @@ use rand::RngCore;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::time::Duration;
+use std::{
+    sync::OnceLock,
+    time::{Duration, Instant},
+};
+use tokio::sync::RwLock;
 
 // Hardcoded Keccak-256 values for Solidity ABI encoding.
 // These are constants derived from the contract's function/event signatures.
@@ -21,10 +25,19 @@ const IMAGE_ACTIVATED_TOPIC: &str =
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(5);
+const TRUST_CHAIN_CACHE_TTL: Duration = Duration::from_secs(60);
+
+static TRUST_CHAIN_CACHE: OnceLock<RwLock<Option<CachedTrustChain>>> = OnceLock::new();
+
+#[derive(Clone)]
+struct CachedTrustChain {
+    fetched_at: Instant,
+    response: TrustChainResponse,
+}
 
 // -- Response types --
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct TrustChainResponse {
     pub commit_sha: Option<String>,
     pub workflow_run_id: Option<String>,
@@ -42,7 +55,7 @@ pub struct TrustChainResponse {
     pub history: Vec<HistoricalBuild>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct AttestationInfo {
     pub available: bool,
     pub pcr0: Option<String>,
@@ -51,7 +64,7 @@ pub struct AttestationInfo {
     pub doc_byte_size: Option<usize>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct BlockchainInfo {
     pub approved: bool,
     pub propose_tx: Option<String>,
@@ -60,7 +73,7 @@ pub struct BlockchainInfo {
     pub activate_timestamp: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct HistoricalBuild {
     pub image_id: String,
     pub commit_hash: String,
@@ -482,7 +495,7 @@ async fn fetch_blockchain_data(
 
 // -- Handler --
 
-pub async fn get_trust_chain() -> Json<TrustChainResponse> {
+async fn build_trust_chain_response() -> TrustChainResponse {
     let commit_sha = std::env::var("CURRENT_COMMIT_SHA").ok();
     let workflow_run_id = std::env::var("CURRENT_WORKFLOW_RUN_ID").ok();
     let image_ref = std::env::var("CURRENT_IMAGE_REF").ok();
@@ -555,7 +568,7 @@ pub async fn get_trust_chain() -> Json<TrustChainResponse> {
         Err(_) => None,
     };
 
-    Json(TrustChainResponse {
+    TrustChainResponse {
         commit_sha,
         workflow_run_id,
         image_ref,
@@ -570,7 +583,25 @@ pub async fn get_trust_chain() -> Json<TrustChainResponse> {
         blockchain,
         attestation,
         history,
-    })
+    }
+}
+
+pub async fn get_trust_chain() -> Json<TrustChainResponse> {
+    let cache = TRUST_CHAIN_CACHE.get_or_init(|| RwLock::new(None));
+
+    if let Some(cached) = cache.read().await.as_ref() {
+        if cached.fetched_at.elapsed() < TRUST_CHAIN_CACHE_TTL {
+            return Json(cached.response.clone());
+        }
+    }
+
+    let response = build_trust_chain_response().await;
+    *cache.write().await = Some(CachedTrustChain {
+        fetched_at: Instant::now(),
+        response: response.clone(),
+    });
+
+    Json(response)
 }
 
 // -- Live verification endpoint --

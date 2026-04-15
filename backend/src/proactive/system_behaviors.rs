@@ -313,7 +313,10 @@ pub async fn run_urgency_classification(
         acknowledged unless this is clearly a new situation.\n\
         \n\
         Classify the urgency:\n\
-        - high: delay would cause real consequences\n\
+        - high: genuine emergency or time-critical situation where a delay of hours would cause \
+        irreversible harm (safety, health, locked out, stranded, critical deadline). A friend \
+        casually asking for help, making plans, or requesting a favor is NOT high even if they \
+        say \"today\" or \"tomorrow\" - that's medium at most.\n\
         - medium: important but can wait hours\n\
         - low: routine, casual, or spam",
         now_formatted, signal_report
@@ -373,7 +376,7 @@ pub async fn run_urgency_classification(
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "Concise summary of the message (under 160 chars, no URLs). Don't restate sender name. \
+                "Concise summary starting with sender name, e.g. 'Mom: ...' (under 160 chars, no URLs). \
                  Used for SMS notification if urgent, digest teaser otherwise."
                     .to_string(),
             ),

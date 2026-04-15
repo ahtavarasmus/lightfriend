@@ -742,6 +742,19 @@ pub fn is_health_check_message(content: &str) -> bool {
         || lower.contains("unknown command")
 }
 
+/// Check if a message is a call event notice from a mautrix bridge.
+/// mautrix-whatsapp and mautrix-signal send these as m.notice messages.
+pub fn is_call_event_message(content: &str) -> bool {
+    let lower = content.to_lowercase();
+    lower.contains("incoming call")
+        || lower.contains("incoming voice call")
+        || lower.contains("incoming video call")
+        || lower.contains("missed call")
+        || lower.contains("missed voice call")
+        || lower.contains("missed video call")
+        || lower.contains("group call")
+}
+
 /// Check if a message contains error content that should be skipped
 pub fn is_error_message(content: &str) -> bool {
     let lower = content.to_lowercase();
