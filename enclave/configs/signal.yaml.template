@@ -25,7 +25,7 @@ database:
     max_idle_conns: 5
 
 signal:
-    device_name: mautrix-signal
+    device_name: Lightfriend
 
 bridge:
     username_template: signal_{{.}}

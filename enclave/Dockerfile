@@ -4,6 +4,13 @@
 # Runs PostgreSQL, Tuwunel, mautrix bridges, and Lightfriend backend
 # all under supervisord in one container.
 
+ARG VEHICLE_COMMAND_COMMIT=49977a18fd68567501d59e16a6c9e4a8b9348544
+ARG TUWUNEL_IMAGE=jevolk/tuwunel@sha256:5a3453f450bc1f5186becfac7640d2f71e20fb77c282f87e994f3363ced6575a
+ARG MAUTRIX_WHATSAPP_IMAGE=dock.mau.dev/mautrix/whatsapp@sha256:2c836d2225cf8112a752ffbf003fe61a58795922c13748f5a77b4f7ee1a21460
+ARG MAUTRIX_SIGNAL_IMAGE=dock.mau.dev/mautrix/signal@sha256:05e956d3ba5aead72daa38cc60246153edf60a6c49f62db522a296beea6f5a75
+ARG CLOUDFLARED_VERSION=2026.3.0
+ARG MAUTRIX_TELEGRAM_VERSION=0.15.3
+
 # ── Stage 1: Build Lightfriend backend ──────────────────────────────────────
 
 FROM rust:1.88-bookworm AS backend-builder
@@ -115,7 +122,7 @@ RUN cargo build --release --target-dir /src/oyster/target --manifest-path initia
 
 FROM golang:1.23-bookworm AS tesla-proxy-builder
 
-ARG VEHICLE_COMMAND_COMMIT=main
+ARG VEHICLE_COMMAND_COMMIT
 
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 RUN git clone https://github.com/teslamotors/vehicle-command.git /src/vehicle-command && \
@@ -125,9 +132,9 @@ RUN CGO_ENABLED=0 go build -o /tesla-http-proxy
 
 # ── Stage 3: Collect bridge binaries from official images ───────────────────
 
-FROM jevolk/tuwunel:latest AS tuwunel-src
-FROM dock.mau.dev/mautrix/whatsapp:latest AS whatsapp-src
-FROM dock.mau.dev/mautrix/signal:latest AS signal-src
+FROM ${TUWUNEL_IMAGE} AS tuwunel-src
+FROM ${MAUTRIX_WHATSAPP_IMAGE} AS whatsapp-src
+FROM ${MAUTRIX_SIGNAL_IMAGE} AS signal-src
 # mautrix-telegram installed via pip (no binary image needed)
 
 # ── Stage 4: Runtime - single container with all services ───────────────────
@@ -137,6 +144,8 @@ FROM debian:bookworm-slim
 # BUILD_MODE: "production" (default) includes cloudflared for tunnel access.
 #             "local" skips it (not needed for local testing).
 ARG BUILD_MODE=production
+ARG CLOUDFLARED_VERSION
+ARG MAUTRIX_TELEGRAM_VERSION
 
 # Install runtime dependencies + PostgreSQL + supervisord
 RUN apt-get update && apt-get install -y \
@@ -162,7 +171,8 @@ RUN apt-get update && apt-get install -y \
 # ── Install cloudflared for Cloudflare tunnel (production only) ──────────────
 ARG TARGETARCH
 RUN if [ "$BUILD_MODE" = "production" ]; then \
-        curl -L "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${TARGETARCH}" \
+        if [ "$CLOUDFLARED_VERSION" = "latest" ]; then CLOUDFLARED_VERSION_PATH="latest/download"; else CLOUDFLARED_VERSION_PATH="download/${CLOUDFLARED_VERSION}"; fi; \
+        curl -L "https://github.com/cloudflare/cloudflared/releases/${CLOUDFLARED_VERSION_PATH}/cloudflared-linux-${TARGETARCH}" \
             -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared; \
     fi
 
@@ -186,7 +196,6 @@ COPY --from=whatsapp-src /usr/bin/mautrix-whatsapp /usr/local/bin/mautrix-whatsa
 COPY --from=signal-src /usr/bin/mautrix-signal /usr/local/bin/mautrix-signal
 
 # ── Install mautrix-telegram into a local venv ────────────────────────────
-ARG MAUTRIX_TELEGRAM_VERSION=0.15.3
 RUN mkdir -p /opt/mautrix-telegram && \
     python3 -m venv /opt/mautrix-telegram-venv && \
     /opt/mautrix-telegram-venv/bin/pip install --upgrade pip && \

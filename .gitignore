@@ -40,6 +40,7 @@ backend/matrix_store/
 
 # Claude safety guard override flags (one-time use)
 .claude/.allow-*
+.claude/worktrees/
 
 # Generated contract build artifacts
 cache/

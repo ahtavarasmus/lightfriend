@@ -24,6 +24,7 @@ MEMORY_WARN_COUNT=0
 MEMORY_WARN_THRESHOLD=2
 HEALTH_UPLOAD_INTERVAL_LOOPS="${HEALTH_UPLOAD_INTERVAL_LOOPS:-10}" # 10 checks * 30s = 5 minutes
 HEALTH_UPLOAD_COUNT=0
+SIGNAL_SESSION_ERROR_COUNT=0
 
 storage_report() {
     if [ -x /app/storage-health.sh ]; then
@@ -49,6 +50,15 @@ upload_health_snapshot() {
     fi
 }
 
+signal_session_error_count() {
+    if [ -f /var/log/supervisor/signal.log ]; then
+        grep -Eci "Decryption error|failed to decrypt|Failed to verify ACI-PNI mapping|failed to fetch prekey|identity was.?t found in store" \
+            /var/log/supervisor/signal.log 2>/dev/null || true
+    else
+        echo 0
+    fi
+}
+
 while true; do
     sleep 30
 
@@ -59,6 +69,17 @@ while true; do
         upload_health_snapshot
         HEALTH_UPLOAD_COUNT=0
     fi
+
+    # ── Check 0c: Signal protocol/session errors ──
+    CURRENT_SIGNAL_SESSION_ERROR_COUNT=$(signal_session_error_count)
+    if [ "$CURRENT_SIGNAL_SESSION_ERROR_COUNT" -gt "$SIGNAL_SESSION_ERROR_COUNT" ]; then
+        NEW_SIGNAL_ERRORS=$((CURRENT_SIGNAL_SESSION_ERROR_COUNT - SIGNAL_SESSION_ERROR_COUNT))
+        echo "WATCHDOG: Detected ${NEW_SIGNAL_ERRORS} new Signal crypto/session error(s)"
+        grep -Ei "Decryption error|failed to decrypt|Failed to verify ACI-PNI mapping|failed to fetch prekey|identity was.?t found in store" \
+            /var/log/supervisor/signal.log 2>/dev/null | tail -10 || true
+        upload_health_snapshot
+    fi
+    SIGNAL_SESSION_ERROR_COUNT="$CURRENT_SIGNAL_SESSION_ERROR_COUNT"
 
     # ── Check 0: Storage pressure ──
     if [ -x /app/storage-health.sh ] && ! /app/storage-health.sh check >/tmp/storage-health-check.log 2>&1; then

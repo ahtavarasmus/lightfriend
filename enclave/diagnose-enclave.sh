@@ -51,6 +51,11 @@ echo "--- mautrix-signal stdout (last 40 lines, sanitized) ---"
 tail -40 /var/log/supervisor/signal.log 2>/dev/null | sanitize_bridge_log || echo "  empty"
 echo ""
 
+echo "--- mautrix-signal crypto/session errors (last 20, sanitized) ---"
+grep -Ei "Decryption error|failed to decrypt|Failed to verify ACI-PNI mapping|failed to fetch prekey|identity was.?t found in store" \
+    /var/log/supervisor/signal.log 2>/dev/null | tail -20 | sanitize_bridge_log || echo "  none"
+echo ""
+
 echo "--- mautrix-signal stderr (last 20 lines, sanitized) ---"
 tail -20 /var/log/supervisor/signal-err.log 2>/dev/null | sanitize_bridge_log || echo "  empty"
 echo ""

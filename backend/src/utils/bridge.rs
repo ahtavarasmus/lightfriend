@@ -76,6 +76,34 @@ fn get_sender_prefix(service: &str) -> String {
     format!("{}_", service)
 }
 
+fn log_bridge_error_notice(
+    direction: &str,
+    user_id: i32,
+    service: &str,
+    room_id: &str,
+    content: &str,
+) {
+    let lower = content.to_lowercase();
+    let error_kind = if lower.contains("decrypt") {
+        "decrypt"
+    } else if lower.contains("media") {
+        "media"
+    } else if lower.contains("failed") {
+        "bridge_failed"
+    } else {
+        "bridge_error"
+    };
+
+    tracing::warn!(
+        user_id,
+        service = %service,
+        direction,
+        room_id = %room_id,
+        error_kind,
+        "Bridge error notice skipped from notification pipeline"
+    );
+}
+
 fn room_name_matches_service(room_name: &str, service: &str) -> bool {
     let room_name = room_name.trim().to_lowercase();
     match service {
@@ -652,11 +680,7 @@ pub async fn get_triggering_message_in_room(
                     };
 
                     // Skip error-like messages
-                    if body.contains("Failed to bridge media")
-                        || body.contains("media no longer available")
-                        || body.contains("Decrypting message from WhatsApp failed")
-                        || body.starts_with("* Failed to")
-                    {
+                    if is_error_message(&body) {
                         continue;
                     }
 
@@ -792,11 +816,7 @@ pub async fn get_latest_sent_message_in_room(
                 };
 
                 // Skip error-like messages if needed (adapted from existing logic)
-                if body.contains("Failed to bridge media")
-                    || body.contains("media no longer available")
-                    || body.contains("Decrypting message from WhatsApp failed")
-                    || body.starts_with("* Failed to")
-                {
+                if is_error_message(&body) {
                     continue;
                 }
 
@@ -1509,6 +1529,13 @@ pub async fn handle_bridge_message(
             _ => return, // Skip user media (no useful text for LLM)
         };
         if is_error_message(&content) {
+            log_bridge_error_notice(
+                "outgoing",
+                user_id,
+                &service,
+                room.room_id().as_str(),
+                &content,
+            );
             return;
         }
         let current_room_id = room.room_id().to_string();
@@ -1669,14 +1696,15 @@ pub async fn handle_bridge_message(
         tracing::warn!("Failed to log bandwidth for user {}: {}", user_id, e);
     }
 
-    // Skip error messages
-    if is_error_message(&content) {
-        tracing::debug!("Skipping error message");
-        return;
-    }
-
     let chat_name = remove_bridge_suffix(room_name.as_str());
     let current_room_id = room.room_id().to_string();
+
+    // Skip bridge-generated error notices so they are logged but never treated
+    // as user messages for notification/proactive rules.
+    if is_error_message(&content) {
+        log_bridge_error_notice("incoming", user_id, &service, &current_room_id, &content);
+        return;
+    }
 
     // Check if this is a group chat (same heuristic as get_service_rooms)
     let is_group = match room.members(matrix_sdk::RoomMemberships::JOIN).await {

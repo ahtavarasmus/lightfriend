@@ -744,9 +744,13 @@ pub fn is_health_check_message(content: &str) -> bool {
 
 /// Check if a message contains error content that should be skipped
 pub fn is_error_message(content: &str) -> bool {
+    let lower = content.to_lowercase();
     content.contains("Failed to bridge media")
-        || content.contains("media no longer available")
-        || content.contains("Decrypting message from WhatsApp failed")
+        || lower.contains("media no longer available")
+        || lower.contains("decrypting message from whatsapp failed")
+        || lower.contains("decrypting message from signal failed")
+        || lower.contains("failed to decrypt")
+        || lower.contains("decryption error")
         || content.starts_with("* Failed to")
 }
 
@@ -834,6 +838,9 @@ mod tests {
         assert!(is_error_message("Failed to bridge media: error"));
         assert!(is_error_message("media no longer available"));
         assert!(is_error_message("Decrypting message from WhatsApp failed"));
+        assert!(is_error_message("Decrypting message from Signal failed"));
+        assert!(is_error_message("Failed to decrypt Signal message"));
+        assert!(is_error_message("Decryption error with known sender"));
         assert!(is_error_message("* Failed to send message"));
         assert!(!is_error_message("Hello, how are you?"));
     }

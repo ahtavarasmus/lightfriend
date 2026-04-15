@@ -1,0 +1,42 @@
+name: Enclave Dependency Updates
+
+on:
+  schedule:
+    - cron: '23 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refresh enclave dependency pins
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/update_enclave_dependency_pins.py
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: automation/enclave-dependency-updates
+          delete-branch: true
+          commit-message: Update enclave dependency pins
+          title: Update enclave dependency pins
+          body: |
+            Refreshes pinned enclave runtime dependencies.
+
+            This PR is intentionally review-gated because these components run inside the production enclave:
+
+            - Tuwunel image digest
+            - mautrix-whatsapp image digest
+            - mautrix-signal image digest
+            - mautrix-telegram PyPI version
+            - cloudflared release version
+            - Tesla vehicle-command commit
+
+            CI and the Docker Build & Deploy workflow should prove the combined image before merge.

@@ -919,15 +919,15 @@ done
 
 ensure_telegram_config_compat
 
-# Patch displayname_template in existing bridge configs to match current templates.
-# This ensures contact detection (WA/WA~ and Signal/Signal~) stays correct
-# without regenerating the full config (which would lose mautrix-generated fields).
-patch_displayname_templates() {
+# Patch safe runtime settings in existing bridge configs to match current
+# templates without regenerating full configs (which would lose generated fields).
+patch_bridge_runtime_config() {
     python3 - <<'PY'
 from pathlib import Path
 
 WA_TEMPLATE = '"{{if .FullName}}{{.FullName}} (WA){{else}}{{or .PushName .BusinessName .Phone}} (WA~){{end}}"'
 SIGNAL_TEMPLATE = '"{{if .ContactName}}{{.ContactName}} (Signal){{else}}{{or .ProfileName .PhoneNumber}} (Signal~){{end}}"'
+SIGNAL_DEVICE_NAME = "Lightfriend"
 
 patches = {
     "/data/bridges/whatsapp/config.yaml": WA_TEMPLATE,
@@ -953,9 +953,42 @@ for config_path, desired_template in patches.items():
         print(f"  Patched displayname_template in {config_path}", flush=True)
     else:
         print(f"  displayname_template already correct in {config_path}", flush=True)
+
+signal_path = Path("/data/bridges/signal/config.yaml")
+if signal_path.exists():
+    lines = signal_path.read_text().splitlines(keepends=True)
+    changed = False
+    saw_signal_section = False
+    inserted = False
+    for i, line in enumerate(lines):
+        stripped = line.lstrip()
+        if stripped.strip() == "signal:":
+            saw_signal_section = True
+            continue
+        if saw_signal_section and stripped.strip() and not line.startswith(" ") and not line.startswith("\t"):
+            lines.insert(i, f"    device_name: {SIGNAL_DEVICE_NAME}\n")
+            changed = True
+            inserted = True
+            break
+        if saw_signal_section and stripped.startswith("device_name:"):
+            indent = line[: len(line) - len(stripped)]
+            new_line = f"{indent}device_name: {SIGNAL_DEVICE_NAME}\n"
+            if lines[i] != new_line:
+                lines[i] = new_line
+                changed = True
+            inserted = True
+            break
+    if saw_signal_section and not inserted:
+        lines.append(f"    device_name: {SIGNAL_DEVICE_NAME}\n")
+        changed = True
+    if changed:
+        signal_path.write_text("".join(lines))
+        print(f"  Patched Signal device_name in {signal_path}", flush=True)
+    else:
+        print(f"  Signal device_name already correct in {signal_path}", flush=True)
 PY
 }
-patch_displayname_templates
+patch_bridge_runtime_config
 
 # Clean stale telegram sessions on boot (prevents AuthKeyUnregisteredError).
 # The backend also cleans up at runtime before each new connection attempt.
