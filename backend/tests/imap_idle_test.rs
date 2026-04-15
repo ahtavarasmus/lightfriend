@@ -114,6 +114,7 @@ async fn test_insert_email_dedup_against_preexisting_row() {
             room_id: "email_99".to_string(),
             platform: "email".to_string(),
             sender_name: "Carol".to_string(),
+            sender_key: None,
             content: "cron inserted".to_string(),
             person_id: None,
             created_at: Utc::now().timestamp() as i32,
