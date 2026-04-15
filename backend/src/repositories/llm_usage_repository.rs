@@ -61,6 +61,16 @@ pub struct UserLlmUsageDetailed {
     pub total_tokens: i64,
 }
 
+type DetailedUsageRow = (
+    i32,
+    String,
+    String,
+    i64,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+);
+
 impl LlmUsageRepository {
     pub fn new(pool: PgDbPool) -> Self {
         Self { pool }
@@ -197,15 +207,7 @@ impl LlmUsageRepository {
     ) -> Result<Vec<UserLlmUsageDetailed>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
-        let rows: Vec<(
-            i32,
-            String,
-            String,
-            i64,
-            Option<i64>,
-            Option<i64>,
-            Option<i64>,
-        )> = llm_usage_logs::table
+        let rows: Vec<DetailedUsageRow> = llm_usage_logs::table
             .filter(llm_usage_logs::created_at.ge(from_timestamp))
             .group_by((
                 llm_usage_logs::user_id,
