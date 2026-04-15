@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use crate::pg_schema::{message_status_log, usage_logs, users};
 use crate::repositories::llm_usage_repository::{
-    CallsiteBreakdown, DailyLlmStat, ModelBreakdown, UserLlmUsage,
+    CallsiteBreakdown, DailyLlmStat, ModelBreakdown, UserLlmUsage, UserLlmUsageDetailed,
 };
 use crate::AppState;
 
@@ -498,6 +498,7 @@ pub struct LlmUsageStatsResponse {
     pub by_callsite: Vec<CallsiteBreakdown>,
     pub by_model: Vec<ModelBreakdown>,
     pub per_user: Vec<UserLlmUsage>,
+    pub per_user_detailed: Vec<UserLlmUsageDetailed>,
     pub daily_stats: Vec<DailyLlmStat>,
 }
 
@@ -544,6 +545,17 @@ pub async fn get_llm_stats(
             )
         })?;
 
+    let per_user_detailed = state
+        .llm_usage_repository
+        .get_per_user_detailed_stats(from_timestamp)
+        .map_err(|e| {
+            tracing::error!("Failed to get detailed per-user LLM stats: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to get detailed per-user LLM stats"})),
+            )
+        })?;
+
     Ok(Json(LlmUsageStatsResponse {
         total_calls: stats.total_calls,
         total_prompt_tokens: stats.total_prompt_tokens,
@@ -552,6 +564,7 @@ pub async fn get_llm_stats(
         by_callsite: stats.by_callsite,
         by_model: stats.by_model,
         per_user,
+        per_user_detailed,
         daily_stats,
     }))
 }

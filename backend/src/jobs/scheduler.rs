@@ -1436,10 +1436,7 @@ pub async fn build_digest_for_user(
         ),
     };
 
-    // CTA: nudge the user to reply for full content of any item.
-    let footer = "Reply to dig in.";
-
-    let digest_text = format!("{}\n\n{}\n\n{}", header, digest_parts.join("\n\n"), footer);
+    let digest_text = format!("{}\n\n{}", header, digest_parts.join("\n\n"));
     Some((digest_text, message_ids))
 }
 
@@ -1505,11 +1502,9 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
         let current_minute_of_day = (((local_ts % 86400 + 86400) % 86400) / 60) as u16;
         // Snap current time to a 10-minute slot — matches the cron's */10 cadence
         let current_slot = (current_minute_of_day / 10) * 10;
-        let current_hour = (current_minute_of_day / 60) as usize;
-
         // Determine if we're in a delivery window:
         // - Manual mode: exact 10-min slot match against user's configured times
-        // - Auto mode: predicted wake hour (or default 8 AM), 2-hour fuzzy window
+        // - Auto mode: 3 fixed slots at wake, wake+5h, wake+10h
         let in_target_window = if let Some(ref time_str) = settings.digest_time {
             match parse_digest_times(time_str) {
                 Ok((_, slots)) => should_deliver_now(&slots, current_minute_of_day),
@@ -1522,30 +1517,25 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
                 }
             }
         } else {
-            // Auto mode: deliver from predicted wake hour through waking hours
-            // (~14h window). The 3-hour cooldown rate-limits to ~4-5 digests/day.
+            // Auto mode: 3 fixed slots relative to predicted wake hour.
+            // Morning (wake), midday (wake+5h), evening (wake+10h).
             let predicted = state
                 .ontology_repository
                 .compute_user_wake_hour(user_id, tz_offset_secs);
             let wake_hour = predicted.unwrap_or(8);
-            let sleep_hour = (wake_hour + 15) % 24; // ~15h awake window
-            if wake_hour < sleep_hour {
-                current_hour >= wake_hour && current_hour < sleep_hour
-            } else {
-                // wraps midnight (e.g. wake at 22, sleep at 13)
-                current_hour >= wake_hour || current_hour < sleep_hour
-            }
+            let slots: Vec<u16> = [0, 5, 10]
+                .iter()
+                .map(|offset| (((wake_hour + offset) % 24) * 60) as u16)
+                .collect();
+            should_deliver_now(&slots, current_minute_of_day)
         };
 
         // Cooldown: don't send more than one digest per N seconds.
         // Manual mode uses 9 min — just under the 10-min cron cadence — so consecutive
         // 10-min slots like 08:50, 09:00 can both fire while still preventing
         // double-fires from cron drift within the same slot.
-        let cooldown_secs = if settings.digest_time.is_some() {
-            540 // 9 min for manual
-        } else {
-            10800 // 3h for auto
-        };
+        // Auto mode uses 9 min too since it now uses fixed slots like manual.
+        let cooldown_secs = 540; // 9 min for both modes
         if let Some(last_sent) = state.digest_cooldowns.get(&user_id) {
             if now - *last_sent < cooldown_secs {
                 continue;

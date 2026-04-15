@@ -149,6 +149,7 @@ struct LlmUsageStatsResponse {
     by_callsite: Vec<LlmCallsiteBreakdown>,
     by_model: Vec<LlmModelBreakdown>,
     per_user: Vec<LlmUserUsage>,
+    per_user_detailed: Vec<LlmUserUsageDetailed>,
     daily_stats: Vec<DailyLlmStat>,
 }
 
@@ -156,6 +157,17 @@ struct LlmUsageStatsResponse {
 struct LlmUserUsage {
     user_id: i32,
     calls: i64,
+    total_tokens: i64,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct LlmUserUsageDetailed {
+    user_id: i32,
+    model: String,
+    callsite: String,
+    calls: i64,
+    prompt_tokens: i64,
+    completion_tokens: i64,
     total_tokens: i64,
 }
 
@@ -1147,22 +1159,31 @@ pub fn admin_dashboard() -> Html {
                                                 </tbody>
                                             </table>
 
-                                            <h3>{"By User"}</h3>
+                                            <h3>{"By User (detailed)"}</h3>
                                             <table class="stats-table">
                                                 <thead>
                                                     <tr>
-                                                        <th>{"User ID"}</th>
+                                                        <th>{"User"}</th>
+                                                        <th>{"Model"}</th>
+                                                        <th>{"Callsite"}</th>
                                                         <th>{"Calls"}</th>
-                                                        <th>{"Tokens"}</th>
+                                                        <th>{"Input"}</th>
+                                                        <th>{"Output"}</th>
+                                                        <th>{"Total"}</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
                                                     {
-                                                        stats.per_user.iter().map(|u| {
+                                                        stats.per_user_detailed.iter().map(|u| {
+                                                            let key = format!("{}-{}-{}", u.user_id, u.model, u.callsite);
                                                             html! {
-                                                                <tr key={u.user_id}>
+                                                                <tr key={key}>
                                                                     <td>{u.user_id}</td>
+                                                                    <td>{&u.model}</td>
+                                                                    <td>{&u.callsite}</td>
                                                                     <td>{u.calls}</td>
+                                                                    <td>{u.prompt_tokens}</td>
+                                                                    <td>{u.completion_tokens}</td>
                                                                     <td>{u.total_tokens}</td>
                                                                 </tr>
                                                             }
