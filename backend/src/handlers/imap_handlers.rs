@@ -420,6 +420,10 @@ pub async fn insert_email_into_ontology(
         .unwrap_or_default()
         .as_secs() as i32;
     let sender_name = preview.from.as_deref().unwrap_or("Unknown").to_string();
+    let sender_key = preview
+        .from_email
+        .as_deref()
+        .and_then(normalize_email_sender_key);
     let content = format!(
         "{}\n{}",
         preview.subject.as_deref().unwrap_or(""),
@@ -437,6 +441,7 @@ pub async fn insert_email_into_ontology(
         room_id: room_id.clone(),
         platform: "email".to_string(),
         sender_name: sender_name.clone(),
+        sender_key: sender_key.clone(),
         content: content.clone(),
         person_id: matched_person_id,
         created_at: now,
@@ -459,6 +464,7 @@ pub async fn insert_email_into_ontology(
         "platform": "email",
         "sender": sender_name,
         "sender_name": sender_name,
+        "sender_key": sender_key,
         "content": content,
         "room_id": room_id,
     });
@@ -477,6 +483,15 @@ pub async fn insert_email_into_ontology(
     .await;
 
     Ok(created.id)
+}
+
+fn normalize_email_sender_key(email: &str) -> Option<String> {
+    let normalized = email.trim().to_lowercase();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
 }
 
 /// Fetch new emails from an already-open IMAP session, insert them into

@@ -29,6 +29,16 @@ struct SuggestionCandidate {
     msg_count: i64,
 }
 
+pub struct RecentHighSenderMessagesQuery<'a> {
+    pub user_id: i32,
+    pub platform: &'a str,
+    pub sender_name: &'a str,
+    pub sender_key: Option<&'a str>,
+    pub since_ts: i32,
+    pub exclude_message_id: Option<i64>,
+    pub limit: i64,
+}
+
 fn format_hour(h: usize) -> String {
     match h {
         0 => "12am".to_string(),
@@ -1038,6 +1048,40 @@ impl OntologyRepository {
             .filter(ont_messages::room_id.eq(room_id))
             .order(ont_messages::created_at.desc())
             .limit(limit)
+            .load::<OntMessage>(&mut conn)
+    }
+
+    /// Get recently high-classified messages from the same sender/platform.
+    ///
+    /// This gives urgency classification durable context about alerts the user
+    /// probably already received, even when similar emails/messages arrive in
+    /// separate rooms or after a process restart.
+    pub fn get_recent_high_messages_by_sender(
+        &self,
+        params: RecentHighSenderMessagesQuery<'_>,
+    ) -> Result<Vec<OntMessage>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let mut query = ont_messages::table
+            .filter(ont_messages::user_id.eq(params.user_id))
+            .filter(ont_messages::platform.eq(params.platform))
+            .filter(ont_messages::sender_name.ne("You"))
+            .filter(ont_messages::urgency.eq("high"))
+            .filter(ont_messages::created_at.ge(params.since_ts))
+            .into_boxed();
+
+        if let Some(sender_key) = params.sender_key {
+            query = query.filter(ont_messages::sender_key.eq(sender_key));
+        } else {
+            query = query.filter(ont_messages::sender_name.eq(params.sender_name));
+        }
+
+        if let Some(message_id) = params.exclude_message_id {
+            query = query.filter(ont_messages::id.ne(message_id));
+        }
+
+        query
+            .order(ont_messages::created_at.desc())
+            .limit(params.limit)
             .load::<OntMessage>(&mut conn)
     }
 

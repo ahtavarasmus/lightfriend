@@ -427,6 +427,7 @@ diesel::table! {
         room_id -> Text,
         platform -> Text,
         sender_name -> Text,
+        sender_key -> Nullable<Text>,
         content -> Text,
         person_id -> Nullable<Int4>,
         created_at -> Int4,

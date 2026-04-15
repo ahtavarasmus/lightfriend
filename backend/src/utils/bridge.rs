@@ -1554,6 +1554,7 @@ pub async fn handle_bridge_message(
             room_id: current_room_id.clone(),
             platform: service.clone(),
             sender_name: "You".to_string(),
+            sender_key: None,
             content: content.clone(),
             person_id: None,
             created_at: std::time::SystemTime::now()
@@ -1776,6 +1777,7 @@ pub async fn handle_bridge_message(
         room_id: current_room_id.clone(),
         platform: service.clone(),
         sender_name: chat_name.clone(),
+        sender_key: None,
         content: content.clone(),
         person_id,
         created_at: std::time::SystemTime::now()
