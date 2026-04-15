@@ -50,6 +50,17 @@ pub struct UserLlmUsage {
     pub total_tokens: i64,
 }
 
+#[derive(Debug, Serialize)]
+pub struct UserLlmUsageDetailed {
+    pub user_id: i32,
+    pub model: String,
+    pub callsite: String,
+    pub calls: i64,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub total_tokens: i64,
+}
+
 impl LlmUsageRepository {
     pub fn new(pool: PgDbPool) -> Self {
         Self { pool }
@@ -177,6 +188,55 @@ impl LlmUsageRepository {
                 calls,
                 total_tokens: tokens.unwrap_or(0),
             })
+            .collect())
+    }
+
+    pub fn get_per_user_detailed_stats(
+        &self,
+        from_timestamp: i32,
+    ) -> Result<Vec<UserLlmUsageDetailed>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let rows: Vec<(
+            i32,
+            String,
+            String,
+            i64,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+        )> = llm_usage_logs::table
+            .filter(llm_usage_logs::created_at.ge(from_timestamp))
+            .group_by((
+                llm_usage_logs::user_id,
+                llm_usage_logs::model,
+                llm_usage_logs::callsite,
+            ))
+            .select((
+                llm_usage_logs::user_id,
+                llm_usage_logs::model,
+                llm_usage_logs::callsite,
+                count(llm_usage_logs::id),
+                diesel::dsl::sum(llm_usage_logs::prompt_tokens),
+                diesel::dsl::sum(llm_usage_logs::completion_tokens),
+                diesel::dsl::sum(llm_usage_logs::total_tokens),
+            ))
+            .order(diesel::dsl::sum(llm_usage_logs::total_tokens).desc())
+            .load(&mut conn)?;
+
+        Ok(rows
+            .into_iter()
+            .map(
+                |(user_id, model, callsite, calls, pt, ct, tt)| UserLlmUsageDetailed {
+                    user_id,
+                    model,
+                    callsite,
+                    calls,
+                    prompt_tokens: pt.unwrap_or(0),
+                    completion_tokens: ct.unwrap_or(0),
+                    total_tokens: tt.unwrap_or(0),
+                },
+            )
             .collect())
     }
 
