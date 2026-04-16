@@ -981,6 +981,11 @@ pub async fn get_senders(
                     msg_count: None,
                     is_group: false,
                 });
+                // Claim the chat:/group: keys too, so bridge DB and bridge-room
+                // searches further down don't add a second row for the same
+                // (name, platform) pair that's already surfaced as a person channel.
+                seen.insert(format!("chat:{}:{}", display.to_lowercase(), ch.platform));
+                seen.insert(format!("group:{}:{}", display.to_lowercase(), ch.platform));
             }
         }
     }
