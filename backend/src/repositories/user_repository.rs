@@ -1673,6 +1673,63 @@ impl UserRepository {
         Ok(())
     }
 
+    // Bridge watchdog log methods
+
+    pub fn insert_watchdog_log(
+        &self,
+        log: crate::pg_models::NewPgBridgeWatchdogLog,
+    ) -> Result<(), DieselError> {
+        use crate::pg_schema::bridge_watchdog_logs;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::insert_into(bridge_watchdog_logs::table)
+            .values(&log)
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    pub fn get_recent_watchdog_logs(
+        &self,
+        user_id_val: i32,
+        bridge_type_val: &str,
+        limit_val: i64,
+    ) -> Result<Vec<crate::pg_models::PgBridgeWatchdogLog>, DieselError> {
+        use crate::pg_schema::bridge_watchdog_logs::dsl::*;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        bridge_watchdog_logs
+            .filter(user_id.eq(user_id_val))
+            .filter(bridge_type.eq(bridge_type_val))
+            .order(created_at.desc())
+            .limit(limit_val)
+            .load::<crate::pg_models::PgBridgeWatchdogLog>(&mut conn)
+    }
+
+    pub fn get_watchdog_logs_since(
+        &self,
+        user_id_val: i32,
+        bridge_type_val: &str,
+        since_ts: i32,
+    ) -> Result<Vec<crate::pg_models::PgBridgeWatchdogLog>, DieselError> {
+        use crate::pg_schema::bridge_watchdog_logs::dsl::*;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        bridge_watchdog_logs
+            .filter(user_id.eq(user_id_val))
+            .filter(bridge_type.eq(bridge_type_val))
+            .filter(created_at.ge(since_ts))
+            .order(created_at.desc())
+            .load::<crate::pg_models::PgBridgeWatchdogLog>(&mut conn)
+    }
+
+    pub fn delete_old_watchdog_logs(&self, cutoff_ts: i32) -> Result<usize, DieselError> {
+        use crate::pg_schema::bridge_watchdog_logs::dsl::*;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::delete(bridge_watchdog_logs.filter(created_at.lt(cutoff_ts))).execute(&mut conn)
+    }
+
     // Mark an email as processed
     pub fn mark_email_as_processed(
         &self,

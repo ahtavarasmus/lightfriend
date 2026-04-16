@@ -2453,3 +2453,83 @@ pub fn capitalize(s: &str) -> String {
         Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
     }
 }
+
+// -- Watchdog: management room message reader --
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ManagementRoomMessage {
+    pub sender: String,
+    pub body: String,
+    pub timestamp: i64,
+    pub is_from_bot: bool,
+}
+
+/// Read recent messages from a bridge management room (the room where the bridge
+/// bot sends status/health messages). Uses the room_id stored in PgBridge.room_id.
+pub async fn read_management_room_messages(
+    client: &Arc<MatrixClient>,
+    room_id_str: &str,
+    limit: u64,
+) -> Result<Vec<ManagementRoomMessage>> {
+    use matrix_sdk::ruma::{
+        events::room::message::{MessageType, SyncRoomMessageEvent},
+        events::AnySyncTimelineEvent,
+        OwnedRoomId,
+    };
+
+    let room_id: OwnedRoomId = room_id_str
+        .parse()
+        .map_err(|_| anyhow!("Invalid room ID: {}", room_id_str))?;
+
+    let room = client
+        .get_room(&room_id)
+        .ok_or_else(|| anyhow!("Management room not found: {}", room_id_str))?;
+
+    let mut options = MessagesOptions::backward();
+    options.limit = matrix_sdk::ruma::UInt::new(limit).unwrap();
+
+    let response = room
+        .messages(options)
+        .await
+        .map_err(|e| anyhow!("Failed to fetch management room messages: {}", e))?;
+
+    // Determine which bot user to look for based on room members
+    let bot_localparts = ["whatsappbot", "signalbot", "telegrambot"];
+
+    let mut messages = Vec::new();
+    for msg in response.chunk {
+        let raw_event = msg.raw();
+        if let Ok(event) = raw_event.deserialize() {
+            let sender = event.sender().to_string();
+            let sender_localpart = event.sender().localpart().to_string();
+
+            if let AnySyncTimelineEvent::MessageLike(
+                matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(
+                    SyncRoomMessageEvent::Original(original),
+                ),
+            ) = event
+            {
+                let body = match original.content.msgtype {
+                    MessageType::Text(text) => text.body,
+                    MessageType::Notice(notice) => notice.body,
+                    _ => continue,
+                };
+
+                let timestamp = i64::from(original.origin_server_ts.0) / 1000;
+
+                let is_from_bot = bot_localparts
+                    .iter()
+                    .any(|bot| sender_localpart.as_str() == *bot);
+
+                messages.push(ManagementRoomMessage {
+                    sender,
+                    body,
+                    timestamp,
+                    is_from_bot,
+                });
+            }
+        }
+    }
+
+    Ok(messages)
+}

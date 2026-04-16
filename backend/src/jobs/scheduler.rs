@@ -5,7 +5,7 @@ use chrono::Offset;
 use futures_util::TryStreamExt;
 use std::sync::Arc;
 use tokio_cron_scheduler::{Job, JobScheduler};
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use crate::handlers::imap_handlers;
 
@@ -248,6 +248,84 @@ async fn cleanup_matrix_client(state: &Arc<AppState>, user_id: i32) {
     if matrix_clients.remove(&user_id).is_some() {
         debug!("Removed Matrix client for user {} during cleanup", user_id);
     }
+}
+
+/// Scan bridge management rooms for all users and log bot messages.
+/// This captures disconnection events, errors, and status messages
+/// for future analysis.
+async fn scan_bridge_management_rooms(
+    state: &Arc<AppState>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let users_with_bridges = state.user_repository.get_users_with_active_bridges()?;
+
+    for (user_id, bridges) in users_with_bridges {
+        for bridge in bridges {
+            let Some(ref room_id) = bridge.room_id else {
+                continue;
+            };
+
+            let client = match crate::utils::matrix_auth::get_cached_client(user_id, state).await {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("Watchdog: can't get client for user {}: {}", user_id, e);
+                    continue;
+                }
+            };
+
+            let messages =
+                match crate::utils::bridge::read_management_room_messages(&client, room_id, 10)
+                    .await
+                {
+                    Ok(m) => m,
+                    Err(e) => {
+                        warn!(
+                            "Watchdog: can't read mgmt room for user {} {}: {}",
+                            user_id, bridge.bridge_type, e
+                        );
+                        continue;
+                    }
+                };
+
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
+
+            // Get the last logged timestamp to avoid duplicate logging
+            let last_logged = state
+                .user_repository
+                .get_recent_watchdog_logs(user_id, &bridge.bridge_type, 1)
+                .ok()
+                .and_then(|logs| logs.first().map(|l| l.created_at))
+                .unwrap_or(0);
+
+            // Compute bridge age for metadata
+            let bridge_age = bridge.created_at.map(|c| now - c);
+
+            for msg in messages
+                .iter()
+                .filter(|m| m.is_from_bot && (m.timestamp as i32) > last_logged)
+            {
+                let metadata = serde_json::json!({
+                    "bridge_age_secs": bridge_age,
+                })
+                .to_string();
+
+                let log = crate::pg_models::NewPgBridgeWatchdogLog {
+                    user_id,
+                    bridge_type: bridge.bridge_type.clone(),
+                    event_type: "bot_message".to_string(),
+                    message: msg.body.clone(),
+                    metadata: Some(metadata),
+                    created_at: msg.timestamp as i32,
+                };
+                if let Err(e) = state.user_repository.insert_watchdog_log(log) {
+                    error!("Failed to insert watchdog log: {}", e);
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Check if any Matrix sync tasks have died and restart them.
@@ -684,6 +762,24 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .await
         .expect("Failed to add sync health check job to scheduler");
 
+    // Bridge watchdog - runs every 15 minutes to log management room messages
+    let state_clone = Arc::clone(&state);
+    let bridge_watchdog_job = Job::new_async("0 */15 * * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            debug!("Running bridge watchdog management room scan...");
+            if let Err(e) = scan_bridge_management_rooms(&state).await {
+                error!("Bridge watchdog scan failed: {}", e);
+            }
+        })
+    })
+    .expect("Failed to create bridge watchdog job");
+
+    sched
+        .add(bridge_watchdog_job)
+        .await
+        .expect("Failed to add bridge watchdog job to scheduler");
+
     // Admin alert cleanup - runs daily at 2am UTC to remove alerts older than 30 days
     let state_clone = Arc::clone(&state);
     let alert_cleanup_job = Job::new_async("0 0 2 * * *", move |_, _| {
@@ -731,6 +827,16 @@ pub async fn start_scheduler(state: Arc<AppState>) {
             {
                 Ok(count) => debug!("Cleaned up {} old message status logs", count),
                 Err(e) => error!("Failed to cleanup old message status logs: {}", e),
+            }
+
+            // Clean up old watchdog logs (30 days)
+            match state
+                .user_repository
+                .delete_old_watchdog_logs(message_log_cutoff)
+            {
+                Ok(count) if count > 0 => debug!("Cleaned up {} old watchdog logs", count),
+                Err(e) => error!("Failed to cleanup old watchdog logs: {}", e),
+                _ => {}
             }
 
             // Expire stale "ongoing" call records (no webhook received after 1 hour)

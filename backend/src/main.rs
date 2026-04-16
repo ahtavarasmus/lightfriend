@@ -1298,7 +1298,19 @@ async fn main() {
             post(admin_handlers::recover_users_from_external),
         );
 
+    // Watchdog endpoints (secret-authenticated, no JWT)
+    let watchdog_routes = Router::new()
+        .route(
+            "/api/watchdog/bridge/health",
+            get(handlers::watchdog_handlers::bridge_health_check),
+        )
+        .route(
+            "/api/watchdog/bridge/test-send",
+            post(handlers::watchdog_handlers::bridge_send_test),
+        );
+
     let app = Router::new()
+        .merge(watchdog_routes)
         .merge(maintenance_routes)
         .merge(public_routes)
         .merge(admin_routes)
