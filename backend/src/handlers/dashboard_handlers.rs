@@ -1022,7 +1022,7 @@ pub async fn get_senders(
             async move {
                 let result = tokio::time::timeout(
                     Duration::from_secs(8),
-                    crate::utils::bridge::search_bridge_rooms(
+                    crate::utils::bridge::search_bridge_rooms_by_name(
                         &service,
                         &state,
                         user_id,

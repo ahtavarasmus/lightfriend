@@ -2397,6 +2397,55 @@ pub async fn search_bridge_rooms(
     Ok(results)
 }
 
+/// Search only the Matrix rooms the client already knows about.
+///
+/// This is intentionally narrower than `search_bridge_rooms`: it does not call
+/// provisioning APIs, user-directory search, or bridge management-room commands.
+/// Dashboard autocomplete needs a bounded, non-mutating lookup; bridge commands
+/// can block the backend when the bridge bot does not answer.
+pub async fn search_bridge_rooms_by_name(
+    service: &str,
+    state: &Arc<AppState>,
+    user_id: i32,
+    search_term: &str,
+) -> Result<Vec<BridgeRoom>> {
+    let bridge = state.user_repository.get_bridge(user_id, service)?;
+    if bridge.map(|b| b.status != "connected").unwrap_or(true) {
+        return Err(anyhow!(
+            "{} bridge is not connected. Please log in first.",
+            capitalize(service)
+        ));
+    }
+
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
+    let all_rooms = get_service_rooms(&client, service).await?;
+    let search_term_lower = search_term.trim().to_lowercase();
+
+    let mut matching_rooms: Vec<(f64, BridgeRoom)> = all_rooms
+        .into_iter()
+        .filter_map(|room| {
+            bridge_room_matches_search(&room.display_name, &search_term_lower)
+                .map(|score| (score, room))
+        })
+        .collect();
+
+    matching_rooms.sort_by(|a, b| {
+        b.0.partial_cmp(&a.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(b.1.last_activity.cmp(&a.1.last_activity))
+    });
+
+    let results: Vec<BridgeRoom> = matching_rooms.into_iter().map(|(_, room)| room).collect();
+    tracing::info!(
+        "search_bridge_rooms_by_name: final_results={} service={} query_len={}",
+        results.len(),
+        capitalize(service),
+        search_term.trim().chars().count()
+    );
+
+    Ok(results)
+}
+
 pub fn capitalize(s: &str) -> String {
     let mut c = s.chars();
     match c.next() {
