@@ -94,7 +94,7 @@ fn active_hour_range(hour_buckets: &[u32; 24], total: u32) -> Option<(usize, usi
         return None;
     }
     // Sort by count descending, accumulate until 80%
-    indexed.sort_by(|a, b| b.1.cmp(&a.1));
+    indexed.sort_by_key(|b| std::cmp::Reverse(b.1));
     let threshold = (total as f64 * 0.8) as u32;
     let mut acc = 0u32;
     let mut active: Vec<usize> = Vec::new();

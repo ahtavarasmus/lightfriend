@@ -96,7 +96,7 @@ impl BandwidthRepository {
             )
             .collect();
 
-        results.sort_by(|a, b| b.bytes_total.cmp(&a.bytes_total));
+        results.sort_by_key(|b| std::cmp::Reverse(b.bytes_total));
         Ok(results)
     }
 

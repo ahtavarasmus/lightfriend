@@ -663,7 +663,7 @@ impl RoomInterface for MockRoom {
             .take(limit as usize)
             .cloned()
             .collect();
-        result.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        result.sort_by_key(|b| std::cmp::Reverse(b.timestamp));
         Ok(result)
     }
 

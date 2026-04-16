@@ -232,7 +232,7 @@ async fn fetch_subscription_feed_with_token(
     }
 
     // Sort by published date (newest first)
-    all_videos.sort_by(|a, b| b.published_at.cmp(&a.published_at));
+    all_videos.sort_by_cached_key(|b| std::cmp::Reverse(b.published_at.clone()));
 
     // Limit to 20 most recent
     all_videos.truncate(20);
