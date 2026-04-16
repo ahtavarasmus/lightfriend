@@ -518,7 +518,7 @@ pub async fn fetch_bridge_messages_trait(
     }
 
     // Sort by timestamp (most recent first)
-    all_messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    all_messages.sort_by_key(|b| std::cmp::Reverse(b.timestamp));
     Ok(all_messages)
 }
 
@@ -1036,7 +1036,7 @@ pub async fn fetch_bridge_messages(
     }
 
     // Sort by timestamp (most recent first)
-    bridge_messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    bridge_messages.sort_by_key(|b| std::cmp::Reverse(b.timestamp));
     tracing::info!("Retrieved {} messages from Postgres", bridge_messages.len());
     Ok(bridge_messages)
 }

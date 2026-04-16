@@ -763,7 +763,7 @@ pub async fn get_activity_feed(
     }
 
     // Sort by timestamp descending, truncate
-    entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    entries.sort_by_key(|b| std::cmp::Reverse(b.timestamp));
     entries.truncate(limit as usize);
 
     Ok(Json(entries))
@@ -981,6 +981,11 @@ pub async fn get_senders(
                     msg_count: None,
                     is_group: false,
                 });
+                // Claim the chat:/group: keys too, so bridge DB and bridge-room
+                // searches further down don't add a second row for the same
+                // (name, platform) pair that's already surfaced as a person channel.
+                seen.insert(format!("chat:{}:{}", display.to_lowercase(), ch.platform));
+                seen.insert(format!("group:{}:{}", display.to_lowercase(), ch.platform));
             }
         }
     }

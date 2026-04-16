@@ -542,7 +542,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                                         if processed_emails.len() > cleanup_threshold {
                                             // Sort by processed_at timestamp (newest first)
-                                            processed_emails.sort_by(|a, b| b.processed_at.cmp(&a.processed_at));
+                                            processed_emails.sort_by_key(|b| std::cmp::Reverse(b.processed_at));
 
                                             // Keep at least fetch_window emails plus some buffer
                                             let keep_count = fetch_window * 2;  // Keep 20 emails (double the fetch window)

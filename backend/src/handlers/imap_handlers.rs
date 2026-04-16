@@ -1133,7 +1133,7 @@ pub async fn fetch_emails_imap(
     }
 
     // Sort by date descending (newest first)
-    all_previews.sort_by(|a, b| b.date.cmp(&a.date));
+    all_previews.sort_by_key(|b| std::cmp::Reverse(b.date));
 
     // Apply limit across all accounts
     if let Some(lim) = limit {

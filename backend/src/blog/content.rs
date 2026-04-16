@@ -268,7 +268,7 @@ impl BlogStore {
 
         // Blog posts sorted by date
         let mut sorted: Vec<&BlogPost> = posts.values().collect();
-        sorted.sort_by(|a, b| b.frontmatter.date.cmp(&a.frontmatter.date));
+        sorted.sort_by_cached_key(|b| std::cmp::Reverse(b.frontmatter.date.clone()));
 
         for post in sorted {
             let priority = if post.frontmatter.cluster_hub {
