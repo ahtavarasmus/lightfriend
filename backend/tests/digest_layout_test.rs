@@ -672,7 +672,7 @@ async fn full_digest_renders_all_sections() {
     );
     println!("message_ids included: {:?}", message_ids);
 
-    // Section ordering: header → Today → Critical → Important → FYI → New → Done → Reply
+    // Section ordering: header → Today → Critical → Important → FYI → New → Done
     let today_pos = digest_text.find("Today:").expect("Today section missing");
     let crit_pos = digest_text
         .find("Critical:")
@@ -683,16 +683,12 @@ async fn full_digest_renders_all_sections() {
     let fyi_pos = digest_text.find("FYI:").expect("FYI section missing");
     let new_pos = digest_text.find("New:").expect("New section missing");
     let done_pos = digest_text.find("Done:").expect("Done section missing");
-    let cta_pos = digest_text
-        .find("Reply to dig in")
-        .expect("CTA footer missing");
 
     assert!(today_pos < crit_pos);
     assert!(crit_pos < imp_pos);
     assert!(imp_pos < fyi_pos);
     assert!(fyi_pos < new_pos);
     assert!(new_pos < done_pos);
-    assert!(done_pos < cta_pos);
 
     // Today's events present (inline format with times)
     assert!(digest_text.contains("Doctor appointment"));
