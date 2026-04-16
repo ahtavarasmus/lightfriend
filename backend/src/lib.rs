@@ -29,6 +29,7 @@ pub mod handlers {
     pub mod totp_handlers;
     pub mod trust_chain_handlers;
     pub mod twilio_handlers;
+    pub mod watchdog_handlers;
     pub mod webauthn_handlers;
     pub mod whatsapp_auth;
     pub mod whatsapp_handlers;

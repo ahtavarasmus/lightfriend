@@ -502,6 +502,18 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    bridge_watchdog_logs (id) {
+        id -> Int4,
+        user_id -> Int4,
+        bridge_type -> Text,
+        event_type -> Text,
+        message -> Text,
+        metadata -> Nullable<Text>,
+        created_at -> Int4,
+    }
+}
+
 diesel::joinable!(ont_person_edits -> ont_persons (person_id));
 diesel::joinable!(ont_channels -> ont_persons (person_id));
 
@@ -544,4 +556,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     ont_rules,
     llm_usage_logs,
     bridge_bandwidth_logs,
+    bridge_watchdog_logs,
 );

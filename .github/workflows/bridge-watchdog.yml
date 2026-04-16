@@ -1,0 +1,164 @@
+name: Bridge Watchdog
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # Every 15 minutes
+  workflow_dispatch: {}       # Manual trigger
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  check-bridge-health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Check bridge health
+        env:
+          WATCHDOG_API_KEY: ${{ secrets.WATCHDOG_API_KEY }}
+          SERVER_URL: ${{ secrets.SERVER_URL }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          S3_BUCKET: lightfriend-prod-backups
+        run: |
+          set -euo pipefail
+
+          # Call the health check endpoint
+          RESPONSE=$(curl -sf --max-time 30 \
+            -H "X-Watchdog-Key: ${WATCHDOG_API_KEY}" \
+            "${SERVER_URL}/api/watchdog/bridge/health" 2>/dev/null || echo "")
+
+          if [ -z "$RESPONSE" ]; then
+            echo "CRITICAL: Backend unreachable or returned error"
+            STATUS="unreachable"
+            TOTAL=0
+            HEALTHY=0
+            UNHEALTHY=0
+          else
+            STATUS=$(echo "$RESPONSE" | jq -r '.overall_status // "unknown"')
+            TOTAL=$(echo "$RESPONSE" | jq -r '.total_bridges // 0')
+            HEALTHY=$(echo "$RESPONSE" | jq -r '.healthy // 0')
+            UNHEALTHY=$(echo "$RESPONSE" | jq -r '.unhealthy // 0')
+
+            # Log only aggregate status (no per-user details in workflow output)
+            echo "Bridge health: ${HEALTHY}/${TOTAL} healthy (status: ${STATUS})"
+          fi
+
+          # Only alert on unhealthy or unreachable
+          if [ "$STATUS" != "unhealthy" ] && [ "$STATUS" != "unreachable" ]; then
+            echo "OK: All bridges healthy"
+            exit 0
+          fi
+
+          echo "ALERT: Bridge status is ${STATUS}"
+
+          # Check cooldown: skip email if we sent one within the last 4 hours
+          MARKER_KEY="watchdog/last-bridge-alert.txt"
+          LAST_ALERT=$(aws s3 cp "s3://${S3_BUCKET}/${MARKER_KEY}" - 2>/dev/null || echo "0")
+          NOW=$(date +%s)
+          COOLDOWN=14400  # 4 hours
+
+          if [ -n "$LAST_ALERT" ] && [ "$LAST_ALERT" -gt 0 ] 2>/dev/null; then
+            ELAPSED=$((NOW - LAST_ALERT))
+            if [ "$ELAPSED" -lt "$COOLDOWN" ]; then
+              echo "Cooldown active: last alert was ${ELAPSED}s ago (threshold: ${COOLDOWN}s). Skipping email."
+              exit 1
+            fi
+          fi
+
+          # Build alert email - include full details only in email (private)
+          if [ "$STATUS" = "unreachable" ]; then
+            DETAILS="The backend health check endpoint is unreachable.\nThis could indicate the server is down."
+          else
+            DETAILS=$(echo "$RESPONSE" | jq -r '
+              .checks_detail[] |
+              select(.status != "healthy") |
+              "User \(.user_id) (\(.bridge_type)): \(.status)\n" +
+              (.checks | to_entries[] | select(.value.status != "pass") |
+              "  \(.key): \(.value.status) - \(.value.detail // "no detail")\n")
+            ' 2>/dev/null | head -50)
+          fi
+
+          SUBJECT="ALERT: WhatsApp bridge ${STATUS} (${UNHEALTHY}/${TOTAL} unhealthy)"
+
+          cat > /tmp/email.txt <<EOF
+          From: Lightfriend Watchdog <notifications@lightfriend.ai>
+          To: rasmus@lightfriend.ai
+          Subject: ${SUBJECT}
+          Content-Type: text/plain; charset=utf-8
+
+          Lightfriend Bridge Watchdog
+
+          Status: ${STATUS}
+          Bridges: ${HEALTHY}/${TOTAL} healthy, ${UNHEALTHY} unhealthy
+
+          Failed checks:
+          $(echo -e "$DETAILS")
+
+          Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          EOF
+
+          sed -i 's/^          //' /tmp/email.txt
+
+          curl -s --url "smtps://smtp.resend.com:465" \
+            --mail-from "notifications@lightfriend.ai" \
+            --mail-rcpt "rasmus@lightfriend.ai" \
+            --upload-file /tmp/email.txt \
+            --user "${SMTP_USERNAME}:${SMTP_PASSWORD}" \
+            --ssl-reqd
+
+          echo "Alert email sent"
+
+          # Write cooldown marker to S3
+          echo -n "$NOW" | aws s3 cp - "s3://${S3_BUCKET}/${MARKER_KEY}"
+
+          # Fail the workflow so it shows red in GitHub Actions
+          exit 1
+
+  send-test-message:
+    runs-on: ubuntu-latest
+    # Only attempt test-send every 3 hours
+    if: github.event_name == 'schedule'
+    steps:
+      - name: Send test message (rate-limited by backend)
+        env:
+          WATCHDOG_API_KEY: ${{ secrets.WATCHDOG_API_KEY }}
+          SERVER_URL: ${{ secrets.SERVER_URL }}
+        run: |
+          set -euo pipefail
+
+          HOUR=$(date -u +%H)
+          MINUTE=$(date -u +%M)
+
+          # Only run at 3-hour boundaries in the first 15-minute window
+          if [ $(( HOUR % 3 )) -ne 0 ] || [ "$MINUTE" -ge 15 ]; then
+            echo "Skipping test-send: not a 3-hour boundary (hour=${HOUR}, minute=${MINUTE})"
+            exit 0
+          fi
+
+          RESPONSE=$(curl -sf --max-time 60 \
+            -X POST \
+            -H "X-Watchdog-Key: ${WATCHDOG_API_KEY}" \
+            "${SERVER_URL}/api/watchdog/bridge/test-send" 2>/dev/null || echo "")
+
+          if [ -z "$RESPONSE" ]; then
+            echo "WARNING: Test send endpoint unreachable"
+            exit 0
+          fi
+
+          TEST_STATUS=$(echo "$RESPONSE" | jq -r '.status // "unknown"')
+          SKIPPED=$(echo "$RESPONSE" | jq -r '.skipped // false')
+
+          echo "Test send: status=${TEST_STATUS}, skipped=${SKIPPED}"
+
+          if [ "$TEST_STATUS" = "fail" ] && [ "$SKIPPED" = "false" ]; then
+            echo "WARNING: Test message send failed"
+            echo "Detail: $(echo "$RESPONSE" | jq -r '.detail // "unknown"')"
+            # Don't fail workflow - the health check job handles alerting
+          fi

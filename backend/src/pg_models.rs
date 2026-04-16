@@ -4,10 +4,10 @@
 //! If any code tries to use these with a SQLite connection, it won't compile.
 
 use crate::pg_schema::{
-    admin_alerts, bridge_bandwidth_logs, bridge_disconnection_events, bridges,
-    country_availability, disabled_alert_types, imap_connection, llm_usage_logs, mcp_servers,
-    message_history, message_status_log, processed_emails, refund_info, site_metrics, tesla,
-    totp_backup_codes, totp_secrets, usage_logs, user_info, user_secrets, waitlist,
+    admin_alerts, bridge_bandwidth_logs, bridge_disconnection_events, bridge_watchdog_logs,
+    bridges, country_availability, disabled_alert_types, imap_connection, llm_usage_logs,
+    mcp_servers, message_history, message_status_log, processed_emails, refund_info, site_metrics,
+    tesla, totp_backup_codes, totp_secrets, usage_logs, user_info, user_secrets, waitlist,
     webauthn_challenges, webauthn_credentials, youtube,
 };
 use diesel::prelude::*;
@@ -352,6 +352,32 @@ pub struct NewPgBridgeDisconnectionEvent {
     pub user_id: i32,
     pub bridge_type: String,
     pub detected_at: i32,
+}
+
+// -- bridge_watchdog_logs --
+
+#[derive(Queryable, Selectable, Debug, Clone, Serialize)]
+#[diesel(table_name = bridge_watchdog_logs)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct PgBridgeWatchdogLog {
+    pub id: i32,
+    pub user_id: i32,
+    pub bridge_type: String,
+    pub event_type: String,
+    pub message: String,
+    pub metadata: Option<String>,
+    pub created_at: i32,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = bridge_watchdog_logs)]
+pub struct NewPgBridgeWatchdogLog {
+    pub user_id: i32,
+    pub bridge_type: String,
+    pub event_type: String,
+    pub message: String,
+    pub metadata: Option<String>,
+    pub created_at: i32,
 }
 
 // -- usage_logs --
