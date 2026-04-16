@@ -1011,9 +1011,56 @@ pub async fn get_senders(
         }
     }
 
-    // 3. Targeted bridge search for typed autocomplete. Avoid scanning every room
-    // when the dropdown first opens; large Matrix accounts can otherwise block UI.
-    let services = ["signal", "whatsapp", "telegram"];
+    // 3. WhatsApp contacts from bridge DB. This is the primary source for
+    // WhatsApp contacts because Matrix rooms/portals can be created lazily.
+    // Keep this before bridge room scans so the prod test can clearly show
+    // whether whatsapp_db has the contact coverage we need.
+    if state.whatsapp_bridge_repository.is_some() {
+        let contacts = crate::utils::bridge_contacts::get_whatsapp_contacts(&state, user_id).await;
+        let total_from_db = contacts.len();
+        let mut matched = 0usize;
+        let mut added = 0usize;
+        for c in &contacts {
+            if search_lower
+                .as_ref()
+                .map(|q| !c.name.to_lowercase().contains(q))
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            matched += 1;
+            let key = format!("chat:{}:whatsapp", c.name.to_lowercase());
+            if seen.insert(key) {
+                options.push(SenderOption {
+                    name: c.name.clone(),
+                    platform: Some("whatsapp".to_string()),
+                    source: "chat".to_string(),
+                    msg_count: None,
+                    is_group: false,
+                });
+                added += 1;
+            }
+        }
+        tracing::info!(
+            "get_senders: user {} whatsapp bridge DB PRIMARY query_len={} returned {} contacts, {} matched, {} new (rest deduped)",
+            user_id,
+            query_len,
+            total_from_db,
+            matched,
+            added
+        );
+    } else {
+        tracing::info!(
+            "get_senders: user {} whatsapp bridge repository not configured (WHATSAPP_BRIDGE_DATABASE_URL unset)",
+            user_id
+        );
+    }
+
+    // 4. Targeted bridge room search for non-WhatsApp typed autocomplete. Avoid
+    // scanning every room when the dropdown first opens; large Matrix accounts
+    // can otherwise block UI. WhatsApp intentionally uses only the bridge DB in
+    // this endpoint during the prod coverage test.
+    let services = ["signal", "telegram"];
     if let Some(search_term) = search.as_ref().filter(|q| q.chars().count() >= 2) {
         let searches = services.iter().map(|service| {
             let state = state.clone();
@@ -1084,48 +1131,6 @@ pub async fn get_senders(
             "get_senders: user {} skipping bridge search query_len={}",
             user_id,
             query_len
-        );
-    }
-
-    // 4. WhatsApp contacts from bridge DB (catches DMs without Matrix rooms yet).
-    // No-op if WHATSAPP_BRIDGE_DATABASE_URL is unset (e.g. dev). Failures are
-    // logged inside get_whatsapp_contacts and yield an empty Vec, so this
-    // branch can never break the rest of the endpoint.
-    if state.whatsapp_bridge_repository.is_some() {
-        let contacts = crate::utils::bridge_contacts::get_whatsapp_contacts(&state, user_id).await;
-        let total_from_db = contacts.len();
-        let mut added = 0usize;
-        for c in &contacts {
-            if search_lower
-                .as_ref()
-                .map(|q| !c.name.to_lowercase().contains(q))
-                .unwrap_or(false)
-            {
-                continue;
-            }
-            let key = format!("chat:{}:whatsapp", c.name.to_lowercase());
-            if seen.insert(key) {
-                options.push(SenderOption {
-                    name: c.name.clone(),
-                    platform: Some("whatsapp".to_string()),
-                    source: "chat".to_string(),
-                    msg_count: None,
-                    is_group: false,
-                });
-                added += 1;
-            }
-        }
-        tracing::info!(
-            "get_senders: user {} whatsapp bridge DB query_len={} returned {} contacts, {} new (rest deduped)",
-            user_id,
-            query_len,
-            total_from_db,
-            added
-        );
-    } else {
-        tracing::info!(
-            "get_senders: user {} whatsapp bridge repository not configured (WHATSAPP_BRIDGE_DATABASE_URL unset)",
-            user_id
         );
     }
 
