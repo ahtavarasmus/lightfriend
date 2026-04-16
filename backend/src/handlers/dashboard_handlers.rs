@@ -5,9 +5,9 @@ use axum::{
     Json,
 };
 use chrono::Datelike;
-use futures::stream::Stream;
+use futures::{future::join_all, stream::Stream};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use std::collections::HashMap;
 
@@ -911,16 +911,36 @@ pub struct SenderOption {
     pub is_group: bool,
 }
 
+#[derive(Deserialize)]
+pub struct SenderListQuery {
+    pub q: Option<String>,
+}
+
 /// GET /api/dashboard/senders
 /// Returns known senders for rule builder autocomplete.
 /// Combines: persons (with their channels) + distinct senders from ont_messages.
 pub async fn get_senders(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
+    Query(query): Query<SenderListQuery>,
 ) -> Result<Json<Vec<SenderOption>>, (StatusCode, Json<serde_json::Value>)> {
     let user_id = auth_user.user_id;
     let mut options: Vec<SenderOption> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let search = query
+        .q
+        .as_deref()
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+        .map(str::to_string);
+    let search_lower = search.as_ref().map(|q| q.to_lowercase());
+    let query_len = search.as_ref().map(|q| q.chars().count()).unwrap_or(0);
+
+    tracing::info!(
+        "get_senders: user {} start query_len={}",
+        user_id,
+        query_len
+    );
 
     // 1. Persons with channels (highest priority)
     let persons = state
@@ -930,6 +950,13 @@ pub async fn get_senders(
 
     for person in &persons {
         let display = person.display_name().to_string();
+        if search_lower
+            .as_ref()
+            .map(|q| !display.to_lowercase().contains(q))
+            .unwrap_or(false)
+        {
+            continue;
+        }
 
         // Person-level entry (matches all channels)
         let key = format!("person:{}", display.to_lowercase());
@@ -965,6 +992,13 @@ pub async fn get_senders(
         .unwrap_or_default();
 
     for (sender_name, platform, count) in &senders {
+        if search_lower
+            .as_ref()
+            .map(|q| !sender_name.to_lowercase().contains(q))
+            .unwrap_or(false)
+        {
+            continue;
+        }
         let key = format!("chat:{}:{}", sender_name.to_lowercase(), platform);
         if seen.insert(key) {
             options.push(SenderOption {
@@ -977,95 +1011,80 @@ pub async fn get_senders(
         }
     }
 
-    // 3. All bridge rooms (fills in chats not yet in ont_messages + identifies groups)
+    // 3. Targeted bridge search for typed autocomplete. Avoid scanning every room
+    // when the dropdown first opens; large Matrix accounts can otherwise block UI.
     let services = ["signal", "whatsapp", "telegram"];
-    // Clone the Arc so we can drop the lock before the potentially slow sync
-    let client_arc = {
-        let matrix_clients = state.matrix_clients.lock().await;
-        matrix_clients.get(&user_id).cloned()
-    };
-    if let Some(client) = client_arc {
-        let before_sync = client.joined_rooms().len();
-        // Sync to pick up rooms created/joined since last sync (bridges create rooms lazily)
-        if let Err(e) = client
-            .sync_once(matrix_sdk::config::SyncSettings::new())
-            .await
-        {
-            tracing::warn!("get_senders: user {} sync_once failed: {}", user_id, e);
-        }
-        let after_sync = client.joined_rooms().len();
-        tracing::info!(
-            "ROOM_SYNC_RESULT: user={}, before={}, after={}, new_rooms={}",
-            user_id,
-            before_sync,
-            after_sync,
-            after_sync.saturating_sub(before_sync)
-        );
-        for service in &services {
-            let bridge_ok = state
-                .user_repository
-                .get_bridge(user_id, service)
-                .ok()
-                .flatten()
-                .map(|b| b.status == "connected")
-                .unwrap_or(false);
-            if !bridge_ok {
-                tracing::info!(
-                    "get_senders: user {} skipping {} (bridge not connected)",
-                    user_id,
-                    service
-                );
-                continue;
+    if let Some(search_term) = search.as_ref().filter(|q| q.chars().count() >= 2) {
+        let searches = services.iter().map(|service| {
+            let state = state.clone();
+            let service = service.to_string();
+            let search_term = search_term.clone();
+            async move {
+                let result = tokio::time::timeout(
+                    Duration::from_secs(8),
+                    crate::utils::bridge::search_bridge_rooms(
+                        &service,
+                        &state,
+                        user_id,
+                        &search_term,
+                    ),
+                )
+                .await;
+                (service, result)
             }
-            match crate::utils::bridge::get_service_rooms(&client, service).await {
-                Ok(rooms) => {
+        });
+
+        for (service, result) in join_all(searches).await {
+            match result {
+                Ok(Ok(rooms)) => {
                     tracing::info!(
-                        "get_senders: user {} {} returned {} rooms",
+                        "get_senders: user {} {} query_len={} returned {} matched bridge rooms",
                         user_id,
                         service,
+                        query_len,
                         rooms.len()
                     );
                     for room in rooms {
                         let display =
                             crate::utils::bridge::remove_bridge_suffix(&room.display_name);
-                        if room.is_group {
-                            let key = format!("group:{}:{}", display.to_lowercase(), service);
-                            if seen.insert(key) {
-                                options.push(SenderOption {
-                                    name: display,
-                                    platform: Some(service.to_string()),
-                                    source: "group".to_string(),
-                                    msg_count: None,
-                                    is_group: true,
-                                });
-                            }
-                        } else {
-                            // Non-group bridge room - add if not already present from ont_messages
-                            let key = format!("chat:{}:{}", display.to_lowercase(), service);
-                            if seen.insert(key) {
-                                options.push(SenderOption {
-                                    name: display,
-                                    platform: Some(service.to_string()),
-                                    source: "chat".to_string(),
-                                    msg_count: None,
-                                    is_group: false,
-                                });
-                            }
+                        let source = if room.is_group { "group" } else { "chat" };
+                        let key = format!("{}:{}:{}", source, display.to_lowercase(), service);
+                        if seen.insert(key) {
+                            options.push(SenderOption {
+                                name: display,
+                                platform: Some(service.clone()),
+                                source: source.to_string(),
+                                msg_count: None,
+                                is_group: room.is_group,
+                            });
                         }
                     }
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     tracing::warn!(
-                        "get_senders: user {} get_service_rooms({}) failed: {}",
+                        "get_senders: user {} bridge search {} query_len={} failed: {}",
                         user_id,
                         service,
+                        query_len,
                         e
+                    );
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        "get_senders: user {} bridge search {} query_len={} timed out",
+                        user_id,
+                        service,
+                        query_len
                     );
                 }
             }
         }
     } else {
-        tracing::warn!("get_senders: user {} has no matrix client cached", user_id);
+        tracing::info!(
+            "get_senders: user {} skipping bridge search query_len={}",
+            user_id,
+            query_len
+        );
     }
 
     // 4. WhatsApp contacts from bridge DB (catches DMs without Matrix rooms yet).
@@ -1077,6 +1096,13 @@ pub async fn get_senders(
         let total_from_db = contacts.len();
         let mut added = 0usize;
         for c in &contacts {
+            if search_lower
+                .as_ref()
+                .map(|q| !c.name.to_lowercase().contains(q))
+                .unwrap_or(false)
+            {
+                continue;
+            }
             let key = format!("chat:{}:whatsapp", c.name.to_lowercase());
             if seen.insert(key) {
                 options.push(SenderOption {
@@ -1090,8 +1116,9 @@ pub async fn get_senders(
             }
         }
         tracing::info!(
-            "get_senders: user {} whatsapp bridge DB returned {} contacts, {} new (rest deduped)",
+            "get_senders: user {} whatsapp bridge DB query_len={} returned {} contacts, {} new (rest deduped)",
             user_id,
+            query_len,
             total_from_db,
             added
         );
@@ -1106,8 +1133,9 @@ pub async fn get_senders(
     let chat_count = options.iter().filter(|o| o.source == "chat").count();
     let group_count = options.iter().filter(|o| o.source == "group").count();
     tracing::info!(
-        "get_senders: user {} -> {} persons, {} chats, {} groups, {} total",
+        "get_senders: user {} query_len={} -> {} persons, {} chats, {} groups, {} total",
         user_id,
+        query_len,
         person_count,
         chat_count,
         group_count,

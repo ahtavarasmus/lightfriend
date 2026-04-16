@@ -1322,58 +1322,77 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
     // Fetch senders for autocomplete (persons + chat room names + group chats)
     {
         let sender_suggestions = sender_suggestions.clone();
+        let current_filter_value = event_filter_value.clone();
         use_effect_with_deps(
-            move |open| {
-                if *open {
+            move |(open, query)| {
+                let handle = if !*open || query.trim().len() < 2 {
+                    sender_suggestions.set(Vec::new());
+                    None
+                } else {
                     let sender_suggestions = sender_suggestions.clone();
-                    spawn_local(async move {
-                        if let Ok(r) = Api::get("/api/dashboard/senders").send().await {
-                            if let Ok(senders) = r.json::<Vec<serde_json::Value>>().await {
-                                let mut suggestions: Vec<(
-                                    String,
-                                    Option<String>,
-                                    bool,
-                                    Option<String>,
-                                )> = Vec::new();
-                                for s in &senders {
-                                    let name = match s.get("name").and_then(|n| n.as_str()) {
-                                        Some(n) => n.to_string(),
-                                        None => continue,
-                                    };
-                                    let platform = s
-                                        .get("platform")
-                                        .and_then(|p| p.as_str())
-                                        .map(|p| p.to_string());
-                                    let is_group = s
-                                        .get("is_group")
-                                        .and_then(|g| g.as_bool())
-                                        .unwrap_or(false);
-                                    if is_group {
-                                        // Add two entries for groups: (all) and (mention only)
-                                        suggestions.push((
-                                            name.clone(),
-                                            platform.clone(),
-                                            true,
-                                            Some("all".to_string()),
-                                        ));
-                                        suggestions.push((
-                                            name,
-                                            platform,
-                                            true,
-                                            Some("mention_only".to_string()),
-                                        ));
-                                    } else {
-                                        suggestions.push((name, platform, false, None));
-                                    }
+                    let current_filter_value = current_filter_value.clone();
+                    let query = query.trim().to_string();
+                    Some(gloo_timers::callback::Timeout::new(250, move || {
+                        spawn_local(async move {
+                            let url = format!(
+                                "/api/dashboard/senders?q={}",
+                                js_sys::encode_uri_component(&query)
+                            );
+                            let Ok(r) = Api::get(&url).send().await else {
+                                sender_suggestions.set(Vec::new());
+                                return;
+                            };
+                            let Ok(senders) = r.json::<Vec<serde_json::Value>>().await else {
+                                sender_suggestions.set(Vec::new());
+                                return;
+                            };
+
+                            let mut suggestions: Vec<(
+                                String,
+                                Option<String>,
+                                bool,
+                                Option<String>,
+                            )> = Vec::new();
+                            for s in &senders {
+                                let name = match s.get("name").and_then(|n| n.as_str()) {
+                                    Some(n) => n.to_string(),
+                                    None => continue,
+                                };
+                                let platform = s
+                                    .get("platform")
+                                    .and_then(|p| p.as_str())
+                                    .map(|p| p.to_string());
+                                let is_group =
+                                    s.get("is_group").and_then(|g| g.as_bool()).unwrap_or(false);
+                                if is_group {
+                                    // Add two entries for groups: (all) and (mention only)
+                                    suggestions.push((
+                                        name.clone(),
+                                        platform.clone(),
+                                        true,
+                                        Some("all".to_string()),
+                                    ));
+                                    suggestions.push((
+                                        name,
+                                        platform,
+                                        true,
+                                        Some("mention_only".to_string()),
+                                    ));
+                                } else {
+                                    suggestions.push((name, platform, false, None));
                                 }
-                                sender_suggestions.set(suggestions);
                             }
-                        }
-                    });
-                }
-                || ()
+                            if current_filter_value.trim() != query {
+                                return;
+                            }
+                            sender_suggestions.set(suggestions);
+                        });
+                    }))
+                };
+
+                move || drop(handle)
             },
-            props.is_open,
+            ((*sender_dropdown_open), (*event_filter_value).clone()),
         );
     }
 
