@@ -2517,9 +2517,7 @@ pub async fn read_management_room_messages(
 
                 let timestamp = i64::from(original.origin_server_ts.0) / 1000;
 
-                let is_from_bot = bot_localparts
-                    .iter()
-                    .any(|bot| sender_localpart.as_str() == *bot);
+                let is_from_bot = bot_localparts.contains(&sender_localpart.as_str());
 
                 messages.push(ManagementRoomMessage {
                     sender,
