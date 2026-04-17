@@ -526,13 +526,32 @@ async fn connect_telegram(
     );
 
     // --- first sync so the invite is processed ---
+    // Use a room filter so sync only processes the telegram bot room, not all
+    // rooms. Without this, sync_once processes hundreds of old messages across
+    // every room, saturating the Tokio runtime and making the backend
+    // unresponsive to health checks (which triggers the watchdog restart).
+    let tg_room_filter = {
+        use matrix_sdk::ruma::api::client::filter::{FilterDefinition, RoomFilter};
+        use matrix_sdk::ruma::api::client::sync::sync_events::v3::Filter;
+        let mut room_filter = RoomFilter::default();
+        room_filter.rooms = Some(vec![room_id.clone().into()]);
+        let mut filter_def = FilterDefinition::default();
+        filter_def.room = room_filter;
+        Filter::FilterDefinition(filter_def)
+    };
+
     let t_sync1 = Instant::now();
     tracing::info!(
-        "[TG-CONNECT user={}] SUBPHASE=sync1 calling sync_once(timeout=5s) to process invitation...",
-        user_id
+        "[TG-CONNECT user={}] SUBPHASE=sync1 calling sync_once(timeout=5s) to process invitation (filtered to room {})...",
+        user_id,
+        room_id
     );
     client
-        .sync_once(MatrixSyncSettings::default().timeout(Duration::from_secs(5)))
+        .sync_once(
+            MatrixSyncSettings::default()
+                .timeout(Duration::from_secs(5))
+                .filter(tg_room_filter.clone()),
+        )
         .await
         .map_err(|e| {
             tracing::error!(
@@ -689,7 +708,9 @@ async fn connect_telegram(
     // spoken yet. Either way we want the diagnostic in logs.
     let mut quiet_polls: u32 = 0;
 
-    let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_millis(1500));
+    let sync_settings = MatrixSyncSettings::default()
+        .timeout(Duration::from_millis(1500))
+        .filter(tg_room_filter);
 
     'poll: for attempt in 1..=60 {
         if attempt == 1 || attempt <= 3 || attempt % 10 == 0 {
