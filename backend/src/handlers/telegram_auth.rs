@@ -1269,15 +1269,42 @@ async fn monitor_telegram_connection(
 
     let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(10));
 
-    // Do NOT send any messages during monitoring - the user is completing the
-    // web auth flow and sending messages floods the room, pushing the bridge's
-    // "Logged in" response out of the message check window.
+    // Actively probe login status with "!tg ping" every PING_INTERVAL attempts.
+    // The web login may send the "Logged in" notification to a different room
+    // than the one we're monitoring, so passive waiting alone is unreliable.
+    const PING_INTERVAL: u32 = 8;
+    // Wait a bit before the first ping so the user has time to complete the web flow.
+    const FIRST_PING_AT: u32 = 16;
 
     let mut total_bot_msgs_seen = 0usize;
     let mut last_bot_body: Option<String> = None;
     let mut quiet_polls: u32 = 0;
 
     for attempt in 1..=120 {
+        // Send "!tg ping" to actively check login status
+        if attempt >= FIRST_PING_AT && attempt % PING_INTERVAL == 0 {
+            if let Some(room) = client.get_room(room_id) {
+                tracing::info!(
+                    "[TG-MONITOR user={}] attempt={}/120 sending !tg ping to check login status",
+                    user_id,
+                    attempt
+                );
+                if let Err(e) = room
+                    .send(RoomMessageEventContent::text_plain("!tg ping"))
+                    .await
+                {
+                    tracing::warn!(
+                        "[TG-MONITOR user={}] attempt={}/120 !tg ping send FAILED chain=[{}]",
+                        user_id,
+                        attempt,
+                        format_std_err_chain(&e)
+                    );
+                }
+                // Give the bot a moment to respond
+                sleep(Duration::from_secs(2)).await;
+            }
+        }
+
         if attempt <= 3 || attempt % 10 == 0 {
             tracing::info!(
                 "[TG-MONITOR user={}] attempt={}/120 elapsed_ms={} bot_msgs_seen={}",
@@ -1396,9 +1423,12 @@ async fn monitor_telegram_connection(
                             );
                             last_bot_body = Some(content.clone());
 
-                            // Check for successful login or already logged in
-                            if content.contains("Logged in")
-                                || content.contains("You are already logged in")
+                            // Check for successful login or already logged in.
+                            // Matches both the "Logged in" notification and
+                            // the "!tg ping" response ("logged in as ...").
+                            let content_lower = content.to_lowercase();
+                            if content_lower.contains("logged in")
+                                || content_lower.contains("already logged in")
                             {
                                 tracing::info!(
                                     "[TG-MONITOR user={}] SUCCESS detected logged-in pattern elapsed_ms={}",
