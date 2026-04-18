@@ -534,7 +534,7 @@ async fn connect_telegram(
         use matrix_sdk::ruma::api::client::filter::{FilterDefinition, RoomFilter};
         use matrix_sdk::ruma::api::client::sync::sync_events::v3::Filter;
         let mut room_filter = RoomFilter::default();
-        room_filter.rooms = Some(vec![room_id.clone().into()]);
+        room_filter.rooms = Some(vec![room_id.into()]);
         let mut filter_def = FilterDefinition::default();
         filter_def.room = room_filter;
         Filter::FilterDefinition(filter_def)
@@ -1272,9 +1272,9 @@ async fn monitor_telegram_connection(
     // Actively probe login status with "!tg ping" every PING_INTERVAL attempts.
     // The web login may send the "Logged in" notification to a different room
     // than the one we're monitoring, so passive waiting alone is unreliable.
-    const PING_INTERVAL: u32 = 8;
+    const PING_INTERVAL: u32 = 4;
     // Wait a bit before the first ping so the user has time to complete the web flow.
-    const FIRST_PING_AT: u32 = 16;
+    const FIRST_PING_AT: u32 = 6;
 
     let mut total_bot_msgs_seen = 0usize;
     let mut last_bot_body: Option<String> = None;
