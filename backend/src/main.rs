@@ -690,6 +690,10 @@ async fn main() {
             "/api/admin/reinit-matrix",
             post(admin_handlers::reinit_matrix),
         )
+        .route(
+            "/api/admin/bridge-probe/{bridge_type}/{cmd}",
+            get(admin_handlers::probe_bridge_command),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             handlers::auth_middleware::require_admin,

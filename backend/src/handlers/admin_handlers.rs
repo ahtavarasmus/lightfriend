@@ -1590,3 +1590,222 @@ pub async fn reinit_matrix(
         "new_tasks": new_total,
     })))
 }
+
+/// Admin probe endpoint: send a read-only command to a bridge management room and
+/// return the bridge bot's response(s). Used to discover what `help`/`ping`/`version`
+/// actually return for the specific deployed bridge versions, so we can write an
+/// accurate health check.
+///
+/// GET /api/admin/bridge-probe/{bridge_type}/{cmd}
+///   bridge_type: telegram | whatsapp | signal
+///   cmd:         help | ping | version
+///
+/// The caller must already have that bridge connected (we read the management
+/// room_id from their existing bridge record).
+pub async fn probe_bridge_command(
+    State(state): State<Arc<AppState>>,
+    auth_user: crate::handlers::auth_middleware::AuthUser,
+    axum::extract::Path((bridge_type, cmd)): axum::extract::Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    use matrix_sdk::config::SyncSettings as MatrixSyncSettings;
+    use matrix_sdk::ruma::events::room::message::{
+        MessageType, RoomMessageEventContent, SyncRoomMessageEvent,
+    };
+    use matrix_sdk::ruma::events::AnySyncTimelineEvent;
+    use matrix_sdk::ruma::{OwnedRoomId, OwnedUserId};
+    use tokio::time::{sleep, Duration};
+
+    // Whitelist bridge_type
+    let prefix = match bridge_type.as_str() {
+        "telegram" => "!tg",
+        "whatsapp" => "!wa",
+        "signal" => "!signal",
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "invalid bridge_type (expected telegram|whatsapp|signal)"})),
+            ));
+        }
+    };
+
+    // Whitelist cmd - read-only only, no side effects
+    match cmd.as_str() {
+        "help" | "ping" | "version" | "list-logins" => {}
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "invalid cmd (expected help|ping|version|list-logins)"})),
+            ));
+        }
+    };
+
+    let bridge_bot_env = match bridge_type.as_str() {
+        "telegram" => "TELEGRAM_BRIDGE_BOT",
+        "whatsapp" => "WHATSAPP_BRIDGE_BOT",
+        "signal" => "SIGNAL_BRIDGE_BOT",
+        _ => unreachable!(),
+    };
+    let bridge_bot = std::env::var(bridge_bot_env).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("{} env var not set", bridge_bot_env)})),
+        )
+    })?;
+    let bot_user_id = OwnedUserId::try_from(bridge_bot.as_str()).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("invalid bridge bot user id: {}", e)})),
+        )
+    })?;
+
+    // Look up management room from user's bridge record
+    let bridge = state
+        .user_repository
+        .get_bridge(auth_user.user_id, &bridge_type)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("db error: {}", e)})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": format!("no {} bridge found for this user; connect it first so we have a management room to probe", bridge_type)})),
+            )
+        })?;
+
+    let room_id_str = bridge.room_id.unwrap_or_default();
+    let room_id = OwnedRoomId::try_from(room_id_str.as_str()).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "invalid room id on bridge record"})),
+        )
+    })?;
+
+    let client = crate::utils::matrix_auth::get_cached_client(auth_user.user_id, &state)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("matrix client: {}", e)})),
+            )
+        })?;
+    let room = client.get_room(&room_id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "bridge management room not found in matrix client"})),
+        )
+    })?;
+
+    // Record send timestamp BEFORE sending so we can filter stale messages
+    let cmd_sent_ts_ms: u64 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+
+    let full_cmd = format!("{} {}", prefix, cmd);
+    tracing::info!(
+        "[BRIDGE-PROBE] user={} sending {:?} to {} ts_ms={}",
+        auth_user.user_id,
+        full_cmd,
+        room_id_str,
+        cmd_sent_ts_ms
+    );
+
+    room.send(RoomMessageEventContent::text_plain(&full_cmd))
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("failed to send command: {}", e)})),
+            )
+        })?;
+
+    // Poll: sync and look for bridge bot messages with origin_server_ts > cmd_sent_ts_ms.
+    // Up to ~9s total (6 iterations of sync_once(timeout=1s) + 500ms sleep each).
+    let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(1));
+    let mut responses: Vec<serde_json::Value> = Vec::new();
+
+    for iter in 0..9 {
+        let _ = client.sync_once(sync_settings.clone()).await;
+
+        let mut opts =
+            matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
+        opts.limit = matrix_sdk::ruma::UInt::new(30).unwrap();
+        if let Ok(messages) = room.messages(opts).await {
+            for msg in messages.chunk.iter().rev() {
+                // oldest-first within this window
+                if let Ok(event) = msg.raw().deserialize() {
+                    if event.sender() != bot_user_id {
+                        continue;
+                    }
+                    let ts_ms: u64 = i64::from(event.origin_server_ts().0) as u64;
+                    if ts_ms <= cmd_sent_ts_ms {
+                        continue;
+                    }
+                    // avoid duplicates across iterations
+                    if responses
+                        .iter()
+                        .any(|r| r.get("ts_ms").and_then(|v| v.as_u64()) == Some(ts_ms))
+                    {
+                        continue;
+                    }
+                    if let AnySyncTimelineEvent::MessageLike(
+                        matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(sync_event),
+                    ) = event
+                    {
+                        let content = match sync_event {
+                            SyncRoomMessageEvent::Original(e) => e.content,
+                            SyncRoomMessageEvent::Redacted(_) => continue,
+                        };
+                        let (msgtype, text, formatted) = match content.msgtype {
+                            MessageType::Text(t) => {
+                                let f = t.formatted.map(|f| f.body);
+                                ("m.text", t.body, f)
+                            }
+                            MessageType::Notice(n) => {
+                                let f = n.formatted.map(|f| f.body);
+                                ("m.notice", n.body, f)
+                            }
+                            other => {
+                                tracing::info!(
+                                    "[BRIDGE-PROBE] skipping non-text bridge bot msg type={:?}",
+                                    other
+                                );
+                                continue;
+                            }
+                        };
+                        responses.push(json!({
+                            "ts_ms": ts_ms,
+                            "msgtype": msgtype,
+                            "body": text,
+                            "formatted": formatted,
+                        }));
+                    }
+                }
+            }
+        }
+
+        if !responses.is_empty() && iter >= 2 {
+            // got at least one response and waited a bit extra for follow-ups
+            break;
+        }
+        sleep(Duration::from_millis(500)).await;
+    }
+
+    tracing::info!(
+        "[BRIDGE-PROBE] user={} cmd={:?} got {} response(s)",
+        auth_user.user_id,
+        full_cmd,
+        responses.len()
+    );
+
+    Ok(Json(json!({
+        "bridge_type": bridge_type,
+        "command_sent": full_cmd,
+        "cmd_sent_ts_ms": cmd_sent_ts_ms,
+        "response_count": responses.len(),
+        "responses": responses,
+    })))
+}
