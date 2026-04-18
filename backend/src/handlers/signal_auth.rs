@@ -361,31 +361,14 @@ pub async fn start_signal_connection(
         auth_user.user_id
     );
 
-    // Check if there's an existing bridge - block if cleanup is in progress
-    if let Ok(Some(existing_bridge)) = state
+    if let Ok(Some(_existing_bridge)) = state
         .user_repository
         .get_bridge(auth_user.user_id, "signal")
     {
-        if existing_bridge.status == "cleaning_up" {
-            tracing::info!(
-                "⏳ Signal cleanup in progress for user {}, blocking connect",
-                auth_user.user_id
-            );
-            return Err((
-                StatusCode::CONFLICT,
-                AxumJson(json!({
-                    "error": "cleanup_in_progress",
-                    "message": "Please wait, cleaning up previous connection..."
-                })),
-            ));
-        }
-        // If there's an existing connected/connecting bridge, delete it first for fresh start
-        if existing_bridge.status == "connected" || existing_bridge.status == "connecting" {
-            tracing::info!("🧹 Removing existing Signal bridge for fresh start");
-            let _ = state
-                .user_repository
-                .delete_bridge(auth_user.user_id, "signal");
-        }
+        tracing::info!("Removing existing Signal bridge for fresh start");
+        let _ = state
+            .user_repository
+            .delete_bridge(auth_user.user_id, "signal");
     }
 
     // Remove any cached Matrix client to ensure fresh state
@@ -421,85 +404,17 @@ pub async fn start_signal_connection(
     // Get bridge bot from environment
     let bridge_bot = std::env::var("SIGNAL_BRIDGE_BOT").expect("SIGNAL_BRIDGE_BOT not set");
 
-    // Check for stale Signal rooms (rooms with Signal bot but no bridge record)
-    // This can happen if a previous connection failed or was partially cleaned up
     let stale_room_count = count_signal_rooms(&client, &bridge_bot).await.unwrap_or(0);
     if stale_room_count > 0 {
         tracing::info!(
-            "🧹 Found {} stale Signal rooms for user {}, starting cleanup",
+            "Found {} stale Signal rooms for user {}, cleaning up",
             stale_room_count,
             auth_user.user_id
         );
-
-        // Create a temporary "cleaning_up" bridge record to track state
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32;
-        let new_bridge = NewPgBridge {
-            user_id: auth_user.user_id,
-            bridge_type: "signal".to_string(),
-            status: "cleaning_up".to_string(),
-            room_id: None,
-            data: None,
-            created_at: Some(current_time),
-        };
-        let _ = state.user_repository.create_bridge(new_bridge);
-
-        // Spawn cleanup task
-        let state_clone = state.clone();
-        let user_id = auth_user.user_id;
-        let bridge_bot_clone = bridge_bot.clone();
-        let client_clone = Arc::clone(&client);
-        tokio::spawn(async move {
-            tracing::info!("🧹 Starting stale room cleanup for user {}", user_id);
-
-            // Clean up all Signal rooms
-            match cleanup_all_signal_rooms(&client_clone, &bridge_bot_clone).await {
-                Ok(count) => tracing::info!("Cleaned up {} stale Signal rooms", count),
-                Err(e) => tracing::error!("Failed to cleanup stale Signal rooms: {}", e),
-            }
-
-            // Remove client from cache
-            {
-                let mut matrix_clients = state_clone.matrix_clients.lock().await;
-                let mut sync_tasks = state_clone.matrix_sync_tasks.lock().await;
-                if let Some(task) = sync_tasks.remove(&user_id) {
-                    task.abort();
-                }
-                matrix_clients.remove(&user_id);
-            }
-
-            // Check if we should clear the store
-            let has_active_bridges = state_clone
-                .user_repository
-                .has_active_bridges(user_id)
-                .unwrap_or(false);
-            if !has_active_bridges {
-                if let Some(user_id_matrix) = client_clone.user_id() {
-                    let username = user_id_matrix.localpart().to_string();
-                    if let Ok(store_path) = get_store_path(&username) {
-                        if Path::new(&store_path).exists() {
-                            let _ = fs::remove_dir_all(&store_path).await;
-                            tracing::info!("Cleared Matrix store for user {}", user_id);
-                        }
-                    }
-                }
-            }
-
-            // Delete the cleanup bridge record
-            let _ = state_clone.user_repository.delete_bridge(user_id, "signal");
-            tracing::info!("🧹 Stale room cleanup completed for user {}", user_id);
-        });
-
-        // Return cleanup_in_progress - frontend will retry
-        return Err((
-            StatusCode::CONFLICT,
-            AxumJson(json!({
-                "error": "cleanup_in_progress",
-                "message": "Cleaning up stale data from previous connection..."
-            })),
-        ));
+        match cleanup_all_signal_rooms(&client, &bridge_bot).await {
+            Ok(count) => tracing::info!("Cleaned up {} stale Signal rooms", count),
+            Err(e) => tracing::error!("Failed to cleanup stale Signal rooms: {}", e),
+        }
     }
 
     tracing::debug!("🔗 Connecting to Signal bridge...");

@@ -1451,21 +1451,20 @@ pub async fn handle_bridge_message(
                 return;
             }
         };
-        // Log bridge bot management room messages for debugging (no more email)
+        // Log bridge bot management room messages for debugging
         tracing::info!(
-            "🤖 Bridge bot ({}) management room message ({} chars)",
+            "Bridge bot ({}) management room message: {:?}",
             bridge.bridge_type,
-            content.len()
+            content
         );
 
         // Skip health check related messages - these are handled by the health check endpoint
         if is_health_check_message(&content) {
-            tracing::info!("⏭️ Skipping health check / status message in management room");
+            tracing::info!("Skipping health check / status message in management room");
             return;
         }
 
         // Check for disconnection patterns using the pure function
-        tracing::info!("📝 Bot message content ({} chars)", content.len());
         if is_disconnection_message(&content) {
             tracing::info!(
                 "🚨 Detected disconnection in {} bridge for user {}",
@@ -1558,6 +1557,31 @@ pub async fn handle_bridge_message(
         tracing::info!(
             "⏳ Skipping {} portal message - bridge is connecting",
             service
+        );
+        return;
+    }
+
+    // Skip messages from the bridge bot itself (e.g. "Hello, I'm a Telegram bridge bot...")
+    // Derive localparts from env vars (format: @localpart:server) to match deployment config
+    let bot_localparts: Vec<String> = [
+        "TELEGRAM_BRIDGE_BOT",
+        "WHATSAPP_BRIDGE_BOT",
+        "SIGNAL_BRIDGE_BOT",
+    ]
+    .iter()
+    .filter_map(|var| std::env::var(var).ok())
+    .filter_map(|full_id| {
+        // Extract localpart from @localpart:server
+        full_id
+            .strip_prefix('@')
+            .and_then(|s| s.split(':').next())
+            .map(|s| s.to_string())
+    })
+    .collect();
+    if bot_localparts.iter().any(|b| b == &sender_localpart) {
+        tracing::debug!(
+            "Skipping bridge bot message from {} in portal room",
+            sender_localpart
         );
         return;
     }
