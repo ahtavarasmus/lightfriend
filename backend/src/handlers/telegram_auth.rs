@@ -1448,53 +1448,19 @@ async fn monitor_telegram_connection(
                                 state.user_repository.delete_bridge(user_id, "telegram")?;
                                 state.user_repository.create_bridge(new_bridge)?;
 
-                                // Add client to app state and start sync
-                                let mut matrix_clients = state.matrix_clients.lock().await;
-                                let mut sync_tasks = state.matrix_sync_tasks.lock().await;
-
-                                let state_for_handler = Arc::clone(&state);
-                                client.add_event_handler(move |ev: matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent, room: matrix_sdk::room::Room, client| {
-                                    let state = Arc::clone(&state_for_handler);
-                                    async move {
-                                        tracing::debug!("Received message in room {}", room.room_id());
-                                        crate::utils::bridge::handle_bridge_message(ev, room, client, state).await;
-                                    }
-                                });
-
-                                let client_arc = Arc::new(client.clone());
-                                matrix_clients.insert(user_id, client_arc.clone());
-
-                                let sync_settings = MatrixSyncSettings::default()
-                                    .timeout(Duration::from_secs(30))
-                                    .full_state(true);
-
-                                let handle = tokio::spawn(async move {
-                                    loop {
-                                        match client_arc.sync(sync_settings.clone()).await {
-                                            Ok(_) => {
-                                                tracing::debug!(
-                                                    "Sync completed normally for user {}",
-                                                    user_id
-                                                );
-                                                tokio::time::sleep(Duration::from_secs(1)).await;
-                                            }
-                                            Err(e) => {
-                                                tracing::error!(
-                                                    "Matrix sync error for user {}: {}",
-                                                    user_id,
-                                                    e
-                                                );
-                                                tokio::time::sleep(Duration::from_secs(30)).await;
-                                            }
-                                        }
-                                    }
-                                });
-
-                                // Abort old sync task to prevent duplicate message processing
-                                if let Some(old_task) = sync_tasks.remove(&user_id) {
-                                    old_task.abort();
+                                // Make sure the shared Matrix client + sync loop is running for this user.
+                                if let Err(e) =
+                                    crate::utils::matrix_auth::ensure_matrix_user_running(
+                                        user_id, &state,
+                                    )
+                                    .await
+                                {
+                                    tracing::error!(
+                                        "Failed to start Matrix sync for user {}: {}",
+                                        user_id,
+                                        e
+                                    );
                                 }
-                                sync_tasks.insert(user_id, handle);
 
                                 if let Some(room) = client.get_room(room_id) {
                                     if let Err(e) = room
@@ -1812,22 +1778,12 @@ pub async fn disconnect_telegram(
                     }
                 }
             }
-
-            // Remove client and sync task
-            let mut matrix_clients = state_clone.matrix_clients.lock().await;
-            let mut sync_tasks = state_clone.matrix_sync_tasks.lock().await;
-
-            if let Some(task) = sync_tasks.remove(&user_id) {
-                task.abort();
-                tracing::debug!("Background cleanup: Aborted sync task for user {}", user_id);
-            }
-            if matrix_clients.remove(&user_id).is_some() {
-                tracing::debug!(
-                    "Background cleanup: Removed Matrix client for user {}",
-                    user_id
-                );
-            }
         }
+
+        // Tear down the shared Matrix client only if no bridges remain.
+        crate::utils::matrix_auth::stop_matrix_user_if_no_bridges(user_id, &state_clone)
+            .await
+            .ok();
 
         tracing::info!(
             "🧹 Background cleanup completed for Telegram user {}",

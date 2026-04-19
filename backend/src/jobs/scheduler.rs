@@ -44,98 +44,15 @@ pub async fn initialize_matrix_clients(state: Arc<AppState>) {
                     user_id
                 );
 
-                match crate::utils::matrix_auth::get_cached_client(user_id, &state).await {
-                    Ok(client) => {
-                        // Add event handlers before storing/cloning the client
-                        use matrix_sdk::room::Room;
-                        use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
+                if let Err(e) =
+                    crate::utils::matrix_auth::ensure_matrix_user_running(user_id, &state).await
+                {
+                    error!("Failed to start Matrix sync for user {}: {}", user_id, e);
+                }
 
-                        let state_for_handler = Arc::clone(&state);
-                        client.add_event_handler(
-                            move |ev: OriginalSyncRoomMessageEvent, room: Room, client| {
-                                let state = Arc::clone(&state_for_handler);
-                                async move {
-                                    tracing::debug!(
-                                        "📨 Received message in room {}: {:?}",
-                                        room.room_id(),
-                                        ev
-                                    );
-                                    crate::utils::bridge::handle_bridge_message(
-                                        ev, room, client, state,
-                                    )
-                                    .await;
-                                }
-                            },
-                        );
-
-                        // Read receipt handler: mark ont_messages as seen
-                        {
-                            use matrix_sdk::ruma::events::receipt::ReceiptEventContent;
-                            use matrix_sdk::ruma::events::SyncEphemeralRoomEvent;
-                            let state_for_receipt = Arc::clone(&state);
-                            client.add_event_handler(
-                                move |ev: SyncEphemeralRoomEvent<ReceiptEventContent>,
-                                      room: Room,
-                                      client| {
-                                    let state = Arc::clone(&state_for_receipt);
-                                    async move {
-                                        crate::utils::bridge::handle_read_receipt(
-                                            ev, room, client, state, user_id,
-                                        )
-                                        .await;
-                                    }
-                                },
-                            );
-                        }
-
-                        // Create sync task
-                        let sync_settings = matrix_sdk::config::SyncSettings::default()
-                            .timeout(std::time::Duration::from_secs(30));
-
-                        let client_for_sync = client.clone();
-                        let handle = tokio::spawn(async move {
-                            let mut backoff_secs: u64 = 1;
-                            const MAX_BACKOFF_SECS: u64 = 300;
-
-                            loop {
-                                match client_for_sync.sync(sync_settings.clone()).await {
-                                    Ok(_) => {
-                                        tracing::debug!(
-                                            "Sync completed normally for user {}",
-                                            user_id
-                                        );
-                                        backoff_secs = 1; // Reset on success
-                                        tokio::time::sleep(tokio::time::Duration::from_secs(1))
-                                            .await;
-                                    }
-                                    Err(e) => {
-                                        error!(
-                                            "Matrix sync error for user {} (retry in {}s): {}",
-                                            user_id, backoff_secs, e
-                                        );
-                                        tokio::time::sleep(tokio::time::Duration::from_secs(
-                                            backoff_secs,
-                                        ))
-                                        .await;
-                                        backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
-                                    }
-                                }
-                            }
-                        });
-
-                        {
-                            let mut sync_tasks = state.matrix_sync_tasks.lock().await;
-                            sync_tasks.insert(user_id, handle);
-                        }
-
-                        // Stagger sync starts: 100ms between each to avoid thundering herd on tuwunel
-                        if idx < user_count - 1 {
-                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to create Matrix client for user {}: {}", user_id, e);
-                    }
+                // Stagger sync starts: 100ms between each to avoid thundering herd on tuwunel
+                if idx < user_count - 1 {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                 }
             }
         }
@@ -192,16 +109,8 @@ pub async fn check_all_bridges_health(
             }
         }
 
-        // Clean up Matrix client if no bridges left
-        match state.user_repository.has_active_bridges(user_id) {
-            Ok(false) => {
-                cleanup_matrix_client(state, user_id).await;
-            }
-            Err(e) => {
-                error!("Failed to check active bridges for user {}: {}", user_id, e);
-            }
-            _ => {}
-        }
+        // Clean up Matrix client if no bridges left (no-op otherwise).
+        let _ = crate::utils::matrix_auth::stop_matrix_user_if_no_bridges(user_id, state).await;
     }
 
     debug!("Bridge health check completed");
@@ -238,18 +147,6 @@ async fn is_bridge_healthy(
     }
 }
 
-async fn cleanup_matrix_client(state: &Arc<AppState>, user_id: i32) {
-    let mut matrix_clients = state.matrix_clients.lock().await;
-    let mut sync_tasks = state.matrix_sync_tasks.lock().await;
-    if let Some(task) = sync_tasks.remove(&user_id) {
-        task.abort();
-        debug!("Aborted sync task for user {} during cleanup", user_id);
-    }
-    if matrix_clients.remove(&user_id).is_some() {
-        debug!("Removed Matrix client for user {} during cleanup", user_id);
-    }
-}
-
 /// Check if any Matrix sync tasks have died and restart them.
 /// A dead sync task means messages stop flowing even though the bridge
 /// DB record still shows "connected".
@@ -277,101 +174,14 @@ pub async fn check_and_restart_dead_sync_tasks(state: &Arc<AppState>) {
         dead_user_ids
     );
 
-    // Restart each dead sync task
+    // Restart each dead sync task by delegating to the single entry point.
     for user_id in dead_user_ids {
-        // Remove the dead task handle
+        if let Err(e) = crate::utils::matrix_auth::ensure_matrix_user_running(user_id, state).await
         {
-            let mut sync_tasks = state.matrix_sync_tasks.lock().await;
-            sync_tasks.remove(&user_id);
+            tracing::error!("Failed to restart sync task for user {}: {}", user_id, e);
+        } else {
+            tracing::info!("Restarted sync task for user {}", user_id);
         }
-
-        // Get existing cached client (should still be there)
-        let client = match state.matrix_clients.lock().await.get(&user_id).cloned() {
-            Some(c) => c,
-            None => {
-                // Client was also removed - try to recreate from scratch
-                match crate::utils::matrix_auth::get_cached_client(user_id, state).await {
-                    Ok(c) => {
-                        // Register event handler on the new client
-                        use matrix_sdk::room::Room;
-                        use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
-                        let state_for_handler = Arc::clone(state);
-                        c.add_event_handler(
-                            move |ev: OriginalSyncRoomMessageEvent, room: Room, client| {
-                                let state = Arc::clone(&state_for_handler);
-                                async move {
-                                    crate::utils::bridge::handle_bridge_message(
-                                        ev, room, client, state,
-                                    )
-                                    .await;
-                                }
-                            },
-                        );
-                        // Read receipt handler
-                        {
-                            use matrix_sdk::ruma::events::receipt::ReceiptEventContent;
-                            use matrix_sdk::ruma::events::SyncEphemeralRoomEvent;
-                            let state_for_receipt = Arc::clone(state);
-                            c.add_event_handler(
-                                move |ev: SyncEphemeralRoomEvent<ReceiptEventContent>,
-                                      room: Room,
-                                      client| {
-                                    let state = Arc::clone(&state_for_receipt);
-                                    async move {
-                                        crate::utils::bridge::handle_read_receipt(
-                                            ev, room, client, state, user_id,
-                                        )
-                                        .await;
-                                    }
-                                },
-                            );
-                        }
-                        // Store in cache
-                        state.matrix_clients.lock().await.insert(user_id, c.clone());
-                        c
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            "Failed to recreate Matrix client for user {}: {}",
-                            user_id,
-                            e
-                        );
-                        continue;
-                    }
-                }
-            }
-        };
-
-        // Start new sync task
-        let sync_settings =
-            matrix_sdk::config::SyncSettings::default().timeout(std::time::Duration::from_secs(30));
-        let client_for_sync = client.clone();
-        let handle = tokio::spawn(async move {
-            let mut backoff_secs: u64 = 1;
-            const MAX_BACKOFF_SECS: u64 = 300;
-            loop {
-                match client_for_sync.sync(sync_settings.clone()).await {
-                    Ok(_) => {
-                        backoff_secs = 1;
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                    }
-                    Err(e) => {
-                        error!(
-                            "Matrix sync error for user {} (retry in {}s): {}",
-                            user_id, backoff_secs, e
-                        );
-                        tokio::time::sleep(tokio::time::Duration::from_secs(backoff_secs)).await;
-                        backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
-                    }
-                }
-            }
-        });
-
-        {
-            let mut sync_tasks = state.matrix_sync_tasks.lock().await;
-            sync_tasks.insert(user_id, handle);
-        }
-        tracing::info!("Restarted sync task for user {}", user_id);
     }
 }
 

@@ -364,19 +364,12 @@ pub async fn start_signal_connection(
             .delete_bridge(auth_user.user_id, "signal");
     }
 
-    // Remove any cached Matrix client to ensure fresh state
-    {
-        let mut matrix_clients = state.matrix_clients.lock().await;
-        let mut sync_tasks = state.matrix_sync_tasks.lock().await;
-
-        if let Some(task) = sync_tasks.remove(&auth_user.user_id) {
-            task.abort();
-            tracing::debug!("Aborted existing sync task for fresh connect");
-        }
-        if matrix_clients.remove(&auth_user.user_id).is_some() {
-            tracing::debug!("Removed cached Matrix client for fresh connect");
-        }
-    }
+    // If the user has no other bridges, tear down the client so Signal reconnects
+    // from fresh state. If WhatsApp or Telegram are still connected, leave the
+    // shared client alone - we'd otherwise kill their sync loops.
+    crate::utils::matrix_auth::stop_matrix_user_if_no_bridges(auth_user.user_id, &state)
+        .await
+        .ok();
 
     tracing::info!("📝 Getting fresh Matrix client...");
     // Get or create Matrix client using the centralized function
@@ -622,42 +615,11 @@ async fn monitor_signal_connection(
         state.user_repository.delete_bridge(user_id, "signal")?;
         state.user_repository.create_bridge(new_bridge)?;
 
-        let mut matrix_clients = state.matrix_clients.lock().await;
-        let mut sync_tasks = state.matrix_sync_tasks.lock().await;
-
-        use matrix_sdk::room::Room;
-        use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
-
-        let state_for_handler = Arc::clone(&state);
-        client.add_event_handler(
-            move |ev: OriginalSyncRoomMessageEvent, room: Room, client| {
-                let state = Arc::clone(&state_for_handler);
-                async move {
-                    crate::utils::bridge::handle_bridge_message(ev, room, client, state).await;
-                }
-            },
-        );
-        let client_arc = Arc::new(client.clone());
-        matrix_clients.insert(user_id, client_arc.clone());
-
-        let sync_settings = MatrixSyncSettings::default()
-            .timeout(Duration::from_secs(30))
-            .full_state(true);
-        let handle = tokio::spawn(async move {
-            loop {
-                match client_arc.sync(sync_settings.clone()).await {
-                    Ok(_) => tokio::time::sleep(tokio::time::Duration::from_secs(1)).await,
-                    Err(e) => {
-                        tracing::error!("Matrix sync error for user {}: {}", user_id, e);
-                        tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
-                    }
-                }
-            }
-        });
-        if let Some(old_task) = sync_tasks.remove(&user_id) {
-            old_task.abort();
+        // Make sure the shared Matrix client + sync loop is running for this user.
+        if let Err(e) = crate::utils::matrix_auth::ensure_matrix_user_running(user_id, &state).await
+        {
+            tracing::error!("Failed to start Matrix sync for user {}: {}", user_id, e);
         }
-        sync_tasks.insert(user_id, handle);
 
         // Signal portals are created on message receipt - no explicit sync needed.
         return Ok(());
@@ -940,25 +902,9 @@ pub async fn disconnect_signal(
             }
         }
 
-        // Remove client and sync task BEFORE checking other bridges
-        // This ensures fresh state for reconnection
-        {
-            let mut matrix_clients = state_clone.matrix_clients.lock().await;
-            let mut sync_tasks = state_clone.matrix_sync_tasks.lock().await;
-
-            if let Some(task) = sync_tasks.remove(&user_id) {
-                task.abort();
-                tracing::debug!("Background cleanup: Aborted sync task for user {}", user_id);
-            }
-            if matrix_clients.remove(&user_id).is_some() {
-                tracing::debug!(
-                    "Background cleanup: Removed Matrix client for user {}",
-                    user_id
-                );
-            }
-        }
-
-        // Check for remaining active bridges and cleanup store if none left
+        // Check for remaining active bridges and cleanup store if none left.
+        // Signal's status is "cleaning_up" here, so has_active_bridges only
+        // returns true if WhatsApp/Telegram are still connected.
         let has_active_bridges = state_clone
             .user_repository
             .has_active_bridges(user_id)
@@ -999,6 +945,11 @@ pub async fn disconnect_signal(
                 user_id
             );
         }
+
+        // Tear down the shared Matrix client only if no bridges remain.
+        crate::utils::matrix_auth::stop_matrix_user_if_no_bridges(user_id, &state_clone)
+            .await
+            .ok();
     });
 
     Ok(AxumJson(json!({
