@@ -79,23 +79,33 @@ mod pure_function_tests {
     }
 
     #[test]
-    fn test_is_disconnection_message_detects_patterns() {
-        // Various disconnection patterns
-        assert!(is_disconnection_message("Device has been disconnected"));
-        assert!(is_disconnection_message("Connection lost to server"));
-        assert!(is_disconnection_message("You have been logged out"));
-        assert!(is_disconnection_message("Authentication failed"));
-        assert!(is_disconnection_message("Login failed: bad_credentials"));
-        assert!(is_disconnection_message("Session expired"));
-        assert!(is_disconnection_message("User is not logged in"));
-        assert!(is_disconnection_message("wa-logged-out event received"));
-        assert!(is_disconnection_message("wa-not-logged-in state"));
-        assert!(is_disconnection_message(
-            "Your device has been device_removed"
-        ));
-        assert!(is_disconnection_message(
-            "Please relogin to continue using the service"
-        ));
+    fn test_is_disconnection_message_always_false_until_verified() {
+        // `is_disconnection_message` returns false for EVERY input. This is
+        // intentional: the previous fuzzy substring matcher (`logged out`,
+        // `not logged in`, `disconnected`, etc.) mis-fired on normal command
+        // replies like "You're not logged in." or "Logged out successfully."
+        // and silently deleted user bridge records. We removed all fuzz.
+        //
+        // The function will only start returning true once we hand-probe a
+        // real passive-push disconnection event and add its exact body as a
+        // verified constant in `utils/bridge_responses.rs`. Until then,
+        // unknown = never act.
+        //
+        // Below are strings that used to trip the old matcher. All must be
+        // false under the strict contract.
+        assert!(!is_disconnection_message("Device has been disconnected"));
+        assert!(!is_disconnection_message("Connection lost to server"));
+        assert!(!is_disconnection_message("You have been logged out"));
+        assert!(!is_disconnection_message("Authentication failed"));
+        assert!(!is_disconnection_message("Login failed: bad_credentials"));
+        assert!(!is_disconnection_message("Session expired"));
+        assert!(!is_disconnection_message("User is not logged in"));
+        assert!(!is_disconnection_message("DISCONNECTED"));
+        assert!(!is_disconnection_message("Logged Out"));
+        // Normal command replies also must not trigger (this was the bug).
+        assert!(!is_disconnection_message("You're not logged in."));
+        assert!(!is_disconnection_message("Logged out successfully."));
+        assert!(!is_disconnection_message("Logged out"));
     }
 
     #[test]
@@ -105,14 +115,6 @@ mod pure_function_tests {
         assert!(!is_disconnection_message("Message delivered"));
         assert!(!is_disconnection_message("Connected to server"));
         assert!(!is_disconnection_message("Your friend John is online"));
-    }
-
-    #[test]
-    fn test_is_disconnection_message_case_insensitive() {
-        assert!(is_disconnection_message("DISCONNECTED"));
-        assert!(is_disconnection_message("Disconnected"));
-        assert!(is_disconnection_message("LOGGED OUT"));
-        assert!(is_disconnection_message("Logged Out"));
     }
 
     #[test]
