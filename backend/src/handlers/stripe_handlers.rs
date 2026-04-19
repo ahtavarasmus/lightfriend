@@ -37,7 +37,7 @@ pub struct SubscriptionCheckoutBody {
 async fn setup_user_subscription(
     state: &Arc<AppState>,
     user_id: i32,
-    price_id: &str,
+    product_id: &str,
     current_period_end: i64,
     _phone_country: Option<&str>,
 ) -> Result<(), String> {
@@ -53,12 +53,10 @@ async fn setup_user_subscription(
         }
     }
 
-    let sub_info = extract_subscription_info(price_id);
-
-    // Set subscription tier
+    // All products map to tier 2
     if let Err(e) = state
         .user_repository
-        .set_subscription_tier(user_id, Some(sub_info.tier))
+        .set_subscription_tier(user_id, Some("tier 2"))
     {
         tracing::error!(
             "Failed to set subscription tier for user {}: {}",
@@ -67,14 +65,12 @@ async fn setup_user_subscription(
         );
     }
 
-    // Set plan_type based on price ID
-    use crate::utils::country::{is_assistant_plan_price, is_byot_plan_price};
-    let plan_type = if is_assistant_plan_price(price_id) {
-        "assistant"
-    } else if is_byot_plan_price(price_id) || user_id == 12 {
+    // Set plan_type based on product ID
+    use crate::utils::country::{is_byot_product, plan_type_from_product};
+    let plan_type = if user_id == 12 || user_id == 245 {
         "byot"
     } else {
-        "autopilot" // any legacy/unknown price ID -> autopilot
+        plan_type_from_product(product_id)
     };
     if let Err(e) = state
         .user_repository
@@ -85,14 +81,11 @@ async fn setup_user_subscription(
 
     // Calculate credits: fixed budget for all hosted plans, all countries
     use crate::utils::plan_features::MONTHLY_CREDIT_BUDGET;
-    let credits: f32 = if sub_info.tier == "tier 2" {
-        if is_byot_plan_price(price_id) {
-            0.0 // BYOT users pay Twilio directly
-        } else {
-            MONTHLY_CREDIT_BUDGET // 25.0 for all hosted plans
-        }
+    let is_byot = user_id == 12 || user_id == 245 || is_byot_product(product_id);
+    let credits: f32 = if is_byot {
+        0.0 // BYOT users pay Twilio directly
     } else {
-        0.0
+        MONTHLY_CREDIT_BUDGET // 25.0 for all hosted plans
     };
 
     if let Err(e) = state.user_repository.update_sub_credits(user_id, credits) {
@@ -120,11 +113,11 @@ async fn setup_user_subscription(
     }
 
     tracing::info!(
-        "Setup subscription for user {}: tier={}, plan={}, credits={}",
+        "Setup subscription for user {}: plan={}, credits={}, product={}",
         user_id,
-        sub_info.tier,
         plan_type,
-        credits
+        credits,
+        product_id
     );
 
     Ok(())
@@ -234,23 +227,28 @@ pub async fn create_unified_subscription_checkout(
     tracing::debug!("country: {}", country);
 
     let base_price_id = match body.subscription_type {
-        SubscriptionType::Hosted => {
-            if country == "US" || country == "CA" {
-                match body.plan_type.as_deref() {
-                    Some("assistant") => std::env::var("STRIPE_ASSISTANT_PLAN_PRICE_ID_US")
-                        .expect("STRIPE_ASSISTANT_PLAN_PRICE_ID_US not set"),
-                    _ => std::env::var("STRIPE_AUTOPILOT_PLAN_PRICE_ID_US")
-                        .expect("STRIPE_AUTOPILOT_PLAN_PRICE_ID_US not set"),
-                }
-            } else {
-                match body.plan_type.as_deref() {
-                    Some("assistant") => std::env::var("STRIPE_ASSISTANT_PLAN_PRICE_ID")
-                        .expect("STRIPE_ASSISTANT_PLAN_PRICE_ID not set"),
-                    _ => std::env::var("STRIPE_AUTOPILOT_PLAN_PRICE_ID")
-                        .expect("STRIPE_AUTOPILOT_PLAN_PRICE_ID not set"),
+        SubscriptionType::Hosted => match body.plan_type.as_deref() {
+            Some("byot") => std::env::var("STRIPE_BYOT_CHECKOUT_PRICE_ID")
+                .expect("STRIPE_BYOT_CHECKOUT_PRICE_ID not set"),
+            Some("assistant") => {
+                if country == "US" || country == "CA" {
+                    std::env::var("STRIPE_ASSISTANT_CHECKOUT_PRICE_ID_US")
+                        .expect("STRIPE_ASSISTANT_CHECKOUT_PRICE_ID_US not set")
+                } else {
+                    std::env::var("STRIPE_ASSISTANT_CHECKOUT_PRICE_ID")
+                        .expect("STRIPE_ASSISTANT_CHECKOUT_PRICE_ID not set")
                 }
             }
-        }
+            _ => {
+                if country == "US" || country == "CA" {
+                    std::env::var("STRIPE_AUTOPILOT_CHECKOUT_PRICE_ID_US")
+                        .expect("STRIPE_AUTOPILOT_CHECKOUT_PRICE_ID_US not set")
+                } else {
+                    std::env::var("STRIPE_AUTOPILOT_CHECKOUT_PRICE_ID")
+                        .expect("STRIPE_AUTOPILOT_CHECKOUT_PRICE_ID not set")
+                }
+            }
+        },
     };
     // Build line items
     let line_items = vec![stripe::CreateCheckoutSessionLineItems {
@@ -378,23 +376,28 @@ pub async fn create_guest_checkout(
 
     // Select price ID based on subscription type, country, and plan choice
     let base_price_id = match body.subscription_type {
-        SubscriptionType::Hosted => {
-            if country == "US" || country == "CA" {
-                match body.plan_type.as_deref() {
-                    Some("assistant") => std::env::var("STRIPE_ASSISTANT_PLAN_PRICE_ID_US")
-                        .expect("STRIPE_ASSISTANT_PLAN_PRICE_ID_US not set"),
-                    _ => std::env::var("STRIPE_AUTOPILOT_PLAN_PRICE_ID_US")
-                        .expect("STRIPE_AUTOPILOT_PLAN_PRICE_ID_US not set"),
-                }
-            } else {
-                match body.plan_type.as_deref() {
-                    Some("assistant") => std::env::var("STRIPE_ASSISTANT_PLAN_PRICE_ID")
-                        .expect("STRIPE_ASSISTANT_PLAN_PRICE_ID not set"),
-                    _ => std::env::var("STRIPE_AUTOPILOT_PLAN_PRICE_ID")
-                        .expect("STRIPE_AUTOPILOT_PLAN_PRICE_ID not set"),
+        SubscriptionType::Hosted => match body.plan_type.as_deref() {
+            Some("byot") => std::env::var("STRIPE_BYOT_CHECKOUT_PRICE_ID")
+                .expect("STRIPE_BYOT_CHECKOUT_PRICE_ID not set"),
+            Some("assistant") => {
+                if country == "US" || country == "CA" {
+                    std::env::var("STRIPE_ASSISTANT_CHECKOUT_PRICE_ID_US")
+                        .expect("STRIPE_ASSISTANT_CHECKOUT_PRICE_ID_US not set")
+                } else {
+                    std::env::var("STRIPE_ASSISTANT_CHECKOUT_PRICE_ID")
+                        .expect("STRIPE_ASSISTANT_CHECKOUT_PRICE_ID not set")
                 }
             }
-        }
+            _ => {
+                if country == "US" || country == "CA" {
+                    std::env::var("STRIPE_AUTOPILOT_CHECKOUT_PRICE_ID_US")
+                        .expect("STRIPE_AUTOPILOT_CHECKOUT_PRICE_ID_US not set")
+                } else {
+                    std::env::var("STRIPE_AUTOPILOT_CHECKOUT_PRICE_ID")
+                        .expect("STRIPE_AUTOPILOT_CHECKOUT_PRICE_ID not set")
+                }
+            }
+        },
     };
 
     // Build line items
@@ -784,110 +787,6 @@ async fn create_new_customer(
         })?;
     Ok(customer.id.to_string())
 }
-#[derive(Debug, Clone)]
-struct SubscriptionInfo {
-    country: Option<&'static str>,
-    tier: &'static str,
-}
-
-// Helper function to extract subscription info from price ID
-fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
-    // Default values - all subscriptions map to tier 2 (hosted)
-    let mut info = SubscriptionInfo {
-        country: None,
-        tier: "tier 2",
-    };
-
-    // Helper macro to reduce code duplication
-    macro_rules! check_price_id {
-        ($country:expr, $env_var:expr, $tier:expr) => {
-            if price_id == std::env::var($env_var).unwrap_or_default() {
-                info.country = Some($country);
-                info.tier = $tier;
-                return info;
-            }
-        };
-    }
-
-    // Check for new Assistant and Autopilot plans (tier 2)
-    for env_var in [
-        "STRIPE_ASSISTANT_PLAN_PRICE_ID",
-        "STRIPE_ASSISTANT_PLAN_PRICE_ID_US",
-        "STRIPE_AUTOPILOT_PLAN_PRICE_ID",
-        "STRIPE_AUTOPILOT_PLAN_PRICE_ID_US",
-    ] {
-        if price_id == std::env::var(env_var).unwrap_or_default() {
-            info.tier = "tier 2";
-            return info;
-        }
-    }
-
-    // Legacy Monitor and Digest plans (tier 2)
-    if price_id == std::env::var("STRIPE_MONITOR_PLAN_PRICE_ID").unwrap_or_default() {
-        info.tier = "tier 2";
-        return info;
-    }
-    if price_id == std::env::var("STRIPE_DIGEST_PLAN_PRICE_ID").unwrap_or_default() {
-        info.tier = "tier 2";
-        return info;
-    }
-
-    // All legacy and current hosted plans map to tier 2
-    // Check all regional variants for both legacy and current price IDs
-    for country in ["US", "FI", "NL", "UK", "AU", "OTHER", "CA"] {
-        // Legacy price IDs (all map to tier 2 now)
-        check_price_id!(
-            country,
-            format!("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_{}", country),
-            "tier 2"
-        );
-        check_price_id!(
-            country,
-            format!("STRIPE_SUBSCRIPTION_BASIC_DAILY_PRICE_ID_{}", country),
-            "tier 2"
-        );
-        check_price_id!(
-            country,
-            format!("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_{}", country),
-            "tier 2"
-        );
-        check_price_id!(
-            country,
-            format!("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_{}", country),
-            "tier 2"
-        );
-        check_price_id!(
-            country,
-            format!("STRIPE_SUBSCRIPTION_ESCAPE_DAILY_PRICE_ID_{}", country),
-            "tier 2"
-        );
-        check_price_id!(
-            country,
-            format!("STRIPE_SUBSCRIPTION_MONITORING_PRICE_ID_{}", country),
-            "tier 2"
-        );
-        check_price_id!(
-            country,
-            format!("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_{}", country),
-            "tier 2"
-        );
-
-        // Current price IDs
-        check_price_id!(
-            country,
-            format!("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_{}", country),
-            "tier 2"
-        );
-        check_price_id!(
-            country,
-            format!("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_{}", country),
-            "tier 2"
-        );
-    }
-
-    info
-}
-
 pub async fn stripe_webhook(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -939,13 +838,12 @@ pub async fn stripe_webhook(
                     stripe::Expandable::Object(customer) => customer.id,
                 };
 
-                // Get price ID from subscription
-                let price_id = subscription
+                // Get price and product ID from subscription
+                let price = subscription
                     .items
                     .data
                     .first()
                     .and_then(|item| item.price.as_ref())
-                    .map(|price| price.id.to_string())
                     .ok_or_else(|| {
                         tracing::error!("No price found in subscription items");
                         (
@@ -954,7 +852,17 @@ pub async fn stripe_webhook(
                         )
                     })?;
 
-                let sub_info = extract_subscription_info(&price_id);
+                let price_id = price.id.to_string();
+                let product_id = match &price.product {
+                    Some(stripe::Expandable::Id(id)) => id.to_string(),
+                    Some(stripe::Expandable::Object(product)) => product.id.to_string(),
+                    None => String::new(),
+                };
+                tracing::info!(
+                    "Subscription price_id={}, product_id={}",
+                    price_id,
+                    product_id
+                );
 
                 // Skip subscription updates that are part of a plan change or being cancelled
                 if event.type_ == stripe::EventType::CustomerSubscriptionUpdated {
@@ -997,23 +905,32 @@ pub async fn stripe_webhook(
                         )
                     })?;
 
-                    for existing_sub in existing_subscriptions.data.iter() {
-                        if existing_sub.id != subscription.id {
-                            tracing::info!("Canceling existing subscription: {}", existing_sub.id);
-                            // Add plan_change metadata so the deletion webhook knows to skip processing
-                            let mut metadata = std::collections::HashMap::new();
-                            metadata.insert("plan_change".to_string(), "true".to_string());
-                            let _ = Subscription::update(
-                                &client,
-                                &existing_sub.id,
-                                UpdateSubscription {
-                                    cancel_at_period_end: Some(true),
-                                    metadata: Some(metadata),
-                                    ..Default::default()
-                                },
-                            )
-                            .await;
-                        }
+                    // Cancel old subs in background to avoid blocking the webhook response
+                    let subs_to_cancel: Vec<_> = existing_subscriptions
+                        .data
+                        .iter()
+                        .filter(|s| s.id != subscription.id)
+                        .map(|s| s.id.clone())
+                        .collect();
+                    if !subs_to_cancel.is_empty() {
+                        let client_bg = client.clone();
+                        tokio::spawn(async move {
+                            for sub_id in subs_to_cancel {
+                                tracing::info!("Canceling existing subscription: {}", sub_id);
+                                let mut metadata = std::collections::HashMap::new();
+                                metadata.insert("plan_change".to_string(), "true".to_string());
+                                let _ = Subscription::update(
+                                    &client_bg,
+                                    &sub_id,
+                                    UpdateSubscription {
+                                        cancel_at_period_end: Some(true),
+                                        metadata: Some(metadata),
+                                        ..Default::default()
+                                    },
+                                )
+                                .await;
+                            }
+                        });
                     }
                 }
 
@@ -1175,21 +1092,20 @@ pub async fn stripe_webhook(
                         )
                     })?;
 
-                // Update subscription country
+                let phone_country =
+                    crate::utils::country::get_country_code_from_phone(&user.phone_number);
+
+                // Update subscription country from user's phone number
                 if let Err(e) = state
                     .user_core
-                    .update_sub_country(user.id, sub_info.country)
+                    .update_sub_country(user.id, phone_country.as_deref())
                 {
                     tracing::error!("Failed to update subscription country: {}", e);
                 }
-
-                // Use centralized subscription setup (idempotent)
-                let phone_country =
-                    crate::utils::country::get_country_code_from_phone(&user.phone_number);
                 if let Err(e) = setup_user_subscription(
                     &state,
                     user.id,
-                    &price_id,
+                    &product_id,
                     subscription.current_period_end,
                     phone_country.as_deref(),
                 )
@@ -1199,7 +1115,7 @@ pub async fn stripe_webhook(
                 }
 
                 // Set preferred Lightfriend number (for non-BYOT plans)
-                if !crate::utils::country::is_byot_plan_price(&price_id)
+                if !crate::utils::country::is_byot_product(&product_id)
                     && user.preferred_number.is_none()
                 {
                     if let Some(ref country) = phone_country {
@@ -1279,25 +1195,34 @@ pub async fn stripe_webhook(
                     } else {
                         // User still has active subscriptions - update to the first one found
                         if let Some(remaining_sub) = active_subscriptions.data.first() {
-                            if let Some(tier_info) = remaining_sub
+                            // Always tier 2 for any active subscription
+                            tracing::info!("User still has active subscription, keeping tier 2");
+                            if let Err(e) = state
+                                .user_repository
+                                .set_subscription_tier(user.id, Some("tier 2"))
+                            {
+                                tracing::error!("Failed to update subscription tier: {}", e);
+                            }
+                            // Extract product ID from remaining subscription for plan type
+                            if let Some(remaining_product_id) = remaining_sub
                                 .items
                                 .data
                                 .first()
                                 .and_then(|item| item.price.as_ref())
-                                .map(|price| extract_subscription_info(&price.id))
+                                .and_then(|price| price.product.as_ref())
+                                .map(|p| match p {
+                                    stripe::Expandable::Id(id) => id.to_string(),
+                                    stripe::Expandable::Object(product) => product.id.to_string(),
+                                })
                             {
-                                tracing::info!("Updating subscription tier to {} based on remaining subscription", tier_info.tier);
+                                let remaining_plan = crate::utils::country::plan_type_from_product(
+                                    &remaining_product_id,
+                                );
                                 if let Err(e) = state
                                     .user_repository
-                                    .set_subscription_tier(user.id, Some(tier_info.tier))
+                                    .update_plan_type(user.id, Some(remaining_plan))
                                 {
-                                    tracing::error!("Failed to update subscription tier: {}", e);
-                                }
-                                if let Err(e) = state
-                                    .user_core
-                                    .update_sub_country(user.id, tier_info.country)
-                                {
-                                    tracing::error!("Failed to update subscription country: {}", e);
+                                    tracing::error!("Failed to update plan_type: {}", e);
                                 }
                             }
                         }

@@ -91,6 +91,35 @@ const DASHBOARD_STYLES: &str = r#"
     min-width: 0;
     margin-bottom: 0;
 }
+.cards-locked {
+    position: relative;
+    opacity: 0.4;
+    transform: scale(0.85);
+    transform-origin: top center;
+    pointer-events: none;
+}
+.cards-locked-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 5;
+    pointer-events: auto;
+}
+.cards-locked-badge {
+    background: rgba(126, 178, 255, 0.15);
+    color: #7EB2FF;
+    padding: 0.3rem 0.8rem;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    border: 1px solid rgba(126, 178, 255, 0.3);
+}
 /* Critical Notifications card */
 .critical-notif-card {
     padding: 0.6rem 0.7rem;
@@ -1830,7 +1859,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     <div class="panel-right">
                         <div class="panel-right-rules">
                             // ---- Cards row: Critical Notifications + Digests ----
-                            <div class="cards-row">
+                            <div class={classes!("cards-row", if !has_auto { "cards-locked" } else { "" })}>
+                            if !has_auto {
+                                <div class="cards-locked-overlay">
+                                    <span class="cards-locked-badge">{"Autopilot"}</span>
+                                </div>
+                            }
                             <div class="critical-notif-card">
                                 <div class="critical-notif-header">
                                     <div class="critical-notif-left">

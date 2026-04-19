@@ -1,4 +1,3 @@
-use crate::components::notification::AnimationComponent;
 use crate::utils::api::Api;
 use crate::utils::seo::{use_seo, SeoMeta};
 use crate::Route;
@@ -81,11 +80,9 @@ pub fn landing() -> Html {
         result
     };
 
-    // State for expanded integration (-1 = none, 0-5 = which one)
-    let expanded_integration = use_state(|| -1i32);
-
     // State for expanded FAQ item (-1 = none, 0+ = which one)
     let expanded_faq = use_state(|| -1i32);
+
 
     // SMS demo scenarios: (label, icon_class, messages)
     // is_user=false means Lightfriend sends it proactively
@@ -180,58 +177,16 @@ pub fn landing() -> Html {
         );
     }
 
-    // Integration data: (icon_class, label, description)
-    let integration_data = vec![
-        ("fab fa-whatsapp", "WhatsApp", "Receive and reply to WhatsApp messages via SMS or voice call. AI filters noise and only forwards what matters."),
-        ("fab fa-telegram", "Telegram", "Access your Telegram chats from any phone. Get notified about important messages, reply directly."),
-        ("fab fa-signal-messenger", "Signal", "Stay on Signal without a smartphone. Messages are bridged securely to your phone via SMS."),
-        ("fas fa-envelope", "Email", "Read and respond to emails via text or voice. AI summarizes long threads and flags urgent ones."),
-        ("fas fa-car", "Tesla", "Lock, unlock, preheat, and check battery status of your Tesla via SMS commands."),
-        ("fas fa-plug", "MCP / Custom", "Connect any external tool or service via MCP (Model Context Protocol). Extend what Lightfriend can do."),
-    ];
-
-    let integration_buttons_html: Vec<Html> = integration_data.iter().enumerate().map(|(idx, (icon, label, _))| {
-        let expanded = expanded_integration.clone();
-        let i = idx as i32;
-        let is_active = *expanded == i;
-        let onclick = {
-            let expanded = expanded.clone();
-            Callback::from(move |e: MouseEvent| {
-                e.prevent_default();
-                if *expanded == i {
-                    expanded.set(-1);
-                } else {
-                    expanded.set(i);
-                }
-            })
-        };
-        html! {
-            <button class={classes!("integration-btn", if is_active { "active" } else { "" })} onclick={onclick} title={*label}>
-                <i class={*icon}></i>
-                <span class="integration-label">{label}</span>
-            </button>
-        }
-    }).collect();
-
-    let integration_detail_html = if *expanded_integration >= 0 {
-        let idx = *expanded_integration as usize;
-        let (_, label, desc) = &integration_data[idx];
-        html! {
-            <div class={classes!("integration-detail", "visible")}>
-                <div class="integration-detail-content">
-                    <h3>{label}</h3>
-                    <p>{desc}</p>
-                </div>
-            </div>
-        }
-    } else {
-        html! { <div class="integration-detail"></div> }
-    };
-
     // FAQ data: (question, answer_html)
     let faq_data: Vec<(&str, Html)> = vec![
         ("Do I need a phone with internet?", html! {
             <p>{"No. Lightfriend works through normal voice calls and SMS. Any phone that can call and text will work."}</p>
+        }),
+        ("How does it protect my data?", html! {
+            <>
+                <p>{"Lightfriend runs in its own hardware-isolated enclave, and all AI requests are processed through Tinfoil's verified enclaves. No one - not even the developer - can access your data. Period. Fully open source, with privacy cryptographically verifiable on blockchain."}</p>
+                <p><a href="/trustless" style="color: #7EB2FF;">{"See exactly how it works"}</a></p>
+            </>
         }),
         ("Can I send and receive messages?", html! {
             <p>{"Yes. You can reply to WhatsApp, Telegram, Signal, and email directly via SMS or voice call. Lightfriend forwards your reply to the right place."}</p>
@@ -255,12 +210,6 @@ pub fn landing() -> Html {
                 <p><strong>{"Full service:"}</strong>{" US, Canada, UK, Finland, Netherlands, Australia."}</p>
                 <p><strong>{"Notification-only:"}</strong>{" 30+ countries across Europe and Asia-Pacific."}</p>
                 <p><strong>{"Elsewhere:"}</strong>{" Bring your own Twilio number."}</p>
-            </>
-        }),
-        ("How does it protect my data?", html! {
-            <>
-                <p>{"Lightfriend runs in its own hardware-isolated enclave, and all AI requests are processed through Tinfoil's verified enclaves. No one - not even the developer - can access your data. Period. Fully open source, with privacy cryptographically verifiable on blockchain."}</p>
-                <p><a href="/trustless" style="color: #7EB2FF;">{"See exactly how it works"}</a></p>
             </>
         }),
         ("How do critical notifications work?", html! {
@@ -309,6 +258,7 @@ pub fn landing() -> Html {
         html! { <span class="particle" style={style}></span> }
     }).collect();
 
+
     html! {
         <div class="landing-page">
             <head>
@@ -323,10 +273,9 @@ pub fn landing() -> Html {
                 <div class="hero-content">
                     <div class="hero-right-panel">
                         <h1 class="hero-title hero-anim hero-anim-1">{"Mute everything. Miss nothing."}</h1>
-                        <p class="hero-subtitle hero-anim hero-anim-2">{"AI watches your WhatsApp, email, and messages. If something matters, it calls or texts you."}</p>
-                        <div class="hero-cta-group hero-anim hero-anim-3">
+                        <div class="hero-cta-group hero-anim hero-anim-2">
                             <Link<Route> to={Route::Pricing} classes="forward-link">
-                                <button class="hero-cta">{"See Plans"}</button>
+                                <button class="hero-cta">{"Select Your Lifestyle"}</button>
                             </Link<Route>>
                         </div>
                         <div class="trust-signal hero-anim hero-anim-3">
@@ -335,62 +284,104 @@ pub fn landing() -> Html {
                                 <img src="/assets/lightphone-logo.svg" alt="The Light Phone" class="trust-logo" />
                             </a>
                         </div>
-                        <div class="hero-metric hero-anim hero-anim-3">
-                            <span class="hero-metric-number">{days_smartphone_free}</span>
-                            <span class="hero-metric-label">{"smartphone-free days powered"}</span>
-                        </div>
                     </div>
                 </div>
             </header>
 
-            // Animation - immediately shows how it works
-            <div class="filter-concept">
-                <h2>{"Stay in Your Life"}</h2>
-                <p class="filter-concept-subtitle">{"We'll pull you out only when it's urgent."}</p>
-                <div class="filter-content">
-                    <AnimationComponent />
-                </div>
-                <div class="integrations-row">
-                    <div class="integration-buttons">
-                        { for integration_buttons_html }
-                    </div>
-                    { integration_detail_html }
-                </div>
-            </div>
-
-            // Section: Verifiably Private
-            <section class="privacy-section scroll-animate">
-                <h2>{"Verifiably Private"}</h2>
-                <div class="privacy-content">
-                    <div class="privacy-visibility">
-                        <div class="privacy-vis-card privacy-can-see">
-                            <h3><i class="fas fa-eye"></i>{" What we can see"}</h3>
-                            <p>{"Only your phone number and email (for subscription management)."}</p>
+            // Freedom section - diagram + tagline with contrast background
+            <section class="freedom-section">
+                <div class="freedom-overlay"></div>
+                <div class="freedom-content scroll-animate">
+                    <p class="freedom-tagline">{"Lightfriend upgrades your dumbphone so living "}<span class="freedom-highlight">{"free"}</span>{" is possible again."}</p>
+                    <div class="hero-diagram">
+                        <div class="diagram-left">
+                            <img src="/assets/empty-phone.png" alt="Your phone" class="diagram-nokia" />
+                            <span class="diagram-node-label">{"Your phone"}</span>
                         </div>
-                        <div class="privacy-vis-card privacy-cannot-see">
-                            <h3><i class="fas fa-eye-slash"></i>{" What we can NOT see"}</h3>
-                            <p>{"Your messages, emails, contacts, or any private data."}</p>
+                        <div class="diagram-center-group">
+                            <svg class="diagram-left-line" viewBox="0 0 100 24" preserveAspectRatio="none">
+                                <defs>
+                                    <marker id="arrow-right" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+                                        <path d="M0,0 L6,2 L0,4" fill="rgba(126,178,255,0.6)" />
+                                    </marker>
+                                    <marker id="arrow-left" markerWidth="6" markerHeight="4" refX="1" refY="2" orient="auto">
+                                        <path d="M6,0 L0,2 L6,4" fill="rgba(126,178,255,0.6)" />
+                                    </marker>
+                                </defs>
+                                <line x1="4" y1="12" x2="96" y2="12" stroke="rgba(126,178,255,0.4)" stroke-width="1" marker-start="url(#arrow-left)" marker-end="url(#arrow-right)" />
+                            </svg>
+                            <span class="diagram-edge-label">{"SMS / Call"}</span>
+                            <div class="diagram-lf-wrapper">
+                                <img src="/assets/fav.png" alt="Lightfriend" class="diagram-lf-icon" />
+                            </div>
                         </div>
-                    </div>
-                    <div class="privacy-bold-statement">
-                        <h3>{"We Can\u{2019}t See Your Data. Even If We Wanted To."}</h3>
-                        <p>{"Open source. Verified on-chain. AI processed through Tinfoil\u{2019}s verified enclaves. Not a promise - cryptographic proof."}</p>
-                        <a href="/trustless" class="privacy-link">{"See exactly how it works \u{2192}"}</a>
+                        <div class="diagram-right-group">
+                            <svg class="diagram-fan-svg" viewBox="0 0 70 130" preserveAspectRatio="none">
+                                <defs>
+                                    <marker id="fan-arrow-r" markerWidth="5" markerHeight="4" refX="4" refY="2" orient="auto">
+                                        <path d="M0,0 L5,2 L0,4" fill="rgba(126,178,255,0.5)" />
+                                    </marker>
+                                    <marker id="fan-arrow-l" markerWidth="5" markerHeight="4" refX="1" refY="2" orient="auto">
+                                        <path d="M5,0 L0,2 L5,4" fill="rgba(126,178,255,0.5)" />
+                                    </marker>
+                                </defs>
+                                <line x1="0" y1="65" x2="65" y2="5" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
+                                <line x1="0" y1="65" x2="65" y2="35" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
+                                <line x1="0" y1="65" x2="65" y2="65" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
+                                <line x1="0" y1="65" x2="65" y2="95" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
+                                <line x1="0" y1="65" x2="65" y2="125" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
+                            </svg>
+                            <div class="diagram-apps-list">
+                                <div class="diagram-app-row"><i class="fab fa-whatsapp"></i><span>{"WhatsApp"}</span></div>
+                                <div class="diagram-app-row"><i class="fab fa-telegram"></i><span>{"Telegram"}</span></div>
+                                <div class="diagram-app-row"><i class="fab fa-signal-messenger"></i><span>{"Signal"}</span></div>
+                                <div class="diagram-app-row"><i class="fas fa-envelope"></i><span>{"Email"}</span></div>
+                                <div class="diagram-app-row"><i class="fas fa-plug"></i><span>{"MCP"}</span></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </section>
 
-            <section class="trust-proof scroll-animate">
-                <div class="section-intro">
-                    <h2>{"The Story"}</h2>
-                    <img src="/assets/rasmus-pfp.png" alt="Rasmus, founder of Lightfriend" loading="lazy" style="max-width: 200px; border-radius: 50%; margin: 0 auto 1.5rem; display: block;"/>
-                    <p>{"I\u{2019}m "}<a href="https://rasmus.ahtava.com" target="_blank" rel="noopener noreferrer">{"Rasmus"}</a>{". I built Lightfriend because I switched to a dumbphone and needed a way to keep WhatsApp and email without a smartphone."}</p>
+            // TODO: Image carousel goes here when "Removed" style photos are ready
+
+            // Privacy section
+            <section class="privacy-hook scroll-animate">
+                <h2 class="privacy-hook-title">{"Nobody can read your messages. Not even us."}</h2>
+                <p class="privacy-hook-subtitle">{"Lightfriend runs inside a hardware-isolated enclave. Your data is end-to-end private, cryptographically verifiable."}</p>
+                <div class="privacy-hook-links">
+                    <Link<Route> to={Route::Trustless} classes="privacy-hook-link">
+                        {"Verifiably Private →"}
+                    </Link<Route>>
+                    <Link<Route> to={Route::TrustChain} classes="privacy-hook-link">
+                        {"Trust Chain →"}
+                    </Link<Route>>
                 </div>
             </section>
 
             <section class="testimonials-section scroll-animate">
                 <div class="testimonials-content">
+                    <div class="testimonial-metric">
+                        <span class="testimonial-metric-number">{days_smartphone_free}</span>
+                        <span class="testimonial-metric-label">{"smartphone-free days powered"}</span>
+                    </div>
                     <h2>{"Life After Smartphones"}</h2>
+                    <div class="testimonial">
+                        <blockquote>
+                            {"I have ADHD so smartphones were basically impossible for me. I'd check one notification and suddenly an hour was gone. Now I just get a text with the important stuff. No apps, nothing to get lost in. Honestly it's changed everything for how I get through my day."}
+                        </blockquote>
+                    </div>
+                    <div class="testimonial">
+                        <blockquote>
+                            {"As a dumbphone user, I couldn't live without lightfriend. It's useful, smart and most importantly, reliable. A true must have for living a distraction free life."}
+                        </blockquote>
+                    </div>
+                    <div class="testimonial">
+                        <blockquote>
+                            {"Lightfriend has saved me so many times. I\u{2019}ll forget a deadline or miss an important email \u{2014} but then Lightfriend pings me about it before it\u{2019}s too late. It watches my inbox so I don\u{2019}t have to. Honestly, I\u{2019}d be lost without it."}
+                        </blockquote>
+                        <p class="testimonial-author">{"- Kasperi"}</p>
+                    </div>
                     <div class="testimonial">
                         <blockquote>
                             {"Lightfriend proactively alerted me of a security alert in my email when my notifications were disabled making me aware of a threat which I then took care of before anything permanent damage could be done. Thanks to lightfriend monitoring, the issue was resolved and I could go back to work swiftly."}
@@ -401,22 +392,6 @@ pub fn landing() -> Html {
                             {"lightfriend fills in the gaps that the LP3(light phone 3) is missing, without making me want to use my iphone. Also I love that I can talk to Perplexity while I'm out"}
                         </blockquote>
                         <p class="testimonial-author">{"- Max"}</p>
-                    </div>
-                    <div class="testimonial">
-                        <blockquote>
-                            {"As a dumbphone user, I couldn't live without lightfriend. It's useful, smart and most importantly, reliable. A true must have for living a distraction free life."}
-                        </blockquote>
-                    </div>
-                    <div class="testimonial">
-                        <blockquote>
-                            {"I have ADHD so smartphones were basically impossible for me. I'd check one notification and suddenly an hour was gone. Now I just get a text with the important stuff. No apps, nothing to get lost in. Honestly it's changed everything for how I get through my day."}
-                        </blockquote>
-                    </div>
-                    <div class="testimonial">
-                        <blockquote>
-                            {"Lightfriend has saved me so many times. I\u{2019}ll forget a deadline or miss an important email \u{2014} but then Lightfriend pings me about it before it\u{2019}s too late. It watches my inbox so I don\u{2019}t have to. Honestly, I\u{2019}d be lost without it."}
-                        </blockquote>
-                        <p class="testimonial-author">{"- Kasperi"}</p>
                     </div>
                 </div>
             </section>
@@ -431,11 +406,18 @@ pub fn landing() -> Html {
                     </div>
                 </div>
             </div>
+            <section class="trust-proof scroll-animate">
+                <div class="section-intro">
+                    <h2>{"The Story"}</h2>
+                    <img src="/assets/rasmus-pfp.png" alt="Rasmus, founder of Lightfriend" loading="lazy" style="max-width: 200px; border-radius: 50%; margin: 0 auto 1.5rem; display: block;"/>
+                    <p>{"I\u{2019}m "}<a href="https://rasmus.ahtava.com" target="_blank" rel="noopener noreferrer">{"Rasmus"}</a>{". I built Lightfriend because I switched to a dumbphone and needed a way to keep WhatsApp and email without a smartphone."}</p>
+                </div>
+            </section>
             <footer class="footer-cta scroll-animate">
                 <div class="footer-content">
                     <h2>{"Ready for Digital Peace?"}</h2>
                     <Link<Route> to={Route::Pricing} classes="forward-link">
-                        <button class="hero-cta">{"Start Today"}</button>
+                        <button class="hero-cta">{"Select Your Lifestyle"}</button>
                     </Link<Route>>
                     <p class="disclaimer">{"Works with any phone - smartphones, flip phones, and feature phones. No extra hardware required."}</p>
                     <div class="waitlist-section">
@@ -547,6 +529,377 @@ pub fn landing() -> Html {
         background: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.5) 80%, #0d0d0d 100%);
         z-index: -1;
         pointer-events: none;
+    }
+    /* Hero diagram */
+    .hero-diagram {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0;
+        margin: 2rem auto;
+        max-width: 700px;
+        width: 100%;
+    }
+    .diagram-left, .diagram-center, .diagram-right {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    .diagram-node {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.4rem;
+    }
+    .diagram-nokia {
+        width: 60px;
+        height: auto;
+        filter: drop-shadow(0 2px 8px rgba(0,0,0,0.5));
+    }
+    .diagram-node-label {
+        font-size: 0.75rem;
+        color: #999;
+        white-space: nowrap;
+    }
+    .diagram-lf-icon {
+        width: 48px;
+        height: 48px;
+        border-radius: 12px;
+    }
+    .diagram-center-group {
+        display: flex;
+        align-items: center;
+        position: relative;
+        align-self: center;
+    }
+    .diagram-left-line {
+        width: 80px;
+        height: 24px;
+        flex-shrink: 0;
+    }
+    .diagram-edge-label {
+        position: absolute;
+        bottom: -14px;
+        left: 20px;
+        font-size: 0.65rem;
+        color: #7EB2FF;
+        white-space: nowrap;
+    }
+    .diagram-lf-wrapper {
+        flex-shrink: 0;
+        margin-top: 8px;
+    }
+    .diagram-right-group {
+        display: flex;
+        align-items: center;
+        gap: 0;
+    }
+    .diagram-fan-svg {
+        width: 70px;
+        height: 130px;
+        flex-shrink: 0;
+    }
+    .diagram-apps-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+    }
+    .diagram-app-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        height: 1.55rem;
+    }
+    .diagram-app-row i {
+        font-size: 1.1rem;
+        color: rgba(255, 255, 255, 0.6);
+        width: 1.3rem;
+        text-align: center;
+        flex-shrink: 0;
+    }
+    .diagram-app-row span {
+        font-size: 0.8rem;
+        color: #999;
+        white-space: nowrap;
+    }
+    @media (max-width: 768px) {
+        .hero-diagram {
+            gap: 0;
+            max-width: 100%;
+            padding: 0 0.5rem;
+        }
+        .diagram-nokia {
+            width: 40px;
+        }
+        .diagram-lf-icon {
+            width: 36px;
+            height: 36px;
+        }
+        .diagram-left-line {
+            width: 40px;
+        }
+        .diagram-fan-svg {
+            width: 40px;
+            height: 110px;
+        }
+        .diagram-app-row span {
+            font-size: 0.7rem;
+        }
+        .diagram-app-row i {
+            font-size: 0.9rem;
+        }
+        .diagram-app-row {
+            height: 1.3rem;
+        }
+    }
+    /* Testimonial metric */
+    .testimonial-metric {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+    }
+    .testimonial-metric-number {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #7EB2FF;
+    }
+    .testimonial-metric-label {
+        font-size: 0.85rem;
+        color: #999;
+    }
+    /* Freedom section */
+    .freedom-section {
+        position: relative;
+        padding: 6rem 2rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        background: #0d0d0d;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .freedom-overlay {
+        display: none;
+    }
+    .freedom-content {
+        position: relative;
+        z-index: 2;
+        text-align: center;
+        max-width: 800px;
+    }
+    .freedom-tagline {
+        font-size: 1.6rem;
+        color: #ccc;
+        line-height: 1.6;
+        margin-bottom: 3.5rem;
+        font-weight: 300;
+    }
+    .freedom-highlight {
+        color: #7EB2FF;
+        font-weight: 700;
+        font-size: 1.8rem;
+    }
+    @media (max-width: 768px) {
+        .freedom-section {
+            padding: 3rem 1.5rem;
+            min-height: auto;
+        }
+        .freedom-tagline {
+            font-size: 1.2rem;
+        }
+        .freedom-highlight {
+            font-size: 1.4rem;
+        }
+    }
+    /* Privacy hook section */
+    .privacy-hook {
+        padding: 5rem 2rem;
+        text-align: center;
+        background: #0d0d0d;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        position: relative;
+        z-index: 2;
+    }
+    .privacy-hook-title {
+        font-size: 2rem;
+        color: #fff;
+        font-weight: 700;
+        margin-bottom: 1rem;
+        max-width: 700px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+    .privacy-hook-subtitle {
+        font-size: 1.05rem;
+        color: #999;
+        line-height: 1.6;
+        max-width: 600px;
+        margin: 0 auto 2rem;
+    }
+    .privacy-hook-links {
+        display: flex;
+        justify-content: center;
+        gap: 2rem;
+        flex-wrap: wrap;
+    }
+    .privacy-hook-link {
+        color: #7EB2FF;
+        text-decoration: none;
+        font-size: 0.95rem;
+        font-weight: 500;
+        transition: color 0.3s ease;
+    }
+    .privacy-hook-link:hover {
+        color: #a8ccff;
+    }
+    @media (max-width: 768px) {
+        .privacy-hook {
+            padding: 3rem 1.5rem;
+        }
+        .privacy-hook-title {
+            font-size: 1.5rem;
+        }
+        .privacy-hook-subtitle {
+            font-size: 0.95rem;
+        }
+        .privacy-hook-links {
+            gap: 1.2rem;
+        }
+    }
+    /* Cost hook section */
+    .cost-hook {
+        padding: 4rem 2rem;
+        text-align: center;
+        background: #0d0d0d;
+        position: relative;
+        z-index: 2;
+    }
+    .cost-hook-label {
+        font-size: 1rem;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-bottom: 0.5rem;
+    }
+    .cost-hook-number {
+        font-size: 4rem;
+        font-weight: 800;
+        color: #fff;
+        margin: 0.3rem 0;
+    }
+    .cost-hook-toggle {
+        background: none;
+        border: none;
+        color: #7EB2FF;
+        font-size: 0.9rem;
+        cursor: pointer;
+        padding: 0.5rem 0;
+        margin-top: 0.5rem;
+        transition: color 0.3s ease;
+    }
+    .cost-hook-toggle:hover {
+        color: #a8ccff;
+    }
+    .cost-hook-breakdown {
+        max-width: 700px;
+        margin: 2rem auto 0;
+        text-align: left;
+    }
+    .cost-hook-item {
+        padding: 1.2rem 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .cost-hook-item h3 {
+        font-size: 1.1rem;
+        color: #fff;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+    }
+    .cost-hook-item p {
+        font-size: 0.9rem;
+        color: #999;
+        line-height: 1.7;
+        margin: 0;
+    }
+    .cost-hook-source {
+        font-size: 0.7rem;
+        color: #555;
+        display: block;
+        margin-top: 0.4rem;
+    }
+    .cost-hook-footer {
+        font-size: 0.85rem;
+        color: #777;
+        text-align: center;
+        margin-top: 1.5rem;
+        font-style: italic;
+    }
+    @media (max-width: 768px) {
+        .cost-hook-number {
+            font-size: 3rem;
+        }
+        .cost-hook {
+            padding: 3rem 1.5rem;
+        }
+    }
+    /* Image carousel section */
+    .image-carousel-section {
+        padding: 2rem 0;
+        margin: 0 auto;
+        max-width: 900px;
+        position: relative;
+        z-index: 2;
+        background: #0d0d0d;
+    }
+    .carousel-container {
+        width: 100%;
+        aspect-ratio: 3 / 2;
+        overflow: hidden;
+        border-radius: 8px;
+        background: #111;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .carousel-image {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        filter: grayscale(100%);
+        transition: opacity 0.6s ease;
+    }
+    .carousel-dots {
+        display: flex;
+        justify-content: center;
+        gap: 0.5rem;
+        margin-top: 1rem;
+    }
+    .carousel-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        background: transparent;
+        cursor: pointer;
+        padding: 0;
+        transition: all 0.3s ease;
+    }
+    .carousel-dot.active {
+        background: #fff;
+        border-color: #fff;
+    }
+    .carousel-dot:hover {
+        border-color: rgba(255, 255, 255, 0.6);
+    }
+    @media (max-width: 768px) {
+        .image-carousel-section {
+            padding: 1rem;
+        }
+        .carousel-container {
+            border-radius: 4px;
+        }
     }
     .cta-image-container {
         max-width: 300px;

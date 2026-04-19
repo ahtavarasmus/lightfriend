@@ -3,6 +3,7 @@ use crate::pages::landing::Landing;
 use crate::profile::billing_models::UserProfile;
 use crate::utils::api::Api;
 use crate::Route;
+use gloo_timers::callback::Timeout;
 use serde::Deserialize;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
@@ -76,6 +77,26 @@ pub fn Home() -> Html {
                 || ()
             },
             (),
+        );
+    }
+
+    // Auto-dismiss success banner after 5 seconds
+    {
+        let success_dismiss = success.clone();
+        let success_dep = (*success).clone();
+        use_effect_with_deps(
+            move |msg: &Option<String>| {
+                let timeout = if msg.is_some() {
+                    let success = success_dismiss.clone();
+                    Some(Timeout::new(5_000, move || {
+                        success.set(None);
+                    }))
+                } else {
+                    None
+                };
+                move || drop(timeout)
+            },
+            success_dep,
         );
     }
 
@@ -283,7 +304,6 @@ pub fn Home() -> Html {
                                 html! {
                                     <div class="message success-message">
                                         <div class="success-content">
-                                            <span class="success-icon">{"+"}</span>
                                             <div class="success-text">
                                                 {success_msg}
                                             </div>

@@ -42,22 +42,28 @@ pub fn is_notification_only_country_code(country: &str) -> bool {
     !LOCAL_NUMBER_COUNTRY_CODES.contains(&country)
 }
 
-/// Check if a Stripe price ID is the Assistant plan (new tier)
-pub fn is_assistant_plan_price(price_id: &str) -> bool {
-    let ids = [
-        std::env::var("STRIPE_ASSISTANT_PLAN_PRICE_ID").ok(),
-        std::env::var("STRIPE_ASSISTANT_PLAN_PRICE_ID_US").ok(),
-    ];
-    ids.iter().filter_map(|p| p.as_ref()).any(|p| p == price_id)
+/// Determine plan type from a Stripe product ID.
+/// Returns "assistant", "byot", or "autopilot" (default).
+pub fn plan_type_from_product(product_id: &str) -> &'static str {
+    if std::env::var("STRIPE_ASSISTANT_PRODUCT_ID")
+        .map(|p| p == product_id)
+        .unwrap_or(false)
+    {
+        return "assistant";
+    }
+    if std::env::var("STRIPE_BYOT_PRODUCT_ID")
+        .map(|p| p == product_id)
+        .unwrap_or(false)
+    {
+        return "byot";
+    }
+    // Autopilot is the default - any unrecognized product is autopilot
+    "autopilot"
 }
 
-/// Check if a Stripe price ID is the BYOT plan
-pub fn is_byot_plan_price(price_id: &str) -> bool {
-    // Legacy BYOT price ID for user on older subscription
-    if price_id == "price_1RWavGKxKvG0CX8G9MFEIy93" {
-        return true;
-    }
-    std::env::var("STRIPE_BYOT_PLAN_PRICE_ID")
-        .map(|p| p == price_id)
+/// Check if a Stripe product ID is the BYOT plan.
+pub fn is_byot_product(product_id: &str) -> bool {
+    std::env::var("STRIPE_BYOT_PRODUCT_ID")
+        .map(|p| p == product_id)
         .unwrap_or(false)
 }
