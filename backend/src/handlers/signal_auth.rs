@@ -1065,7 +1065,6 @@ pub async fn check_signal_health(
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
     tracing::info!("🏥 Checking Signal health for user {}", auth_user.user_id);
 
-    // Get the bridge information first
     let bridge = state
         .user_repository
         .get_bridge(auth_user.user_id, "signal")
@@ -1084,7 +1083,6 @@ pub async fn check_signal_health(
         })));
     };
 
-    // Get Matrix client
     let client = matrix_auth::get_cached_client(auth_user.user_id, &state)
         .await
         .map_err(|e| {
@@ -1095,7 +1093,6 @@ pub async fn check_signal_health(
             )
         })?;
 
-    // Get the room
     let room_id = OwnedRoomId::try_from(bridge.room_id.unwrap_or_default()).map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -1110,22 +1107,6 @@ pub async fn check_signal_health(
         )
     })?;
 
-    // Send login command to check status - if already logged in, bridge will respond with status
-    tracing::info!(
-        "📤 Sending login command for health check for user {}",
-        auth_user.user_id
-    );
-    room.send(RoomMessageEventContent::text_plain("login"))
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to send ping command: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({"error": "Failed to send ping command"})),
-            )
-        })?;
-
-    // Wait for response with timeout
     let bridge_bot = std::env::var("SIGNAL_BRIDGE_BOT").expect("SIGNAL_BRIDGE_BOT not set");
     let bot_user_id = OwnedUserId::try_from(bridge_bot.as_str()).map_err(|_| {
         (
@@ -1134,126 +1115,81 @@ pub async fn check_signal_health(
         )
     })?;
 
-    // Simple approach: check the MOST RECENT message from the bot
-    let mut options =
-        matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
-    options.limit = matrix_sdk::ruma::UInt::new(50).unwrap();
-
-    let messages = match room.messages(options).await {
-        Ok(m) => m,
+    // Send `!signal list-logins` (read-only). The bridge bot responds with one
+    // line per login: "* `<id>` (<identifier>) - `CONNECTED`" for healthy
+    // logins. Other statuses indicate unhealthy state.
+    tracing::info!(
+        "📤 Sending !signal list-logins for health check for user {}",
+        auth_user.user_id
+    );
+    let responses = match crate::utils::bridge::probe_bridge_room(
+        &client,
+        &room,
+        &bot_user_id,
+        "!signal list-logins",
+        Duration::from_secs(8),
+    )
+    .await
+    {
+        Ok(r) => r,
         Err(e) => {
-            tracing::warn!("⚠️ Failed to get messages: {}", e);
+            tracing::warn!("⚠️ probe_bridge_room failed: {}", e);
             return Ok(AxumJson(json!({
                 "healthy": false,
-                "message": format!("Failed to get room messages: {}", e)
+                "ambiguous": true,
+                "message": format!("probe failed: {}", e)
             })));
         }
     };
 
-    tracing::info!(
-        "📨 Got {} messages from room for health check",
-        messages.chunk.len()
-    );
-
-    for msg in messages.chunk {
-        let raw_event = msg.raw();
-        if let Ok(event) = raw_event.deserialize() {
-            if event.sender() == bot_user_id {
-                if let AnySyncTimelineEvent::MessageLike(
-                    matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(sync_event),
-                ) = event
-                {
-                    let event_content: RoomMessageEventContent = match sync_event {
-                        SyncRoomMessageEvent::Original(original_event) => original_event.content,
-                        SyncRoomMessageEvent::Redacted(_) => continue,
-                    };
-
-                    let content = match event_content.msgtype {
-                        MessageType::Text(text_content) => text_content.body,
-                        MessageType::Notice(notice_content) => notice_content.body,
-                        _ => continue,
-                    };
-
-                    let content_lower = content.to_lowercase();
-                    tracing::info!("🔍 Most recent bot message ({} chars)", content.len());
-
-                    // Skip non-status messages
-                    if content_lower.contains("scan")
-                        || content_lower.contains("qr code")
-                        || content_lower.contains("queued sync")
-                        || content_lower.contains("unknown command")
-                    {
-                        continue;
-                    }
-
-                    // Unhealthy patterns
-                    if content_lower.contains("not logged in")
-                        || content_lower.contains("not connected")
-                        || content_lower.contains("disconnected")
-                        || content_lower.contains("logged out")
-                        || content_lower.contains("no session")
-                        || content_lower.contains("not registered")
-                    {
-                        tracing::warn!(
-                            "❌ Signal health check failed for user {}: {}",
-                            auth_user.user_id,
-                            content
-                        );
-
-                        if let Err(e) = state
-                            .user_repository
-                            .delete_bridge(auth_user.user_id, "signal")
-                        {
-                            tracing::error!("Failed to delete stale bridge: {}", e);
-                        } else {
-                            tracing::info!(
-                                "🧹 Deleted stale Signal bridge for user {}",
-                                auth_user.user_id
-                            );
-                        }
-
-                        return Ok(AxumJson(json!({
-                            "healthy": false,
-                            "message": content
-                        })));
-                    }
-
-                    // Healthy patterns
-                    if content_lower.contains("successfully logged in")
-                        || content_lower.contains("logged in as")
-                        || content_lower.contains("already logged in")
-                    {
-                        tracing::info!(
-                            "✅ Signal health check passed for user {}: {}",
-                            auth_user.user_id,
-                            content
-                        );
-
-                        // Extract and save the connected account (phone number)
-                        if let Some(account) = extract_connected_account(&content) {
-                            tracing::info!("📱 Extracted connected account: {}", account);
-                            if let Err(e) = state.user_repository.update_bridge_data(
-                                auth_user.user_id,
-                                "signal",
-                                &account,
-                            ) {
-                                tracing::warn!("Failed to save connected account: {}", e);
-                            }
-                        }
-
-                        return Ok(AxumJson(json!({
-                            "healthy": true,
-                            "message": content
-                        })));
-                    }
-                }
-            }
-        }
+    if responses.is_empty() {
+        tracing::warn!(
+            "⚠️ Signal health check: no response from bridge bot for user {}",
+            auth_user.user_id
+        );
+        return Ok(AxumJson(json!({
+            "healthy": false,
+            "ambiguous": true,
+            "message": "Bridge bot did not respond. The bridge may be temporarily unreachable."
+        })));
     }
 
-    tracing::info!("ℹ️ No clear status message found, assuming healthy based on bridge record");
-    Ok(AxumJson(json!({
-        "healthy": true,
-        "message": "Connection appears healthy (no recent status changes)"
-    })))
+    let combined = responses.join("\n");
+    tracing::info!(
+        "📨 Signal list-logins response for user {}: {:?}",
+        auth_user.user_id,
+        combined
+    );
+
+    if crate::utils::bridge::list_logins_has_connected(&combined) {
+        tracing::info!(
+            "✅ Signal health check passed for user {}",
+            auth_user.user_id
+        );
+        if let Some(ident) = crate::utils::bridge::extract_first_connected_identifier(&combined) {
+            if let Err(e) =
+                state
+                    .user_repository
+                    .update_bridge_data(auth_user.user_id, "signal", &ident)
+            {
+                tracing::warn!("Failed to save connected account: {}", e);
+            }
+        }
+        Ok(AxumJson(json!({
+            "healthy": true,
+            "message": combined,
+        })))
+    } else {
+        // No CONNECTED login. Report unhealthy but DO NOT delete the bridge -
+        // that's the user's call. Frontend can prompt them to reconnect.
+        tracing::warn!(
+            "❌ Signal health check: no CONNECTED login for user {}: {:?}",
+            auth_user.user_id,
+            combined
+        );
+        Ok(AxumJson(json!({
+            "healthy": false,
+            "message": combined,
+        })))
+    }
 }

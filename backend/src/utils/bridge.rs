@@ -2477,3 +2477,174 @@ pub fn capitalize(s: &str) -> String {
         Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
     }
 }
+
+/// Send a read-only command to a bridge management room and collect responses
+/// from the bridge bot that arrived AFTER the command was sent. Filters by
+/// origin_server_ts to avoid matching stale messages from history.
+///
+/// Used by health checks to get a fresh, authoritative status from the bridge
+/// without parsing potentially-stale historical messages.
+///
+/// Returns the raw text bodies of bridge bot messages newer than the send
+/// timestamp, in chronological order. Empty vec means the bot didn't respond
+/// within `max_wait` (could mean bot is down, command was unrecognized but
+/// silent, or sync was lagging).
+pub async fn probe_bridge_room(
+    client: &MatrixClient,
+    room: &Room,
+    bot_user_id: &matrix_sdk::ruma::OwnedUserId,
+    command: &str,
+    max_wait: Duration,
+) -> Result<Vec<String>> {
+    use matrix_sdk::config::SyncSettings as MatrixSyncSettings;
+    use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
+    use std::time::Instant;
+    use tokio::time::sleep;
+
+    // Record send timestamp BEFORE sending so we can filter stale messages.
+    // Matrix origin_server_ts is in milliseconds since epoch.
+    let cmd_sent_ts_ms: u64 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+
+    room.send(RoomMessageEventContent::text_plain(command))
+        .await
+        .map_err(|e| anyhow!("send command failed: {}", e))?;
+
+    let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(1));
+    let deadline = Instant::now() + max_wait;
+    let mut responses: Vec<(u64, String)> = Vec::new();
+
+    while Instant::now() < deadline {
+        let _ = client.sync_once(sync_settings.clone()).await;
+
+        let mut opts =
+            matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
+        opts.limit = matrix_sdk::ruma::UInt::new(30).unwrap();
+        if let Ok(messages) = room.messages(opts).await {
+            for msg in &messages.chunk {
+                if let Ok(event) = msg.raw().deserialize() {
+                    if event.sender() != bot_user_id {
+                        continue;
+                    }
+                    let ts_ms: u64 = i64::from(event.origin_server_ts().0) as u64;
+                    if ts_ms <= cmd_sent_ts_ms {
+                        continue;
+                    }
+                    if responses.iter().any(|(t, _)| *t == ts_ms) {
+                        continue;
+                    }
+                    if let AnySyncTimelineEvent::MessageLike(
+                        matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(sync_event),
+                    ) = event
+                    {
+                        let content = match sync_event {
+                            SyncRoomMessageEvent::Original(e) => e.content,
+                            SyncRoomMessageEvent::Redacted(_) => continue,
+                        };
+                        let body = match content.msgtype {
+                            MessageType::Text(t) => t.body,
+                            MessageType::Notice(n) => n.body,
+                            _ => continue,
+                        };
+                        responses.push((ts_ms, body));
+                    }
+                }
+            }
+        }
+
+        if !responses.is_empty() {
+            // Got at least one response. Wait one more 500ms in case there are
+            // multi-line follow-ups, then bail.
+            sleep(Duration::from_millis(500)).await;
+            // Re-sync once more to pick up any straggler.
+            let _ = client.sync_once(sync_settings.clone()).await;
+            if let Ok(messages) = room
+                .messages({
+                    let mut o = matrix_sdk::room::MessagesOptions::new(
+                        matrix_sdk::ruma::api::Direction::Backward,
+                    );
+                    o.limit = matrix_sdk::ruma::UInt::new(30).unwrap();
+                    o
+                })
+                .await
+            {
+                for msg in &messages.chunk {
+                    if let Ok(event) = msg.raw().deserialize() {
+                        if event.sender() != bot_user_id {
+                            continue;
+                        }
+                        let ts_ms: u64 = i64::from(event.origin_server_ts().0) as u64;
+                        if ts_ms <= cmd_sent_ts_ms {
+                            continue;
+                        }
+                        if responses.iter().any(|(t, _)| *t == ts_ms) {
+                            continue;
+                        }
+                        if let AnySyncTimelineEvent::MessageLike(
+                            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(
+                                sync_event,
+                            ),
+                        ) = event
+                        {
+                            let content = match sync_event {
+                                SyncRoomMessageEvent::Original(e) => e.content,
+                                SyncRoomMessageEvent::Redacted(_) => continue,
+                            };
+                            let body = match content.msgtype {
+                                MessageType::Text(t) => t.body,
+                                MessageType::Notice(n) => n.body,
+                                _ => continue,
+                            };
+                            responses.push((ts_ms, body));
+                        }
+                    }
+                }
+            }
+            break;
+        }
+
+        sleep(Duration::from_millis(500)).await;
+    }
+
+    // Sort by ts ascending so caller sees responses in chronological order.
+    responses.sort_by_key(|(t, _)| *t);
+    Ok(responses.into_iter().map(|(_, b)| b).collect())
+}
+
+/// Parse a `list-logins` response body from mautrix-whatsapp/signal v26.04+
+/// (bridgev2 architecture). Format per line:
+///   `* <login_id> (<identifier>) - <STATUS>`
+/// Returns true if any line shows `CONNECTED` status. Returns false if the
+/// response contains logins but none are CONNECTED, or if the response is
+/// empty / contains no login lines.
+pub fn list_logins_has_connected(body: &str) -> bool {
+    body.lines().any(|line| {
+        let line_trimmed = line.trim();
+        // Match the literal status indicator. `CONNECTED` is wrapped in
+        // backticks in the bridge response, so the literal string we look for
+        // is "- `CONNECTED`" at end-of-line.
+        line_trimmed.ends_with("- `CONNECTED`") || line_trimmed.ends_with("- CONNECTED")
+    })
+}
+
+/// Extract the identifier (e.g. phone number) from the first CONNECTED login
+/// line in a `list-logins` response. Returns None if no connected login found.
+pub fn extract_first_connected_identifier(body: &str) -> Option<String> {
+    for line in body.lines() {
+        let line_trimmed = line.trim();
+        if !(line_trimmed.ends_with("- `CONNECTED`") || line_trimmed.ends_with("- CONNECTED")) {
+            continue;
+        }
+        // Format: "* `<id>` (<identifier>) - `CONNECTED`"
+        // Extract <identifier> from inside the parens.
+        if let Some(open) = line_trimmed.find('(') {
+            if let Some(close) = line_trimmed[open + 1..].find(')') {
+                let ident = &line_trimmed[open + 1..open + 1 + close];
+                return Some(ident.to_string());
+            }
+        }
+    }
+    None
+}
