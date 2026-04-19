@@ -698,6 +698,10 @@ async fn main() {
             "/api/admin/bridge-send/{bridge_type}",
             post(admin_handlers::send_bridge_command),
         )
+        .route(
+            "/api/admin/bridge-recent-bot-messages/{bridge_type}",
+            get(admin_handlers::recent_bot_messages),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             handlers::auth_middleware::require_admin,

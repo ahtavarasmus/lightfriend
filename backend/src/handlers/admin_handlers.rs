@@ -1938,3 +1938,169 @@ pub async fn send_bridge_command(
         "responses": responses,
     })))
 }
+
+/// Admin passive-read endpoint: dump recent bot messages from a bridge
+/// management room WITHOUT sending anything. Used to capture spontaneous push
+/// events (e.g. the bridge notifying us that a session was revoked externally
+/// when the user unlinked the device from their phone app).
+///
+/// GET /api/admin/bridge-recent-bot-messages/{bridge_type}?since_mins=N
+///   bridge_type: telegram | whatsapp | signal
+///   since_mins:  optional, default 10, max 120
+///
+/// Triggers a single sync_once to pull recent room history into the cache,
+/// then returns every bot message whose ts falls within the window. Returns
+/// bodies with their origin_server_ts so the caller can reconstruct ordering.
+#[derive(Deserialize)]
+pub struct RecentBotMessagesQuery {
+    pub since_mins: Option<u64>,
+}
+
+pub async fn recent_bot_messages(
+    State(state): State<Arc<AppState>>,
+    auth_user: crate::handlers::auth_middleware::AuthUser,
+    axum::extract::Path(bridge_type): axum::extract::Path<String>,
+    axum::extract::Query(q): axum::extract::Query<RecentBotMessagesQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    use matrix_sdk::config::SyncSettings as MatrixSyncSettings;
+    use matrix_sdk::ruma::events::room::message::{MessageType, SyncRoomMessageEvent};
+    use matrix_sdk::ruma::events::AnySyncTimelineEvent;
+    use matrix_sdk::ruma::{OwnedRoomId, OwnedUserId};
+    use tokio::time::Duration;
+
+    if !matches!(bridge_type.as_str(), "telegram" | "whatsapp" | "signal") {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "invalid bridge_type"})),
+        ));
+    }
+
+    let since_mins = q.since_mins.unwrap_or(10).min(120);
+    let window_start_ts_ms: u64 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+        - (since_mins * 60 * 1000);
+
+    let bridge_bot_env = match bridge_type.as_str() {
+        "telegram" => "TELEGRAM_BRIDGE_BOT",
+        "whatsapp" => "WHATSAPP_BRIDGE_BOT",
+        "signal" => "SIGNAL_BRIDGE_BOT",
+        _ => unreachable!(),
+    };
+    let bridge_bot = std::env::var(bridge_bot_env).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("{} env var not set", bridge_bot_env)})),
+        )
+    })?;
+    let bot_user_id = OwnedUserId::try_from(bridge_bot.as_str()).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("invalid bridge bot user id: {}", e)})),
+        )
+    })?;
+
+    let bridge = state
+        .user_repository
+        .get_bridge(auth_user.user_id, &bridge_type)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("db error: {}", e)})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": format!(
+                        "no {} bridge found for this user; connect it first so we have a management room",
+                        bridge_type
+                    )
+                })),
+            )
+        })?;
+
+    let room_id_str = bridge.room_id.unwrap_or_default();
+    let room_id = OwnedRoomId::try_from(room_id_str.as_str()).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "invalid room id on bridge record"})),
+        )
+    })?;
+
+    let client = crate::utils::matrix_auth::get_cached_client(auth_user.user_id, &state)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("matrix client: {}", e)})),
+            )
+        })?;
+    let room = client.get_room(&room_id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "bridge management room not found in matrix client"})),
+        )
+    })?;
+
+    // Sync once to pull the latest timeline events into the local store. No
+    // command is sent - this is a pure read.
+    let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(2));
+    let _ = client.sync_once(sync_settings).await;
+
+    let mut opts =
+        matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
+    opts.limit = matrix_sdk::ruma::UInt::new(100).unwrap();
+    let messages = room.messages(opts).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("fetch messages failed: {}", e)})),
+        )
+    })?;
+
+    let mut bot_messages: Vec<serde_json::Value> = Vec::new();
+    for msg in &messages.chunk {
+        let Ok(event) = msg.raw().deserialize() else {
+            continue;
+        };
+        if event.sender() != bot_user_id {
+            continue;
+        }
+        let ts_ms: u64 = i64::from(event.origin_server_ts().0) as u64;
+        if ts_ms < window_start_ts_ms {
+            continue;
+        }
+        if let AnySyncTimelineEvent::MessageLike(
+            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(sync_event),
+        ) = event
+        {
+            let content = match sync_event {
+                SyncRoomMessageEvent::Original(e) => e.content,
+                SyncRoomMessageEvent::Redacted(_) => continue,
+            };
+            let (body, msgtype) = match content.msgtype {
+                MessageType::Text(t) => (t.body, "m.text"),
+                MessageType::Notice(n) => (n.body, "m.notice"),
+                _ => continue,
+            };
+            bot_messages.push(json!({
+                "ts_ms": ts_ms,
+                "msgtype": msgtype,
+                "body": body,
+            }));
+        }
+    }
+
+    // Chronological ascending order for human readability
+    bot_messages.sort_by_key(|v| v.get("ts_ms").and_then(|t| t.as_u64()).unwrap_or(0));
+
+    Ok(Json(json!({
+        "bridge_type": bridge_type,
+        "since_mins": since_mins,
+        "window_start_ts_ms": window_start_ts_ms,
+        "message_count": bot_messages.len(),
+        "messages": bot_messages,
+    })))
+}
