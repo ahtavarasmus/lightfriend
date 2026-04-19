@@ -1423,11 +1423,15 @@ async fn monitor_telegram_connection(
                             );
                             last_bot_body = Some(content.clone());
 
-                            // Check for successful login or already logged in.
-                            // Matches both the "Logged in" notification and
-                            // the "!tg ping" response ("logged in as ...").
+                            // Check for successful login. We match the verified
+                            // `!tg ping` healthy response: "You're logged in as @username".
+                            // Empirically confirmed against mautrix-telegram v0.15.3.
+                            // The substring "logged in as" is present in healthy
+                            // responses but NOT in unhealthy responses like
+                            // "That command requires you to be logged in.", so this
+                            // is the safe specific match.
                             let content_lower = content.to_lowercase();
-                            if content_lower.contains("logged in")
+                            if content_lower.contains("logged in as")
                                 || content_lower.contains("already logged in")
                             {
                                 tracing::info!(

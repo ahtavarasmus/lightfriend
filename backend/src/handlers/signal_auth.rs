@@ -83,13 +83,6 @@ fn is_one_time_key_conflict(error: &anyhow::Error) -> bool {
     false
 }
 
-/// Extract connected account (phone number) from bridge status message
-fn extract_connected_account(message: &str) -> Option<String> {
-    // Look for phone number pattern (starts with + followed by digits)
-    let re = regex::Regex::new(r"\+\d{6,15}").ok()?;
-    re.find(message).map(|m| m.as_str().to_string())
-}
-
 // Helper function to get the store path
 fn get_store_path(username: &str) -> Result<String> {
     let persistent_store_path = std::env::var("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH")
@@ -555,6 +548,10 @@ pub async fn get_signal_status(
     }
 }
 
+/// Poll `!signal list-logins` until a CONNECTED login appears, then mark the
+/// bridge connected and start sync. Same approach as the WhatsApp monitor:
+/// we trust only the verified status command, not transient login-success
+/// notification text.
 async fn monitor_signal_connection(
     client: &MatrixClient,
     room_id: &OwnedRoomId,
@@ -563,180 +560,110 @@ async fn monitor_signal_connection(
     state: Arc<AppState>,
 ) -> Result<(), anyhow::Error> {
     tracing::debug!(
-        "👀 Starting optimized Signal connection monitoring for user {} in room {}",
+        "👀 Starting Signal connection monitoring for user {} in room {}",
         user_id,
         room_id
     );
     let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
-    // Shorter sync timeout for faster response
-    let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(10));
-    // Reduced monitoring duration but more frequent checks
-    for attempt in 1..60 {
-        // Try for about 5 minutes (60 * 5 seconds)
-        tracing::debug!("🔄 Monitoring attempt #{} for user {}", attempt, user_id);
-        let _ = client.sync_once(sync_settings.clone()).await?;
+    let room = client
+        .get_room(room_id)
+        .ok_or_else(|| anyhow!("management room {} not found in matrix client", room_id))?;
 
-        if let Some(room) = client.get_room(room_id) {
-            // Get only recent messages to reduce processing time
-            let mut options =
-                matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
-            options.limit = matrix_sdk::ruma::UInt::new(5).unwrap(); // Reduced from default to 5
-            let messages = room.messages(options).await?;
+    const MAX_POLLS: u32 = 60;
+    for attempt in 1..=MAX_POLLS {
+        let responses = match crate::utils::bridge::probe_bridge_room(
+            client,
+            &room,
+            &bot_user_id,
+            "!signal list-logins",
+            Duration::from_secs(5),
+        )
+        .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("⚠️ Signal monitor attempt #{} probe error: {}", attempt, e);
+                sleep(Duration::from_secs(3)).await;
+                continue;
+            }
+        };
 
-            for msg in messages.chunk {
-                let raw_event = msg.raw();
-                if let Ok(event) = raw_event.deserialize() {
-                    if event.sender() == bot_user_id {
-                        if let AnySyncTimelineEvent::MessageLike(
-                            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(
-                                sync_event,
-                            ),
-                        ) = event
-                        {
-                            let event_content: RoomMessageEventContent = match sync_event {
-                                SyncRoomMessageEvent::Original(original_event) => {
-                                    original_event.content
-                                }
-                                SyncRoomMessageEvent::Redacted(_) => continue,
-                            };
-                            let content = match event_content.msgtype {
-                                MessageType::Text(text_content) => text_content.body,
-                                MessageType::Notice(notice_content) => notice_content.body,
-                                _ => continue,
-                            };
-                            // Check for successful login message first
-                            if content.contains("Successfully logged in") {
-                                tracing::info!(
-                                    "🎉 Signal successfully connected for user {}",
-                                    user_id
-                                );
+        let combined = responses.join("\n");
+        if attempt <= 3 || attempt.is_multiple_of(10) {
+            tracing::info!(
+                "🔄 Signal monitor #{}/{} list-logins reply: {:?}",
+                attempt,
+                MAX_POLLS,
+                combined
+            );
+        }
 
-                                // Extract the connected account (phone number)
-                                let connected_account = extract_connected_account(&content);
-                                if connected_account.is_some() {
-                                    tracing::info!("📱 Connected as: [redacted]");
-                                }
+        if !crate::utils::bridge::list_logins_has_connected(&combined) {
+            sleep(Duration::from_secs(3)).await;
+            continue;
+        }
 
-                                // Update bridge status to connected
-                                let current_time = std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap()
-                                    .as_secs()
-                                    as i32;
-                                let new_bridge = NewPgBridge {
-                                    user_id,
-                                    bridge_type: "signal".to_string(),
-                                    status: "connected".to_string(),
-                                    room_id: Some(room_id.to_string()),
-                                    data: connected_account,
-                                    created_at: Some(current_time),
-                                };
-                                state.user_repository.delete_bridge(user_id, "signal")?;
-                                state.user_repository.create_bridge(new_bridge)?;
+        tracing::info!("🎉 Signal successfully connected for user {}", user_id);
 
-                                // Bridge-level E2EE is unnecessary: both the Matrix server and bridges run
-                                // inside the enclave, so data never leaves unencrypted.
+        let connected_account = crate::utils::bridge::extract_first_connected_identifier(&combined);
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+        let new_bridge = NewPgBridge {
+            user_id,
+            bridge_type: "signal".to_string(),
+            status: "connected".to_string(),
+            room_id: Some(room_id.to_string()),
+            data: connected_account,
+            created_at: Some(current_time),
+        };
+        state.user_repository.delete_bridge(user_id, "signal")?;
+        state.user_repository.create_bridge(new_bridge)?;
 
-                                // Add client to app state and start sync
-                                let mut matrix_clients = state.matrix_clients.lock().await;
-                                let mut sync_tasks = state.matrix_sync_tasks.lock().await;
-                                // Add event handlers before storing/cloning the client
-                                use matrix_sdk::room::Room;
-                                use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
+        let mut matrix_clients = state.matrix_clients.lock().await;
+        let mut sync_tasks = state.matrix_sync_tasks.lock().await;
 
-                                let state_for_handler = Arc::clone(&state);
-                                client.add_event_handler(
-                                    move |ev: OriginalSyncRoomMessageEvent, room: Room, client| {
-                                        let state = Arc::clone(&state_for_handler);
-                                        async move {
-                                            tracing::debug!(
-                                                "📨 Received message in room {}: {:?}",
-                                                room.room_id(),
-                                                ev
-                                            );
-                                            crate::utils::bridge::handle_bridge_message(
-                                                ev, room, client, state,
-                                            )
-                                            .await;
-                                        }
-                                    },
-                                );
-                                // Store the client
-                                let client_arc = Arc::new(client.clone());
-                                matrix_clients.insert(user_id, client_arc.clone());
-                                // Create sync task
-                                let sync_settings = MatrixSyncSettings::default()
-                                    .timeout(Duration::from_secs(30))
-                                    .full_state(true);
-                                let handle = tokio::spawn(async move {
-                                    loop {
-                                        match client_arc.sync(sync_settings.clone()).await {
-                                            Ok(_) => {
-                                                tracing::debug!(
-                                                    "Sync completed normally for user {}",
-                                                    user_id
-                                                );
-                                                tokio::time::sleep(
-                                                    tokio::time::Duration::from_secs(1),
-                                                )
-                                                .await;
-                                            }
-                                            Err(e) => {
-                                                tracing::error!(
-                                                    "Matrix sync error for user {}: {}",
-                                                    user_id,
-                                                    e
-                                                );
-                                                tokio::time::sleep(
-                                                    tokio::time::Duration::from_secs(30),
-                                                )
-                                                .await;
-                                            }
-                                        }
-                                    }
-                                });
-                                // Abort old sync task to prevent duplicate message processing
-                                if let Some(old_task) = sync_tasks.remove(&user_id) {
-                                    old_task.abort();
-                                }
-                                sync_tasks.insert(user_id, handle);
-                                // No specific sync commands for Signal, as portals are created on message receipt
-                                return Ok(());
-                            }
-                            // Check for error messages with more specific patterns
-                            let error_patterns = [
-                                "error",
-                                "failed",
-                                "timeout",
-                                "disconnected",
-                                "invalid",
-                                "connection lost",
-                                "authentication failed",
-                                "login failed",
-                            ];
-                            if error_patterns
-                                .iter()
-                                .any(|&pattern| content.to_lowercase().contains(pattern))
-                            {
-                                tracing::error!(
-                                    "❌ Signal connection failed for user {}: {}",
-                                    user_id,
-                                    content
-                                );
-                                state.user_repository.delete_bridge(user_id, "signal")?;
-                                return Err(anyhow!("Signal connection failed: {}", content));
-                            }
-                        }
+        use matrix_sdk::room::Room;
+        use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
+
+        let state_for_handler = Arc::clone(&state);
+        client.add_event_handler(
+            move |ev: OriginalSyncRoomMessageEvent, room: Room, client| {
+                let state = Arc::clone(&state_for_handler);
+                async move {
+                    crate::utils::bridge::handle_bridge_message(ev, room, client, state).await;
+                }
+            },
+        );
+        let client_arc = Arc::new(client.clone());
+        matrix_clients.insert(user_id, client_arc.clone());
+
+        let sync_settings = MatrixSyncSettings::default()
+            .timeout(Duration::from_secs(30))
+            .full_state(true);
+        let handle = tokio::spawn(async move {
+            loop {
+                match client_arc.sync(sync_settings.clone()).await {
+                    Ok(_) => tokio::time::sleep(tokio::time::Duration::from_secs(1)).await,
+                    Err(e) => {
+                        tracing::error!("Matrix sync error for user {}: {}", user_id, e);
+                        tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
                     }
                 }
             }
+        });
+        if let Some(old_task) = sync_tasks.remove(&user_id) {
+            old_task.abort();
         }
-        // Shorter sleep between checks for faster response
-        sleep(Duration::from_secs(3)).await; // Reduced from 5 to 3 seconds
+        sync_tasks.insert(user_id, handle);
+
+        // Signal portals are created on message receipt - no explicit sync needed.
+        return Ok(());
     }
-    // If we reach here, connection timed out
+
     state.user_repository.delete_bridge(user_id, "signal")?;
-    Err(anyhow!("Signal connection timed out after 3 minutes"))
+    Err(anyhow!("Signal connection timed out after 5 minutes"))
 }
 
 pub async fn resync_signal(

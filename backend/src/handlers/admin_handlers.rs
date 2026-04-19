@@ -1809,3 +1809,132 @@ pub async fn probe_bridge_command(
         "responses": responses,
     })))
 }
+
+/// Admin endpoint to send an ARBITRARY (potentially side-effecting) command to
+/// a bridge management room and capture the response. Used for empirical
+/// verification of bridge bot replies (e.g. `logout`, `login qr`).
+///
+/// POST /api/admin/bridge-send/{bridge_type}
+///   body: {"command": "!wa logout 358442105886"}
+///
+/// Unlike `probe_bridge_command` (GET, whitelisted read-only), this accepts
+/// arbitrary commands. Use deliberately - sending `logout` will actually log
+/// you out, sending `login qr` will start a login flow, etc.
+#[derive(Deserialize)]
+pub struct BridgeSendRequest {
+    pub command: String,
+}
+
+pub async fn send_bridge_command(
+    State(state): State<Arc<AppState>>,
+    auth_user: crate::handlers::auth_middleware::AuthUser,
+    axum::extract::Path(bridge_type): axum::extract::Path<String>,
+    Json(body): Json<BridgeSendRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    use matrix_sdk::ruma::OwnedRoomId;
+    use matrix_sdk::ruma::OwnedUserId;
+    use tokio::time::Duration;
+
+    if !matches!(bridge_type.as_str(), "telegram" | "whatsapp" | "signal") {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "invalid bridge_type"})),
+        ));
+    }
+
+    let bridge_bot_env = match bridge_type.as_str() {
+        "telegram" => "TELEGRAM_BRIDGE_BOT",
+        "whatsapp" => "WHATSAPP_BRIDGE_BOT",
+        "signal" => "SIGNAL_BRIDGE_BOT",
+        _ => unreachable!(),
+    };
+    let bridge_bot = std::env::var(bridge_bot_env).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("{} env var not set", bridge_bot_env)})),
+        )
+    })?;
+    let bot_user_id = OwnedUserId::try_from(bridge_bot.as_str()).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("invalid bridge bot user id: {}", e)})),
+        )
+    })?;
+
+    let bridge = state
+        .user_repository
+        .get_bridge(auth_user.user_id, &bridge_type)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("db error: {}", e)})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": format!("no {} bridge - connect first so we have a management room", bridge_type)})),
+            )
+        })?;
+
+    let room_id_str = bridge.room_id.unwrap_or_default();
+    let room_id = OwnedRoomId::try_from(room_id_str.as_str()).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "invalid room id on bridge record"})),
+        )
+    })?;
+
+    let client = crate::utils::matrix_auth::get_cached_client(auth_user.user_id, &state)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("matrix client: {}", e)})),
+            )
+        })?;
+    let room = client.get_room(&room_id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "bridge management room not found in matrix client"})),
+        )
+    })?;
+
+    tracing::warn!(
+        "[BRIDGE-SEND] user={} bridge={} sending arbitrary command: {:?}",
+        auth_user.user_id,
+        bridge_type,
+        body.command
+    );
+
+    let cmd_sent_ts_ms: u64 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+
+    let responses = match crate::utils::bridge::probe_bridge_room(
+        &client,
+        &room,
+        &bot_user_id,
+        &body.command,
+        Duration::from_secs(10),
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("probe failed: {}", e)})),
+            ));
+        }
+    };
+
+    Ok(Json(json!({
+        "bridge_type": bridge_type,
+        "command_sent": body.command,
+        "cmd_sent_ts_ms": cmd_sent_ts_ms,
+        "response_count": responses.len(),
+        "responses": responses,
+    })))
+}
