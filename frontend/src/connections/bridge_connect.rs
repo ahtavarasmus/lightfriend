@@ -32,10 +32,6 @@ const CONNECT_REQUEST_TIMEOUT_MS: u32 = 45000; // 45 seconds for initial connect
 /// Map backend error strings to user-friendly messages
 fn humanize_error(raw: &str) -> String {
     match raw {
-        "cleanup_in_progress" => {
-            "Previous connection is still being cleaned up. Please wait a moment and try again."
-                .to_string()
-        }
         "bridge_not_found" => {
             "The messaging bridge could not be found. Please try again.".to_string()
         }
@@ -163,10 +159,6 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
     let show_disconnect_modal = use_state(|| false);
     let is_checking_health = use_state(|| false);
     let health_message = use_state(|| None::<String>);
-    let show_reset_modal = use_state(|| false);
-    let is_resetting = use_state(|| false);
-    let reset_success = use_state(|| false);
-    let is_cleaning_up = use_state(|| false);
     let remaining_seconds = use_state(|| 0_i32);
     let poll_start_time = use_state(|| 0.0_f64);
 
@@ -300,14 +292,12 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
         );
     }
 
-    // Function to start connection with cleanup retry support
     let start_connection = {
         let is_connecting = is_connecting.clone();
         let was_connecting = was_connecting.clone();
         let auth_data = auth_data.clone();
         let error = error.clone();
         let fetch_status = fetch_status.clone();
-        let is_cleaning_up = is_cleaning_up.clone();
         let poll_start_time = poll_start_time.clone();
         let remaining_seconds = remaining_seconds.clone();
         let bridge_id = bridge_id.to_string();
@@ -318,7 +308,6 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
             let auth_data = auth_data.clone();
             let error = error.clone();
             let fetch_status = fetch_status.clone();
-            let is_cleaning_up = is_cleaning_up.clone();
             let poll_start_time = poll_start_time.clone();
             let remaining_seconds = remaining_seconds.clone();
             let bridge_id = bridge_id.clone();
@@ -331,13 +320,11 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
             {
                 let request_active = request_active.clone();
                 let is_connecting = is_connecting.clone();
-                let is_cleaning_up = is_cleaning_up.clone();
                 let error = error.clone();
                 let bridge_name = bridge_name.clone();
                 gloo_timers::callback::Timeout::new(CONNECT_REQUEST_TIMEOUT_MS, move || {
                     if request_active.replace(false) {
                         is_connecting.set(false);
-                        is_cleaning_up.set(false);
                         error.set(Some(format!(
                             "{} connection timed out while waiting for the bridge. Please try again.",
                             bridge_name
@@ -347,138 +334,101 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                 .forget();
             }
             spawn_local(async move {
-                // Retry loop for cleanup_in_progress
-                let max_cleanup_retries = 30; // 30 retries * 2 seconds = ~60 seconds max wait
-                for _retry in 0..max_cleanup_retries {
-                    let url = format!("/api/auth/{}/connect", bridge_id);
-                    match Api::get(&url).send().await {
-                        Ok(response) => {
-                            if !request_active.get() {
-                                return;
-                            }
-                            let status = response.status();
-                            // Check for cleanup_in_progress (409 Conflict)
-                            if status == 409 {
-                                if let Ok(err_response) = response.json::<ErrorResponse>().await {
-                                    if err_response.error == "cleanup_in_progress" {
-                                        is_cleaning_up.set(true);
-                                        // Wait and retry
-                                        TimeoutFuture::new(2_000).await;
-                                        continue;
-                                    }
-                                }
-                            }
-                            is_cleaning_up.set(false);
-
-                            if status == 200 {
-                                match response.json::<ConnectionResponse>().await {
-                                    Ok(connection_response) => {
-                                        request_active.set(false);
-                                        auth_data.set(Some(connection_response.auth_data));
-                                        error.set(None);
-                                        // Start polling for status
-                                        let start_time = js_sys::Date::now();
-                                        // Create a recursive polling function
-                                        fn create_poll_fn(
-                                            start_time: f64,
-                                            poll_duration: i32,
-                                            poll_interval: i32,
-                                            is_connecting: UseStateHandle<bool>,
-                                            auth_data: UseStateHandle<Option<String>>,
-                                            error: UseStateHandle<Option<String>>,
-                                            fetch_status: Callback<()>,
-                                        ) -> Box<dyn Fn()> {
-                                            Box::new(move || {
-                                                if js_sys::Date::now() - start_time
-                                                    > poll_duration as f64
-                                                {
-                                                    is_connecting.set(false);
-                                                    auth_data.set(None);
-                                                    error.set(Some(
-                                                        "Connection attempt timed out".to_string(),
-                                                    ));
-                                                    return;
-                                                }
-                                                fetch_status.emit(());
-                                                // Clone all necessary values for the next iteration
-                                                let is_connecting = is_connecting.clone();
-                                                let auth_data = auth_data.clone();
-                                                let error = error.clone();
-                                                let fetch_status = fetch_status.clone();
-                                                // Schedule next poll
-                                                let poll_fn = create_poll_fn(
-                                                    start_time,
-                                                    poll_duration,
-                                                    poll_interval,
-                                                    is_connecting,
-                                                    auth_data,
-                                                    error,
-                                                    fetch_status,
-                                                );
-                                                let handle = gloo_timers::callback::Timeout::new(
-                                                    poll_interval as u32,
-                                                    move || poll_fn(),
-                                                );
-                                                handle.forget();
-                                            })
-                                        }
-                                        // Start the polling
-                                        let poll_fn = create_poll_fn(
-                                            start_time,
-                                            POLL_DURATION_MS,
-                                            POLL_INTERVAL_MS,
-                                            is_connecting.clone(),
-                                            auth_data.clone(),
-                                            error.clone(),
-                                            fetch_status.clone(),
-                                        );
-                                        poll_fn();
-                                        return; // Success - exit retry loop
-                                    }
-                                    Err(_) => {
-                                        request_active.set(false);
-                                        is_connecting.set(false);
-                                        error.set(Some(
-                                            "Failed to parse connection response".to_string(),
-                                        ));
-                                        return;
-                                    }
-                                }
-                            } else {
-                                // Other error
-                                request_active.set(false);
-                                is_connecting.set(false);
-                                if let Ok(err_response) = response.json::<ErrorResponse>().await {
-                                    error.set(Some(humanize_error(&err_response.error)));
-                                } else {
-                                    error.set(Some(format!(
-                                        "Failed to start {} connection",
-                                        bridge_name
-                                    )));
-                                }
-                                return;
-                            }
-                        }
-                        Err(_) => {
-                            if !request_active.replace(false) {
-                                return;
-                            }
-                            is_connecting.set(false);
-                            is_cleaning_up.set(false);
-                            error.set(Some(format!("Failed to start {} connection", bridge_name)));
+                let url = format!("/api/auth/{}/connect", bridge_id);
+                match Api::get(&url).send().await {
+                    Ok(response) => {
+                        if !request_active.get() {
                             return;
                         }
+                        let status = response.status();
+                        if status == 200 {
+                            match response.json::<ConnectionResponse>().await {
+                                Ok(connection_response) => {
+                                    request_active.set(false);
+                                    auth_data.set(Some(connection_response.auth_data));
+                                    error.set(None);
+                                    let start_time = js_sys::Date::now();
+                                    fn create_poll_fn(
+                                        start_time: f64,
+                                        poll_duration: i32,
+                                        poll_interval: i32,
+                                        is_connecting: UseStateHandle<bool>,
+                                        auth_data: UseStateHandle<Option<String>>,
+                                        error: UseStateHandle<Option<String>>,
+                                        fetch_status: Callback<()>,
+                                    ) -> Box<dyn Fn()> {
+                                        Box::new(move || {
+                                            if js_sys::Date::now() - start_time
+                                                > poll_duration as f64
+                                            {
+                                                is_connecting.set(false);
+                                                auth_data.set(None);
+                                                error.set(Some(
+                                                    "Connection attempt timed out".to_string(),
+                                                ));
+                                                return;
+                                            }
+                                            fetch_status.emit(());
+                                            let is_connecting = is_connecting.clone();
+                                            let auth_data = auth_data.clone();
+                                            let error = error.clone();
+                                            let fetch_status = fetch_status.clone();
+                                            let poll_fn = create_poll_fn(
+                                                start_time,
+                                                poll_duration,
+                                                poll_interval,
+                                                is_connecting,
+                                                auth_data,
+                                                error,
+                                                fetch_status,
+                                            );
+                                            let handle = gloo_timers::callback::Timeout::new(
+                                                poll_interval as u32,
+                                                move || poll_fn(),
+                                            );
+                                            handle.forget();
+                                        })
+                                    }
+                                    let poll_fn = create_poll_fn(
+                                        start_time,
+                                        POLL_DURATION_MS,
+                                        POLL_INTERVAL_MS,
+                                        is_connecting.clone(),
+                                        auth_data.clone(),
+                                        error.clone(),
+                                        fetch_status.clone(),
+                                    );
+                                    poll_fn();
+                                }
+                                Err(_) => {
+                                    request_active.set(false);
+                                    is_connecting.set(false);
+                                    error.set(Some(
+                                        "Failed to parse connection response".to_string(),
+                                    ));
+                                }
+                            }
+                        } else {
+                            request_active.set(false);
+                            is_connecting.set(false);
+                            if let Ok(err_response) = response.json::<ErrorResponse>().await {
+                                error.set(Some(humanize_error(&err_response.error)));
+                            } else {
+                                error.set(Some(format!(
+                                    "Failed to start {} connection",
+                                    bridge_name
+                                )));
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        if !request_active.replace(false) {
+                            return;
+                        }
+                        is_connecting.set(false);
+                        error.set(Some(format!("Failed to start {} connection", bridge_name)));
                     }
                 }
-                // Exhausted retries waiting for cleanup
-                if !request_active.replace(false) {
-                    return;
-                }
-                is_connecting.set(false);
-                is_cleaning_up.set(false);
-                error.set(Some(
-                    "Cleanup is taking too long. Please try again later.".to_string(),
-                ));
             });
         })
     };
@@ -490,7 +440,6 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
         let pairing_code = pairing_code.clone();
         let error = error.clone();
         let fetch_status = fetch_status.clone();
-        let is_cleaning_up = is_cleaning_up.clone();
         let phone_input = phone_input.clone();
         let bridge_id = bridge_id.to_string();
         let bridge_name = bridge_name.to_string();
@@ -500,7 +449,6 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
             let pairing_code = pairing_code.clone();
             let error = error.clone();
             let fetch_status = fetch_status.clone();
-            let is_cleaning_up = is_cleaning_up.clone();
             let phone_number = (*phone_input).clone();
             let bridge_id = bridge_id.clone();
             let bridge_name = bridge_name.clone();
@@ -513,121 +461,96 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
             is_connecting.set(true);
             was_connecting.set(true);
             spawn_local(async move {
-                let max_cleanup_retries = 30;
-                for _retry in 0..max_cleanup_retries {
-                    let url = format!("/api/auth/{}/connect-phone", bridge_id);
-                    let body = serde_json::json!({ "phone_number": phone_number });
-                    match Api::post(&url).json(&body).unwrap().send().await {
-                        Ok(response) => {
-                            let status = response.status();
-                            if status == 409 {
-                                if let Ok(err_response) = response.json::<ErrorResponse>().await {
-                                    if err_response.error == "cleanup_in_progress" {
-                                        is_cleaning_up.set(true);
-                                        TimeoutFuture::new(2_000).await;
-                                        continue;
+                let url = format!("/api/auth/{}/connect-phone", bridge_id);
+                let body = serde_json::json!({ "phone_number": phone_number });
+                match Api::post(&url).json(&body).unwrap().send().await {
+                    Ok(response) => {
+                        let status = response.status();
+                        if status == 200 {
+                            match response.json::<PhonePairingResponse>().await {
+                                Ok(phone_response) => {
+                                    pairing_code.set(Some(phone_response.pairing_code));
+                                    error.set(None);
+                                    let start_time = js_sys::Date::now();
+                                    fn create_poll_fn(
+                                        start_time: f64,
+                                        poll_duration: i32,
+                                        poll_interval: i32,
+                                        is_connecting: UseStateHandle<bool>,
+                                        pairing_code: UseStateHandle<Option<String>>,
+                                        error: UseStateHandle<Option<String>>,
+                                        fetch_status: Callback<()>,
+                                    ) -> Box<dyn Fn()> {
+                                        Box::new(move || {
+                                            if js_sys::Date::now() - start_time
+                                                > poll_duration as f64
+                                            {
+                                                is_connecting.set(false);
+                                                pairing_code.set(None);
+                                                error.set(Some(
+                                                    "Connection attempt timed out".to_string(),
+                                                ));
+                                                return;
+                                            }
+                                            fetch_status.emit(());
+                                            let is_connecting = is_connecting.clone();
+                                            let pairing_code = pairing_code.clone();
+                                            let error = error.clone();
+                                            let fetch_status = fetch_status.clone();
+                                            let poll_fn = create_poll_fn(
+                                                start_time,
+                                                poll_duration,
+                                                poll_interval,
+                                                is_connecting,
+                                                pairing_code,
+                                                error,
+                                                fetch_status,
+                                            );
+                                            let handle = gloo_timers::callback::Timeout::new(
+                                                poll_interval as u32,
+                                                move || poll_fn(),
+                                            );
+                                            handle.forget();
+                                        })
                                     }
+                                    let poll_fn = create_poll_fn(
+                                        start_time,
+                                        POLL_DURATION_MS,
+                                        POLL_INTERVAL_MS,
+                                        is_connecting.clone(),
+                                        pairing_code.clone(),
+                                        error.clone(),
+                                        fetch_status.clone(),
+                                    );
+                                    poll_fn();
+                                }
+                                Err(_) => {
+                                    is_connecting.set(false);
+                                    error.set(Some(
+                                        "Failed to parse pairing response".to_string(),
+                                    ));
                                 }
                             }
-                            is_cleaning_up.set(false);
-
-                            if status == 200 {
-                                match response.json::<PhonePairingResponse>().await {
-                                    Ok(phone_response) => {
-                                        pairing_code.set(Some(phone_response.pairing_code));
-                                        error.set(None);
-                                        // Start polling for connection status
-                                        let start_time = js_sys::Date::now();
-                                        fn create_poll_fn(
-                                            start_time: f64,
-                                            poll_duration: i32,
-                                            poll_interval: i32,
-                                            is_connecting: UseStateHandle<bool>,
-                                            pairing_code: UseStateHandle<Option<String>>,
-                                            error: UseStateHandle<Option<String>>,
-                                            fetch_status: Callback<()>,
-                                        ) -> Box<dyn Fn()> {
-                                            Box::new(move || {
-                                                if js_sys::Date::now() - start_time
-                                                    > poll_duration as f64
-                                                {
-                                                    is_connecting.set(false);
-                                                    pairing_code.set(None);
-                                                    error.set(Some(
-                                                        "Connection attempt timed out".to_string(),
-                                                    ));
-                                                    return;
-                                                }
-                                                fetch_status.emit(());
-                                                let is_connecting = is_connecting.clone();
-                                                let pairing_code = pairing_code.clone();
-                                                let error = error.clone();
-                                                let fetch_status = fetch_status.clone();
-                                                let poll_fn = create_poll_fn(
-                                                    start_time,
-                                                    poll_duration,
-                                                    poll_interval,
-                                                    is_connecting,
-                                                    pairing_code,
-                                                    error,
-                                                    fetch_status,
-                                                );
-                                                let handle = gloo_timers::callback::Timeout::new(
-                                                    poll_interval as u32,
-                                                    move || poll_fn(),
-                                                );
-                                                handle.forget();
-                                            })
-                                        }
-                                        let poll_fn = create_poll_fn(
-                                            start_time,
-                                            POLL_DURATION_MS,
-                                            POLL_INTERVAL_MS,
-                                            is_connecting.clone(),
-                                            pairing_code.clone(),
-                                            error.clone(),
-                                            fetch_status.clone(),
-                                        );
-                                        poll_fn();
-                                        return;
-                                    }
-                                    Err(_) => {
-                                        is_connecting.set(false);
-                                        error.set(Some(
-                                            "Failed to parse pairing response".to_string(),
-                                        ));
-                                        return;
-                                    }
-                                }
-                            } else {
-                                is_connecting.set(false);
-                                if let Ok(err_response) = response.json::<ErrorResponse>().await {
-                                    error.set(Some(err_response.error));
-                                } else {
-                                    error.set(Some(format!(
-                                        "Failed to start {} phone connection",
-                                        bridge_name
-                                    )));
-                                }
-                                return;
-                            }
-                        }
-                        Err(_) => {
+                        } else {
                             is_connecting.set(false);
-                            is_cleaning_up.set(false);
-                            error.set(Some(format!(
-                                "Failed to start {} phone connection",
-                                bridge_name
-                            )));
-                            return;
+                            if let Ok(err_response) = response.json::<ErrorResponse>().await {
+                                error.set(Some(err_response.error));
+                            } else {
+                                error.set(Some(format!(
+                                    "Failed to start {} phone connection",
+                                    bridge_name
+                                )));
+                            }
                         }
                     }
+                    Err(_) => {
+                        is_connecting.set(false);
+                        error.set(Some(format!(
+                            "Failed to start {} phone connection",
+                            bridge_name
+                        )));
+                    }
                 }
-                is_connecting.set(false);
-                is_cleaning_up.set(false);
-                error.set(Some(
-                    "Cleanup is taking too long. Please try again later.".to_string(),
-                ));
             });
         })
     };
@@ -748,58 +671,6 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                     Err(_) => {
                         is_checking_health.set(false);
                         error.set(Some(format!("Failed to check {} health", bridge_name)));
-                    }
-                }
-            });
-        })
-    };
-
-    // Function to reset Matrix connection
-    let reset_matrix = {
-        let is_resetting = is_resetting.clone();
-        let show_reset_modal = show_reset_modal.clone();
-        let reset_success = reset_success.clone();
-        let error = error.clone();
-        let connection_status = connection_status.clone();
-        let fetch_status = fetch_status.clone();
-        Callback::from(move |_| {
-            let is_resetting = is_resetting.clone();
-            let show_reset_modal = show_reset_modal.clone();
-            let reset_success = reset_success.clone();
-            let error = error.clone();
-            let connection_status = connection_status.clone();
-            let fetch_status = fetch_status.clone();
-            is_resetting.set(true);
-            spawn_local(async move {
-                match Api::delete("/api/auth/matrix/reset").send().await {
-                    Ok(response) => {
-                        is_resetting.set(false);
-                        show_reset_modal.set(false);
-                        if response.status() == 200 {
-                            reset_success.set(true);
-                            error.set(None);
-                            // Update connection status to disconnected
-                            connection_status.set(Some(BridgeStatus {
-                                connected: false,
-                                status: "not_connected".to_string(),
-                                created_at: (js_sys::Date::now() / 1000.0) as i32,
-                                connected_account: None,
-                            }));
-                            // Auto-hide success message after 5 seconds
-                            let reset_success_clone = reset_success.clone();
-                            spawn_local(async move {
-                                TimeoutFuture::new(5_000).await;
-                                reset_success_clone.set(false);
-                            });
-                            // Refresh status
-                            fetch_status.emit(());
-                        } else {
-                            error.set(Some("Failed to reset Matrix connection".to_string()));
-                        }
-                    }
-                    Err(_) => {
-                        is_resetting.set(false);
-                        error.set(Some("Failed to reset Matrix connection".to_string()));
                     }
                 }
             });
@@ -981,9 +852,7 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                 <div class="loading-container">
                                     <p class="connect-instruction">
                                         {
-                                            if *is_cleaning_up {
-                                                "Cleaning up previous connection..."
-                                            } else if *phone_login_mode {
+                                            if *phone_login_mode {
                                                 "Getting pairing code..."
                                             } else {
                                                 match config.auth_type {
@@ -1076,11 +945,6 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
             } else {
                 <p>{"Loading connection status..."}</p>
             }
-            if *reset_success {
-                <div class="reset-success-banner">
-                    {"Matrix connection has been reset. You can now try reconnecting."}
-                </div>
-            }
             // Only show error if not connected (prevents showing error alongside sync indicator)
             if !(*connection_status).as_ref().map(|s| s.connected).unwrap_or(false) {
                 if let Some(error_msg) = (*error).clone() {
@@ -1088,45 +952,8 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                         <div class="error-content">
                             <span>{error_msg}</span>
                         </div>
-                        <div class="error-actions">
-                            <p class="reset-hint">{"If you're having persistent connection issues, try resetting the Matrix connection."}</p>
-                            <button onclick={
-                                let show_reset_modal = show_reset_modal.clone();
-                                Callback::from(move |_| show_reset_modal.set(true))
-                            } class="reset-button">
-                                {"Reset Matrix Connection"}
-                            </button>
-                        </div>
                     </div>
                 }
-            }
-            if *show_reset_modal {
-                <div class="modal-overlay">
-                    <div class="modal-content">
-                        <h3>{"Reset Matrix Connection?"}</h3>
-                        <p>{"This will clear all Matrix authentication credentials and allow you to reconnect fresh. This affects all messaging bridges (WhatsApp, Signal, Telegram)."}</p>
-                        <p class="warning-text">{"You will need to reconnect each bridge after resetting."}</p>
-                        <div class="modal-buttons">
-                            <button onclick={
-                                let show_reset_modal = show_reset_modal.clone();
-                                Callback::from(move |_| show_reset_modal.set(false))
-                            } class="cancel-button" disabled={*is_resetting}>
-                                {"Cancel"}
-                            </button>
-                            <button onclick={
-                                let reset_matrix = reset_matrix.clone();
-                                Callback::from(move |_| reset_matrix.emit(()))
-                            } class="confirm-reset-button" disabled={*is_resetting}>
-                                if *is_resetting {
-                                    <span class="button-spinner"></span>
-                                    {"Resetting..."}
-                                } else {
-                                    {"Yes, Reset Connection"}
-                                }
-                            </button>
-                        </div>
-                    </div>
-                </div>
             }
             <style>
                 {r#"
@@ -1557,68 +1384,6 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                         border-radius: 8px;
                         padding: 1rem;
                         margin-top: 1rem;
-                    }
-                    .error-content {
-                        margin-bottom: 0.75rem;
-                    }
-                    .error-actions {
-                        border-top: 1px solid rgba(255, 75, 75, 0.2);
-                        padding-top: 0.75rem;
-                        margin-top: 0.5rem;
-                    }
-                    .reset-hint {
-                        color: #CCC;
-                        font-size: 0.85rem;
-                        margin: 0 0 0.75rem 0;
-                    }
-                    .reset-button {
-                        background: transparent;
-                        border: 1px solid rgba(255, 165, 0, 0.5);
-                        color: #FFA500;
-                        padding: 0.5rem 1rem;
-                        border-radius: 6px;
-                        cursor: pointer;
-                        font-size: 0.9rem;
-                        transition: all 0.3s ease;
-                    }
-                    .reset-button:hover {
-                        background: rgba(255, 165, 0, 0.1);
-                        border-color: #FFA500;
-                        transform: translateY(-1px);
-                    }
-                    .reset-success-banner {
-                        color: #4CAF50;
-                        background: rgba(76, 175, 80, 0.1);
-                        border: 1px solid rgba(76, 175, 80, 0.3);
-                        border-radius: 8px;
-                        padding: 1rem;
-                        margin-top: 1rem;
-                        text-align: center;
-                    }
-                    .confirm-reset-button {
-                        background: linear-gradient(45deg, #FFA500, #FF8C00);
-                        color: white;
-                        border: none;
-                        padding: 0.8rem 1.5rem;
-                        border-radius: 8px;
-                        cursor: pointer;
-                        transition: all 0.3s ease;
-                        display: flex;
-                        align-items: center;
-                        gap: 0.5rem;
-                    }
-                    .confirm-reset-button:hover:not(:disabled) {
-                        transform: translateY(-2px);
-                        box-shadow: 0 4px 12px rgba(255, 165, 0, 0.3);
-                    }
-                    .confirm-reset-button:disabled {
-                        opacity: 0.7;
-                        cursor: not-allowed;
-                    }
-                    .warning-text {
-                        color: #FFA500;
-                        font-size: 0.9rem;
-                        margin-top: 0.5rem;
                     }
                     .success-banner {
                         color: #4CAF50;
