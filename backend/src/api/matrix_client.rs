@@ -712,25 +712,23 @@ pub fn should_process_message(timestamp_ms: u64, max_age_ms: u64) -> bool {
     now.saturating_sub(timestamp_ms) <= max_age_ms
 }
 
-/// Detect if a message indicates a bridge disconnection
-pub fn is_disconnection_message(content: &str) -> bool {
-    let disconnection_patterns = [
-        "disconnected",
-        "connection lost",
-        "logged out",
-        "authentication failed",
-        "login failed",
-        "bad_credentials",
-        "wa-logged-out",
-        "wa-not-logged-in",
-        "device_removed",
-        "relogin to continue",
-        "not logged in",
-        "session expired",
-    ];
-
-    let lower = content.to_lowercase();
-    disconnection_patterns.iter().any(|p| lower.contains(p))
+/// Detect if a bridge bot message is a spontaneous push event reporting that
+/// the user's session was terminated externally.
+///
+/// Scope: this function is ONLY used for telemetry/logging in
+/// `handle_bridge_message`. It does NOT trigger any state change or
+/// deletion. That decoupling is deliberate - see the handler comment.
+///
+/// Pattern policy: we only include strings we have verified empirically
+/// against the live bridges. No speculation. If a pattern here fires, it
+/// means we have independently confirmed the bridge emits that exact token
+/// during an external disconnect.
+///
+/// Currently empty: we have NOT yet verified any passive-disconnect event
+/// strings for our deployed bridge versions (mautrix-telegram v0.15.3,
+/// mautrix-whatsapp/signal v26.04). Add tokens here only after probing.
+pub fn is_disconnection_message(_content: &str) -> bool {
+    false
 }
 
 /// Check if a message is a health check or status message that should be skipped
@@ -828,11 +826,24 @@ mod tests {
 
     #[test]
     fn test_is_disconnection_message() {
-        assert!(is_disconnection_message("Device has been disconnected"));
-        assert!(is_disconnection_message("Login failed: bad_credentials"));
-        assert!(is_disconnection_message("wa-logged-out event received"));
+        // Current policy: no verified passive-disconnect patterns, so the
+        // detector is a no-op. These assertions encode the invariant that
+        // normal command replies (which used to trip a fuzzy detector and
+        // silently delete bridges) do NOT match. When we verify push-event
+        // strings against the live bridges, add them as positive cases here.
+        assert!(!is_disconnection_message("Logged out successfully."));
+        assert!(!is_disconnection_message("You're not logged in."));
+        assert!(!is_disconnection_message(
+            "That command requires you to be logged in."
+        ));
+        assert!(!is_disconnection_message(
+            "You're logged in as @exampleuser"
+        ));
         assert!(!is_disconnection_message("Successfully logged in"));
         assert!(!is_disconnection_message("Message delivered"));
+        assert!(!is_disconnection_message(
+            "Disconnected from 149.154.167.91"
+        ));
     }
 
     #[test]

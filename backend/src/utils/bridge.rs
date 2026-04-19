@@ -1464,15 +1464,36 @@ pub async fn handle_bridge_message(
             return;
         }
 
-        // Check for disconnection patterns using the pure function
+        // Check for disconnection patterns (external session termination).
+        //
+        // DESIGN NOTE: We intentionally do NOT delete the bridge record here,
+        // even when we detect a disconnection event. Reasons:
+        //
+        //  1. The detection patterns are heuristic substring matches against
+        //     bridge bot text. False positives are costly (silently bricks
+        //     the user's bridge; we chased this bug all day). Only the user's
+        //     explicit "Disconnect" action should delete the DB record.
+        //
+        //  2. If the session really did terminate externally, the next
+        //     health-check call (from the UI's "Check Connection" button, or
+        //     from periodic polling) will see `!<prefix> ping` / list-logins
+        //     return an unhealthy response and can surface that state to the
+        //     user without destroying the record.
+        //
+        //  3. Deleting on push events also deletes the room_id/config we
+        //     need for the cleanup commands themselves, making orderly
+        //     cleanup harder.
+        //
+        // So: we LOG the detection and record it for telemetry, but we do not
+        // auto-delete or evict the Matrix client here.
         if is_disconnection_message(&content) {
-            tracing::info!(
-                "🚨 Detected disconnection in {} bridge for user {}",
+            tracing::warn!(
+                "🚨 Detected disconnection signal in {} bridge for user {} (NOT auto-deleting; content={:?})",
                 bridge.bridge_type,
-                user_id
+                user_id,
+                content
             );
 
-            // Record disconnection event
             let current_time = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -1488,35 +1509,6 @@ pub async fn handle_bridge_message(
                     user_id,
                     e
                 );
-            }
-
-            // Delete the bridge record
-            if let Err(e) = state
-                .user_repository
-                .delete_bridge(user_id, &bridge.bridge_type)
-            {
-                tracing::error!("Failed to delete {} bridge: {}", bridge.bridge_type, e);
-            }
-
-            // Check if there are any remaining active bridges
-            let has_active_bridges = match state.user_repository.has_active_bridges(user_id) {
-                Ok(has) => has,
-                Err(e) => {
-                    tracing::error!("Failed to check active bridges: {}", e);
-                    false
-                }
-            };
-            if !has_active_bridges {
-                // No active bridges left, remove client and sync task
-                let mut matrix_clients = state.matrix_clients.lock().await;
-                let mut sync_tasks = state.matrix_sync_tasks.lock().await;
-                if let Some(task) = sync_tasks.remove(&user_id) {
-                    task.abort();
-                    tracing::debug!("Aborted sync task for user {}", user_id);
-                }
-                if matrix_clients.remove(&user_id).is_some() {
-                    tracing::debug!("Removed Matrix client for user {}", user_id);
-                }
             }
         } else {
             tracing::debug!("No disconnection detected in management room message");
@@ -2613,38 +2605,95 @@ pub async fn probe_bridge_room(
     Ok(responses.into_iter().map(|(_, b)| b).collect())
 }
 
-/// Parse a `list-logins` response body from mautrix-whatsapp/signal v26.04+
-/// (bridgev2 architecture). Format per line:
-///   `* <login_id> (<identifier>) - <STATUS>`
-/// Returns true if any line shows `CONNECTED` status. Returns false if the
-/// response contains logins but none are CONNECTED, or if the response is
-/// empty / contains no login lines.
-pub fn list_logins_has_connected(body: &str) -> bool {
-    body.lines().any(|line| {
-        let line_trimmed = line.trim();
-        // Match the literal status indicator. `CONNECTED` is wrapped in
-        // backticks in the bridge response, so the literal string we look for
-        // is "- `CONNECTED`" at end-of-line.
-        line_trimmed.ends_with("- `CONNECTED`") || line_trimmed.ends_with("- CONNECTED")
-    })
-}
+// NOTE: `list_logins_has_connected` and `extract_first_connected_identifier`
+// were removed in favour of the strict exact-match parser in
+// `crate::utils::bridge_responses`. The new parser requires verified backtick
+// formatting around both the login id and the status field; fuzzy variants
+// (e.g. "- CONNECTED" without backticks) are rejected on purpose.
 
-/// Extract the identifier (e.g. phone number) from the first CONNECTED login
-/// line in a `list-logins` response. Returns None if no connected login found.
-pub fn extract_first_connected_identifier(body: &str) -> Option<String> {
-    for line in body.lines() {
-        let line_trimmed = line.trim();
-        if !(line_trimmed.ends_with("- `CONNECTED`") || line_trimmed.ends_with("- CONNECTED")) {
-            continue;
-        }
-        // Format: "* `<id>` (<identifier>) - `CONNECTED`"
-        // Extract <identifier> from inside the parens.
-        if let Some(open) = line_trimmed.find('(') {
-            if let Some(close) = line_trimmed[open + 1..].find(')') {
-                let ident = &line_trimmed[open + 1..open + 1 + close];
-                return Some(ident.to_string());
+/// Log out every CONNECTED login in a bridgev2 management room.
+///
+/// Empirical finding: mautrix-whatsapp and mautrix-signal v26.04 both REQUIRE
+/// the login_id argument to `logout`. Bare `!<prefix> logout` returns a
+/// usage message and is a silent no-op. To log out properly we must:
+///
+/// 1. Probe `!<prefix> list-logins` and parse each CONNECTED entry.
+/// 2. For each, send `!<prefix> logout <login_id>`.
+/// 3. Verify the reply is exactly `"Logged out"` (anything else means the
+///    bridge state differs from what we expected - log a warning).
+///
+/// Safe no-op when nothing is logged in. `cmd_prefix` must be `"!wa"` for
+/// WhatsApp or `"!signal"` for Signal. Returns the count of logins
+/// confirmed-logged-out (not counting skipped/unexpected responses).
+pub async fn logout_all_bridgev2_logins(
+    client: &MatrixClient,
+    room: &Room,
+    bot_user_id: &matrix_sdk::ruma::OwnedUserId,
+    cmd_prefix: &str,
+) -> Result<usize> {
+    use crate::utils::bridge_responses::{parse_list_logins, verified};
+
+    let list_cmd = format!("{} list-logins", cmd_prefix);
+    let list_responses =
+        probe_bridge_room(client, room, bot_user_id, &list_cmd, Duration::from_secs(8)).await?;
+    let combined = list_responses.join("\n");
+    let entries = parse_list_logins(&combined);
+    let connected: Vec<_> = entries
+        .iter()
+        .filter(|e| e.status == verified::bridgev2::STATUS_CONNECTED)
+        .collect();
+
+    if connected.is_empty() {
+        tracing::debug!(
+            "{} logout: no CONNECTED logins (list-logins body: {:?}), skipping",
+            cmd_prefix,
+            combined
+        );
+        return Ok(0);
+    }
+
+    let mut logged_out = 0usize;
+    for entry in connected {
+        let logout_cmd = format!("{} logout {}", cmd_prefix, entry.login_id);
+        let logout_responses = match probe_bridge_room(
+            client,
+            room,
+            bot_user_id,
+            &logout_cmd,
+            Duration::from_secs(8),
+        )
+        .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    "{} logout probe failed for login_id={}: {}",
+                    cmd_prefix,
+                    entry.login_id,
+                    e
+                );
+                continue;
             }
+        };
+        let body = logout_responses
+            .first()
+            .map(String::as_str)
+            .unwrap_or("(no reply)");
+
+        // Both WA and Signal return the same exact body on success.
+        if body == "Logged out" {
+            logged_out += 1;
+            tracing::info!("{} logout ok for login_id={}", cmd_prefix, entry.login_id);
+        } else {
+            // Divergence: log the full body so we can update classifiers if
+            // the bridge changes wire format.
+            tracing::warn!(
+                "{} logout unexpected reply for login_id={} body={:?}",
+                cmd_prefix,
+                entry.login_id,
+                body
+            );
         }
     }
-    None
+    Ok(logged_out)
 }

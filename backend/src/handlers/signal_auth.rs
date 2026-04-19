@@ -598,14 +598,15 @@ async fn monitor_signal_connection(
             );
         }
 
-        if !crate::utils::bridge::list_logins_has_connected(&combined) {
+        if !crate::utils::bridge_responses::any_connected(&combined) {
             sleep(Duration::from_secs(3)).await;
             continue;
         }
 
         tracing::info!("🎉 Signal successfully connected for user {}", user_id);
 
-        let connected_account = crate::utils::bridge::extract_first_connected_identifier(&combined);
+        let connected_account =
+            crate::utils::bridge_responses::first_connected_identifier(&combined);
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -842,14 +843,35 @@ pub async fn disconnect_signal(
         // Get the room and send cleanup commands
         if let Ok(room_id) = OwnedRoomId::try_from(room_id_str.as_str()) {
             if let Some(room) = client.get_room(&room_id) {
-                // Send logout command
-                if let Err(e) = room
-                    .send(RoomMessageEventContent::text_plain("!signal logout"))
-                    .await
+                // Bridgev2 requires `logout <login_id>`. Probe list-logins
+                // first, then logout each CONNECTED login and verify
+                // "Logged out" reply. Bare `!signal logout` is a silent
+                // no-op (prints usage message).
+                let bridge_bot_env =
+                    std::env::var("SIGNAL_BRIDGE_BOT").expect("SIGNAL_BRIDGE_BOT not set");
+                if let Ok(bot_user_id) =
+                    matrix_sdk::ruma::OwnedUserId::try_from(bridge_bot_env.as_str())
                 {
-                    tracing::error!("Background cleanup: Failed to send logout command: {}", e);
+                    match crate::utils::bridge::logout_all_bridgev2_logins(
+                        &client,
+                        &room,
+                        &bot_user_id,
+                        "!signal",
+                    )
+                    .await
+                    {
+                        Ok(n) => tracing::info!(
+                            "Signal background cleanup: logged out {} login(s) for user {}",
+                            n,
+                            user_id
+                        ),
+                        Err(e) => {
+                            tracing::warn!("Signal background cleanup logout helper failed: {}", e)
+                        }
+                    }
+                } else {
+                    tracing::warn!("Signal background cleanup: invalid SIGNAL_BRIDGE_BOT user id");
                 }
-                sleep(Duration::from_secs(2)).await;
 
                 // Send delete-all-portals
                 if let Err(e) = room
@@ -1088,12 +1110,12 @@ pub async fn check_signal_health(
         combined
     );
 
-    if crate::utils::bridge::list_logins_has_connected(&combined) {
+    if crate::utils::bridge_responses::any_connected(&combined) {
         tracing::info!(
             "✅ Signal health check passed for user {}",
             auth_user.user_id
         );
-        if let Some(ident) = crate::utils::bridge::extract_first_connected_identifier(&combined) {
+        if let Some(ident) = crate::utils::bridge_responses::first_connected_identifier(&combined) {
             if let Err(e) =
                 state
                     .user_repository

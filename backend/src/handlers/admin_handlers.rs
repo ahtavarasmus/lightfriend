@@ -1815,7 +1815,7 @@ pub async fn probe_bridge_command(
 /// verification of bridge bot replies (e.g. `logout`, `login qr`).
 ///
 /// POST /api/admin/bridge-send/{bridge_type}
-///   body: {"command": "!wa logout 358442105886"}
+///   body: {"command": "!wa logout <login_id>"}
 ///
 /// Unlike `probe_bridge_command` (GET, whitelisted read-only), this accepts
 /// arbitrary commands. Use deliberately - sending `logout` will actually log

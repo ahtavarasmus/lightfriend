@@ -264,6 +264,15 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                     }
                                     // Don't clear auth_data here - let the timeout handle it
                                 }
+
+                                // If the backend still has an in-progress connection (e.g. user
+                                // navigated away mid-login and came back) but our local state
+                                // forgot, resume the "connecting" UI so the countdown + cancel
+                                // button are visible again.
+                                if !status.connected && status.status == "connecting" && !*is_connecting {
+                                    is_connecting.set(true);
+                                    was_connecting.set(true);
+                                }
                                 connection_status.set(Some(status));
                                 error.set(None);
                             }
@@ -849,21 +858,53 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                     }
                                 </div>
                             } else {
-                                <div class="loading-container">
-                                    <p class="connect-instruction">
+                                // Two sub-cases:
+                                //  (a) Initial connect, auth data still loading → spinner
+                                //  (b) User navigated away mid-flow and came back → backend
+                                //      says "connecting" but we lost the QR/URL locally.
+                                //      Tell them what to do per bridge type.
+                                if matches!(
+                                    (*connection_status).as_ref().map(|s| s.status.as_str()),
+                                    Some("connecting")
+                                ) {
+                                    <div class="loading-container">
                                         {
-                                            if *phone_login_mode {
-                                                "Getting pairing code..."
-                                            } else {
-                                                match config.auth_type {
-                                                    AuthType::QrCode | AuthType::QrCodeOrPhone => "Generating QR code...",
-                                                    AuthType::LoginLink => "Generating login link...",
-                                                }
+                                            match config.auth_type {
+                                                AuthType::LoginLink => html! {
+                                                    <p class="connect-instruction">
+                                                        {"Connection in progress. Complete the login in the tab you opened earlier, or click Cancel to retry."}
+                                                    </p>
+                                                },
+                                                AuthType::QrCode | AuthType::QrCodeOrPhone => html! {
+                                                    <p class="connect-instruction">
+                                                        {"Connection in progress (QR code is no longer available here). Click Cancel to start over with a new QR code."}
+                                                    </p>
+                                                },
                                             }
                                         }
-                                    </p>
-                                    <div class="loading-spinner"></div>
-                                </div>
+                                        if *remaining_seconds > 0 {
+                                            <div class="poll-countdown">
+                                                {format!("{}:{:02} remaining", *remaining_seconds / 60, *remaining_seconds % 60)}
+                                            </div>
+                                        }
+                                    </div>
+                                } else {
+                                    <div class="loading-container">
+                                        <p class="connect-instruction">
+                                            {
+                                                if *phone_login_mode {
+                                                    "Getting pairing code..."
+                                                } else {
+                                                    match config.auth_type {
+                                                        AuthType::QrCode | AuthType::QrCodeOrPhone => "Generating QR code...",
+                                                        AuthType::LoginLink => "Generating login link...",
+                                                    }
+                                                }
+                                            }
+                                        </p>
+                                        <div class="loading-spinner"></div>
+                                    </div>
+                                }
                             }
                         } else {
                             if props.sub_tier.is_some() {

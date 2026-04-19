@@ -38,6 +38,7 @@ pub mod handlers {
 pub mod utils {
     pub mod bridge;
     pub mod bridge_contacts;
+    pub mod bridge_responses;
     pub mod country;
     pub mod email;
     pub mod encryption;

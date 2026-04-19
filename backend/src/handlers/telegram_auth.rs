@@ -310,24 +310,6 @@ fn is_one_time_key_conflict(error: &anyhow::Error) -> bool {
     false
 }
 
-/// Extract connected account (username or phone) from bridge status message
-/// For Telegram, it might be username like @username or phone number
-fn extract_connected_account(message: &str) -> Option<String> {
-    // First try to find a phone number pattern
-    if let Ok(re) = regex::Regex::new(r"\+\d{6,15}") {
-        if let Some(m) = re.find(message) {
-            return Some(m.as_str().to_string());
-        }
-    }
-    // Then try to find @username pattern
-    if let Ok(re) = regex::Regex::new(r"@[\w]+") {
-        if let Some(m) = re.find(message) {
-            return Some(m.as_str().to_string());
-        }
-    }
-    None
-}
-
 // Helper function to get the store path
 fn get_store_path(username: &str) -> Result<String> {
     let persistent_store_path = std::env::var("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH")
@@ -1423,37 +1405,32 @@ async fn monitor_telegram_connection(
                             );
                             last_bot_body = Some(content.clone());
 
-                            // Check for successful login. We match the verified
-                            // `!tg ping` healthy response: "You're logged in as @username".
-                            // Empirically confirmed against mautrix-telegram v0.15.3.
-                            // The substring "logged in as" is present in healthy
-                            // responses but NOT in unhealthy responses like
-                            // "That command requires you to be logged in.", so this
-                            // is the safe specific match.
-                            let content_lower = content.to_lowercase();
-                            if content_lower.contains("logged in as")
-                                || content_lower.contains("already logged in")
+                            // Exact-match classifier against the verified
+                            // `!tg ping` healthy response: body starts with
+                            // "You're logged in as @<username>". Empirically
+                            // confirmed against mautrix-telegram v0.15.3.
+                            // Any other bot notice (login-flow intermediate
+                            // messages, errors) is ignored - we only act on
+                            // the ping response because that's the one reply
+                            // whose exact format we have verified.
+                            use crate::utils::bridge_responses::{
+                                classify_telegram_ping, TelegramPingStatus,
+                            };
+                            if let Some(TelegramPingStatus::LoggedIn { username }) =
+                                classify_telegram_ping(&content)
                             {
                                 tracing::info!(
-                                    "[TG-MONITOR user={}] SUCCESS detected logged-in pattern elapsed_ms={}",
+                                    "[TG-MONITOR user={}] SUCCESS detected ping=logged-in elapsed_ms={}",
                                     user_id,
                                     monitor_start.elapsed().as_millis()
                                 );
 
-                                // Extract the connected account (username or phone)
-                                let connected_account = extract_connected_account(&content);
-                                if let Some(ref account) = connected_account {
-                                    tracing::info!(
-                                        "[TG-MONITOR user={}] connected_account={}",
-                                        user_id,
-                                        account
-                                    );
-                                } else {
-                                    tracing::warn!(
-                                        "[TG-MONITOR user={}] could not extract connected_account from success message",
-                                        user_id
-                                    );
-                                }
+                                tracing::info!(
+                                    "[TG-MONITOR user={}] connected_account=@{}",
+                                    user_id,
+                                    username
+                                );
+                                let connected_account = Some(username);
 
                                 let current_time = std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
@@ -1964,62 +1941,66 @@ pub async fn check_telegram_health(
     }
 
     let combined = responses.join("\n");
-    let combined_lower = combined.to_lowercase();
     tracing::info!(
         "📨 Telegram ping response for user {}: {:?}",
         auth_user.user_id,
         combined
     );
 
-    // Verified empirically against deployed mautrix-telegram v0.15.3:
-    //   healthy   `!tg ping` reply: "You're logged in as @ahtavarasmus"
-    //   unhealthy `!tg ping` reply: "That command requires you to be logged in."
-    let healthy = combined_lower.contains("logged in as");
-    let unhealthy = combined_lower.contains("requires you to be logged in")
-        || combined_lower.contains("not logged in");
-
-    if healthy && !unhealthy {
-        tracing::info!(
-            "✅ Telegram health check passed for user {}",
-            auth_user.user_id
-        );
-        if let Some(account) = extract_connected_account(&combined) {
+    // Exact-match classifier against verified strings. Only accepts:
+    //   LoggedIn:     body starts with "You're logged in as @<username>"
+    //   NotLoggedIn:  body exactly "You're not logged in."
+    // Every bot message after cmd_sent_ts_ms was already ordered by ts in
+    // probe_bridge_room, so the FIRST entry is the direct response to our
+    // ping. We classify only that one; trailing messages are ignored because
+    // the bridge bot occasionally emits unrelated notices (state updates).
+    use crate::utils::bridge_responses::{classify_telegram_ping, TelegramPingStatus};
+    let first = responses.first().map(String::as_str).unwrap_or("");
+    match classify_telegram_ping(first) {
+        Some(TelegramPingStatus::LoggedIn { username }) => {
+            tracing::info!(
+                "✅ Telegram health check passed for user {} (@{})",
+                auth_user.user_id,
+                username
+            );
             if let Err(e) =
                 state
                     .user_repository
-                    .update_bridge_data(auth_user.user_id, "telegram", &account)
+                    .update_bridge_data(auth_user.user_id, "telegram", &username)
             {
                 tracing::warn!("Failed to save connected account: {}", e);
             }
+            Ok(AxumJson(json!({
+                "healthy": true,
+                "message": combined,
+            })))
         }
-        Ok(AxumJson(json!({
-            "healthy": true,
-            "message": combined,
-        })))
-    } else if unhealthy {
-        tracing::warn!(
-            "❌ Telegram health check: bridge says not logged in for user {}: {:?}",
-            auth_user.user_id,
-            combined
-        );
-        // DO NOT delete the bridge record. Report unhealthy and let the user
-        // decide whether to reconnect.
-        Ok(AxumJson(json!({
-            "healthy": false,
-            "message": combined,
-        })))
-    } else {
-        // Unrecognized response - surface it but don't make a healthy/unhealthy
-        // decision. Don't change anything.
-        tracing::info!(
-            "ℹ️ Telegram health check: ambiguous response for user {}: {:?}",
-            auth_user.user_id,
-            combined
-        );
-        Ok(AxumJson(json!({
-            "healthy": false,
-            "ambiguous": true,
-            "message": combined,
-        })))
+        Some(TelegramPingStatus::NotLoggedIn) => {
+            tracing::warn!(
+                "❌ Telegram health check: bridge says not logged in for user {}",
+                auth_user.user_id
+            );
+            // DO NOT delete the bridge record. Report unhealthy and let the
+            // user decide whether to reconnect.
+            Ok(AxumJson(json!({
+                "healthy": false,
+                "message": combined,
+            })))
+        }
+        None => {
+            // Unrecognized response - do NOT classify. Never delete. The bot
+            // format may have changed; re-probe manually before updating the
+            // verified constants.
+            tracing::info!(
+                "ℹ️ Telegram health check: unrecognized response for user {}: {:?}",
+                auth_user.user_id,
+                combined
+            );
+            Ok(AxumJson(json!({
+                "healthy": false,
+                "ambiguous": true,
+                "message": combined,
+            })))
+        }
     }
 }
