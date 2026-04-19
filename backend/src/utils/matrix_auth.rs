@@ -9,8 +9,9 @@ use reqwest;
 use reqwest::Client as HttpClient;
 use serde_json::json;
 use sha1::Sha1;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
-use tokio::time::{sleep, Duration};
+use tokio::time::Duration;
 use url::Url;
 use uuid::Uuid;
 
@@ -659,11 +660,14 @@ async fn build_matrix_client(user_id: i32, state: &Arc<AppState>) -> Result<Matr
             }
         }
 
-        // Initial sync for room keys
-        client
-            .sync_once(matrix_sdk::config::SyncSettings::new())
-            .await?;
-        sleep(Duration::from_secs(2)).await;
+        // Note: we used to do an explicit `client.sync_once()` + 2s sleep here
+        // to fetch room keys before declaring the build complete. That's
+        // now deferred to the long-running sync loop's first iteration,
+        // which does the same work. The matrix-sdk queues events it can't
+        // decrypt yet and retries once keys arrive, so no messages are lost
+        // by not blocking here. Removing this roughly halves critical-path
+        // latency for E2EE users on cold build, which matters when the
+        // reconciler is warming thousands of users through a semaphore.
     } else {
         tracing::debug!("Skipping E2EE setup for user {} (not enabled)", user_id);
     }
@@ -724,15 +728,24 @@ fn register_handlers(client: &MatrixClient, state: &Arc<AppState>, user_id: i32)
 /// 5min). Returns the JoinHandle so the caller can track liveness and abort
 /// on teardown.
 ///
+/// `last_sync_at` is bumped to `now()` after every successful `client.sync()`
+/// return. This is the liveness signal the reconciler watches: if the
+/// timestamp goes stale, the sync loop is either dead (task finished) or
+/// zombied (stuck in a permanent error-retry cycle), and the reconciler
+/// rebuilds from scratch. Without this heartbeat a zombie loop would look
+/// alive forever via `is_finished()`, silently eating events.
+///
 /// The loop retries forever and never self-terminates: in practice the
 /// dominant failure mode is transient (homeserver hiccup, network blip),
-/// for which infinite retry is the right behavior. Truly fatal errors
-/// (genuinely invalid auth, account gone) are rare enough to warrant
-/// operator intervention rather than automated recovery; an operator
-/// notices the steady stream of `Matrix sync error` log lines and decides
-/// what to do. The only path that aborts this task is an explicit
-/// `JoinHandle::abort()` from the lifecycle code in `matrix_auth`.
-fn spawn_sync_loop(client: MatrixClient, user_id: i32) -> tokio::task::JoinHandle<()> {
+/// for which infinite retry is the right behavior. Genuinely fatal errors
+/// (invalid auth, account gone) show up as stale `last_sync_at` and get
+/// rebuilt by the reconciler; if the rebuild also fails, the next tick
+/// tries again. No dead-end states.
+fn spawn_sync_loop(
+    client: MatrixClient,
+    user_id: i32,
+    last_sync_at: Arc<AtomicI64>,
+) -> tokio::task::JoinHandle<()> {
     use matrix_sdk::config::SyncSettings;
 
     let sync_settings = SyncSettings::default().timeout(Duration::from_secs(30));
@@ -743,6 +756,7 @@ fn spawn_sync_loop(client: MatrixClient, user_id: i32) -> tokio::task::JoinHandl
             match client.sync(sync_settings.clone()).await {
                 Ok(_) => {
                     backoff_secs = 1;
+                    last_sync_at.store(now_secs(), Ordering::Relaxed);
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
                 Err(e) => {
@@ -760,82 +774,93 @@ fn spawn_sync_loop(client: MatrixClient, user_id: i32) -> tokio::task::JoinHandl
     })
 }
 
+/// Unix timestamp in seconds. Used for the sync heartbeat.
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Max age of `last_sync_at` before the reconciler considers a sync loop
+/// zombied (stuck in permanent error retry) and forces a rebuild. Chosen
+/// generously relative to the 30s sync timeout + 5min max backoff: we want
+/// to give the loop's own retry a chance to self-heal from transient
+/// blips, and only intervene when it's clearly not making progress.
+pub const SYNC_STALE_AFTER: Duration = Duration::from_secs(10 * 60);
+
 /// Ensure the Matrix client, event handlers, and sync loop are running for
 /// `user_id`. This is the single entry point for acquiring a Matrix client.
 /// Idempotent under concurrent calls: the per-user cell mutex serializes
 /// everything, so two callers cannot double-build, double-wire, or
 /// double-spawn.
 ///
-/// Three states for the cell slot:
-/// 1. `Some` with live sync task: return the cached client.
-/// 2. `Some` with dead sync task: try one respawn on the existing client
-///    (cheap recovery from a transient sync panic). If the respawn also
-///    dies within ~100ms, the client itself is suspect: tear it down and
-///    fall through to a full rebuild.
-/// 3. `None` (originally empty, or just torn down by case 2): cold build -
-///    new client, wire handlers, spawn sync, install `UserMatrixState`.
+/// Two states for the cell slot:
+/// 1. `Some` with live sync (task not finished AND `last_sync_at` fresh):
+///    return the cached client.
+/// 2. Anything else (None, task dead, or heartbeat stale): abort any
+///    existing task, drop the slot, cold-build a new client, wire
+///    handlers, spawn sync, install.
 ///
-/// "Client is broken but sync task is alive" is NOT detected here. The
-/// sync loop retries forever with backoff on transient errors (the common
-/// case), which is the right behavior for homeserver hiccups and network
-/// blips. Genuinely fatal failures (auth permanently invalid, account
-/// gone) are rare enough that operator intervention via logs is the
-/// appropriate response, not automated recovery.
+/// We always cold-rebuild rather than trying to respawn sync on the
+/// existing client. A panicked sync task's client state is suspect; the
+/// cost of a fresh client build (~1-2s, one SQLite reopen + one whoami)
+/// is cheap enough that saving it isn't worth the extra branches and
+/// race-prone settle heuristics. One recovery path is strictly simpler
+/// and works for every failure mode (panic, zombie retry loop, dead
+/// task) uniformly.
 pub async fn ensure_matrix_user_running(
     user_id: i32,
     state: &Arc<AppState>,
 ) -> Result<Arc<MatrixClient>> {
-    // How long to wait after respawning a sync task before checking whether
-    // it died at startup. Long enough for a panicking sync loop to crash;
-    // short enough that callers don't notice the latency.
-    const RESPAWN_SETTLE: Duration = Duration::from_millis(100);
-
     let cell = user_cell(state, user_id);
     let mut slot = cell.lock().await;
 
-    // Fast path: live sync task.
+    // Fast path: live sync + fresh heartbeat.
     if let Some(existing) = slot.as_ref() {
-        if !existing.sync_task.is_finished() {
-            return Ok(existing.client.clone());
-        }
-    }
+        let task_alive = !existing.sync_task.is_finished();
+        let heartbeat_age_secs =
+            now_secs().saturating_sub(existing.last_sync_at.load(Ordering::Relaxed));
+        let heartbeat_fresh = heartbeat_age_secs < SYNC_STALE_AFTER.as_secs() as i64;
 
-    // Dead-sync recovery: one respawn try on the existing client.
-    if let Some(existing) = slot.as_mut() {
-        tracing::warn!(
-            "Sync task for user {} died; respawning on existing client",
-            user_id
-        );
-        existing.sync_task.abort();
-        let candidate = spawn_sync_loop((*existing.client).clone(), user_id);
-        tokio::time::sleep(RESPAWN_SETTLE).await;
-
-        if !candidate.is_finished() {
-            existing.sync_task = candidate;
+        if task_alive && heartbeat_fresh {
             return Ok(existing.client.clone());
         }
 
         tracing::warn!(
-            "Respawned sync for user {} died within {}ms; rebuilding client",
+            "Rebuilding Matrix client for user {}: task_alive={} heartbeat_age={}s",
             user_id,
-            RESPAWN_SETTLE.as_millis()
+            task_alive,
+            heartbeat_age_secs
         );
-        candidate.abort();
-        if let Some(old) = slot.take() {
-            old.sync_task.abort();
-        }
     }
 
-    // Cold build (originally empty, or torn down above).
+    // Tear down whatever's there before building fresh. Dropping the old
+    // UserMatrixState aborts the task and releases the Arc<Client>; any
+    // monitor task holding a clone keeps the old client alive until it
+    // finishes, which is fine because each Matrix client opens its own
+    // connection to the homeserver (only the SQLite store path is shared,
+    // and SQLite handles concurrent opens via file-level locks).
+    if let Some(old) = slot.take() {
+        old.sync_task.abort();
+    }
+
+    // Cold build.
     let client = build_matrix_client(user_id, state).await?;
     register_handlers(&client, state, user_id);
-    let sync_task = spawn_sync_loop(client.clone(), user_id);
+
+    // Seed heartbeat to now() so the reconciler's next tick doesn't
+    // classify this freshly-built client as stale before its first sync
+    // cycle completes (E2EE initial sync can take a few seconds).
+    let last_sync_at = Arc::new(AtomicI64::new(now_secs()));
+    let sync_task = spawn_sync_loop(client.clone(), user_id, Arc::clone(&last_sync_at));
     tracing::info!("Spawned Matrix sync loop for user {}", user_id);
 
     let client_arc = Arc::new(client);
     *slot = Some(crate::UserMatrixState {
         client: client_arc.clone(),
         sync_task,
+        last_sync_at,
     });
     Ok(client_arc)
 }

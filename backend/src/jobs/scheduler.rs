@@ -9,64 +9,139 @@ use tracing::{debug, error};
 
 use crate::handlers::imap_handlers;
 
-pub async fn initialize_matrix_clients(state: Arc<AppState>) {
-    tracing::debug!("Starting Matrix client initialization...");
+/// Concurrent cold-builds allowed at once during a reconciler tick.
+///
+/// Each cold build makes ~2-3 HTTP calls to Tuwunel (whoami + first sync,
+/// plus one extra sync_once for E2EE users). A semaphore of size N caps
+/// in-flight builds to N regardless of user count - 229 users, 2000
+/// users, or 50000 users all put the same instantaneous load on Tuwunel.
+///
+/// N=5 is the conservative phase-1 starting point. Raise after measuring
+/// Tuwunel's p99 sync latency and 4xx/5xx rate under load. Do NOT raise
+/// without measuring; guessing is what got us into thundering-herd
+/// problems before.
+const RECONCILE_CONCURRENCY: usize = 5;
 
-    // Tear down every live cell: lock it, take + abort the old state. The
-    // cell itself stays in the DashMap as a permanent serialization point;
-    // removing entries here would race with concurrent callers that already
-    // hold a cloned cell Arc, leaving them building into an orphaned cell
-    // that future callers can't find.
-    let existing_cells: Vec<Arc<tokio::sync::Mutex<Option<crate::UserMatrixState>>>> = state
+/// Max age of a sync heartbeat (`UserMatrixState::last_sync_at`) before
+/// the reconciler treats the sync loop as zombied and forces a rebuild.
+/// Mirrors `matrix_auth::SYNC_STALE_AFTER`; kept here as a separate
+/// constant only to make the reconciler's loop condition self-documenting.
+/// The reconciler's own tick interval should be <= this.
+const RECONCILE_TICK_INTERVAL_SECS: u64 = 60;
+
+/// Idempotent reconciler for Matrix client lifecycle. Called once at boot
+/// (in a background task) and then on a 60s cron. Does three things under
+/// a single top-level mutex so ticks can't overlap and stampede Tuwunel:
+///
+/// 1. Tear down any cell whose user no longer has a connected bridge.
+/// 2. Walk the DB-truth list of active-bridge users, ordered by most-recent
+///    bridge activity first (so warm users come up before cold ones).
+/// 3. For each, acquire a permit from `RECONCILE_CONCURRENCY` and call
+///    `ensure_matrix_user_running`. Live users fast-path under the
+///    per-user mutex; dead/zombie/missing users cold-rebuild.
+///
+/// Non-reentrant via `state.matrix_reconcile_lock.try_lock()`. If a
+/// previous tick is still running (e.g. first tick on 5000 users at
+/// N=5 takes ~30 min), the new tick no-ops and lets the old one finish.
+///
+/// Per-user serialization still comes from the per-user cell mutex
+/// inside `ensure_matrix_user_running`: a handler call and a reconciler
+/// call for the same user can race, but the per-user mutex makes them
+/// sequential, and the heartbeat fast-path means whichever goes second
+/// sees a live client and no-ops. Safe without further coordination.
+pub async fn reconcile_matrix_users(state: Arc<AppState>) {
+    let _guard = match state.matrix_reconcile_lock.try_lock() {
+        Ok(g) => g,
+        Err(_) => {
+            tracing::debug!("Matrix reconciler tick skipped - previous tick still running");
+            return;
+        }
+    };
+
+    let active_users = match state.user_repository.get_active_bridge_users_prioritized() {
+        Ok(u) => u,
+        Err(e) => {
+            error!("Reconciler: failed to fetch active bridge users: {}", e);
+            return;
+        }
+    };
+    let active_set: std::collections::HashSet<i32> = active_users.iter().copied().collect();
+
+    // 1. Tear down stale cells (users with no remaining connected bridges).
+    //    We use `stop_matrix_user_if_no_bridges` which does its own
+    //    has-bridges check as a double-safety against a racing
+    //    create-bridge that slipped in after our DB snapshot.
+    let stale_users: Vec<i32> = state
         .matrix_users
         .iter()
-        .map(|e| e.value().clone())
+        .filter(|e| !active_set.contains(e.key()))
+        .map(|e| *e.key())
         .collect();
-    for cell in existing_cells {
-        let mut slot = cell.lock().await;
-        if let Some(old) = slot.take() {
-            old.sync_task.abort();
+    for uid in stale_users {
+        if let Err(e) = crate::utils::matrix_auth::stop_matrix_user_if_no_bridges(uid, &state).await
+        {
+            tracing::warn!("Reconciler: stop failed for user {}: {}", uid, e);
         }
     }
 
-    // Get all users with active bridge connections
-    match state
-        .user_repository
-        .get_users_with_matrix_bridge_connections()
-    {
-        Ok(users) => {
-            // Setup clients and sync tasks for active users.
-            // Stagger initialization to avoid overwhelming tuwunel with 229+ concurrent syncs
-            let user_count = users.len();
-            tracing::info!(
-                "Initializing Matrix clients for {} users (staggered)",
-                user_count
-            );
-            for (idx, user_id) in users.into_iter().enumerate() {
-                tracing::debug!(
-                    "Setting up Matrix client {}/{} for user {}",
-                    idx + 1,
-                    user_count,
-                    user_id
-                );
+    // 2. Ensure each active user with bounded concurrency. spawn + owned
+    //    permit pattern lets us run N builds concurrently while the outer
+    //    loop itself doesn't block on any of them.
+    let total = active_users.len();
+    tracing::info!(
+        "Reconciler: ensuring {} active-bridge users (concurrency={})",
+        total,
+        RECONCILE_CONCURRENCY
+    );
 
-                if let Err(e) =
-                    crate::utils::matrix_auth::ensure_matrix_user_running(user_id, &state).await
-                {
-                    error!("Failed to start Matrix sync for user {}: {}", user_id, e);
-                }
-
-                // Stagger sync starts: 100ms between each to avoid thundering herd on tuwunel
-                if idx < user_count - 1 {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                }
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(RECONCILE_CONCURRENCY));
+    let mut handles = Vec::with_capacity(total);
+    for user_id in active_users {
+        let permit = match Arc::clone(&semaphore).acquire_owned().await {
+            Ok(p) => p,
+            Err(_) => {
+                tracing::error!("Reconciler: semaphore closed unexpectedly");
+                break;
             }
-        }
-        Err(e) => error!("Failed to get active bridge users: {}", e),
+        };
+        let state = Arc::clone(&state);
+        handles.push(tokio::spawn(async move {
+            let result =
+                crate::utils::matrix_auth::ensure_matrix_user_running(user_id, &state).await;
+            if let Err(e) = result {
+                tracing::warn!(
+                    "Reconciler: ensure_matrix_user_running failed for user {}: {}",
+                    user_id,
+                    e
+                );
+            }
+            drop(permit);
+        }));
     }
+
+    // Wait for the whole batch. If a build hangs forever (shouldn't -
+    // build_matrix_client has network timeouts), the reconcile lock keeps
+    // the next tick from overlapping.
+    for h in handles {
+        let _ = h.await;
+    }
+
+    tracing::info!("Reconciler: tick complete ({} users processed)", total);
 }
 
-/// Checks all bridges for all users and deletes any that are unhealthy
+/// Checks all bridges for all users and deletes any that are confirmed
+/// disconnected. Inconclusive probes (bot slow, unknown status, transient
+/// matrix error) are left alone - we'd rather wait one more tick than
+/// tear down a working bridge on a bad signal.
+///
+/// Verified disconnect signals per bridge:
+/// - whatsapp / signal (bridgev2): `list-logins` returns a row with status
+///   `BAD_CREDENTIALS` and no `CONNECTED` row. This is emitted when the
+///   upstream service invalidates the session - e.g. user unlinks the
+///   lightfriend device from their WhatsApp mobile app's Linked Devices.
+///   Verified on mautrix-whatsapp v26.04 on 2026-04-19.
+/// - telegram (v0.15.3): matrix-side room enumeration error. Older bridge
+///   with no list-logins equivalent.
 pub async fn check_all_bridges_health(
     state: &Arc<AppState>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -80,36 +155,56 @@ pub async fn check_all_bridges_health(
 
     for (user_id, bridges) in users_with_bridges {
         for bridge in bridges {
-            if !is_bridge_healthy(state, user_id, &bridge).await {
-                tracing::info!(
-                    "Bridge {} for user {} is unhealthy, deleting",
-                    bridge.bridge_type,
-                    user_id
-                );
-
-                let current_time = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i32;
-
-                if let Err(e) = state.user_repository.record_bridge_disconnection(
-                    user_id,
-                    &bridge.bridge_type,
-                    current_time,
-                ) {
-                    error!(
-                        "Failed to record disconnection event for user {}: {}",
-                        user_id, e
+            match probe_bridge_login_health(state, user_id, &bridge).await {
+                Some(true) => {
+                    tracing::debug!(
+                        "Bridge health: {} for user {} healthy",
+                        bridge.bridge_type,
+                        user_id
                     );
                 }
+                Some(false) => {
+                    tracing::info!(
+                        "Bridge health: {} for user {} confirmed disconnected, deleting",
+                        bridge.bridge_type,
+                        user_id
+                    );
 
-                if let Err(e) = state
-                    .user_repository
-                    .delete_bridge(user_id, &bridge.bridge_type)
-                {
-                    error!(
-                        "Failed to delete unhealthy bridge {} for user {}: {}",
-                        bridge.bridge_type, user_id, e
+                    let current_time = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs() as i32;
+
+                    if let Err(e) = state.user_repository.record_bridge_disconnection(
+                        user_id,
+                        &bridge.bridge_type,
+                        current_time,
+                    ) {
+                        error!(
+                            "Failed to record disconnection event for user {}: {}",
+                            user_id, e
+                        );
+                    }
+
+                    if let Err(e) = state
+                        .user_repository
+                        .delete_bridge(user_id, &bridge.bridge_type)
+                    {
+                        error!(
+                            "Failed to delete disconnected bridge {} for user {}: {}",
+                            bridge.bridge_type, user_id, e
+                        );
+                    }
+                }
+                None => {
+                    // Inconclusive: probe error, bot timed out, unknown
+                    // status token. Leave bridge in place, try again next
+                    // tick. We never delete on None - that would thrash
+                    // on any transient matrix flake.
+                    tracing::debug!(
+                        "Bridge health: {} for user {} inconclusive, leaving in place",
+                        bridge.bridge_type,
+                        user_id
                     );
                 }
             }
@@ -123,82 +218,165 @@ pub async fn check_all_bridges_health(
     Ok(())
 }
 
-async fn is_bridge_healthy(
+/// Probe the bridge bot and classify the live login health.
+///
+/// For bridgev2 bridges (whatsapp, signal) the signal we rely on is the
+/// `list-logins` response status token:
+///
+/// - `CONNECTED` -> healthy
+/// - `BAD_CREDENTIALS` -> confirmed disconnect (upstream service revoked
+///   the session, e.g. user unlinked from phone side)
+/// - `Empty`/`Unknown` -> DO NOT mark unhealthy. The bridge bot might be
+///   slow, or the bridge version might emit something we don't recognise;
+///   either way we'd rather keep the bridge and retry next tick than
+///   wrongly tear down a working connection.
+///
+/// For telegram (still on the older mautrix-telegram v0.15.3, pre-bridgev2)
+/// we keep the previous behaviour: check Matrix client + room enumeration.
+/// There's no list-logins command on that bridge.
+///
+/// Return value:
+///
+/// - `Some(true)` = confirmed healthy. Leave bridge alone.
+/// - `Some(false)` = confirmed disconnect. Caller should delete bridge.
+/// - `None` = inconclusive (probe error, empty, unknown status). Caller
+///   should log and leave bridge in place until the next tick.
+async fn probe_bridge_login_health(
     state: &Arc<AppState>,
     user_id: i32,
     bridge: &crate::pg_models::PgBridge,
-) -> bool {
-    // Try to get Matrix client and fetch rooms for this bridge type
-    // Note: Empty rooms is OK (user might not have any chats yet)
-    // We only consider it unhealthy if we get an actual error
-    match crate::utils::matrix_auth::get_cached_client(user_id, state).await {
-        Ok(client) => {
-            match crate::utils::bridge::get_service_rooms(&client, &bridge.bridge_type).await {
-                Ok(_) => true, // Successfully fetched rooms (even if empty) = healthy
-                Err(e) => {
-                    tracing::warn!(
-                        "Failed to fetch {} rooms for user {}: {}",
-                        bridge.bridge_type,
-                        user_id,
-                        e
-                    );
-                    false
-                }
-            }
-        }
+) -> Option<bool> {
+    use crate::utils::bridge_responses::{classify_bridgev2_list_logins, BridgeLoginHealth};
+    use matrix_sdk::ruma::{OwnedRoomId, OwnedUserId};
+
+    let client = match crate::utils::matrix_auth::get_cached_client(user_id, state).await {
+        Ok(c) => c,
         Err(e) => {
-            tracing::warn!("Failed to get Matrix client for user {}: {}", user_id, e);
-            false
+            tracing::warn!(
+                "Bridge health: failed to get Matrix client for user {}: {}",
+                user_id,
+                e
+            );
+            return None;
         }
-    }
-}
+    };
 
-/// Check if any Matrix sync tasks have died and restart them.
-/// A dead sync task means messages stop flowing even though the bridge
-/// DB record still shows "connected".
-///
-/// With the per-user cell invariant, `ensure_matrix_user_running` is
-/// itself restart-safe: it detects a finished sync task, aborts and
-/// drops the stale state, and rebuilds the client plus handlers plus
-/// sync from scratch under the cell lock. So this function is just a
-/// scanner that kicks the entry point for any user whose task is dead.
-pub async fn check_and_restart_dead_sync_tasks(state: &Arc<AppState>) {
-    // Collect snapshot of (user_id, cell) pairs. We can't hold DashMap
-    // iterator across awaits.
-    let entries: Vec<(i32, Arc<tokio::sync::Mutex<Option<crate::UserMatrixState>>>)> = state
-        .matrix_users
-        .iter()
-        .map(|e| (*e.key(), e.value().clone()))
-        .collect();
-
-    let mut dead_user_ids = Vec::new();
-    for (user_id, cell) in entries {
-        let slot = cell.lock().await;
-        if let Some(us) = slot.as_ref() {
-            if us.sync_task.is_finished() {
-                tracing::warn!("Sync task for user {} is dead, will restart", user_id);
-                dead_user_ids.push(user_id);
+    // Telegram: older python bridge, no bridgev2 contract. Fall back to the
+    // old "can we reach rooms" check. Not a perfect disconnect signal but
+    // better than nothing for telegram users.
+    if bridge.bridge_type == "telegram" {
+        return match crate::utils::bridge::get_service_rooms(&client, &bridge.bridge_type).await {
+            Ok(_) => Some(true),
+            Err(e) => {
+                tracing::warn!(
+                    "Bridge health: telegram room fetch failed for user {}: {}",
+                    user_id,
+                    e
+                );
+                None
             }
+        };
+    }
+
+    // Bridgev2 path: need the management room to talk to the bot. We stored
+    // it on the bridge record when the connection completed.
+    let (room_id, bot_user_id, cmd_prefix) = match bridge.bridge_type.as_str() {
+        "whatsapp" => (bridge.room_id.as_deref(), "whatsappbot", "!wa"),
+        "signal" => (bridge.room_id.as_deref(), "signalbot", "!signal"),
+        other => {
+            tracing::warn!(
+                "Bridge health: unknown bridge_type {:?} for user {} - skipping",
+                other,
+                user_id
+            );
+            return None;
         }
-    }
+    };
 
-    if dead_user_ids.is_empty() {
-        return;
-    }
+    let Some(room_id_str) = room_id else {
+        tracing::warn!(
+            "Bridge health: {} bridge for user {} has no room_id - cannot probe",
+            bridge.bridge_type,
+            user_id
+        );
+        return None;
+    };
 
+    // Resolve matrix bot user id from the bridge bot localpart + homeserver
+    // domain. The homeserver is derived from the user's Matrix user_id.
+    let Some(matrix_user_id) = client.user_id() else {
+        tracing::warn!(
+            "Bridge health: client for user {} has no matrix user_id",
+            user_id
+        );
+        return None;
+    };
+    let domain = matrix_user_id.server_name().as_str();
+    let bot_full = format!("@{}:{}", bot_user_id, domain);
+    let bot_owned = match OwnedUserId::try_from(bot_full.as_str()) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!("Bridge health: invalid bot user id {}: {}", bot_full, e);
+            return None;
+        }
+    };
+
+    let room_owned = match OwnedRoomId::try_from(room_id_str) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("Bridge health: invalid room id {}: {}", room_id_str, e);
+            return None;
+        }
+    };
+
+    let room = match client.get_room(&room_owned) {
+        Some(r) => r,
+        None => {
+            tracing::warn!(
+                "Bridge health: management room {} not in client state for user {}",
+                room_id_str,
+                user_id
+            );
+            return None;
+        }
+    };
+
+    let list_cmd = format!("{} list-logins", cmd_prefix);
+    let responses = match crate::utils::bridge::probe_bridge_room(
+        &client,
+        &room,
+        &bot_owned,
+        &list_cmd,
+        std::time::Duration::from_secs(8),
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(
+                "Bridge health: {} list-logins probe failed for user {}: {}",
+                bridge.bridge_type,
+                user_id,
+                e
+            );
+            return None;
+        }
+    };
+
+    let combined = responses.join("\n");
+    let health = classify_bridgev2_list_logins(&combined);
     tracing::info!(
-        "Restarting {} dead sync tasks: {:?}",
-        dead_user_ids.len(),
-        dead_user_ids
+        "Bridge health: user {} {} -> {:?} (body: {:?})",
+        user_id,
+        bridge.bridge_type,
+        health,
+        combined
     );
 
-    for user_id in dead_user_ids {
-        if let Err(e) = crate::utils::matrix_auth::ensure_matrix_user_running(user_id, state).await
-        {
-            tracing::error!("Failed to restart sync task for user {}: {}", user_id, e);
-        } else {
-            tracing::info!("Restarted sync task for user {}", user_id);
-        }
+    match health {
+        BridgeLoginHealth::Connected => Some(true),
+        BridgeLoginHealth::BadCredentials => Some(false),
+        BridgeLoginHealth::Empty | BridgeLoginHealth::Unknown => None,
     }
 }
 
@@ -310,9 +488,18 @@ async fn initialize_smartphone_free_days_metric(state: Arc<AppState>) {
 }
 
 pub async fn start_scheduler(state: Arc<AppState>) {
-    // Initialize matrix clients and sync tasks once on startup
-    tracing::debug!("Initializing Matrix clients and sync tasks...");
-    initialize_matrix_clients(Arc::clone(&state)).await;
+    // Matrix clients are brought up by the reconciler. Kick the first
+    // tick in a background task so we don't block boot on warming N users
+    // at a time through the semaphore (could be many minutes at scale).
+    // Handlers that need a client for a user the first tick hasn't
+    // reached yet will call `ensure_matrix_user_running` directly, which
+    // cold-builds on demand under the per-user mutex - the reconciler is
+    // the backstop, not the only path.
+    tracing::info!("Spawning initial Matrix reconciler tick (background)");
+    let state_for_first_tick = Arc::clone(&state);
+    tokio::spawn(async move {
+        reconcile_matrix_users(state_for_first_tick).await;
+    });
 
     // Initialize smartphone-free days metric if it doesn't exist
     initialize_smartphone_free_days_metric(Arc::clone(&state)).await;
@@ -476,12 +663,25 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .await
         .expect("Failed to add message monitor job to scheduler");
 
-    // Bridge health check - runs daily at midnight UTC
+    // Bridge health check - runs every 15 minutes at :07, :22, :37, :52.
+    //
+    // Cadence rationale: the WhatsApp bridge (mautrix-whatsapp v26.04) does
+    // NOT emit any passive push when a user unlinks lightfriend from their
+    // phone's Linked Devices - the session just goes BAD_CREDENTIALS
+    // silently. Empirically verified 2026-04-19. The only detection signal
+    // is our own `!wa list-logins` probe, so health-check frequency is the
+    // upper bound on "how long can a user's bridge look connected but
+    // actually be dead". Daily was way too slow; 15 min gives us prompt
+    // detection without hammering the bot.
+    //
+    // Offset the minutes (:07, :22, :37, :52) to avoid overlapping with
+    // the top-of-hour IMAP monitor (":00, :10, :20...") and the
+    // every-minute reconciler tick (":00"). Keeps Tuwunel RPS smooth.
     let state_clone = Arc::clone(&state);
-    let bridge_health_job = Job::new_async("0 0 0 * * *", move |_, _| {
+    let bridge_health_job = Job::new_async("0 7,22,37,52 * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
-            debug!("Running daily bridge health check...");
+            debug!("Running bridge health check...");
             if let Err(e) = check_all_bridges_health(&state).await {
                 error!("Bridge health check failed: {}", e);
             }
@@ -494,22 +694,39 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .await
         .expect("Failed to add bridge health check job to scheduler");
 
-    // Sync task health check - runs every 2 minutes to restart dead sync tasks
-    // and clean up stale "connecting" bridges
+    // Matrix reconciler - runs every 60s. Sole lifecycle driver for
+    // Matrix clients: brings up missing ones, rebuilds dead/zombied ones
+    // (via `last_sync_at` staleness check), tears down users whose
+    // bridges are all gone. Also cleans up stale "connecting" bridges
+    // in the same tick since they share the "once a minute, housekeep"
+    // cadence.
+    //
+    // Non-reentrant: ticks that fire while a previous tick is still
+    // running (common on the very first post-boot tick if there are
+    // many users to warm) no-op. Per-user mutex inside ensure_matrix_
+    // user_running keeps handler calls and the reconciler from racing
+    // on the same user.
+    // "at second 0 of every minute" = every 60s. If you change the
+    // cadence, update RECONCILE_TICK_INTERVAL_SECS (used only for docs
+    // and the sync-heartbeat staleness threshold).
+    debug_assert_eq!(
+        RECONCILE_TICK_INTERVAL_SECS, 60,
+        "cron expression below is hardcoded for 60s cadence"
+    );
     let state_clone = Arc::clone(&state);
-    let sync_health_job = Job::new_async("0 */2 * * * *", move |_, _| {
+    let matrix_reconcile_job = Job::new_async("0 * * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
-            check_and_restart_dead_sync_tasks(&state).await;
+            reconcile_matrix_users(Arc::clone(&state)).await;
             cleanup_stale_connecting_bridges(&state);
         })
     })
-    .expect("Failed to create sync health check job");
+    .expect("Failed to create matrix reconcile job");
 
     sched
-        .add(sync_health_job)
+        .add(matrix_reconcile_job)
         .await
-        .expect("Failed to add sync health check job to scheduler");
+        .expect("Failed to add matrix reconcile job to scheduler");
 
     // Admin alert cleanup - runs daily at 2am UTC to remove alerts older than 30 days
     let state_clone = Arc::clone(&state);

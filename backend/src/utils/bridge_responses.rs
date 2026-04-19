@@ -67,6 +67,16 @@ pub mod verified {
     pub mod bridgev2 {
         /// Status suffix on a CONNECTED login line.
         pub const STATUS_CONNECTED: &str = "CONNECTED";
+
+        /// Status suffix when the bridge's session has been invalidated by
+        /// the upstream service. Verified on mautrix-whatsapp v26.04 on
+        /// 2026-04-19 by unlinking lightfriend from the WhatsApp mobile
+        /// client's "Linked Devices" list and then probing `!wa list-logins`:
+        /// the status token flipped from `CONNECTED` to `BAD_CREDENTIALS`.
+        /// No passive push from the bot when this happens; the only way to
+        /// detect it is to issue `list-logins` and observe the token change.
+        /// Presence of this status means the user must re-pair.
+        pub const STATUS_BAD_CREDENTIALS: &str = "BAD_CREDENTIALS";
     }
 }
 
@@ -167,6 +177,70 @@ pub fn first_connected(entries: &[ListLoginsEntry]) -> Option<&ListLoginsEntry> 
     // want to distinguish those should inspect entries directly.
 }
 
+/// Strictly classified bridgev2 login health, derived from `list-logins` output.
+///
+/// Four cases matter for the health checker:
+///
+/// - `Connected`: at least one entry reports `CONNECTED`. Healthy.
+/// - `BadCredentials`: no CONNECTED entry, and at least one entry reports
+///   `BAD_CREDENTIALS`. Verified signal that the upstream service
+///   invalidated the session (e.g. user unlinked lightfriend from WhatsApp
+///   mobile's Linked Devices). Disconnect is confirmed.
+/// - `Empty`: the bridge has no logins at all (e.g. user already logged out
+///   via our own flow, or never logged in).
+/// - `Unknown`: something else (other statuses, help text, parse failures).
+///   Caller MUST NOT treat as a disconnect signal - log and leave state
+///   unchanged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BridgeLoginHealth {
+    Connected,
+    BadCredentials,
+    Empty,
+    Unknown,
+}
+
+/// Classify the health of a bridgev2 bridge from the full `list-logins`
+/// response body.
+///
+/// Verified against mautrix-whatsapp v26.04. Same parser shape works for
+/// mautrix-signal v26.04 because both bridges share the bridgev2
+/// list-logins format.
+///
+/// Preference order is Connected > BadCredentials > Empty > Unknown: if any
+/// login is currently CONNECTED we report Connected even when other logins
+/// on the same account are in other states, because the user has a working
+/// session. BadCredentials is only returned when there are no working
+/// sessions and at least one session is explicitly revoked.
+pub fn classify_bridgev2_list_logins(body: &str) -> BridgeLoginHealth {
+    // `is_whatsapp_list_logins_empty` / `is_signal_list_logins_empty` share
+    // the same body; match first so we don't hand empty bodies to the parser.
+    let trimmed = body.trim();
+    if trimmed == verified::whatsapp::LIST_LOGINS_EMPTY {
+        return BridgeLoginHealth::Empty;
+    }
+
+    let entries = parse_list_logins(body);
+    if entries.is_empty() {
+        // Parser rejected every line. Could be help text, an error, or
+        // a bridge version change. Don't treat as either healthy or
+        // disconnected; that's the "Unknown" contract.
+        return BridgeLoginHealth::Unknown;
+    }
+    if entries
+        .iter()
+        .any(|e| e.status == verified::bridgev2::STATUS_CONNECTED)
+    {
+        return BridgeLoginHealth::Connected;
+    }
+    if entries
+        .iter()
+        .any(|e| e.status == verified::bridgev2::STATUS_BAD_CREDENTIALS)
+    {
+        return BridgeLoginHealth::BadCredentials;
+    }
+    BridgeLoginHealth::Unknown
+}
+
 /// Convenience: does any parsed login show CONNECTED?
 pub fn any_connected(body: &str) -> bool {
     first_connected(&parse_list_logins(body)).is_some()
@@ -175,7 +249,7 @@ pub fn any_connected(body: &str) -> bool {
 /// Convenience: identifier (usually phone number) of the first CONNECTED login.
 ///
 /// The identifier is the value inside parentheses in the `list-logins` line,
-/// e.g. `+358442105886` for WhatsApp. It is the user-facing label. It is
+/// e.g. `+10000000000` for WhatsApp. It is the user-facing label. It is
 /// NOT suitable as an argument to `!<prefix> logout` - use
 /// `first_connected_login_id` for that.
 pub fn first_connected_identifier(body: &str) -> Option<String> {
@@ -187,7 +261,7 @@ pub fn first_connected_identifier(body: &str) -> Option<String> {
 /// to `!<prefix> logout <login_id>`.
 ///
 /// Shape is bridge-specific:
-/// - WhatsApp: phone number without the leading `+` (e.g. `358442105886`)
+/// - WhatsApp: phone number without the leading `+` (e.g. `10000000000`)
 /// - Signal:   UUID (e.g. `00000000-0000-0000-0000-000000000000`)
 ///
 /// Empirically, passing the identifier (the `+`-prefixed phone from parens)

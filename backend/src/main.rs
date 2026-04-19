@@ -413,6 +413,7 @@ async fn main() {
         password_reset_otps: DashMap::new(),
         phone_verify_otps: DashMap::new(),
         matrix_users,
+        matrix_reconcile_lock: Arc::new(Mutex::new(())),
         tesla_monitoring_tasks: Arc::new(DashMap::new()),
         tesla_charging_monitor_tasks: Arc::new(DashMap::new()),
         imap_idle_tasks: Arc::new(DashMap::new()),
@@ -449,6 +450,7 @@ async fn main() {
         system_notify_cooldowns: DashMap::new(),
         digest_cooldowns: DashMap::new(),
         activity_feed_tx: tokio::sync::broadcast::channel(64).0,
+        pending_purges: backend::services::data_purge::new_registry(),
     });
     // SMS server route - validates signature using user lookup
     let twilio_sms_routes = Router::new()
@@ -758,6 +760,14 @@ async fn main() {
         .route(
             "/api/profile/delete/{user_id}",
             delete(profile_handlers::delete_user),
+        )
+        .route(
+            "/api/profile/purge-data",
+            post(profile_handlers::purge_my_data),
+        )
+        .route(
+            "/api/profile/purge-data/status/{purge_id}",
+            get(profile_handlers::purge_status),
         )
         .route(
             "/api/profile/update",

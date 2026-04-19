@@ -121,6 +121,7 @@ pub mod repositories {
 }
 pub mod services {
     pub mod country_service;
+    pub mod data_purge;
     pub mod mcp_client;
     pub mod metrics_service;
     pub mod signup_service;
@@ -179,7 +180,7 @@ use diesel::r2d2::{self, ConnectionManager};
 use governor::{clock::DefaultClock, state::keyed::DefaultKeyedStateStore, RateLimiter};
 use oauth2::{basic::BasicClient, EndpointNotSet, EndpointSet};
 use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicI64};
 use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
 use tower_sessions::MemoryStore;
@@ -199,9 +200,18 @@ pub type TeslaOAuthClient =
 /// every time a client is (re)built, which guarantees handlers cannot drift
 /// out of sync with the client instance and that no two sync tasks for the
 /// same user can coexist.
+///
+/// `last_sync_at` is a liveness heartbeat: the sync loop bumps it to
+/// `now()` after every successful `client.sync()` return (~30s cadence).
+/// The reconciler uses this (not `sync_task.is_finished()`) to decide
+/// whether to rebuild, so a sync loop stuck in a permanent error retry
+/// (auth rejected, homeserver 5xx looping) is detectable as a zombie.
+/// Seeded to `now()` at install so a freshly-built client isn't
+/// immediately classified as stale before its first sync returns.
 pub struct UserMatrixState {
     pub client: Arc<matrix_sdk::Client>,
     pub sync_task: tokio::task::JoinHandle<()>,
+    pub last_sync_at: Arc<AtomicI64>,
 }
 
 pub struct AppState {
@@ -228,6 +238,11 @@ pub struct AppState {
     /// `Option` means no client is currently live for that user; the outer
     /// `DashMap` entry exists for serialization even when the slot is None.
     pub matrix_users: Arc<DashMap<i32, Arc<Mutex<Option<UserMatrixState>>>>>,
+    /// Non-reentrant guard for `reconcile_matrix_users`. A tick that fires
+    /// while a previous tick is still running acquires `try_lock`, fails,
+    /// and skips. Prevents overlapping reconcilers from stampeding
+    /// Tuwunel when the first tick runs long on a large user set.
+    pub matrix_reconcile_lock: Arc<Mutex<()>>,
     pub tesla_monitoring_tasks: Arc<DashMap<i32, tokio::task::JoinHandle<()>>>,
     pub tesla_charging_monitor_tasks: Arc<DashMap<i32, tokio::task::JoinHandle<()>>>,
     /// Per-IMAP-connection IDLE tasks. Key is `imap_connection.id`
@@ -272,6 +287,10 @@ pub struct AppState {
     pub digest_cooldowns: DashMap<i32, i32>,
     // Broadcast channel: signals activity feed subscribers that new data is available for a user_id
     pub activity_feed_tx: tokio::sync::broadcast::Sender<i32>,
+    /// In-flight "Delete my data" purges keyed by purge_id. Lets the
+    /// frontend poll `/api/profile/purge-data/status/:purge_id` for live
+    /// step-by-step progress while the purge runs.
+    pub pending_purges: services::data_purge::PurgeRegistry,
 }
 
 impl AppState {

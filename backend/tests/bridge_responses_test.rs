@@ -6,11 +6,11 @@
 //! hand-probing the bot before updating the constants.
 
 use backend::utils::bridge_responses::{
-    any_connected, classify_telegram_ping, first_connected, first_connected_identifier,
-    first_connected_login_id, is_signal_list_logins_empty, is_signal_logout_success,
-    is_telegram_logout_success, is_whatsapp_list_logins_empty, is_whatsapp_logout_not_found,
-    is_whatsapp_logout_success, parse_list_logins, parse_list_logins_line, ListLoginsEntry,
-    TelegramPingStatus,
+    any_connected, classify_bridgev2_list_logins, classify_telegram_ping, first_connected,
+    first_connected_identifier, first_connected_login_id, is_signal_list_logins_empty,
+    is_signal_logout_success, is_telegram_logout_success, is_whatsapp_list_logins_empty,
+    is_whatsapp_logout_not_found, is_whatsapp_logout_success, parse_list_logins,
+    parse_list_logins_line, BridgeLoginHealth, ListLoginsEntry, TelegramPingStatus,
 };
 
 // --- telegram ping ---
@@ -269,4 +269,95 @@ fn logout_does_not_match_arbitrary_text_with_substring() {
     assert!(!is_signal_logout_success(
         "Logged out.\nAlso see: !signal help"
     ));
+}
+
+// --- bridgev2 list-logins health classification ---
+//
+// Every body string below is empirically captured from the live
+// mautrix-whatsapp v26.04 bridge via the admin probe endpoint. See
+// project_matrix_lifecycle_review.md / session transcripts for the raw
+// probe output. If these fail after a bridge version bump, re-probe and
+// update constants in bridge_responses.rs first.
+
+#[test]
+fn bridgev2_health_connected() {
+    // Verified: `!wa list-logins` while phone is linked.
+    let body = "* `10000000000` (+10000000000) - `CONNECTED`";
+    assert_eq!(
+        classify_bridgev2_list_logins(body),
+        BridgeLoginHealth::Connected
+    );
+}
+
+#[test]
+fn bridgev2_health_bad_credentials_after_phone_side_unlink() {
+    // Verified on 2026-04-19: after unlinking lightfriend from WhatsApp
+    // mobile's Linked Devices, the status token flipped from CONNECTED
+    // to BAD_CREDENTIALS. No passive push was emitted - this is the sole
+    // detection signal.
+    let body = "* `10000000000` (+10000000000) - `BAD_CREDENTIALS`";
+    assert_eq!(
+        classify_bridgev2_list_logins(body),
+        BridgeLoginHealth::BadCredentials
+    );
+}
+
+#[test]
+fn bridgev2_health_empty_when_never_linked() {
+    // Verified: fresh bridge, no login ever completed.
+    assert_eq!(
+        classify_bridgev2_list_logins("You're not logged in"),
+        BridgeLoginHealth::Empty
+    );
+}
+
+#[test]
+fn bridgev2_health_unknown_for_unparseable_body() {
+    // Help text, errors, or future bridge output must not be treated as
+    // either connected or disconnected.
+    assert_eq!(
+        classify_bridgev2_list_logins("Unknown command, use the `help` command for help."),
+        BridgeLoginHealth::Unknown
+    );
+    assert_eq!(
+        classify_bridgev2_list_logins(""),
+        BridgeLoginHealth::Unknown
+    );
+}
+
+#[test]
+fn bridgev2_health_connected_wins_over_bad_credentials() {
+    // Two parallel logins on same account: one CONNECTED, one revoked.
+    // Working session exists, so health is Connected - we don't want to
+    // tear down a bridge that still has a functional login.
+    let body = "\
+* `111111111111` (+111111111111) - `BAD_CREDENTIALS`
+* `222222222222` (+222222222222) - `CONNECTED`";
+    assert_eq!(
+        classify_bridgev2_list_logins(body),
+        BridgeLoginHealth::Connected
+    );
+}
+
+#[test]
+fn bridgev2_health_ignores_unknown_statuses_when_no_connected() {
+    // If the bridge ever reports something we don't recognise (say a
+    // future RECONNECTING status), and no CONNECTED or BAD_CREDENTIALS
+    // entry exists, the result is Unknown - NOT BadCredentials. We
+    // never auto-disconnect on an unknown status.
+    let body = "* `10000000000` (+10000000000) - `RECONNECTING`";
+    assert_eq!(
+        classify_bridgev2_list_logins(body),
+        BridgeLoginHealth::Unknown
+    );
+}
+
+#[test]
+fn bridgev2_health_bad_credentials_exact_token_required() {
+    // Substring matches must not fire. Only exact `BAD_CREDENTIALS` counts.
+    let body = "* `10000000000` (+10000000000) - `BAD_CREDENTIALS_EXTENDED`";
+    assert_eq!(
+        classify_bridgev2_list_logins(body),
+        BridgeLoginHealth::Unknown
+    );
 }

@@ -135,6 +135,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         password_reset_verify_limiter: DashMap::new(),
         api_rate_limiter: DashMap::new(),
         matrix_users: Arc::new(DashMap::new()),
+        matrix_reconcile_lock: Arc::new(Mutex::new(())),
         tesla_monitoring_tasks: Arc::new(DashMap::new()),
         tesla_charging_monitor_tasks: Arc::new(DashMap::new()),
         imap_idle_tasks: Arc::new(DashMap::new()),
@@ -164,6 +165,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         system_notify_cooldowns: dashmap::DashMap::new(),
         digest_cooldowns: dashmap::DashMap::new(),
         activity_feed_tx: tokio::sync::broadcast::channel(64).0,
+        pending_purges: crate::services::data_purge::new_registry(),
         blog_store: Arc::new(
             crate::blog::content::BlogStore::load("/nonexistent")
                 .unwrap_or_else(|_| crate::blog::content::BlogStore::empty()),

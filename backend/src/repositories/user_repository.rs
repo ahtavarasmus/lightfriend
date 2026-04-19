@@ -1293,6 +1293,38 @@ impl UserRepository {
         Ok(user_ids)
     }
 
+    /// Return user_ids that currently have at least one "connected" bridge,
+    /// sorted by most-recent bridge activity descending. Priority signal
+    /// is `last_seen_online` with fallback to `created_at` when null
+    /// (bridges that never reported a bot-roundtrip). Used by the Matrix
+    /// reconciler to warm the most-active users first under a bounded-
+    /// concurrency semaphore, so dormant users don't hold up message
+    /// delivery for recently-active ones on boot or after a large restart.
+    pub fn get_active_bridge_users_prioritized(&self) -> Result<Vec<i32>, DieselError> {
+        use crate::pg_schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let rows: Vec<(i32, Option<i32>, Option<i32>)> = bridges::table
+            .filter(bridges::status.eq("connected"))
+            .select((
+                bridges::user_id,
+                bridges::last_seen_online,
+                bridges::created_at,
+            ))
+            .load(&mut conn)?;
+
+        let mut best: std::collections::HashMap<i32, i32> = std::collections::HashMap::new();
+        for (uid, last_seen, created) in rows {
+            let ts = last_seen.or(created).unwrap_or(0);
+            best.entry(uid)
+                .and_modify(|e| *e = (*e).max(ts))
+                .or_insert(ts);
+        }
+        let mut v: Vec<(i32, i32)> = best.into_iter().collect();
+        v.sort_by_key(|(_, ts)| std::cmp::Reverse(*ts));
+        Ok(v.into_iter().map(|(uid, _)| uid).collect())
+    }
+
     /// Check if user credits are below their auto-charge threshold.
     /// Returns true when `charge_when_under` is enabled and credits are at or
     /// below the `charge_back_to` target (meaning the user should be auto-charged).

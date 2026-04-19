@@ -1557,59 +1557,69 @@ pub async fn sync_all_users_to_resend(
     })))
 }
 
-/// Reinitialize all Matrix clients and sync tasks.
-/// Use this to recover from dead sync tasks without restarting the server.
+/// Reinitialize all Matrix clients and sync tasks by forcing a
+/// reconciler tick. Use this to recover from dead/zombied sync tasks
+/// without restarting the server.
+///
+/// Under the reconciler design this is equivalent to waiting for the
+/// next 60s cron tick, just immediate. It respects the non-reentrant
+/// `matrix_reconcile_lock`, so calling this while the periodic tick is
+/// already running no-ops safely (the report returns pre/post counts
+/// either way so the admin can still see the current state).
 pub async fn reinit_matrix(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Admin: reinitializing all Matrix clients and sync tasks");
+    use std::sync::atomic::Ordering;
 
-    // Check how many sync tasks are currently dead. We snapshot the per-user
-    // cells first because DashMap iterators can't be held across awaits.
-    let cells: Vec<Arc<tokio::sync::Mutex<Option<crate::UserMatrixState>>>> = state
-        .matrix_users
-        .iter()
-        .map(|e| e.value().clone())
-        .collect();
-    let mut total = 0usize;
-    let mut dead = 0usize;
-    for cell in &cells {
-        let slot = cell.lock().await;
-        if let Some(us) = slot.as_ref() {
-            total += 1;
-            if us.sync_task.is_finished() {
-                dead += 1;
+    tracing::info!("Admin: forcing Matrix reconciler tick");
+
+    async fn cell_stats(state: &Arc<AppState>) -> (usize, usize, usize) {
+        let cells: Vec<Arc<tokio::sync::Mutex<Option<crate::UserMatrixState>>>> = state
+            .matrix_users
+            .iter()
+            .map(|e| e.value().clone())
+            .collect();
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let mut total = 0usize;
+        let mut dead = 0usize;
+        let mut zombie = 0usize;
+        for cell in &cells {
+            let slot = cell.lock().await;
+            if let Some(us) = slot.as_ref() {
+                total += 1;
+                if us.sync_task.is_finished() {
+                    dead += 1;
+                } else if now_secs - us.last_sync_at.load(Ordering::Relaxed) > 600 {
+                    zombie += 1;
+                }
             }
         }
+        (total, dead, zombie)
     }
 
-    crate::jobs::scheduler::initialize_matrix_clients(Arc::clone(&state)).await;
+    let (total_before, dead_before, zombie_before) = cell_stats(&state).await;
 
-    // Count how many live cells remain after reinit.
-    let post_cells: Vec<Arc<tokio::sync::Mutex<Option<crate::UserMatrixState>>>> = state
-        .matrix_users
-        .iter()
-        .map(|e| e.value().clone())
-        .collect();
-    let mut new_total = 0usize;
-    for cell in &post_cells {
-        if cell.lock().await.is_some() {
-            new_total += 1;
-        }
-    }
+    crate::jobs::scheduler::reconcile_matrix_users(Arc::clone(&state)).await;
+
+    let (total_after, _, _) = cell_stats(&state).await;
 
     tracing::info!(
-        "Matrix reinit complete: {} tasks before ({} dead), {} tasks after",
-        total,
-        dead,
-        new_total
+        "Matrix reconciler tick complete: before={} ({} dead, {} zombie), after={}",
+        total_before,
+        dead_before,
+        zombie_before,
+        total_after
     );
 
     Ok(Json(json!({
-        "message": "Matrix clients reinitialized",
-        "previous_tasks": total,
-        "dead_tasks": dead,
-        "new_tasks": new_total,
+        "message": "Matrix reconciler tick complete",
+        "previous_tasks": total_before,
+        "dead_tasks": dead_before,
+        "zombie_tasks": zombie_before,
+        "new_tasks": total_after,
     })))
 }
 
