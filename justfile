@@ -56,8 +56,24 @@ verify:
 
 # ── Development ─────────────────────────────────────────────────────────
 
-# Development: Run backend locally (not in Docker)
-dev-backend:
+# Install macOS Homebrew prerequisites (idempotent; no-op on non-macOS)
+setup-mac:
+    #!/usr/bin/env bash
+    # Installs the keg-only Homebrew formulas the backend links against at
+    # runtime. rpaths to their `brew --prefix`/lib dirs are baked into
+    # backend/.cargo/config.toml. brew install is fast when already present.
+    set -euo pipefail
+    if [ "$(uname)" != "Darwin" ]; then
+      exit 0
+    fi
+    if ! command -v brew >/dev/null 2>&1; then
+      echo "ERROR: Homebrew not installed. Install from https://brew.sh first."
+      exit 1
+    fi
+    brew install sqlite openssl@3 libiconv postgresql@14
+
+# Development: Run backend locally (auto-installs macOS deps on first run)
+dev-backend: setup-mac
     cd backend && cargo run
 
 # Development: Run frontend locally (not in Docker)

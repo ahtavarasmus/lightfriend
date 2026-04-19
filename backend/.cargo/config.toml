@@ -4,9 +4,15 @@
 # This allows native builds on servers without mold installed
 
 [target.aarch64-apple-darwin]
+# rpaths for keg-only Homebrew formulas (not symlinked into /opt/homebrew/lib).
+# If a boot fails with `Library not loaded: @rpath/libX.dylib`, find where
+# brew put it with `brew --prefix <formula>` and add the `/lib` subdir here.
+# These are macOS-only and don't affect Linux/Docker builds.
 rustflags = [
     "-C", "link-arg=-Wl,-rpath,/opt/homebrew/lib",
     "-C", "link-arg=-Wl,-rpath,/opt/homebrew/opt/openssl@3/lib",
+    "-C", "link-arg=-Wl,-rpath,/opt/homebrew/opt/sqlite/lib",
+    "-C", "link-arg=-Wl,-rpath,/opt/homebrew/opt/libiconv/lib",
     "-C", "link-arg=-Wl,-rpath,/opt/homebrew/lib/postgresql@14",
 ]
 

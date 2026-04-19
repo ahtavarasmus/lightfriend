@@ -4,6 +4,11 @@ Lightfriend is a full-stack AI assistant SaaS with Rust on both backend (Axum we
 
 ## Development Commands
 
+**One-command backend boot (macOS):**
+```bash
+just dev-backend                  # = cd backend && cargo run - port 3000
+```
+
 **Backend (Axum + Diesel):**
 ```bash
 cd backend && cargo run --bin backend   # Run server (port 3000) - rpaths baked in via .cargo/config.toml
@@ -18,10 +23,35 @@ cd frontend && trunk serve        # Dev server (port 8080)
 
 **Docker (Enclave):**
 ```bash
-just build-local                  # Build enclave image for current platform
+just build-local                  # Build enclave image for current platform (validates prod-style build)
 just up                          # Start enclave
 just logs                        # View logs
 ```
+
+## macOS Prerequisites
+
+`just dev-backend` auto-runs `just setup-mac` which installs the Homebrew
+keg-only libs the backend links against (sqlite, openssl@3, libiconv,
+postgresql@14). `brew install` is idempotent so this is fast after the
+first run. Non-macOS hosts no-op out of setup.
+
+If a new crate ever pulls in a new dylib and boot fails with
+`Library not loaded: @rpath/libX.dylib`:
+
+1. Find the missing lib: `brew --prefix <formula>`
+2. Add a `link-arg=-Wl,-rpath,<prefix>/lib` entry to
+   `backend/.cargo/config.toml`
+3. Add the formula to the `brew install` list in the `setup-mac` recipe
+4. `touch backend/src/main.rs && cargo build` to relink
+
+Homebrew keg-only means the lib is NOT symlinked into `/opt/homebrew/lib`,
+so the default rpath doesn't find it. `DYLD_LIBRARY_PATH` is stripped by
+macOS SIP at runtime and does not work as a workaround; rpaths must be
+baked at link time.
+
+To validate a prod-style build actually works, run `just build-local`.
+That runs the same Docker/Linux build the deploy pipeline uses; macOS
+dyld issues are irrelevant inside that container.
 
 ## Architecture
 
