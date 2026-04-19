@@ -716,3 +716,134 @@ pub async fn get_cached_client(user_id: i32, state: &Arc<AppState>) -> Result<Ar
         }
     }
 }
+
+/// Ensure the Matrix client, event handlers, and sync loop are running for `user_id`.
+///
+/// This is the ONLY place that registers event handlers or spawns the sync task.
+/// Called from scheduler startup, dead-sync restart, and each bridge auth flow
+/// after login succeeds. Idempotent:
+/// - If a live sync task exists, returns the cached client without touching anything.
+/// - Otherwise builds the client (reusing the cached instance when available),
+///   registers handlers exactly once per client instance (tracked via
+///   `state.matrix_handlers_wired`), and spawns a fresh sync loop.
+pub async fn ensure_matrix_user_running(
+    user_id: i32,
+    state: &Arc<AppState>,
+) -> Result<Arc<MatrixClient>> {
+    use matrix_sdk::config::SyncSettings;
+    use matrix_sdk::room::Room;
+    use matrix_sdk::ruma::events::receipt::ReceiptEventContent;
+    use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
+    use matrix_sdk::ruma::events::SyncEphemeralRoomEvent;
+
+    // Obtain (or build) the client. get_client already caches into matrix_clients.
+    let client = get_client(user_id, state).await?;
+    let client_arc: Arc<MatrixClient> = {
+        let clients = state.matrix_clients.lock().await;
+        clients
+            .get(&user_id)
+            .cloned()
+            .unwrap_or_else(|| Arc::new(client.clone()))
+    };
+
+    // Register handlers exactly once per (client instance, user).
+    // DashMap::insert returns the previous value if any; `None` = first time.
+    if state.matrix_handlers_wired.insert(user_id, ()).is_none() {
+        tracing::info!("Registering Matrix event handlers for user {}", user_id);
+
+        let state_for_handler = Arc::clone(state);
+        client.add_event_handler(move |ev: OriginalSyncRoomMessageEvent, room: Room, c| {
+            let state = Arc::clone(&state_for_handler);
+            async move {
+                tracing::debug!("📨 Received message in room {}: {:?}", room.room_id(), ev);
+                crate::utils::bridge::handle_bridge_message(ev, room, c, state).await;
+            }
+        });
+
+        let state_for_receipt = Arc::clone(state);
+        client.add_event_handler(
+            move |ev: SyncEphemeralRoomEvent<ReceiptEventContent>, room: Room, c| {
+                let state = Arc::clone(&state_for_receipt);
+                async move {
+                    crate::utils::bridge::handle_read_receipt(ev, room, c, state, user_id).await;
+                }
+            },
+        );
+    }
+
+    // Ensure a live sync task exists. Check-and-insert under the tasks lock so
+    // two concurrent callers can't both spawn.
+    {
+        let mut tasks = state.matrix_sync_tasks.lock().await;
+        let alive = tasks
+            .get(&user_id)
+            .map(|t| !t.is_finished())
+            .unwrap_or(false);
+        if !alive {
+            if let Some(old) = tasks.remove(&user_id) {
+                old.abort();
+            }
+            let client_for_sync = client.clone();
+            let sync_settings = SyncSettings::default().timeout(Duration::from_secs(30));
+            let handle = tokio::spawn(async move {
+                let mut backoff_secs: u64 = 1;
+                const MAX_BACKOFF_SECS: u64 = 300;
+                loop {
+                    match client_for_sync.sync(sync_settings.clone()).await {
+                        Ok(_) => {
+                            backoff_secs = 1;
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                "Matrix sync error for user {} (retry in {}s): {}",
+                                user_id,
+                                backoff_secs,
+                                e
+                            );
+                            tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+                            backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
+                        }
+                    }
+                }
+            });
+            tasks.insert(user_id, handle);
+            tracing::info!("Spawned Matrix sync loop for user {}", user_id);
+        }
+    }
+
+    Ok(client_arc)
+}
+
+/// Tear down the Matrix client and sync loop for `user_id`, but only if they
+/// have no remaining connected bridges. Call this from bridge disconnect flows
+/// instead of unconditionally removing the client - otherwise disconnecting one
+/// bridge kills sync for the others sharing the same Matrix account.
+pub async fn stop_matrix_user_if_no_bridges(user_id: i32, state: &Arc<AppState>) -> Result<()> {
+    let has_bridges = state
+        .user_repository
+        .has_active_bridges(user_id)
+        .unwrap_or(false);
+    if has_bridges {
+        tracing::debug!(
+            "Keeping Matrix client alive for user {} - other bridges still connected",
+            user_id
+        );
+        return Ok(());
+    }
+
+    let mut clients = state.matrix_clients.lock().await;
+    let mut tasks = state.matrix_sync_tasks.lock().await;
+    if let Some(task) = tasks.remove(&user_id) {
+        task.abort();
+    }
+    let removed = clients.remove(&user_id).is_some();
+    state.matrix_handlers_wired.remove(&user_id);
+    if removed {
+        tracing::info!(
+            "Stopped Matrix sync for user {} - no remaining bridges",
+            user_id
+        );
+    }
+    Ok(())
+}

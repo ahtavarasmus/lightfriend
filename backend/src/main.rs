@@ -415,6 +415,7 @@ async fn main() {
         phone_verify_otps: DashMap::new(),
         matrix_sync_tasks,
         matrix_clients,
+        matrix_handlers_wired: Arc::new(DashMap::new()),
         tesla_monitoring_tasks: Arc::new(DashMap::new()),
         tesla_charging_monitor_tasks: Arc::new(DashMap::new()),
         imap_idle_tasks: Arc::new(DashMap::new()),

@@ -211,6 +211,10 @@ pub struct AppState {
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     pub matrix_sync_tasks: Arc<Mutex<HashMap<i32, tokio::task::JoinHandle<()>>>>,
     pub matrix_clients: Arc<Mutex<HashMap<i32, Arc<matrix_sdk::Client>>>>,
+    /// Users whose Matrix event handlers are already wired on the current
+    /// client instance. Cleared when the client is torn down so handlers
+    /// re-register on the fresh client. See `ensure_matrix_user_running`.
+    pub matrix_handlers_wired: Arc<DashMap<i32, ()>>,
     pub tesla_monitoring_tasks: Arc<DashMap<i32, tokio::task::JoinHandle<()>>>,
     pub tesla_charging_monitor_tasks: Arc<DashMap<i32, tokio::task::JoinHandle<()>>>,
     /// Per-IMAP-connection IDLE tasks. Key is `imap_connection.id`
