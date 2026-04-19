@@ -12,23 +12,29 @@ use crate::handlers::imap_handlers;
 pub async fn initialize_matrix_clients(state: Arc<AppState>) {
     tracing::debug!("Starting Matrix client initialization...");
 
-    // Get all users with active WhatsApp connection
+    // Tear down every live cell: lock it, take + abort the old state. The
+    // cell itself stays in the DashMap as a permanent serialization point;
+    // removing entries here would race with concurrent callers that already
+    // hold a cloned cell Arc, leaving them building into an orphaned cell
+    // that future callers can't find.
+    let existing_cells: Vec<Arc<tokio::sync::Mutex<Option<crate::UserMatrixState>>>> = state
+        .matrix_users
+        .iter()
+        .map(|e| e.value().clone())
+        .collect();
+    for cell in existing_cells {
+        let mut slot = cell.lock().await;
+        if let Some(old) = slot.take() {
+            old.sync_task.abort();
+        }
+    }
+
+    // Get all users with active bridge connections
     match state
         .user_repository
         .get_users_with_matrix_bridge_connections()
     {
         Ok(users) => {
-            // Clear existing clients and sync tasks
-            {
-                let mut matrix_clients = state.matrix_clients.lock().await;
-                let mut sync_tasks = state.matrix_sync_tasks.lock().await;
-                for (_, task) in sync_tasks.drain() {
-                    task.abort();
-                }
-                matrix_clients.clear();
-            }
-            // Lock is released here - get_client can safely lock it again
-
             // Setup clients and sync tasks for active users.
             // Stagger initialization to avoid overwhelming tuwunel with 229+ concurrent syncs
             let user_count = users.len();
@@ -56,7 +62,7 @@ pub async fn initialize_matrix_clients(state: Arc<AppState>) {
                 }
             }
         }
-        Err(e) => error!("Failed to get active WhatsApp users: {}", e),
+        Err(e) => error!("Failed to get active bridge users: {}", e),
     }
 }
 
@@ -150,14 +156,26 @@ async fn is_bridge_healthy(
 /// Check if any Matrix sync tasks have died and restart them.
 /// A dead sync task means messages stop flowing even though the bridge
 /// DB record still shows "connected".
+///
+/// With the per-user cell invariant, `ensure_matrix_user_running` is
+/// itself restart-safe: it detects a finished sync task, aborts and
+/// drops the stale state, and rebuilds the client plus handlers plus
+/// sync from scratch under the cell lock. So this function is just a
+/// scanner that kicks the entry point for any user whose task is dead.
 pub async fn check_and_restart_dead_sync_tasks(state: &Arc<AppState>) {
-    let mut dead_user_ids = Vec::new();
+    // Collect snapshot of (user_id, cell) pairs. We can't hold DashMap
+    // iterator across awaits.
+    let entries: Vec<(i32, Arc<tokio::sync::Mutex<Option<crate::UserMatrixState>>>)> = state
+        .matrix_users
+        .iter()
+        .map(|e| (*e.key(), e.value().clone()))
+        .collect();
 
-    // Find dead sync tasks
-    {
-        let sync_tasks = state.matrix_sync_tasks.lock().await;
-        for (&user_id, handle) in sync_tasks.iter() {
-            if handle.is_finished() {
+    let mut dead_user_ids = Vec::new();
+    for (user_id, cell) in entries {
+        let slot = cell.lock().await;
+        if let Some(us) = slot.as_ref() {
+            if us.sync_task.is_finished() {
                 tracing::warn!("Sync task for user {} is dead, will restart", user_id);
                 dead_user_ids.push(user_id);
             }
@@ -174,7 +192,6 @@ pub async fn check_and_restart_dead_sync_tasks(state: &Arc<AppState>) {
         dead_user_ids
     );
 
-    // Restart each dead sync task by delegating to the single entry point.
     for user_id in dead_user_ids {
         if let Err(e) = crate::utils::matrix_auth::ensure_matrix_user_running(user_id, state).await
         {

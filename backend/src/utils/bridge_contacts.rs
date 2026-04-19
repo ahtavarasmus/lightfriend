@@ -43,15 +43,22 @@ pub async fn get_whatsapp_contacts(state: &Arc<AppState>, user_id: i32) -> Vec<C
 
     // Resolve the Matrix user ID for this Lightfriend user.
     let matrix_user_id = {
-        let clients = state.matrix_clients.lock().await;
-        let Some(client) = clients.get(&user_id) else {
+        let Some(cell) = state.matrix_users.get(&user_id).map(|e| e.value().clone()) else {
             tracing::info!(
                 "get_whatsapp_contacts: user {} - no matrix client cached",
                 user_id
             );
             return Vec::new();
         };
-        let Some(uid) = client.user_id() else {
+        let slot = cell.lock().await;
+        let Some(us) = slot.as_ref() else {
+            tracing::info!(
+                "get_whatsapp_contacts: user {} - matrix cell empty",
+                user_id
+            );
+            return Vec::new();
+        };
+        let Some(uid) = us.client.user_id() else {
             tracing::info!(
                 "get_whatsapp_contacts: user {} - matrix client has no user_id",
                 user_id

@@ -191,6 +191,19 @@ pub type GoogleOAuthClient =
 pub type TeslaOAuthClient =
     BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
 
+/// Per-user Matrix state held atomically under a single mutex.
+///
+/// Invariant: the event handlers are always wired on `client`, and
+/// `sync_task` is the most recently spawned sync loop for that client.
+/// A fresh `UserMatrixState` is constructed by `ensure_matrix_user_running`
+/// every time a client is (re)built, which guarantees handlers cannot drift
+/// out of sync with the client instance and that no two sync tasks for the
+/// same user can coexist.
+pub struct UserMatrixState {
+    pub client: Arc<matrix_sdk::Client>,
+    pub sync_task: tokio::task::JoinHandle<()>,
+}
+
 pub struct AppState {
     pub pg_pool: PgDbPool,
     pub user_core: Arc<UserCore>,
@@ -209,12 +222,12 @@ pub struct AppState {
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     pub api_rate_limiter:
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
-    pub matrix_sync_tasks: Arc<Mutex<HashMap<i32, tokio::task::JoinHandle<()>>>>,
-    pub matrix_clients: Arc<Mutex<HashMap<i32, Arc<matrix_sdk::Client>>>>,
-    /// Users whose Matrix event handlers are already wired on the current
-    /// client instance. Cleared when the client is torn down so handlers
-    /// re-register on the fresh client. See `ensure_matrix_user_running`.
-    pub matrix_handlers_wired: Arc<DashMap<i32, ()>>,
+    /// Per-user Matrix client + sync task, stored together under a single
+    /// per-user mutex so that building, tearing down, and restarting are
+    /// atomic. See `utils::matrix_auth::ensure_matrix_user_running`. Empty
+    /// `Option` means no client is currently live for that user; the outer
+    /// `DashMap` entry exists for serialization even when the slot is None.
+    pub matrix_users: Arc<DashMap<i32, Arc<Mutex<Option<UserMatrixState>>>>>,
     pub tesla_monitoring_tasks: Arc<DashMap<i32, tokio::task::JoinHandle<()>>>,
     pub tesla_charging_monitor_tasks: Arc<DashMap<i32, tokio::task::JoinHandle<()>>>,
     /// Per-IMAP-connection IDLE tasks. Key is `imap_connection.id`

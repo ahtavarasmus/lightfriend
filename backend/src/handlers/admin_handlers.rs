@@ -1564,17 +1564,39 @@ pub async fn reinit_matrix(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Admin: reinitializing all Matrix clients and sync tasks");
 
-    // Check how many sync tasks are currently dead
-    let (total, dead) = {
-        let sync_tasks = state.matrix_sync_tasks.lock().await;
-        let total = sync_tasks.len();
-        let dead = sync_tasks.values().filter(|h| h.is_finished()).count();
-        (total, dead)
-    };
+    // Check how many sync tasks are currently dead. We snapshot the per-user
+    // cells first because DashMap iterators can't be held across awaits.
+    let cells: Vec<Arc<tokio::sync::Mutex<Option<crate::UserMatrixState>>>> = state
+        .matrix_users
+        .iter()
+        .map(|e| e.value().clone())
+        .collect();
+    let mut total = 0usize;
+    let mut dead = 0usize;
+    for cell in &cells {
+        let slot = cell.lock().await;
+        if let Some(us) = slot.as_ref() {
+            total += 1;
+            if us.sync_task.is_finished() {
+                dead += 1;
+            }
+        }
+    }
 
     crate::jobs::scheduler::initialize_matrix_clients(Arc::clone(&state)).await;
 
-    let new_total = state.matrix_sync_tasks.lock().await.len();
+    // Count how many live cells remain after reinit.
+    let post_cells: Vec<Arc<tokio::sync::Mutex<Option<crate::UserMatrixState>>>> = state
+        .matrix_users
+        .iter()
+        .map(|e| e.value().clone())
+        .collect();
+    let mut new_total = 0usize;
+    for cell in &post_cells {
+        if cell.lock().await.is_some() {
+            new_total += 1;
+        }
+    }
 
     tracing::info!(
         "Matrix reinit complete: {} tasks before ({} dead), {} tasks after",

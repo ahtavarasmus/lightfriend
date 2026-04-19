@@ -388,8 +388,7 @@ async fn main() {
                 .expect("Invalid redirect URL"),
         );
 
-    let matrix_sync_tasks = Arc::new(Mutex::new(HashMap::new()));
-    let matrix_clients = Arc::new(Mutex::new(HashMap::new()));
+    let matrix_users = Arc::new(DashMap::new());
     let twilio_client = Arc::new(backend::RealTwilioClient::new());
     let twilio_message_service = Arc::new(backend::TwilioMessageService::new(
         twilio_client.clone(),
@@ -413,9 +412,7 @@ async fn main() {
         api_rate_limiter: DashMap::new(),
         password_reset_otps: DashMap::new(),
         phone_verify_otps: DashMap::new(),
-        matrix_sync_tasks,
-        matrix_clients,
-        matrix_handlers_wired: Arc::new(DashMap::new()),
+        matrix_users,
         tesla_monitoring_tasks: Arc::new(DashMap::new()),
         tesla_charging_monitor_tasks: Arc::new(DashMap::new()),
         imap_idle_tasks: Arc::new(DashMap::new()),
