@@ -57,7 +57,7 @@ verify:
 # ── Development ─────────────────────────────────────────────────────────
 
 # Install macOS Homebrew prerequisites (idempotent; no-op on non-macOS)
-setup-mac:
+setup-mac: install-hooks
     #!/usr/bin/env bash
     # Installs the keg-only Homebrew formulas the backend links against at
     # runtime. rpaths to their `brew --prefix`/lib dirs are baked into
@@ -72,7 +72,20 @@ setup-mac:
     fi
     brew install sqlite openssl@3 libiconv postgresql@14
 
-# Development: Run backend locally (auto-installs macOS deps on first run)
+# Point git at .githooks/ so pre-commit runs cargo clippy + cargo test +
+# trunk build on every commit. Idempotent, runs automatically on first
+# dev-backend invocation via setup-mac. Also works in fresh worktrees
+# (each worktree has its own git config).
+install-hooks:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    current=$(git config --get core.hooksPath 2>/dev/null || echo "")
+    if [ "$current" != ".githooks" ]; then
+      git config core.hooksPath .githooks
+      echo "Installed git hooks (core.hooksPath = .githooks)."
+    fi
+
+# Development: Run backend locally (auto-installs macOS deps and git hooks on first run)
 dev-backend: setup-mac
     cd backend && cargo run
 

@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Pre-commit validation.
+#
+# Runs the three checks CI runs, in the order they would fail cheapest first:
+#   1. cargo clippy -D warnings (catches style issues CI rejects, e.g.
+#      too_many_arguments, unwrap-after-is_some, doc-list-indent).
+#   2. cargo test (unit + integration; strict = no ignores, no skips).
+#   3. trunk build (catches frontend type/WASM compile errors).
+#
+# Why these and not `cargo run`:
+#   The backend needs ~20 env vars to boot (ADMIN_EMAILS, PG_DATABASE_URL,
+#   encryption keys, Twilio, Stripe, etc). A fresh worktree won't have them
+#   and adding stubs just to make boot succeed gives no real signal -- the
+#   runtime paths we'd hit (DB connect, Tesla API, etc) are integration
+#   tests, not local validation. Clippy + compile-time test run + trunk
+#   build catches every CI failure class we've shipped so far.
+#
+# Skip via `git commit --no-verify` when genuinely needed (e.g. committing
+# a doc-only change on a machine without Rust toolchain). Don't skip to
+# push broken code.
+
+set -euo pipefail
+
+# Only run if any Rust/frontend source is staged; otherwise skip to keep
+# doc-only / config-only commits fast.
+changed=$(git diff --cached --name-only --diff-filter=ACMR)
+need_backend=false
+need_frontend=false
+while IFS= read -r f; do
+  case "$f" in
+    backend/*)  need_backend=true ;;
+    frontend/*) need_frontend=true ;;
+    Cargo.toml|Cargo.lock) need_backend=true ;;
+  esac
+done <<<"$changed"
+
+if ! $need_backend && ! $need_frontend; then
+  echo "pre-commit: no backend/frontend changes staged, skipping."
+  exit 0
+fi
+
+repo_root=$(git rev-parse --show-toplevel)
+
+# Color helpers (no-op on non-tty)
+if [ -t 1 ]; then
+  red='\033[0;31m'; green='\033[0;32m'; yellow='\033[0;33m'; reset='\033[0m'
+else
+  red=''; green=''; yellow=''; reset=''
+fi
+
+step() { printf "${yellow}==> %s${reset}\n" "$*"; }
+ok()   { printf "${green}    ok${reset}\n"; }
+fail() { printf "${red}    FAILED${reset}\n"; exit 1; }
+
+start=$(date +%s)
+
+if $need_backend; then
+  step "cargo clippy --all-targets -- -D warnings"
+  (cd "$repo_root/backend" && cargo clippy --all-targets --no-deps -- -D warnings) || fail
+  ok
+
+  step "cargo test --no-fail-fast"
+  (cd "$repo_root/backend" && cargo test --no-fail-fast) || fail
+  ok
+fi
+
+if $need_frontend; then
+  step "trunk build"
+  if ! command -v trunk >/dev/null 2>&1; then
+    printf "${red}    trunk not installed (cargo install trunk)${reset}\n"
+    exit 1
+  fi
+  (cd "$repo_root/frontend" && trunk build) || fail
+  ok
+fi
+
+end=$(date +%s)
+printf "${green}pre-commit: all checks passed in %ss${reset}\n" $((end - start))

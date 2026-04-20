@@ -217,6 +217,13 @@ async fn bootstrap_admin_if_needed(
 // server. With 16, the server stays responsive even under pressure.
 #[tokio::main(worker_threads = 16)]
 async fn main() {
+    // Load .env if present. Dev / local `cargo run` works without any shell
+    // scaffolding. In enclave/prod the env vars are injected by the orchestrator
+    // and `.env` does not exist - `.ok()` swallows that case. Existing
+    // process env vars always win (dotenvy does NOT override by default) so
+    // prod injection keeps priority.
+    let _ = dotenvy::dotenv();
+
     // Check for CLI commands first
     match backend::cli::run_cli().await {
         Ok(true) => return,
