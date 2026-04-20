@@ -1151,6 +1151,7 @@ async fn resolve_whatsapp_room(
     Ok(room)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn send_bridge_message(
     service: &str,
     state: &Arc<AppState>,
@@ -1233,20 +1234,23 @@ pub async fn send_bridge_message(
                     rid,
                     target_chat_id.is_some()
                 );
-                if target_chat_id.is_some() && service == "whatsapp" {
-                    resolve_whatsapp_room(state, user_id, target_chat_id.unwrap(), &client).await?
-                } else {
-                    return Err(anyhow!(
-                        "Room '{}' not in client and no chat_id fallback available for service '{}'",
-                        rid,
-                        service
-                    ));
+                match (target_chat_id, service) {
+                    (Some(chat_id), "whatsapp") => {
+                        resolve_whatsapp_room(state, user_id, chat_id, &client).await?
+                    }
+                    _ => {
+                        return Err(anyhow!(
+                            "Room '{}' not in client and no chat_id fallback available for service '{}'",
+                            rid,
+                            service
+                        ));
+                    }
                 }
             }
         }
-    } else if service == "whatsapp" && target_chat_id.is_some() {
+    } else if let (Some(chat_id), "whatsapp") = (target_chat_id, service) {
         // Cold path: resolve via portal table (+start-chat for DMs).
-        resolve_whatsapp_room(state, user_id, target_chat_id.unwrap(), &client).await?
+        resolve_whatsapp_room(state, user_id, chat_id, &client).await?
     } else {
         tracing::info!(
             "SEND_FLOW_BRIDGE No target_room_id, searching by name '{}'",

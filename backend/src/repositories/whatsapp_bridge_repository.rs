@@ -332,20 +332,20 @@ impl WhatsAppBridgeRepository {
     /// Source of truth: mautrix-whatsapp's bridgev2 `portal` table
     /// (schema: github.com/mautrix/go `bridgev2/database/upgrades/00-latest.sql`).
     /// The table is keyed by `(bridge_id, id, receiver)` where:
-    ///   - `bridge_id` = constant "whatsapp" for this bridge
-    ///   - `id` = WhatsApp chat_id (jid), e.g. "358442055570@s.whatsapp.net"
-    ///            for a DM or "<gid>@g.us" for a group
-    ///   - `receiver` = user's login_id (bare phone string). Can also be ''
-    ///            for global portals (legacy), so we match either.
-    ///   - `mxid` = the Matrix room ID, nullable until the portal is
-    ///            materialized on Matrix side.
+    /// - `bridge_id` = constant "whatsapp" for this bridge
+    /// - `id` = WhatsApp chat_id (jid), e.g. "358442055570@s.whatsapp.net"
+    ///   for a DM or "<gid>@g.us" for a group
+    /// - `receiver` = user's login_id (bare phone string). Can also be ''
+    ///   for global portals (legacy), so we match either.
+    /// - `mxid` = the Matrix room ID, nullable until the portal is
+    ///   materialized on Matrix side.
     ///
     /// Returns:
-    ///   Ok(Some(mxid))  - portal materialized, ready to send
-    ///   Ok(None)        - portal row missing OR present but mxid is NULL.
-    ///                     Caller should treat both as "not yet materialized"
-    ///                     and fall back to `!wa start-chat` for DMs.
-    ///   Err(_)          - DB error (e.g. table schema surprise).
+    /// - `Ok(Some(mxid))` - portal materialized, ready to send.
+    /// - `Ok(None)` - portal row missing OR present but mxid is NULL.
+    ///   Caller should treat both as "not yet materialized" and fall back
+    ///   to `!wa start-chat` for DMs.
+    /// - `Err(_)` - DB error (e.g. table schema surprise).
     pub fn get_portal_mxid(
         &self,
         chat_id: &str,
