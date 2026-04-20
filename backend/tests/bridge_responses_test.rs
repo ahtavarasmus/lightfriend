@@ -434,6 +434,26 @@ fn whatsapp_start_chat_success_requires_matrix_to_url() {
 }
 
 #[test]
+fn whatsapp_start_chat_existing_portal_parses_room_id() {
+    // Verified 2026-04-20: calling `!wa start-chat +<phone>` on a contact
+    // whose portal already exists returns a different prefix ("You already
+    // have a direct chat with ") and uses " at " instead of ": " as the
+    // display-name / room-name separator, but still exposes the same
+    // matrix.to URL we need.
+    let body = "You already have a direct chat with `358400314196` / Kappuliini (WA) at Kappuliini (WA) (https://matrix.to/#/!aWwTOtKAgPGgTc0N0L:localhost)";
+    match classify_whatsapp_start_chat(body) {
+        Some(WhatsAppStartChatReply::Created {
+            room_id,
+            display_name,
+        }) => {
+            assert_eq!(room_id, "!aWwTOtKAgPGgTc0N0L:localhost");
+            assert_eq!(display_name, "Kappuliini (WA)");
+        }
+        other => panic!("expected Created (existing portal), got {:?}", other),
+    }
+}
+
+#[test]
 fn whatsapp_start_chat_success_rejects_non_room_mxid() {
     // Guard: if the URL segment doesn't start with `!` (Matrix room ID
     // sigil), reject. This catches user-links (@user:server) slipping

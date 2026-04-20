@@ -82,12 +82,20 @@ pub mod verified {
     // `!wa start-chat <identifier>` replies, verified on prod
     // (mautrix-whatsapp v26.04, bridgev2) on 2026-04-20.
     pub mod whatsapp_start_chat {
-        /// Success reply body shape:
+        /// Success reply when the bridge creates a new portal:
         ///   `Created chat with `<jid_localpart>` / <display_name>: <room_name> (<matrix.to url>)`
         /// Probe: `!wa start-chat +358442055570` on a contact that had no
         /// existing portal returned:
         ///   `Created chat with `358442055570` / Perttu (WA): Perttu (WA) (https://matrix.to/#/!qwwpwelPSZWKBxGQ8M:localhost)`
-        pub const SUCCESS_PREFIX: &str = "Created chat with ";
+        pub const SUCCESS_CREATED_PREFIX: &str = "Created chat with ";
+
+        /// Success reply when a portal already exists for that contact. Same
+        /// payload (jid, display_name, room_name, matrix.to url), different
+        /// separator between display_name and room_name ("at" instead of ":"):
+        ///   `You already have a direct chat with `<jid>` / <display_name> at <room_name> (<matrix.to url>)`
+        /// Probe captured 2026-04-20 when invoking start-chat a second time
+        /// on a contact whose portal already existed.
+        pub const SUCCESS_EXISTING_PREFIX: &str = "You already have a direct chat with ";
 
         /// Failure reply body starts with this exact prefix for any failure
         /// mode (invalid identifier, number not on WhatsApp, server not
@@ -357,37 +365,44 @@ pub fn classify_whatsapp_start_chat(body: &str) -> Option<WhatsAppStartChatReply
         });
     }
 
-    if let Some(rest) = body.strip_prefix(SUCCESS_PREFIX) {
-        // rest: "`<jid_localpart>` / <display_name>: <room_name> (<matrix.to url>)"
-        // Extract the matrix.to URL at the end and pull the room_id from it.
-        let url_start = rest.rfind("(https://matrix.to/#/")?;
-        let after_marker = &rest[url_start + "(https://matrix.to/#/".len()..];
-        let url_end = after_marker.find(')')?;
-        let room_id = after_marker[..url_end].trim().to_string();
-        if !room_id.starts_with('!') {
-            // Not a Matrix room ID. Probably a user-link URL (unlikely for
-            // start-chat but guard anyway).
-            return None;
-        }
+    // Both success variants share the same tail shape:
+    //   "`<jid>` / <display_name><sep><room_name> (<matrix.to url>)"
+    // where <sep> is ": " for Created and " at " for already-exists. Strip
+    // the appropriate prefix first, then parse the shared tail.
+    let (rest, sep) = if let Some(rest) = body.strip_prefix(SUCCESS_CREATED_PREFIX) {
+        (rest, ": ")
+    } else if let Some(rest) = body.strip_prefix(SUCCESS_EXISTING_PREFIX) {
+        (rest, " at ")
+    } else {
+        return None;
+    };
 
-        // Display name is between the first " / " and the ": " that precedes
-        // the room name. Example slice of `rest`:
-        //   "`358442055570` / Perttu (WA): Perttu (WA) (https://matrix.to/#/...)"
-        // We want "Perttu (WA)".
-        let dn_start = rest.find(" / ")? + " / ".len();
-        let before_url = &rest[..url_start].trim_end_matches(' ');
-        // Last ": " before the URL separates display_name from room_name.
-        let dn_end_rel = before_url[dn_start..].rfind(": ")?;
-        let display_name = rest[dn_start..dn_start + dn_end_rel].trim().to_string();
-        if display_name.is_empty() {
-            return None;
-        }
-
-        return Some(WhatsAppStartChatReply::Created {
-            room_id,
-            display_name,
-        });
+    // Extract the matrix.to URL at the end and pull the room_id from it.
+    let url_start = rest.rfind("(https://matrix.to/#/")?;
+    let after_marker = &rest[url_start + "(https://matrix.to/#/".len()..];
+    let url_end = after_marker.find(')')?;
+    let room_id = after_marker[..url_end].trim().to_string();
+    if !room_id.starts_with('!') {
+        // Not a Matrix room ID. Probably a user-link URL (unlikely for
+        // start-chat but guard anyway).
+        return None;
     }
 
-    None
+    // Display name is between the first " / " and the last separator that
+    // precedes the room name. Examples of `rest` before each variant's prefix
+    // was stripped:
+    //   `358442055570` / Perttu (WA): Perttu (WA) (https://matrix.to/#/...)
+    //   `358400314196` / Kappuliini (WA) at Kappuliini (WA) (https://matrix.to/#/...)
+    let dn_start = rest.find(" / ")? + " / ".len();
+    let before_url = rest[..url_start].trim_end_matches(' ');
+    let dn_end_rel = before_url[dn_start..].rfind(sep)?;
+    let display_name = rest[dn_start..dn_start + dn_end_rel].trim().to_string();
+    if display_name.is_empty() {
+        return None;
+    }
+
+    Some(WhatsAppStartChatReply::Created {
+        room_id,
+        display_name,
+    })
 }
