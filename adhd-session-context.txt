@@ -1,0 +1,116 @@
+# ADHD Iltavahti - Kehityssuunnitelma ja konteksti
+
+## Mitä on tehty
+
+Rakennettu ADHD-unihallintasovellus "Iltavahti" joka auttaa menemään nukkumaan ajoissa.
+Sovellus käyttää anti-habituaatiota (vaihtuvia interaktioita), pakotettua toimintaa,
+ja portaittaista intensiteettiä.
+
+## Lisätyt tiedostot (jo repossa)
+
+### src/lib/core/events.ts
+- Tyypitetty pub/sub event bus
+- Tapahtumat: intensity-changed, interaction-required, interaction-completed, interaction-timeout
+
+### src/lib/core/storage.ts
+- localStorage-pohjainen tallennus (avain: adhd-iltavahti-v2)
+- IntensitySettings: wakeUpTime, sleepHours, intensityPreference, selectedSymptoms, onboardingDone
+- InteractionRecord: type, timestamp, durationMs, completed
+- Funktiot: saveIntensitySettings, loadIntensitySettings, logInteraction, getRecentInteractions
+
+### src/lib/modules/iltavahti/time-engine.ts
+- calculateDeadline(wakeTime, sleepHours) - deadline-laskenta (keskiyön ylitys)
+- sleepIfNow(wakeTime) - tunnit unta jos nukahtaa nyt
+- getIntensityLevel(hoursRemaining) - calm/gentle/warning/urgent/overdue
+- getIntensityColor(level) - väri per taso
+- formatHoursMinutes, formatTime
+
+### src/lib/modules/iltavahti/interaction-picker.ts
+- 4 interaktiotyyppiä: clock (15s), math (20s), acknowledge (10s), breathe (15s)
+- generateMathProblem() - satunnainen laskutehtävä
+- pickInteraction() - anti-habituaatio: painotettu satunnainen valinta
+- Seuraa viimeaikaisia interaktioita, painottaa harvinaisempia
+
+### src/lib/modules/iltavahti/intensity-handler.ts
+- handleIntensityChange(level, hoursRemaining, pref) - yhdistää palvelut
+- Käyttää olemassa olevia haptic/wakeLock-funktioita src/lib/iltavahti.ts:stä
+- calm: ei toimintaa
+- gentle: notifikaatio (paitsi kevyt-tasolla)
+- warning: notifikaatio + värinä + interaktio 5min välein
+- urgent: wake lock + interaktio 2min välein
+- overdue: interaktio 1min välein
+
+### src/lib/modules/iltavahti/InteractionModal.svelte
+- Pakotettu tehtävä countdown-timerillä
+- 4 tyyppiä: kirjoita kellonaika, laskutehtävä, "Menen nukkumaan", hengitysharjoitus
+- Jos aika loppuu -> timeout-tapahtuma -> intensiteetti nousee
+- Käyttää <svelte:options runes={false} />
+
+### src/lib/modules/iltavahti/IntensityOverlay.svelte
+- Fullscreen overlay urgent/overdue-tasoilla
+- Pulsoiva rengas-animaatio
+- "MENE NUKKUMAAN" / "OLET MYÖHÄSSÄ"
+
+### src/routes/tervetuloa/+page.svelte
+- 5-vaiheinen onboarding:
+  1. "Ilta venyy. Aamu tulee silti." - intro
+  2. Tunnista ADHD-unioireet (6 toggle-korttia)
+  3. Herätysaika + unitunnit + automaattinen deadline-laskenta
+  4. Intensiteettitason valinta: kevyt/keskikova/kova
+  5. Esikatselu + "Käynnistä Iltavahti"
+- Tallentaa asetukset localStorage:en ja ohjaa /iltavahti
+
+## Mitä EI ole vielä integroitu
+
+Uudet tiedostot on lisätty repoon mutta niitä EI ole vielä yhdistetty
+olemassa olevaan iltavahti-sivuun (src/routes/iltavahti/+page.svelte).
+
+### Seuraavat askeleet:
+1. Lisää iltavahti-sivulle intensiteettijärjestelmä (import time-engine, intensity-handler)
+2. Näytä "tuntia unta jäljellä" -laskuri olemassa olevan task-listan rinnalla
+3. Aktivoi InteractionModal kun intensity-handler emittoi 'interaction-required'
+4. Näytä IntensityOverlay urgent/overdue-tasoilla
+5. Lisää navigaatio tervetuloa-sivulle (esim. ensimmäisellä käynnistyskerralla)
+6. Lisää asetuksiin intensiteettitason muutos
+
+## Olemassa oleva koodi (ei muokattu)
+
+### src/lib/iltavahti.ts
+- Task-pohjainen iltatoimet-lista (localStorage)
+- Streak-seuranta (completedDays)
+- Wake Lock, Audio (alarm beeps), Haptic, Motion detection
+- intensity-handler.ts käyttää tämän haptic/wakeLock-funktioita
+
+### src/routes/+page.svelte
+- Kotisivu: streak-näyttö, "Tee iltatoimet" -nappi, palkintosivut (lukittu/auki)
+
+### src/routes/iltavahti/+page.svelte
+- Fullscreen tap-pohjainen: napauta kun tehtävä tehty
+- Hälytys kun aika menee yli
+- Taustaväri muuttuu kiireellisyyden mukaan
+- Liiketunnistin: havaitsee jos nostat puhelimen sängystä
+
+### src/routes/asetukset/+page.svelte
+- Nukkumaanmenoajan asetus
+- iPhone Keskittymistila -ohjeet
+- Pikakomento-ohjeet
+
+## Käyttäjän palaute (tärkeä)
+
+"Miten saisi silleen että ihminen joutuu oikeesti tehdä ne tietyssä aikamääreessä
+että se ei saa kännykkää auki yms tai jotakin semmoista mikä pakottaa koska se on
+nii hankala aina kattoo sitä koska se tuntuu liian pakolliselta tai työläältä"
+
+-> Interaktioiden pitää olla NOPEITA (5-15s) mutta PAKOLLISIA
+-> Ei saa tuntua työläältä, mutta ei voi ohittaa
+-> Countdown timer pakottaa toimimaan nopeasti
+
+## Tech stack
+
+- Svelte 5 (runes, mutta legacy-mode komponenteissa <svelte:options runes={false} />)
+- SvelteKit + adapter-static
+- TypeScript
+- localStorage (ei IndexedDB)
+- GitHub Pages deploy (kapesiv.github.io/adhd/)
+- PWA (@vite-pwa/sveltekit)
+- Värit: --accent: #f97316 (oranssi), --bg: #0f1115
