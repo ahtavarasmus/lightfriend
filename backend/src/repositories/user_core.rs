@@ -338,31 +338,30 @@ impl UserCoreOps for UserCore {
 
     fn delete_user(&self, user_id: i32) -> Result<(), DieselError> {
         use crate::pg_schema::{
-            bridges, imap_connection, message_history, processed_emails, refund_info, tesla,
-            totp_backup_codes, totp_secrets, usage_logs, user_secrets, webauthn_challenges,
-            webauthn_credentials, youtube,
+            totp_backup_codes, totp_secrets, webauthn_challenges, webauthn_credentials,
         };
 
-        // Delete from PG tables
+        // Cascade delete of user-owned data (bridges, messages, ontology,
+        // tokens, settings, etc). Shared with the self-service
+        // "Delete my data" flow in `services::data_purge`.
+        crate::services::data_purge::cascade_delete_user_data(&self.pg_pool, user_id).map_err(
+            |e| {
+                tracing::error!(
+                    "cascade_delete_user_data failed for user {}: {}",
+                    user_id,
+                    e
+                );
+                DieselError::RollbackTransaction
+            },
+        )?;
+
+        // Account-only tables (login credentials). The self-service purge
+        // keeps these because the user should still be able to log in
+        // afterwards. Full account deletion removes them here.
         let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
-        diesel::delete(bridges::table.filter(bridges::user_id.eq(user_id)))
-            .execute(&mut pg_conn)?;
-        diesel::delete(imap_connection::table.filter(imap_connection::user_id.eq(user_id)))
-            .execute(&mut pg_conn)?;
-        diesel::delete(message_history::table.filter(message_history::user_id.eq(user_id)))
-            .execute(&mut pg_conn)?;
-        diesel::delete(processed_emails::table.filter(processed_emails::user_id.eq(user_id)))
-            .execute(&mut pg_conn)?;
-        diesel::delete(tesla::table.filter(tesla::user_id.eq(user_id))).execute(&mut pg_conn)?;
         diesel::delete(totp_backup_codes::table.filter(totp_backup_codes::user_id.eq(user_id)))
             .execute(&mut pg_conn)?;
         diesel::delete(totp_secrets::table.filter(totp_secrets::user_id.eq(user_id)))
-            .execute(&mut pg_conn)?;
-        diesel::delete(usage_logs::table.filter(usage_logs::user_id.eq(user_id)))
-            .execute(&mut pg_conn)?;
-        diesel::delete(user_info::table.filter(user_info::user_id.eq(user_id)))
-            .execute(&mut pg_conn)?;
-        diesel::delete(user_secrets::table.filter(user_secrets::user_id.eq(user_id)))
             .execute(&mut pg_conn)?;
         diesel::delete(webauthn_challenges::table.filter(webauthn_challenges::user_id.eq(user_id)))
             .execute(&mut pg_conn)?;
@@ -370,14 +369,8 @@ impl UserCoreOps for UserCore {
             webauthn_credentials::table.filter(webauthn_credentials::user_id.eq(user_id)),
         )
         .execute(&mut pg_conn)?;
-        diesel::delete(youtube::table.filter(youtube::user_id.eq(user_id)))
-            .execute(&mut pg_conn)?;
-        diesel::delete(refund_info::table.filter(refund_info::user_id.eq(user_id)))
-            .execute(&mut pg_conn)?;
-        diesel::delete(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-            .execute(&mut pg_conn)?;
 
-        // Finally delete the user
+        // Finally delete the user row itself.
         diesel::delete(users::table.find(user_id)).execute(&mut pg_conn)?;
         Ok(())
     }

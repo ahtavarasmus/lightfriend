@@ -1,4 +1,5 @@
 use crate::profile::billing_models::UserProfile;
+use crate::profile::danger_zone::DangerZone;
 use crate::profile::security::SecuritySettings;
 use crate::profile::timezone_detector::TimezoneDetector;
 use crate::utils::api::Api;
@@ -2521,6 +2522,9 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
 
             // Security section (2FA)
             <SecuritySettings />
+
+            // Danger zone: self-service data deletion
+            <DangerZone />
         </div>
         <style>
             {r#"

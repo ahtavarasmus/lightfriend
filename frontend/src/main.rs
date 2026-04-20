@@ -22,6 +22,7 @@ mod utils {
 mod profile {
     pub mod billing_credits;
     pub mod billing_models;
+    pub mod danger_zone;
     pub mod profile;
     pub mod security;
     pub mod settings;

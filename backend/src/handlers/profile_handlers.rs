@@ -1453,6 +1453,134 @@ pub async fn get_critical_settings(
     }
 }
 
+#[derive(Deserialize)]
+pub struct PurgeMyDataRequest {
+    pub password: String,
+}
+
+/// Self-service data purge: wipes all user-owned data but keeps the account.
+///
+/// Password-gated — session token alone is not enough for an irreversible
+/// action. See `services::data_purge` for the full list of what is deleted
+/// and what is preserved.
+///
+/// Starts the purge as a background task and returns a `purge_id` the
+/// frontend polls via `purge_status` for live step-by-step progress.
+pub async fn purge_my_data(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(req): Json<PurgeMyDataRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let user = match state.user_core.find_by_id(auth_user.user_id) {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"})),
+            ));
+        }
+        Err(e) => {
+            tracing::error!(
+                "purge_my_data: failed to look up user {}: {}",
+                auth_user.user_id,
+                e
+            );
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Database error"})),
+            ));
+        }
+    };
+
+    if !bcrypt::verify(&req.password, &user.password_hash).unwrap_or(false) {
+        tracing::warn!(
+            "purge_my_data: wrong password for user {}",
+            auth_user.user_id
+        );
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Incorrect password"})),
+        ));
+    }
+
+    tracing::info!(
+        "purge_my_data: authorized, purging data for user {}",
+        auth_user.user_id
+    );
+
+    let purge_id: String = {
+        use rand::RngCore;
+        let mut bytes = [0u8; 16];
+        rand::thread_rng().fill_bytes(&mut bytes);
+        hex::encode(bytes)
+    };
+    let handle = std::sync::Arc::new(tokio::sync::Mutex::new(
+        crate::services::data_purge::PurgeState::new(auth_user.user_id),
+    ));
+    state
+        .pending_purges
+        .insert(purge_id.clone(), handle.clone());
+
+    let state_bg = state.clone();
+    let user_id_bg = auth_user.user_id;
+    let purge_id_bg = purge_id.clone();
+    tokio::spawn(async move {
+        if let Err(e) = crate::services::data_purge::purge_user_data(
+            state_bg.clone(),
+            user_id_bg,
+            handle.clone(),
+        )
+        .await
+        {
+            tracing::error!(
+                "purge_my_data: background purge failed for user {}: {}",
+                user_id_bg,
+                e
+            );
+            let mut s = handle.lock().await;
+            if s.error.is_none() {
+                s.error = Some(e.to_string());
+            }
+            s.complete = true;
+        }
+        // Keep the state around briefly so slow pollers can still read
+        // the final result, then drop.
+        tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+        state_bg.pending_purges.remove(&purge_id_bg);
+    });
+
+    Ok(Json(json!({"purge_id": purge_id})))
+}
+
+/// Poll the status of an in-flight or recently-completed purge. Returns
+/// 404 after the 5-minute retention window elapses or if the id is bogus.
+pub async fn purge_status(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    axum::extract::Path(purge_id): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let handle = state
+        .pending_purges
+        .get(&purge_id)
+        .map(|r| r.clone())
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Unknown or expired purge id"})),
+        ))?;
+    let snapshot = handle.lock().await;
+    if snapshot.user_id != auth_user.user_id {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Not your purge"})),
+        ));
+    }
+    Ok(Json(json!({
+        "steps": snapshot.steps,
+        "complete": snapshot.complete,
+        "error": snapshot.error,
+    })))
+}
+
 pub async fn delete_user(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
