@@ -83,10 +83,22 @@ static MESSAGE_DEF: ObjectTypeDef = ObjectTypeDef {
         'what came in'. Pass platform='email' to see only emails, or omit platform to see everything. \
         NEVER answer from conversation history alone — always call this tool fresh, even if a prior \
         assistant turn in history already contained a digest (that history is stale and may be hours old). \
+        \
+        Two result modes, picked automatically from your arguments: \
+        (1) Generic 'what's lately' mode — active when you pass no `sender_name` (or sender_name='all') \
+        AND no free-text `query`. Returns the LATEST INCOMING message from each distinct conversation \
+        (one row per chat/room), sorted by recency, with outgoing messages excluded. This gives you \
+        breadth — you see every conversation that moved recently, not just the chattiest friend's \
+        last 20 messages. This is the right mode for questions like 'what did I miss', 'anything new', \
+        'recent messages'. \
+        (2) Specific-question mode — active when you pass a `sender_name` or a `query`. Returns the \
+        raw most-recent N messages matching the filter, including back-and-forth within a single \
+        conversation. Use this for 'what did Alice say', 'any mention of the party', etc. \
+        \
         Results are sorted most-recent-first and include a timestamp per row. If the default limit \
         doesn't reach far enough back for the user's question (e.g. 'yesterday', 'past few days'), \
         call again with a larger `limit`. \
-        Each result row starts with a stable `[id=N]`. When you write your answer to the user, you \
+        Each result row ends with a stable `[id=N]`. When you write your answer to the user, you \
         MUST copy that `[id=N]` verbatim onto the SAME LINE as the item you reference. Literal square \
         brackets, lowercase `id=`, digits. No other format works — a post-processor strips any line \
         whose id doesn't match what this tool returned. One item per line so a bad citation can't drop \

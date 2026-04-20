@@ -156,6 +156,139 @@ async fn test_query_event_status_all_includes_non_active_events() {
 }
 
 // =============================================================================
+// Message queries
+// =============================================================================
+
+#[tokio::test]
+#[serial]
+async fn test_query_message_generic_dedups_per_room_and_excludes_outgoing() {
+    // "What's in my messages lately?" — no sender, no query.
+    // Expected: one message per distinct (platform, room_id),
+    // outgoing ("You") excluded, chatty sender does NOT eat the budget.
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let now = chrono::Utc::now().timestamp() as i32;
+
+    // Chatty friend: 5 messages in room A
+    for i in 0..5 {
+        state
+            .ontology_repository
+            .insert_message(&backend::models::ontology_models::NewOntMessage {
+                user_id: user.id,
+                room_id: "!roomA:hs".to_string(),
+                platform: "whatsapp".to_string(),
+                sender_name: "Chatty".to_string(),
+                sender_key: None,
+                content: format!("chatty msg {}", i),
+                person_id: None,
+                created_at: now - (60 * (10 - i)), // older → newer
+            })
+            .unwrap();
+    }
+
+    // Quiet friend: 1 message in room B
+    state
+        .ontology_repository
+        .insert_message(&backend::models::ontology_models::NewOntMessage {
+            user_id: user.id,
+            room_id: "!roomB:hs".to_string(),
+            platform: "whatsapp".to_string(),
+            sender_name: "Quiet".to_string(),
+            sender_key: None,
+            content: "quiet hello".to_string(),
+            person_id: None,
+            created_at: now - 30,
+        })
+        .unwrap();
+
+    // Outgoing message the user sent — must NOT appear in generic digest
+    state
+        .ontology_repository
+        .insert_message(&backend::models::ontology_models::NewOntMessage {
+            user_id: user.id,
+            room_id: "!roomC:hs".to_string(),
+            platform: "whatsapp".to_string(),
+            sender_name: "You".to_string(),
+            sender_key: None,
+            content: "my own outgoing".to_string(),
+            person_id: None,
+            created_at: now - 10,
+        })
+        .unwrap();
+
+    let result = handle_query("query_message", r#"{}"#, &state, user.id).await;
+    assert!(result.is_ok(), "query failed: {:?}", result);
+    let output = result.unwrap();
+
+    // Both conversations visible
+    assert!(
+        output.contains("Quiet"),
+        "quiet sender should survive chatty-bias, got: {}",
+        output
+    );
+    assert!(
+        output.contains("Chatty"),
+        "chatty sender should still appear, got: {}",
+        output
+    );
+
+    // Only ONE chatty message (the latest), not all five
+    let chatty_count = output.matches("Chatty").count();
+    assert_eq!(
+        chatty_count, 1,
+        "dedup should collapse chatty to 1 row, got {} (output: {})",
+        chatty_count, output
+    );
+
+    // Outgoing excluded
+    assert!(
+        !output.contains("my own outgoing"),
+        "outgoing should be excluded from generic digest, got: {}",
+        output
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn test_query_message_sender_filter_returns_all_matching() {
+    // "What did Chatty say" — sender filter set → time-desc mode,
+    // no dedup. Should return ALL of chatty's recent messages.
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let now = chrono::Utc::now().timestamp() as i32;
+
+    for i in 0..3 {
+        state
+            .ontology_repository
+            .insert_message(&backend::models::ontology_models::NewOntMessage {
+                user_id: user.id,
+                room_id: "!roomA:hs".to_string(),
+                platform: "whatsapp".to_string(),
+                sender_name: "Chatty".to_string(),
+                sender_key: None,
+                content: format!("chatty msg {}", i),
+                person_id: None,
+                created_at: now - (60 * (10 - i)),
+            })
+            .unwrap();
+    }
+
+    let result = handle_query(
+        "query_message",
+        r#"{"sender_name":"Chatty"}"#,
+        &state,
+        user.id,
+    )
+    .await;
+    assert!(result.is_ok());
+    let output = result.unwrap();
+
+    // All three chatty messages appear
+    assert!(output.contains("chatty msg 0"));
+    assert!(output.contains("chatty msg 1"));
+    assert!(output.contains("chatty msg 2"));
+}
+
 // =============================================================================
 // Error cases
 // =============================================================================

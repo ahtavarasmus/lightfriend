@@ -131,21 +131,48 @@ fn query_message(
         .unwrap_or(20)
         .clamp(1, 100);
 
-    // since_ts=0 effectively disables the time filter on the shared
-    // `get_recent_messages_filtered` helper; the row ordering and limit
-    // give us the "N most recent" semantics we want.
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i32;
 
     let plat = platform_filter.as_deref().filter(|p| *p != "all");
-    let messages: Vec<OntMessage> = state
-        .ontology_repository
-        .get_recent_messages_filtered(user_id, plat, 0, limit)
-        .map_err(|e| format!("Failed to query messages: {}", e))?;
 
-    // Apply sender_name filter
+    // Two modes, picked by whether the caller specified a sender:
+    //
+    // - Generic "what's in my messages lately" (no sender or sender="all",
+    //   and no free-text query): use `get_latest_incoming_per_room` —
+    //   one message per conversation, sorted by recency, outgoing
+    //   excluded. Gives the LLM breadth across conversations instead of
+    //   a single chatty friend eating the whole `limit`.
+    //
+    // - Specific question (sender filter set, or keyword search): use
+    //   `get_recent_messages_filtered` — pure time-desc — so we don't
+    //   collapse a sender's own back-and-forth to one line, and so the
+    //   keyword post-filter has a larger window to scan.
+    let specific_sender = sender_filter
+        .as_deref()
+        .filter(|s| !s.is_empty() && *s != "all")
+        .is_some();
+    let dedup_mode = !specific_sender && query_filter.is_none();
+
+    let messages: Vec<OntMessage> = if dedup_mode {
+        state
+            .ontology_repository
+            .get_latest_incoming_per_room(user_id, plat, limit)
+            .map_err(|e| format!("Failed to query messages: {}", e))?
+    } else {
+        // since_ts=0 disables the time filter; row ordering + limit
+        // give us the "N most recent" semantics we want for post-
+        // filtering by sender/keyword in Rust.
+        state
+            .ontology_repository
+            .get_recent_messages_filtered(user_id, plat, 0, limit)
+            .map_err(|e| format!("Failed to query messages: {}", e))?
+    };
+
+    // Apply sender_name filter (only meaningful in time-desc mode; in
+    // dedup mode there is no sender filter by construction).
     let messages: Vec<OntMessage> = if let Some(ref sender) = sender_filter {
         if sender != "all" {
             let s_lower = sender.to_lowercase();
@@ -202,8 +229,16 @@ fn query_message(
         messages.len()
     );
 
+    // No per-message content cap. This chat-box is a fetch-info tool, not
+    // a long-running conversation — the user asks specific questions and
+    // expects accurate, verbatim answers. A prior 100-char cap cut
+    // Finnish/long-form messages mid-sentence; a 1000-char cap still
+    // silently dropped content on long emails/write-ups. WA/Telegram/
+    // Signal messages in `ont_messages` are typically a few hundred chars,
+    // so even at the max `limit=100` the full-text tool output is well
+    // under modern context-window budgets. Trade small context cost for
+    // accuracy — that's the right call for this use case.
     for (i, m) in messages.iter().enumerate() {
-        let content_preview: String = m.content.chars().take(100).collect();
         // Disambiguate outgoing messages so the LLM refers to them as "you sent"
         // (not "I sent") when summarizing back to the user.
         let sender_label = if m.sender_name == "You" {
@@ -211,14 +246,22 @@ fn query_message(
         } else {
             format!("[from {}]", m.sender_name)
         };
+        // `[id=N]` goes at the END of the line — this is the canonical
+        // format the id_verifier is designed for (see
+        // `backend/tests/id_verifier_test.rs` — all kept-line tests have
+        // trailing ids). Putting the id at the START, immediately before
+        // the quoted content, invites the LLM to fuse the two when
+        // re-quoting the message, producing leaked output like
+        // `"id=9099 toivon vaan..."` where the brackets are dropped and
+        // the verifier's regex no longer matches.
         output.push_str(&format!(
-            "{}. [id={}] ({}) {} via {} - \"{}\"",
+            "{}. ({}) {} via {} - \"{}\" [id={}]",
             i + 1,
-            m.id,
             age_str(m.created_at),
             sender_label,
             m.platform,
-            content_preview
+            m.content,
+            m.id,
         ));
 
         if i + 1 < messages.len() {

@@ -1189,6 +1189,97 @@ impl OntologyRepository {
         query.load::<OntMessage>(&mut conn)
     }
 
+    /// "What's in my messages lately?" digest query.
+    ///
+    /// Returns the latest INCOMING message from each distinct conversation
+    /// (partition by `platform, room_id`), sorted by recency, capped at
+    /// `limit`. Outgoing messages (`sender_name = "You"`) are excluded so
+    /// the user's own sent messages don't clutter the "what did I miss"
+    /// view.
+    ///
+    /// Why this exists: the older `get_recent_messages_filtered` does a
+    /// pure time-desc `LIMIT N`, which means a single chatty friend
+    /// sending 20 messages in the last hour eats the entire budget and
+    /// the LLM never sees the five other people who texted today. This
+    /// method gives breadth — one message per conversation — which is
+    /// what the user actually wants for a generic "what's lately" ask.
+    ///
+    /// Uses a two-step query to avoid requiring `QueryableByName` on
+    /// `OntMessage`: the raw SQL picks the winning ids, then Diesel
+    /// loads the full rows.
+    pub fn get_latest_incoming_per_room(
+        &self,
+        user_id: i32,
+        platform: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<OntMessage>, DieselError> {
+        #[derive(diesel::QueryableByName, Debug)]
+        struct IdRow {
+            #[diesel(sql_type = diesel::sql_types::Int8)]
+            id: i64,
+        }
+
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Wrap DISTINCT ON in a subquery so the outer ORDER BY can be by
+        // created_at DESC (PG requires the DISTINCT ON's first ORDER BY
+        // columns to match the DISTINCT ON expressions).
+        let sql = match platform {
+            Some(_) => {
+                "SELECT id FROM ( \
+                    SELECT DISTINCT ON (platform, room_id) id, created_at \
+                    FROM ont_messages \
+                    WHERE user_id = $1 \
+                      AND sender_name != 'You' \
+                      AND platform = $2 \
+                    ORDER BY platform, room_id, created_at DESC, id DESC \
+                 ) t \
+                 ORDER BY created_at DESC \
+                 LIMIT $3"
+            }
+            None => {
+                "SELECT id FROM ( \
+                    SELECT DISTINCT ON (platform, room_id) id, created_at \
+                    FROM ont_messages \
+                    WHERE user_id = $1 \
+                      AND sender_name != 'You' \
+                    ORDER BY platform, room_id, created_at DESC, id DESC \
+                 ) t \
+                 ORDER BY created_at DESC \
+                 LIMIT $2"
+            }
+        };
+
+        let id_rows: Vec<IdRow> = match platform {
+            Some(plat) => diesel::sql_query(sql)
+                .bind::<diesel::sql_types::Int4, _>(user_id)
+                .bind::<diesel::sql_types::Text, _>(plat)
+                .bind::<diesel::sql_types::Int8, _>(limit)
+                .load(&mut conn)?,
+            None => diesel::sql_query(sql)
+                .bind::<diesel::sql_types::Int4, _>(user_id)
+                .bind::<diesel::sql_types::Int8, _>(limit)
+                .load(&mut conn)?,
+        };
+
+        let ids: Vec<i64> = id_rows.into_iter().map(|r| r.id).collect();
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Load the full rows, then re-sort in memory by created_at desc
+        // (IN-list load doesn't preserve order).
+        let mut rows: Vec<OntMessage> = ont_messages::table
+            .filter(ont_messages::id.eq_any(&ids))
+            .load::<OntMessage>(&mut conn)?;
+        rows.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| b.id.cmp(&a.id))
+        });
+        Ok(rows)
+    }
+
     /// Get recent messages across all platforms since a timestamp.
     pub fn get_recent_messages_all_platforms(
         &self,
