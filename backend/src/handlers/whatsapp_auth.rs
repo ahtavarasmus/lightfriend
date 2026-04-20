@@ -947,6 +947,11 @@ async fn monitor_whatsapp_connection(
         state.user_repository.delete_bridge(user_id, "whatsapp")?;
         state.user_repository.create_bridge(new_bridge)?;
 
+        // Stale ont_channels.room_id values from a previous login are
+        // handled at send-time now: the send path queries the bridge
+        // portal table directly (see utils/bridge.rs::resolve_whatsapp_room),
+        // so there's nothing to pre-clear here.
+
         // Make sure the shared Matrix client + sync loop is running for this user.
         // Idempotent - no-op if another bridge already wired it up.
         if let Err(e) = crate::utils::matrix_auth::ensure_matrix_user_running(user_id, &state).await

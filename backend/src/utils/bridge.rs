@@ -1044,6 +1044,113 @@ pub async fn fetch_bridge_messages(
 use futures::future::join_all;
 use matrix_sdk::room::MessagesOptions;
 
+/// Resolve a WhatsApp chat_id (JID) to a joined Matrix Room, materializing
+/// the portal via `!wa start-chat` when needed.
+///
+/// Only used by the WhatsApp send path. Group JIDs with no mxid yet return
+/// an error (user must wait for bridge sync to finish); DM JIDs with no mxid
+/// fall through to start-chat.
+///
+/// Post-conditions on Ok: the returned Room is joined and reachable via
+/// `client.get_room`. On Err: caller should surface the message verbatim.
+async fn resolve_whatsapp_room(
+    state: &Arc<AppState>,
+    user_id: i32,
+    chat_id: &str,
+    client: &MatrixClient,
+) -> Result<Room> {
+    tracing::info!(
+        "SEND_FLOW_BRIDGE resolve_whatsapp_room: chat_id={}",
+        chat_id
+    );
+    let repo = state
+        .whatsapp_bridge_repository
+        .as_ref()
+        .ok_or_else(|| anyhow!("WhatsApp bridge repository not configured"))?;
+
+    // Figure out the login phone for this user. We need it to scope portal
+    // lookups (bridgev2 portal rows are keyed by receiver = login_id).
+    let matrix_user_id = client
+        .user_id()
+        .ok_or_else(|| anyhow!("Matrix client has no user_id"))?
+        .to_string();
+    let repo_for_login = Arc::clone(repo);
+    let matrix_user_id_clone = matrix_user_id.clone();
+    let login_phone = tokio::task::spawn_blocking(move || {
+        repo_for_login.get_login_phone_for_matrix_user(&matrix_user_id_clone)
+    })
+    .await
+    .map_err(|e| anyhow!("login-phone lookup task panicked: {}", e))?
+    .map_err(|e| anyhow!("login-phone lookup failed: {}", e))?
+    .ok_or_else(|| anyhow!("user not logged into WhatsApp bridge"))?;
+
+    // Portal table lookup.
+    let repo_for_portal = Arc::clone(repo);
+    let chat_id_owned = chat_id.to_string();
+    let login_phone_for_portal = login_phone.clone();
+    let portal_mxid = tokio::task::spawn_blocking(move || {
+        repo_for_portal.get_portal_mxid(&chat_id_owned, &login_phone_for_portal)
+    })
+    .await
+    .map_err(|e| anyhow!("portal lookup task panicked: {}", e))?
+    .map_err(|e| anyhow!("portal lookup failed: {}", e))?;
+
+    let mxid_opt = match portal_mxid {
+        Some(mxid) => {
+            tracing::info!(
+                "SEND_FLOW_BRIDGE portal table hit: chat_id={} mxid={}",
+                chat_id,
+                mxid
+            );
+            Some(mxid)
+        }
+        None => {
+            tracing::info!("SEND_FLOW_BRIDGE portal table miss for chat_id={}", chat_id);
+            None
+        }
+    };
+
+    let is_group = chat_id.ends_with("@g.us");
+    let mxid = match mxid_opt {
+        Some(mxid) => mxid,
+        None if is_group => {
+            return Err(anyhow!(
+                "WhatsApp group '{}' not yet bridged - retry shortly",
+                chat_id
+            ));
+        }
+        None => {
+            // DM cold path: !wa start-chat to materialize portal.
+            let owned = start_chat_whatsapp(state, user_id, chat_id).await?;
+            owned.to_string()
+        }
+    };
+
+    let owned_mxid = matrix_sdk::ruma::OwnedRoomId::try_from(mxid.as_str())
+        .map_err(|e| anyhow!("invalid mxid from resolve_whatsapp_room: {}", e))?;
+    if client.get_room(&owned_mxid).is_none() {
+        tracing::info!(
+            "SEND_FLOW_BRIDGE resolve: room {} not in client cache yet, sync_once",
+            mxid
+        );
+        let _ = client
+            .sync_once(matrix_sdk::config::SyncSettings::new())
+            .await;
+    }
+    let room = client.get_room(&owned_mxid).ok_or_else(|| {
+        anyhow!(
+            "resolved WhatsApp room {} still not reachable after sync",
+            mxid
+        )
+    })?;
+    tracing::info!(
+        "SEND_FLOW_BRIDGE resolve_whatsapp_room ok: chat_id={} mxid={}",
+        chat_id,
+        mxid
+    );
+    Ok(room)
+}
+
 pub async fn send_bridge_message(
     service: &str,
     state: &Arc<AppState>,
@@ -1052,10 +1159,11 @@ pub async fn send_bridge_message(
     message: &str,
     media_url: Option<String>,
     target_room_id: Option<&str>,
+    target_chat_id: Option<&str>,
 ) -> Result<BridgeMessage> {
     tracing::info!(
-        "SEND_FLOW_BRIDGE send_bridge_message ENTER: service={}, user={}, chat_name='{}', room_id={:?}, has_media={}",
-        service, user_id, chat_name, target_room_id, media_url.is_some()
+        "SEND_FLOW_BRIDGE send_bridge_message ENTER: service={}, user={}, chat_name='{}', room_id={:?}, chat_id={:?}, has_media={}",
+        service, user_id, chat_name, target_room_id, target_chat_id, media_url.is_some()
     );
 
     tracing::info!(
@@ -1079,16 +1187,23 @@ pub async fn send_bridge_message(
         ));
     }
 
-    // If we have a room_id from the initial lookup, use it directly (no re-search)
+    // Resolution order:
+    //   1. target_room_id hits cache -> use it (warm path, most common).
+    //   2. target_chat_id (WhatsApp only): query bridge portal table for mxid.
+    //      - mxid found -> use it.
+    //      - mxid None + DM JID -> !wa start-chat to materialize portal.
+    //      - mxid None + group  -> error (groups are materialized on login
+    //        sync; absence means sync hasn't caught up yet).
+    //   3. Fall back to name-based fuzzy search against joined rooms (legacy
+    //      path, still used by non-WA bridges and by web callers that don't
+    //      have a chat_id).
     let room = if let Some(rid) = target_room_id {
         tracing::info!("SEND_FLOW_BRIDGE Using target_room_id directly: {}", rid);
         let room_id = matrix_sdk::ruma::OwnedRoomId::try_from(rid).map_err(|e| {
             tracing::error!("SEND_FLOW_BRIDGE Invalid room ID '{}': {}", rid, e);
             anyhow!("Invalid room ID '{}': {}", rid, e)
         })?;
-        let r = client.get_room(&room_id);
-        if r.is_none() {
-            // Room not in cache - sync and retry (happens after deploy when client cache is cold)
+        if client.get_room(&room_id).is_none() {
             tracing::info!(
                 "SEND_FLOW_BRIDGE Room not in cache, running sync_once to populate rooms..."
             );
@@ -1101,19 +1216,37 @@ pub async fn send_bridge_message(
                 tracing::info!("SEND_FLOW_BRIDGE sync_once completed");
             }
         }
-        let r = client.get_room(&room_id);
-        tracing::info!(
-            "SEND_FLOW_BRIDGE client.get_room({}) returned: found={}",
-            rid,
-            r.is_some()
-        );
-        r.ok_or_else(|| {
-            tracing::error!(
-                "SEND_FLOW_BRIDGE Room {} not found in Matrix client even after sync!",
-                rid
-            );
-            anyhow!("Room {} not found in client", rid)
-        })?
+        match client.get_room(&room_id) {
+            Some(r) => {
+                tracing::info!(
+                    "SEND_FLOW_BRIDGE client.get_room({}) returned: found=true",
+                    rid
+                );
+                r
+            }
+            None => {
+                // Room not reachable. If we have a chat_id, fall through to
+                // the bridge-DB resolution path below; otherwise error out.
+                tracing::warn!(
+                    "SEND_FLOW_BRIDGE Room {} not in client after sync (stale mxid?); \
+                     falling back to chat_id path (have_chat_id={})",
+                    rid,
+                    target_chat_id.is_some()
+                );
+                if target_chat_id.is_some() && service == "whatsapp" {
+                    resolve_whatsapp_room(state, user_id, target_chat_id.unwrap(), &client).await?
+                } else {
+                    return Err(anyhow!(
+                        "Room '{}' not in client and no chat_id fallback available for service '{}'",
+                        rid,
+                        service
+                    ));
+                }
+            }
+        }
+    } else if service == "whatsapp" && target_chat_id.is_some() {
+        // Cold path: resolve via portal table (+start-chat for DMs).
+        resolve_whatsapp_room(state, user_id, target_chat_id.unwrap(), &client).await?
     } else {
         tracing::info!(
             "SEND_FLOW_BRIDGE No target_room_id, searching by name '{}'",
@@ -1243,6 +1376,31 @@ pub async fn send_bridge_message(
         display_name,
         service
     );
+
+    // Post-send: if caller supplied a chat_id (bridge-DB handle), upsert the
+    // ontology Person so future sends can skip bridge-DB lookup. Best-effort;
+    // a failure here never fails the send.
+    if let Some(chat_id) = target_chat_id {
+        let cleaned_name = remove_bridge_suffix(&display_name);
+        match state.ontology_repository.upsert_person(
+            user_id,
+            &cleaned_name,
+            service,
+            Some(chat_id),
+            Some(&rid_str),
+        ) {
+            Ok(p) => tracing::info!(
+                "SEND_FLOW_BRIDGE post-send upsert_person ok: person_id={} name='{}' chat_id={} room_id={}",
+                p.id, p.name, chat_id, rid_str
+            ),
+            Err(e) => tracing::warn!(
+                "SEND_FLOW_BRIDGE post-send upsert_person failed (non-fatal) for chat_id={}: {}",
+                chat_id,
+                e
+            ),
+        }
+    }
+
     // Return the sent message details
     Ok(BridgeMessage {
         sender: "You".to_string(),
@@ -2696,4 +2854,118 @@ pub async fn logout_all_bridgev2_logins(
         }
     }
     Ok(logged_out)
+}
+
+/// Send `!wa start-chat +<phone>` to the WhatsApp bridge management room and
+/// return the Matrix room ID of the (possibly newly created) portal.
+///
+/// Usage: call this when the bridge DB portal lookup returns None for a DM
+/// JID. The bridge will materialize the portal, invite our Matrix user, and
+/// reply with a single message containing the matrix.to URL of the new room.
+/// We parse that reply via `classify_whatsapp_start_chat` to extract the room
+/// ID without race-prone Matrix invite polling.
+///
+/// `chat_id` must be a full DM JID like `"358442055570@s.whatsapp.net"`. The
+/// phone is extracted (localpart before `@`) and prefixed with `+` per the
+/// verified command syntax.
+pub async fn start_chat_whatsapp(
+    state: &Arc<AppState>,
+    user_id: i32,
+    chat_id: &str,
+) -> Result<matrix_sdk::ruma::OwnedRoomId> {
+    use crate::utils::bridge_responses::{classify_whatsapp_start_chat, WhatsAppStartChatReply};
+
+    // Extract the phone localpart from the JID.
+    let (localpart, server) = chat_id
+        .split_once('@')
+        .ok_or_else(|| anyhow!("start_chat_whatsapp: chat_id '{}' missing '@'", chat_id))?;
+    if server != "s.whatsapp.net" {
+        return Err(anyhow!(
+            "start_chat_whatsapp: chat_id '{}' is not a DM JID (expected @s.whatsapp.net)",
+            chat_id
+        ));
+    }
+    // Some JIDs have a device suffix like "phone:device". Strip it.
+    let phone = localpart.split(['.', ':']).next().unwrap_or(localpart);
+    if phone.is_empty() || !phone.chars().all(|c| c.is_ascii_digit()) {
+        return Err(anyhow!(
+            "start_chat_whatsapp: chat_id '{}' has non-numeric phone part",
+            chat_id
+        ));
+    }
+
+    // Resolve management room for this user + bridge.
+    let bridge = state
+        .user_repository
+        .get_bridge(user_id, "whatsapp")?
+        .ok_or_else(|| anyhow!("no WhatsApp bridge record for user {}", user_id))?;
+    let mgmt_room_id_str = bridge.room_id.ok_or_else(|| {
+        anyhow!(
+            "WhatsApp bridge has no management room_id for user {}",
+            user_id
+        )
+    })?;
+    let mgmt_room_id =
+        matrix_sdk::ruma::OwnedRoomId::try_from(mgmt_room_id_str.as_str()).map_err(|e| {
+            anyhow!(
+                "invalid WA management room id '{}': {}",
+                mgmt_room_id_str,
+                e
+            )
+        })?;
+
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
+    let room = client.get_room(&mgmt_room_id).ok_or_else(|| {
+        anyhow!(
+            "WA management room {} not found in client",
+            mgmt_room_id_str
+        )
+    })?;
+
+    let bridge_bot =
+        std::env::var("WHATSAPP_BRIDGE_BOT").map_err(|_| anyhow!("WHATSAPP_BRIDGE_BOT not set"))?;
+    let bot_user_id = matrix_sdk::ruma::OwnedUserId::try_from(bridge_bot.as_str())
+        .map_err(|e| anyhow!("invalid WHATSAPP_BRIDGE_BOT user id: {}", e))?;
+
+    let cmd = format!("!wa start-chat +{}", phone);
+    tracing::info!(
+        "SEND_FLOW_BRIDGE start_chat_whatsapp user={} sending {:?}",
+        user_id,
+        cmd
+    );
+    let responses =
+        probe_bridge_room(&client, &room, &bot_user_id, &cmd, Duration::from_secs(10)).await?;
+    if responses.is_empty() {
+        return Err(anyhow!(
+            "WA start-chat bot did not reply within timeout (phone=+{})",
+            phone
+        ));
+    }
+
+    // Scan all responses and take the first one that matches either shape.
+    for body in &responses {
+        match classify_whatsapp_start_chat(body) {
+            Some(WhatsAppStartChatReply::Created {
+                room_id,
+                display_name,
+            }) => {
+                tracing::info!(
+                    "SEND_FLOW_BRIDGE start_chat_whatsapp ok: room_id={} display_name={}",
+                    room_id,
+                    display_name
+                );
+                return matrix_sdk::ruma::OwnedRoomId::try_from(room_id.as_str())
+                    .map_err(|e| anyhow!("invalid room id from WA start-chat reply: {}", e));
+            }
+            Some(WhatsAppStartChatReply::Failed { reason }) => {
+                return Err(anyhow!("WA start-chat failed: {}", reason));
+            }
+            None => continue,
+        }
+    }
+
+    Err(anyhow!(
+        "WA start-chat bot reply was unrecognised: {:?}",
+        responses
+    ))
 }

@@ -6,11 +6,12 @@
 //! hand-probing the bot before updating the constants.
 
 use backend::utils::bridge_responses::{
-    any_connected, classify_bridgev2_list_logins, classify_telegram_ping, first_connected,
-    first_connected_identifier, first_connected_login_id, is_signal_list_logins_empty,
-    is_signal_logout_success, is_telegram_logout_success, is_whatsapp_list_logins_empty,
-    is_whatsapp_logout_not_found, is_whatsapp_logout_success, parse_list_logins,
-    parse_list_logins_line, BridgeLoginHealth, ListLoginsEntry, TelegramPingStatus,
+    any_connected, classify_bridgev2_list_logins, classify_telegram_ping,
+    classify_whatsapp_start_chat, first_connected, first_connected_identifier,
+    first_connected_login_id, is_signal_list_logins_empty, is_signal_logout_success,
+    is_telegram_logout_success, is_whatsapp_list_logins_empty, is_whatsapp_logout_not_found,
+    is_whatsapp_logout_success, parse_list_logins, parse_list_logins_line, BridgeLoginHealth,
+    ListLoginsEntry, TelegramPingStatus, WhatsAppStartChatReply,
 };
 
 // --- telegram ping ---
@@ -360,4 +361,83 @@ fn bridgev2_health_bad_credentials_exact_token_required() {
         classify_bridgev2_list_logins(body),
         BridgeLoginHealth::Unknown
     );
+}
+
+// --- !wa start-chat ---
+// Probed on prod 2026-04-20 (mautrix-whatsapp v26.04, bridgev2).
+
+#[test]
+fn whatsapp_start_chat_success_parses_room_id_and_display_name() {
+    // Verbatim body observed from probe:
+    //   !wa start-chat +<phone>  ->
+    //   Created chat with `<phone-localpart>` / <DisplayName> (WA): <RoomName> (https://matrix.to/#/<room_id>)
+    let body = "Created chat with `10000000000` / SomeContact (WA): SomeContact (WA) (https://matrix.to/#/!abcDEF123:localhost)";
+    match classify_whatsapp_start_chat(body) {
+        Some(WhatsAppStartChatReply::Created {
+            room_id,
+            display_name,
+        }) => {
+            assert_eq!(room_id, "!abcDEF123:localhost");
+            assert_eq!(display_name, "SomeContact (WA)");
+        }
+        other => panic!("expected Created, got {:?}", other),
+    }
+}
+
+#[test]
+fn whatsapp_start_chat_failure_server_timeout() {
+    // Verified failure body observed from probe against an unreachable number.
+    let body = "Failed to resolve identifier: the server did not respond to the query";
+    match classify_whatsapp_start_chat(body) {
+        Some(WhatsAppStartChatReply::Failed { reason }) => {
+            assert_eq!(reason, "the server did not respond to the query");
+        }
+        other => panic!("expected Failed, got {:?}", other),
+    }
+}
+
+#[test]
+fn whatsapp_start_chat_failure_invalid_identifier_shape() {
+    // Verified failure body observed from probe with non-phone input.
+    let body = "Failed to resolve identifier: WhatsApp only supports phone numbers as user identifiers. Number looks like email";
+    match classify_whatsapp_start_chat(body) {
+        Some(WhatsAppStartChatReply::Failed { reason }) => {
+            assert_eq!(
+                reason,
+                "WhatsApp only supports phone numbers as user identifiers. Number looks like email"
+            );
+        }
+        other => panic!("expected Failed, got {:?}", other),
+    }
+}
+
+#[test]
+fn whatsapp_start_chat_unknown_body_returns_none() {
+    // A body that doesn't match either prefix must classify as None.
+    // Callers must surface this as a raw error, never synthesise a
+    // success or failure from an unrecognised shape.
+    assert!(classify_whatsapp_start_chat("Something totally different").is_none());
+    assert!(classify_whatsapp_start_chat("").is_none());
+    assert!(classify_whatsapp_start_chat("Help: ...").is_none());
+}
+
+#[test]
+fn whatsapp_start_chat_success_requires_matrix_to_url() {
+    // A "Created chat with" prefix that lacks the matrix.to URL entirely
+    // must NOT parse as Created. This protects against malformed replies
+    // or future format changes where the URL structure changes.
+    let body = "Created chat with `10000000000` / SomeContact (WA): SomeContact (WA)";
+    assert!(
+        classify_whatsapp_start_chat(body).is_none(),
+        "must not accept success prefix without a parseable matrix.to URL"
+    );
+}
+
+#[test]
+fn whatsapp_start_chat_success_rejects_non_room_mxid() {
+    // Guard: if the URL segment doesn't start with `!` (Matrix room ID
+    // sigil), reject. This catches user-links (@user:server) slipping
+    // through where we expected a room.
+    let body = "Created chat with `10000000000` / SomeContact (WA): SomeContact (WA) (https://matrix.to/#/@someghost:localhost)";
+    assert!(classify_whatsapp_start_chat(body).is_none());
 }

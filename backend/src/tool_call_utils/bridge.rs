@@ -64,17 +64,34 @@ struct SendChatMessageArgs {
     chat_name: String,
     message: String,
 }
-/// Fuzzy search Persons for a matching name/nickname with a room_id on the given platform.
-/// Returns a BridgeRoom if found, None otherwise. No Matrix client needed.
+/// Resolved chat target for the send path.
+///
+/// Carries everything send_bridge_message needs to route without re-searching:
+///   - display_name: user-facing label (may be a phone number if unsynced)
+///   - chat_id: bridge-internal ID (WA JID / SG uuid / TG user_id) when known
+///   - room_id: Matrix room ID when known (None for cold DMs)
+///
+/// Either chat_id OR room_id MUST be Some; both Some is the ideal warm case.
+/// Group/DM distinction is rederived downstream from the JID suffix.
+#[derive(Debug, Clone)]
+struct ResolvedChat {
+    display_name: String,
+    chat_id: Option<String>,
+    room_id: Option<String>,
+}
+
+/// Fuzzy search the ontology for a matching Person on the given platform.
+/// Returns everything we know about the channel (handle + room_id), not just
+/// the room_id, so the send path can fall back to bridge-DB portal lookup if
+/// the saved room_id is stale.
 fn find_person_room(
     state: &Arc<AppState>,
     user_id: i32,
     search_term: &str,
     platform: &str,
-) -> Option<crate::utils::bridge::BridgeRoom> {
+) -> Option<ResolvedChat> {
     let search_lower = search_term.trim().to_lowercase();
 
-    // Search persons by substring match (name or nickname)
     let persons = match state
         .ontology_repository
         .search_persons(user_id, search_term)
@@ -86,57 +103,44 @@ fn find_person_room(
         }
     };
 
-    // Among matched persons, find one with a room_id for this platform
-    // Prefer exact name match, then substring, then we'll try fuzzy below
+    // Exact name match first.
     for person in &persons {
         let name = person.display_name().to_lowercase();
         if name == search_lower {
-            if let Some(ch) = person
-                .channels
-                .iter()
-                .find(|c| c.platform == platform && c.room_id.is_some())
-            {
-                let rid = ch.room_id.as_ref().unwrap();
+            if let Some(ch) = person.channels.iter().find(|c| c.platform == platform) {
                 tracing::info!(
-                    "SEND_FLOW find_person_room: exact Person match '{}', room_id={}",
+                    "SEND_FLOW find_person_room: exact Person match '{}', handle={:?}, room_id={:?}",
                     person.display_name(),
-                    rid
+                    ch.handle,
+                    ch.room_id
                 );
-                return Some(crate::utils::bridge::BridgeRoom {
-                    room_id: rid.clone(),
+                return Some(ResolvedChat {
                     display_name: person.display_name().to_string(),
-                    last_activity: 0,
-                    last_activity_formatted: String::new(),
-                    is_group: false,
+                    chat_id: ch.handle.clone(),
+                    room_id: ch.room_id.clone(),
                 });
             }
         }
     }
 
-    // Substring matches (search_persons already filtered these)
+    // Substring matches (search_persons already filtered these).
     for person in &persons {
-        if let Some(ch) = person
-            .channels
-            .iter()
-            .find(|c| c.platform == platform && c.room_id.is_some())
-        {
-            let rid = ch.room_id.as_ref().unwrap();
+        if let Some(ch) = person.channels.iter().find(|c| c.platform == platform) {
             tracing::info!(
-                "SEND_FLOW find_person_room: substring Person match '{}', room_id={}",
+                "SEND_FLOW find_person_room: substring Person match '{}', handle={:?}, room_id={:?}",
                 person.display_name(),
-                rid
+                ch.handle,
+                ch.room_id
             );
-            return Some(crate::utils::bridge::BridgeRoom {
-                room_id: rid.clone(),
+            return Some(ResolvedChat {
                 display_name: person.display_name().to_string(),
-                last_activity: 0,
-                last_activity_formatted: String::new(),
-                is_group: false,
+                chat_id: ch.handle.clone(),
+                room_id: ch.room_id.clone(),
             });
         }
     }
 
-    // No substring match found - try fuzzy similarity on all persons
+    // Fall back to fuzzy similarity across all persons.
     let all_persons = match state
         .ontology_repository
         .get_persons_with_channels(user_id, 500, 0)
@@ -153,7 +157,7 @@ fn find_person_room(
             if score >= 0.7 {
                 p.channels
                     .iter()
-                    .find(|c| c.platform == platform && c.room_id.is_some())
+                    .find(|c| c.platform == platform)
                     .map(|ch| (score, p, ch))
             } else {
                 None
@@ -162,19 +166,17 @@ fn find_person_room(
         .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
     if let Some((score, person, ch)) = best {
-        let rid = ch.room_id.as_ref().unwrap();
         tracing::info!(
-            "SEND_FLOW find_person_room: fuzzy Person match '{}' (score={}), room_id={}",
+            "SEND_FLOW find_person_room: fuzzy Person match '{}' (score={}), handle={:?}, room_id={:?}",
             person.display_name(),
             score,
-            rid
+            ch.handle,
+            ch.room_id
         );
-        return Some(crate::utils::bridge::BridgeRoom {
-            room_id: rid.clone(),
+        return Some(ResolvedChat {
             display_name: person.display_name().to_string(),
-            last_activity: 0,
-            last_activity_formatted: String::new(),
-            is_group: false,
+            chat_id: ch.handle.clone(),
+            room_id: ch.room_id.clone(),
         });
     }
 
@@ -183,6 +185,132 @@ fn find_person_room(
         search_term
     );
     None
+}
+
+/// Fuzzy-match a user's query against the full WhatsApp chat list from the
+/// bridge database. Covers both DMs (whatsmeow_contacts) and groups (portal
+/// table) in one query. Returns the single best candidate above threshold,
+/// or None if nothing looks confident enough.
+///
+/// Uses the unified `search_chats_for_login` on the bridge repository and
+/// picks via jaro_winkler similarity. Thresholds mirror what find_person_room
+/// uses so behavior is consistent.
+async fn search_whatsapp_chat_candidate(
+    state: &Arc<AppState>,
+    user_id: i32,
+    search_term: &str,
+) -> Option<ResolvedChat> {
+    let repo = state.whatsapp_bridge_repository.as_ref()?;
+
+    // Need the user's login phone to scope the portal lookups.
+    let matrix_user_id = {
+        let cell = state
+            .matrix_users
+            .get(&user_id)
+            .map(|e| e.value().clone())?;
+        let slot = cell.lock().await;
+        let us = slot.as_ref()?;
+        us.client.user_id()?.to_string()
+    };
+
+    let repo_login = Arc::clone(repo);
+    let mx_for_login = matrix_user_id.clone();
+    let login_phone = match tokio::task::spawn_blocking(move || {
+        repo_login.get_login_phone_for_matrix_user(&mx_for_login)
+    })
+    .await
+    {
+        Ok(Ok(Some(phone))) => phone,
+        Ok(Ok(None)) => {
+            tracing::info!(
+                "SEND_FLOW search_whatsapp_chat_candidate: user {} not logged into WA bridge",
+                user_id
+            );
+            return None;
+        }
+        Ok(Err(e)) => {
+            tracing::warn!(
+                "SEND_FLOW search_whatsapp_chat_candidate: login_phone lookup failed: {}",
+                e
+            );
+            return None;
+        }
+        Err(e) => {
+            tracing::warn!(
+                "SEND_FLOW search_whatsapp_chat_candidate: login_phone task panicked: {}",
+                e
+            );
+            return None;
+        }
+    };
+
+    let repo_search = Arc::clone(repo);
+    let phone_for_search = login_phone.clone();
+    let candidates = match tokio::task::spawn_blocking(move || {
+        repo_search.search_chats_for_login(&phone_for_search)
+    })
+    .await
+    {
+        Ok(Ok(c)) => c,
+        Ok(Err(e)) => {
+            tracing::warn!(
+                "SEND_FLOW search_whatsapp_chat_candidate: search_chats failed: {}",
+                e
+            );
+            return None;
+        }
+        Err(e) => {
+            tracing::warn!(
+                "SEND_FLOW search_whatsapp_chat_candidate: search_chats task panicked: {}",
+                e
+            );
+            return None;
+        }
+    };
+
+    tracing::info!(
+        "SEND_FLOW search_whatsapp_chat_candidate: {} candidates from bridge DB",
+        candidates.len()
+    );
+
+    let search_lower = search_term.trim().to_lowercase();
+    // Rank: exact name > substring > fuzzy >= 0.7.
+    let mut best: Option<(
+        f64,
+        &crate::repositories::whatsapp_bridge_repository::ChatCandidate,
+    )> = None;
+    for cand in &candidates {
+        let name_lower = cand.display_name.to_lowercase();
+        let score = if name_lower == search_lower {
+            1.0
+        } else if name_lower.contains(&search_lower) {
+            0.95
+        } else {
+            strsim::jaro_winkler(&search_lower, &name_lower)
+        };
+        if score < 0.7 {
+            continue;
+        }
+        match &best {
+            Some((cur_score, _)) if *cur_score >= score => {}
+            _ => best = Some((score, cand)),
+        }
+    }
+
+    let (score, cand) = best?;
+    tracing::info!(
+        "SEND_FLOW search_whatsapp_chat_candidate: best match '{}' (score={}), chat_id={}, mxid={:?}, is_group={}",
+        cand.display_name,
+        score,
+        cand.chat_id,
+        cand.mxid,
+        cand.is_group
+    );
+    Some(ResolvedChat {
+        display_name: cand.display_name.clone(),
+        chat_id: Some(cand.chat_id.clone()),
+        room_id: cand.mxid.clone(),
+    })
 }
 
 pub async fn handle_send_chat_message(
@@ -249,7 +377,7 @@ pub async fn handle_send_chat_message(
             }),
         ));
     }
-    // Step 1: Try to find a Person with a room_id for this platform (fast, no Matrix needed)
+    // Step 1: Try to find a Person on this platform (fast, no Matrix needed)
     tracing::info!(
         "SEND_FLOW Step 1: Fuzzy searching Persons for '{}' on {} for user={}",
         args.chat_name,
@@ -258,11 +386,23 @@ pub async fn handle_send_chat_message(
     );
     let best_match = find_person_room(state, user_id, &args.chat_name, &args.platform);
 
-    // Step 2: If no Person match, fall back to Matrix room search
+    // Step 2: If no Person match, fall back to service-specific search.
+    //   - WhatsApp: search the bridge DB (covers contacts + groups, returns
+    //     portal mxid when known, handles cold DMs via start-chat on send).
+    //   - Telegram / Signal: search joined Matrix rooms by display name
+    //     (legacy path; bridge DB schemas for those aren't wired yet).
     let best_match = if best_match.is_some() {
         best_match
+    } else if args.platform == "whatsapp" {
+        tracing::info!(
+            "SEND_FLOW Step 2: No Person match, falling back to WhatsApp bridge DB search"
+        );
+        search_whatsapp_chat_candidate(state, user_id, &args.chat_name).await
     } else {
-        tracing::info!("SEND_FLOW Step 2: No Person match, falling back to Matrix room search");
+        tracing::info!(
+            "SEND_FLOW Step 2: No Person match, falling back to Matrix room search ({})",
+            args.platform
+        );
         let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
         match crate::utils::bridge::get_service_rooms(&client, &args.platform).await {
             Ok(rooms) => {
@@ -271,7 +411,17 @@ pub async fn handle_send_chat_message(
                     rooms.len(),
                     args.platform
                 );
-                crate::utils::bridge::search_best_match(&rooms, &args.chat_name)
+                crate::utils::bridge::search_best_match(&rooms, &args.chat_name).map(|r| {
+                    ResolvedChat {
+                        display_name: r.display_name,
+                        chat_id: None,
+                        room_id: if r.room_id.is_empty() {
+                            None
+                        } else {
+                            Some(r.room_id)
+                        },
+                    }
+                })
             }
             Err(e) => {
                 tracing::error!("SEND_FLOW Failed to fetch rooms: {}", e);
@@ -280,13 +430,14 @@ pub async fn handle_send_chat_message(
         }
     };
     tracing::info!(
-        "SEND_FLOW best_match result: found={}, display_name={:?}, room_id={:?}",
+        "SEND_FLOW best_match result: found={}, display_name={:?}, chat_id={:?}, room_id={:?}",
         best_match.is_some(),
         best_match.as_ref().map(|r| &r.display_name),
+        best_match.as_ref().map(|r| &r.chat_id),
         best_match.as_ref().map(|r| &r.room_id)
     );
     let best_match = match best_match {
-        Some(room) => room,
+        Some(resolved) => resolved,
         None => {
             let error_msg = format!(
                 "No {} contacts found matching '{}'.",
@@ -310,12 +461,12 @@ pub async fn handle_send_chat_message(
             ));
         }
     };
-    // Get the best match
     let exact_name = crate::utils::bridge::remove_bridge_suffix(&best_match.display_name);
     tracing::info!(
-        "SEND_FLOW Matched room: display_name='{}', exact_name='{}', room_id={}",
+        "SEND_FLOW Matched: display_name='{}', exact_name='{}', chat_id={:?}, room_id={:?}",
         best_match.display_name,
         exact_name,
+        best_match.chat_id,
         best_match.room_id
     );
     // Format the queued message with the found contact name and image if present
@@ -355,6 +506,7 @@ pub async fn handle_send_chat_message(
     let cloned_exact_name = exact_name.clone();
     let cloned_message = args.message.clone();
     let cloned_room_id = best_match.room_id.clone();
+    let cloned_chat_id = best_match.chat_id.clone();
     // Log outbound bandwidth estimate
     let outbound_bytes = args.message.len() as i32 + if image_url.is_some() { 50_000 } else { 0 };
     if let Err(e) = state.bandwidth_repository.log_bandwidth(
@@ -373,14 +525,15 @@ pub async fn handle_send_chat_message(
     let cloned_image_url = image_url.map(|s| s.to_string());
     let cloned_skip_sms = skip_sms;
     tracing::info!(
-        "SEND_FLOW About to tokio::spawn delayed send task for user={}, room_id={}",
+        "SEND_FLOW About to tokio::spawn delayed send task for user={}, room_id={:?}, chat_id={:?}",
         user_id,
-        cloned_room_id
+        cloned_room_id,
+        cloned_chat_id
     );
     tokio::spawn(async move {
         tracing::info!(
-            "SEND_FLOW_TASK Delayed task STARTED for user={}, waiting 60s or cancel. platform={}, recipient={}, room_id={}",
-            cloned_user_id, cloned_platform, cloned_exact_name, cloned_room_id
+            "SEND_FLOW_TASK Delayed task STARTED for user={}, waiting 60s or cancel. platform={}, recipient={}, room_id={:?}, chat_id={:?}",
+            cloned_user_id, cloned_platform, cloned_exact_name, cloned_room_id, cloned_chat_id
         );
         let reason = tokio::select! {
             _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => "timeout",
@@ -395,8 +548,12 @@ pub async fn handle_send_chat_message(
         );
         if reason == "timeout" {
             tracing::info!(
-                "SEND_FLOW_TASK Calling send_bridge_message: service={}, user={}, chat_name={}, room_id={}",
-                cloned_platform, cloned_user_id, cloned_exact_name, cloned_room_id
+                "SEND_FLOW_TASK Calling send_bridge_message: service={}, user={}, chat_name={}, room_id={:?}, chat_id={:?}",
+                cloned_platform,
+                cloned_user_id,
+                cloned_exact_name,
+                cloned_room_id,
+                cloned_chat_id
             );
             match crate::utils::bridge::send_bridge_message(
                 &cloned_platform,
@@ -405,7 +562,8 @@ pub async fn handle_send_chat_message(
                 &cloned_exact_name,
                 &cloned_message,
                 cloned_image_url,
-                Some(cloned_room_id.as_str()),
+                cloned_room_id.as_deref(),
+                cloned_chat_id.as_deref(),
             )
             .await
             {

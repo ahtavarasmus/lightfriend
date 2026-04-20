@@ -332,6 +332,33 @@ impl OntologyRepository {
         Ok(person)
     }
 
+    /// Clear `room_id` on every channel for a given platform/user.
+    ///
+    /// Used when a bridge reconnects (e.g. after phone-side unlink + re-link
+    /// on WhatsApp): the bridge assigns fresh portal room IDs under a new
+    /// login_id, so any ont_channels.room_id values from the previous
+    /// session are stale and will make send paths fail with
+    /// "Room not found in client". Nuking them forces the next send to
+    /// fall back to Matrix fuzzy-search by chat name, which re-populates
+    /// the channel with the current portal room_id via upsert_person.
+    ///
+    /// Returns the number of rows affected.
+    pub fn clear_platform_room_ids(
+        &self,
+        user_id: i32,
+        platform: &str,
+    ) -> Result<usize, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(
+            ont_channels::table
+                .filter(ont_channels::user_id.eq(user_id))
+                .filter(ont_channels::platform.eq(platform))
+                .filter(ont_channels::room_id.is_not_null()),
+        )
+        .set(ont_channels::room_id.eq::<Option<String>>(None))
+        .execute(&mut conn)
+    }
+
     /// Add a channel to an existing Person.
     pub fn add_channel(
         &self,

@@ -78,6 +78,24 @@ pub mod verified {
         /// Presence of this status means the user must re-pair.
         pub const STATUS_BAD_CREDENTIALS: &str = "BAD_CREDENTIALS";
     }
+
+    // `!wa start-chat <identifier>` replies, verified on prod
+    // (mautrix-whatsapp v26.04, bridgev2) on 2026-04-20.
+    pub mod whatsapp_start_chat {
+        /// Success reply body shape:
+        ///   `Created chat with `<jid_localpart>` / <display_name>: <room_name> (<matrix.to url>)`
+        /// Probe: `!wa start-chat +358442055570` on a contact that had no
+        /// existing portal returned:
+        ///   `Created chat with `358442055570` / Perttu (WA): Perttu (WA) (https://matrix.to/#/!qwwpwelPSZWKBxGQ8M:localhost)`
+        pub const SUCCESS_PREFIX: &str = "Created chat with ";
+
+        /// Failure reply body starts with this exact prefix for any failure
+        /// mode (invalid identifier, number not on WhatsApp, server not
+        /// responding). Probed variants:
+        /// - `Failed to resolve identifier: the server did not respond to the query`
+        /// - `Failed to resolve identifier: WhatsApp only supports phone numbers as user identifiers. Number looks like email`
+        pub const FAILURE_PREFIX: &str = "Failed to resolve identifier:";
+    }
 }
 
 /// Classified `!tg ping` response.
@@ -308,4 +326,68 @@ pub fn is_signal_list_logins_empty(body: &str) -> bool {
 
 pub fn is_signal_logout_success(body: &str) -> bool {
     body == verified::signal::LOGOUT_SUCCESS
+}
+
+/// Classified `!wa start-chat` reply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WhatsAppStartChatReply {
+    /// Portal created (or already existed — bot replies the same way) and the
+    /// Matrix room ID is known.
+    Created {
+        room_id: String,
+        display_name: String,
+    },
+    /// Bridge refused to create the chat. `reason` is the text after the
+    /// "Failed to resolve identifier:" prefix, trimmed.
+    Failed { reason: String },
+}
+
+/// Strict classifier for `!wa start-chat` reply bodies.
+///
+/// Returns `None` for unrecognized bodies; caller must NOT treat that as a
+/// success or a failure — only as "unknown, propagate as a raw error".
+///
+/// Probed on prod 2026-04-20 against mautrix-whatsapp v26.04.
+pub fn classify_whatsapp_start_chat(body: &str) -> Option<WhatsAppStartChatReply> {
+    use verified::whatsapp_start_chat::*;
+
+    if let Some(rest) = body.strip_prefix(FAILURE_PREFIX) {
+        return Some(WhatsAppStartChatReply::Failed {
+            reason: rest.trim().to_string(),
+        });
+    }
+
+    if let Some(rest) = body.strip_prefix(SUCCESS_PREFIX) {
+        // rest: "`<jid_localpart>` / <display_name>: <room_name> (<matrix.to url>)"
+        // Extract the matrix.to URL at the end and pull the room_id from it.
+        let url_start = rest.rfind("(https://matrix.to/#/")?;
+        let after_marker = &rest[url_start + "(https://matrix.to/#/".len()..];
+        let url_end = after_marker.find(')')?;
+        let room_id = after_marker[..url_end].trim().to_string();
+        if !room_id.starts_with('!') {
+            // Not a Matrix room ID. Probably a user-link URL (unlikely for
+            // start-chat but guard anyway).
+            return None;
+        }
+
+        // Display name is between the first " / " and the ": " that precedes
+        // the room name. Example slice of `rest`:
+        //   "`358442055570` / Perttu (WA): Perttu (WA) (https://matrix.to/#/...)"
+        // We want "Perttu (WA)".
+        let dn_start = rest.find(" / ")? + " / ".len();
+        let before_url = &rest[..url_start].trim_end_matches(' ');
+        // Last ": " before the URL separates display_name from room_name.
+        let dn_end_rel = before_url[dn_start..].rfind(": ")?;
+        let display_name = rest[dn_start..dn_start + dn_end_rel].trim().to_string();
+        if display_name.is_empty() {
+            return None;
+        }
+
+        return Some(WhatsAppStartChatReply::Created {
+            room_id,
+            display_name,
+        });
+    }
+
+    None
 }

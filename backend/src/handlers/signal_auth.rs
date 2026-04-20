@@ -615,6 +615,26 @@ async fn monitor_signal_connection(
         state.user_repository.delete_bridge(user_id, "signal")?;
         state.user_repository.create_bridge(new_bridge)?;
 
+        // Nuke stale ont_channels.room_id values from a previous login.
+        // mautrix-signal can assign fresh portals on re-link, and old IDs
+        // would fail send with "Room not found in client".
+        match state
+            .ontology_repository
+            .clear_platform_room_ids(user_id, "signal")
+        {
+            Ok(n) if n > 0 => tracing::info!(
+                "Cleared {} stale Signal room_ids for user {} on reconnect",
+                n,
+                user_id
+            ),
+            Ok(_) => {}
+            Err(e) => tracing::warn!(
+                "Failed to clear stale Signal room_ids for user {}: {}",
+                user_id,
+                e
+            ),
+        }
+
         // Make sure the shared Matrix client + sync loop is running for this user.
         if let Err(e) = crate::utils::matrix_auth::ensure_matrix_user_running(user_id, &state).await
         {

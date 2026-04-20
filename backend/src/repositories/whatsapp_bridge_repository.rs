@@ -71,6 +71,38 @@ struct JidRow {
     id: String,
 }
 
+#[derive(diesel::QueryableByName, Debug)]
+struct PortalMxidRow {
+    #[diesel(sql_type = diesel::sql_types::Nullable<Text>)]
+    mxid: Option<String>,
+}
+
+/// Unified search result: either a DM contact or a group portal.
+///
+/// Used by the send path to resolve `name_query -> (chat_id, mxid, is_group)`
+/// in a single DB hit. `mxid` is `None` for DMs that haven't been messaged
+/// yet (caller falls back to `!wa start-chat`) and generally `Some` for
+/// groups the user is a member of.
+#[derive(Debug, Clone)]
+pub struct ChatCandidate {
+    pub chat_id: String, // "<phone>@s.whatsapp.net" or "<gid>@g.us"
+    pub display_name: String,
+    pub is_group: bool,
+    pub mxid: Option<String>,
+}
+
+#[derive(diesel::QueryableByName, Debug)]
+struct ChatCandidateRow {
+    #[diesel(sql_type = Text)]
+    chat_id: String,
+    #[diesel(sql_type = diesel::sql_types::Bool)]
+    is_group: bool,
+    #[diesel(sql_type = Text)]
+    display_name: String,
+    #[diesel(sql_type = diesel::sql_types::Nullable<Text>)]
+    mxid: Option<String>,
+}
+
 pub struct WhatsAppBridgeRepository {
     pool: PgDbPool,
 }
@@ -224,6 +256,117 @@ impl WhatsAppBridgeRepository {
         );
 
         Ok(rows.into_iter().map(row_to_contact).collect())
+    }
+
+    /// Unified DM+group search for the send path.
+    ///
+    /// Returns one `ChatCandidate` per possible target chat for this login,
+    /// with `mxid` pre-fetched via LEFT JOIN on the `portal` table. The
+    /// caller fuzzy-matches `display_name` against the user's query in
+    /// Rust (no ILIKE in SQL so we can use the same matching logic as
+    /// contacts-only search and avoid Postgres locale surprises).
+    ///
+    /// - DMs come from `whatsmeow_contacts` joined to `portal` for optional
+    ///   mxid.
+    /// - Groups come from `portal` directly (they don't exist in
+    ///   whatsmeow_contacts; user's membership is implicit via whatsmeow
+    ///   syncing them on login).
+    ///
+    /// For DMs `mxid` is `None` until the user has exchanged at least one
+    /// message with that contact. For groups the user is a member of, the
+    /// bridge materializes portals on login-time sync so `mxid` is almost
+    /// always `Some`.
+    pub fn search_chats_for_login(
+        &self,
+        login_phone: &str,
+    ) -> Result<Vec<ChatCandidate>, DieselError> {
+        let mut conn = self
+            .pool
+            .get()
+            .expect("Failed to get whatsapp_db connection");
+        let rows: Vec<ChatCandidateRow> = diesel::sql_query(
+            "\
+            SELECT c.their_jid AS chat_id, \
+                   false AS is_group, \
+                   COALESCE(NULLIF(c.full_name, ''), NULLIF(c.push_name, ''), NULLIF(c.business_name, ''), c.their_jid) AS display_name, \
+                   p.mxid AS mxid \
+            FROM whatsmeow_contacts c \
+            INNER JOIN whatsmeow_device d ON c.our_jid = d.jid \
+            LEFT JOIN portal p \
+              ON p.bridge_id = 'whatsapp' AND p.id = c.their_jid \
+                 AND (p.receiver = $1 OR p.receiver = '') \
+            WHERE (d.jid LIKE $1 || '@%' OR d.jid LIKE $1 || ':%@%') \
+              AND c.their_jid LIKE '%@s.whatsapp.net' \
+            UNION ALL \
+            SELECT p.id AS chat_id, \
+                   true AS is_group, \
+                   p.name AS display_name, \
+                   p.mxid AS mxid \
+            FROM portal p \
+            WHERE p.bridge_id = 'whatsapp' \
+              AND p.id LIKE '%@g.us' \
+              AND (p.receiver = $1 OR p.receiver = '')",
+        )
+        .bind::<Text, _>(login_phone)
+        .load(&mut conn)?;
+
+        tracing::info!(
+            "whatsapp_bridge: search_chats_for_login -> {} candidates ({} with mxid)",
+            rows.len(),
+            rows.iter().filter(|r| r.mxid.is_some()).count(),
+        );
+
+        Ok(rows
+            .into_iter()
+            .map(|r| ChatCandidate {
+                chat_id: r.chat_id,
+                display_name: r.display_name,
+                is_group: r.is_group,
+                mxid: r.mxid,
+            })
+            .collect())
+    }
+
+    /// Look up the Matrix room ID for a given chat on this WA login.
+    ///
+    /// Source of truth: mautrix-whatsapp's bridgev2 `portal` table
+    /// (schema: github.com/mautrix/go `bridgev2/database/upgrades/00-latest.sql`).
+    /// The table is keyed by `(bridge_id, id, receiver)` where:
+    ///   - `bridge_id` = constant "whatsapp" for this bridge
+    ///   - `id` = WhatsApp chat_id (jid), e.g. "358442055570@s.whatsapp.net"
+    ///            for a DM or "<gid>@g.us" for a group
+    ///   - `receiver` = user's login_id (bare phone string). Can also be ''
+    ///            for global portals (legacy), so we match either.
+    ///   - `mxid` = the Matrix room ID, nullable until the portal is
+    ///            materialized on Matrix side.
+    ///
+    /// Returns:
+    ///   Ok(Some(mxid))  - portal materialized, ready to send
+    ///   Ok(None)        - portal row missing OR present but mxid is NULL.
+    ///                     Caller should treat both as "not yet materialized"
+    ///                     and fall back to `!wa start-chat` for DMs.
+    ///   Err(_)          - DB error (e.g. table schema surprise).
+    pub fn get_portal_mxid(
+        &self,
+        chat_id: &str,
+        login_phone: &str,
+    ) -> Result<Option<String>, DieselError> {
+        let mut conn = self
+            .pool
+            .get()
+            .expect("Failed to get whatsapp_db connection");
+        let rows: Vec<PortalMxidRow> = diesel::sql_query(
+            "SELECT mxid FROM portal \
+             WHERE bridge_id = 'whatsapp' \
+               AND id = $1 \
+               AND (receiver = $2 OR receiver = '') \
+             LIMIT 1",
+        )
+        .bind::<Text, _>(chat_id)
+        .bind::<Text, _>(login_phone)
+        .load(&mut conn)?;
+
+        Ok(rows.into_iter().next().and_then(|r| r.mxid))
     }
 
     /// Convenience: resolve the login phone for a Matrix user, then fetch

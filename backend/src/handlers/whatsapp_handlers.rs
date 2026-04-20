@@ -66,6 +66,7 @@ pub async fn send_message(
         &request.message,
         request.image_url,
         None,
+        None,
     )
     .await
     {
