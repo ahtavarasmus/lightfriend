@@ -391,8 +391,39 @@ pub async fn handle_send_chat_message(
     //     portal mxid when known, handles cold DMs via start-chat on send).
     //   - Telegram / Signal: search joined Matrix rooms by display name
     //     (legacy path; bridge DB schemas for those aren't wired yet).
-    let best_match = if best_match.is_some() {
-        best_match
+    //
+    // Additionally for WhatsApp: even if Step 1 found a Person, backfill a
+    // missing chat_id (handle) by searching the bridge DB. This covers
+    // ontology rows written before we started persisting handles: without it,
+    // a stale saved room_id has no fallback when the bridge reconnects.
+    let best_match = if let Some(mut resolved) = best_match {
+        if args.platform == "whatsapp" && resolved.chat_id.is_none() {
+            tracing::info!(
+                "SEND_FLOW Step 1.5: Ontology match '{}' has no chat_id; backfilling from WA bridge DB",
+                resolved.display_name
+            );
+            if let Some(candidate) =
+                search_whatsapp_chat_candidate(state, user_id, &resolved.display_name).await
+            {
+                tracing::info!(
+                    "SEND_FLOW Backfilled chat_id={:?} (bridge_mxid={:?}) for '{}'",
+                    candidate.chat_id,
+                    candidate.room_id,
+                    resolved.display_name
+                );
+                resolved.chat_id = candidate.chat_id;
+                // Prefer the bridge DB's mxid over a potentially stale ontology one
+                if candidate.room_id.is_some() {
+                    resolved.room_id = candidate.room_id;
+                }
+            } else {
+                tracing::warn!(
+                    "SEND_FLOW WA backfill: no bridge DB match for '{}'",
+                    resolved.display_name
+                );
+            }
+        }
+        Some(resolved)
     } else if args.platform == "whatsapp" {
         tracing::info!(
             "SEND_FLOW Step 2: No Person match, falling back to WhatsApp bridge DB search"
