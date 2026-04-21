@@ -1358,53 +1358,19 @@ pub async fn get_contacts(
         }
     }
 
-    // 2. Distinct senders from ont_messages (chats not yet merged into a
-    //    Person). Skip any sender already covered by a person-channel so
-    //    we don't show the same human twice.
-    let senders = {
-        let repo = state.ontology_repository.clone();
-        tokio::task::spawn_blocking(move || repo.get_distinct_senders(user_id).unwrap_or_default())
-            .await
-            .unwrap_or_default()
-    };
-
-    for (sender_name, platform, _count) in &senders {
-        let key = (platform.clone(), sender_name.trim().to_lowercase());
-        if covered_chat_keys.contains(&key) {
-            continue;
-        }
-        push(
-            &mut contacts,
-            &mut seen,
-            Contact {
-                id: format!("chat:{}:{}", platform, sender_name.to_lowercase()),
-                display_name: sender_name.clone(),
-                subtitle: Some(format!("DM · {}", platform)),
-                platform: Some(platform.clone()),
-                room_id: None,
-                person_id: None,
-                is_group: false,
-                source: "chat".to_string(),
-            },
-        );
-        // Future source-4 matches (bridge rooms) should dedup against
-        // this too — the same WA phone number, for example, may also
-        // show up as a bridge room.
-        covered_chat_keys.insert(key);
-    }
-
-    // 3. Signal / Telegram bridge rooms (Matrix enumeration, best-effort).
+    // 2. Signal / Telegram bridge rooms (Matrix enumeration, best-effort).
     // Wrapped in a 2.5s wall-clock deadline so a slow/unresponsive Matrix
-    // client can't hang the endpoint. DB sources above already cover the
-    // common case — bridge rooms add never-messaged contacts and groups
-    // for those two platforms only.
+    // client can't hang the endpoint.
     //
-    // We dropped the old "WhatsApp phonebook" source: its entries
-    // duplicated person-channels and distinct-senders with a noisier
-    // subtitle ("in phonebook") and users never asked for it by name.
-    // If a WA contact is reachable, they already show up via sources 1
-    // and 2. If they're only in the phonebook and never messaged, a
-    // rule couldn't trigger for them anyway.
+    // Runs BEFORE ont_messages senders (source 3) so that bridge rooms —
+    // which are the only authoritative source of is_group — get to label
+    // groups correctly. Any name that later appears in distinct-senders
+    // is dedup'd away (see source 3 below). If the bridge is offline this
+    // returns empty and source 3 falls back to a neutral subtitle.
+    //
+    // We dropped the old "WhatsApp phonebook" source entirely: its
+    // entries duplicated person-channels and distinct-senders with a
+    // noisier subtitle ("in phonebook").
     let services = ["signal", "telegram"];
     let searches = services.iter().map(|service| {
         let state = state.clone();
@@ -1435,16 +1401,17 @@ pub async fn get_contacts(
         if let Ok(Ok(rooms)) = result {
             for room in rooms {
                 let display = crate::utils::bridge::remove_bridge_suffix(&room.display_name);
-                // Dedup DMs against person-channels / ont_messages senders
-                // (groups never collide, they have unique room_ids and
-                // the subtitle is explicitly "Group").
-                if !room.is_group {
-                    let key = (service.clone(), display.trim().to_lowercase());
-                    if covered_chat_keys.contains(&key) {
-                        continue;
-                    }
-                    covered_chat_keys.insert(key);
+                let key = (service.clone(), display.trim().to_lowercase());
+                // Dedup against person-channels for DMs only. Groups never
+                // collide with person-channels (those are individuals), so
+                // always emit. BUT: always record in covered_chat_keys so
+                // source 3 (ont_messages senders) doesn't emit a second
+                // entry with a wrong DM/Group guess for a name that bridge
+                // rooms already authoritatively labeled.
+                if !room.is_group && covered_chat_keys.contains(&key) {
+                    continue;
                 }
+                covered_chat_keys.insert(key);
                 let sub = Some(if room.is_group {
                     format!("Group · {}", service)
                 } else {
@@ -1473,17 +1440,59 @@ pub async fn get_contacts(
         }
     }
 
-    // Sort: aggregate Persons first (most useful for cross-platform rules),
-    // then per-channel DMs, then chat senders, then bridge-only entries.
-    // Stable by display name within a bucket. Frontend filters locally so
-    // this ordering only affects the "zero-query" default view.
+    // 3. Distinct senders from ont_messages. Catch-all for chats that
+    //    aren't in a live Matrix session right now — e.g. bridge offline,
+    //    or a historical DM whose Matrix room the client dropped.
+    //
+    //    Subtitle is intentionally NEUTRAL (just the platform, no DM/Group
+    //    prefix): ont_messages stores sender_name as the room's display
+    //    name, which is the person's name for DMs and the group's name
+    //    for groups — indistinguishable without Matrix room lookup. We'd
+    //    rather say "signal" than wrongly say "DM · signal" for a group.
+    //    When the bridge is live, source 2 above already emitted the
+    //    correct "Group · signal" / "DM · signal" row and dedup here
+    //    skips the duplicate.
+    let senders = {
+        let repo = state.ontology_repository.clone();
+        tokio::task::spawn_blocking(move || repo.get_distinct_senders(user_id).unwrap_or_default())
+            .await
+            .unwrap_or_default()
+    };
+
+    for (sender_name, platform, _count) in &senders {
+        let key = (platform.clone(), sender_name.trim().to_lowercase());
+        if covered_chat_keys.contains(&key) {
+            continue;
+        }
+        push(
+            &mut contacts,
+            &mut seen,
+            Contact {
+                id: format!("chat:{}:{}", platform, sender_name.to_lowercase()),
+                display_name: sender_name.clone(),
+                subtitle: Some(platform.clone()),
+                platform: Some(platform.clone()),
+                room_id: None,
+                person_id: None,
+                is_group: false,
+                source: "chat".to_string(),
+            },
+        );
+        covered_chat_keys.insert(key);
+    }
+
+    // Sort: aggregate Persons first, then per-channel DMs, then bridge
+    // rooms (authoritative Group/DM labels), then historical chat senders
+    // last (lowest-info, neutral label). Stable by display name within a
+    // bucket. Frontend filters locally so this ordering only affects the
+    // "zero-query" default view.
     contacts.sort_by(|a, b| {
         let bucket = |c: &Contact| -> u8 {
             match c.source.as_str() {
                 "person" => 0,
                 "channel" => 1,
-                "chat" => 2,
-                "bridge_room" | "bridge_group" => 3,
+                "bridge_room" | "bridge_group" => 2,
+                "chat" => 3,
                 _ => 4,
             }
         };
