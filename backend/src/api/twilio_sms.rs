@@ -1383,17 +1383,28 @@ pub async fn process_sms(
         let valid_ids = crate::utils::id_verifier::collect_tool_result_ids(&loop_messages);
         let mut verified = crate::utils::id_verifier::verify(&final_response, &valid_ids);
 
-        // If the verifier stripped hallucinated content, retry the LLM
-        // with a correction hint. Up to 3 retries. If it still fails,
-        // silently drop the bad lines (no user-visible disclaimer).
-        if verified.dropped_line {
+        // If the verifier stripped hallucinated content or detected the
+        // LLM ignored citations entirely, retry with a correction hint.
+        // Up to 3 retries. If it still fails, silently drop the bad lines.
+        if verified.dropped_line || verified.missing_citations {
             for retry in 1..=3 {
-                tracing::info!("Id verifier stripped content, retry {}/3", retry);
+                let error_msg = if verified.missing_citations {
+                    "id-verifier detected missing citations"
+                } else {
+                    "id-verifier stripped hallucinated citation"
+                };
+                tracing::info!("{}, retry {}/3", error_msg, retry);
                 options.emit_status(ChatStatus::Retrying {
                     attempt: retry,
                     max: 3,
-                    error: "id-verifier stripped hallucinated citation".to_string(),
+                    error: error_msg.to_string(),
                 });
+
+                let correction = if verified.missing_citations {
+                    "Your response did not include [id=N] citations for the items you mentioned. Rewrite your answer and include [id=N] from the tool results on each line that references a specific message, event, or person."
+                } else {
+                    "Your previous response contained fabricated information that was automatically detected and rejected. Rewrite your answer based strictly on what the tools actually returned. Do not make anything up."
+                };
 
                 loop_messages.push(chat_completion::ChatCompletionMessage {
                     role: chat_completion::MessageRole::assistant,
@@ -1404,9 +1415,7 @@ pub async fn process_sms(
                 });
                 loop_messages.push(chat_completion::ChatCompletionMessage {
                     role: chat_completion::MessageRole::system,
-                    content: chat_completion::Content::Text(
-                        "Your previous response contained fabricated information that was automatically detected and rejected. Rewrite your answer based strictly on what the tools actually returned. Do not make anything up.".to_string()
-                    ),
+                    content: chat_completion::Content::Text(correction.to_string()),
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
@@ -1432,7 +1441,7 @@ pub async fn process_sms(
                             // Remove the correction messages for next iteration
                             loop_messages.pop();
                             loop_messages.pop();
-                            if !retry_verified.dropped_line {
+                            if !retry_verified.dropped_line && !retry_verified.missing_citations {
                                 verified = retry_verified;
                                 break;
                             }
@@ -1451,11 +1460,10 @@ pub async fn process_sms(
                 }
             }
 
-            // After retries, if still dropping lines, silently strip
-            // without the footer - assume there's no valid content for
-            // those items
-            if verified.dropped_line {
-                tracing::info!("Id verifier still stripping after 3 retries, silently dropping");
+            // After retries, if still dropping lines or missing citations,
+            // silently strip without the footer
+            if verified.dropped_line || verified.missing_citations {
+                tracing::info!("Id verifier still flagging after 3 retries, silently dropping");
                 verified.user_facing = verified
                     .user_facing
                     .replace(crate::utils::id_verifier::STRIPPED_FOOTER, "")

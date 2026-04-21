@@ -1344,6 +1344,30 @@ pub async fn build_digest_for_user(
     drop_spam(&mut important_msgs);
     drop_spam(&mut fyi_msgs);
 
+    // -------- Filter: separate non-contact messages --------
+    // Non-contact = person_id is None AND platform is not email.
+    // Emails always shown since they inherently come from outside the
+    // contacts list. Non-contact bridge messages are collapsed into a
+    // count at the end to reduce noise from unknown senders.
+    let partition_contacts =
+        |msgs: &mut Vec<crate::models::ontology_models::OntMessage>| -> Vec<crate::models::ontology_models::OntMessage> {
+            let mut non_contact = Vec::new();
+            let mut contact = Vec::new();
+            for m in msgs.drain(..) {
+                if m.person_id.is_some() || m.platform == "email" {
+                    contact.push(m);
+                } else {
+                    non_contact.push(m);
+                }
+            }
+            *msgs = contact;
+            non_contact
+        };
+    let nc_critical = partition_contacts(&mut critical_msgs);
+    let nc_important = partition_contacts(&mut important_msgs);
+    let nc_fyi = partition_contacts(&mut fyi_msgs);
+    let non_contact_count = nc_critical.len() + nc_important.len() + nc_fyi.len();
+
     // -------- Sort each section by category score, then recency --------
     let sort_section = |msgs: &mut Vec<crate::models::ontology_models::OntMessage>| {
         msgs.sort_by(|a, b| {
@@ -1413,6 +1437,11 @@ pub async fn build_digest_for_user(
         digest_parts.push(line);
     }
 
+    // Unknown senders: collapsed count only
+    if non_contact_count > 0 {
+        digest_parts.push(format!("+{} from unknown senders", non_contact_count));
+    }
+
     // Recently added tracked items: inline list, no per-item due dates (teaser)
     if !recent_events.is_empty() {
         let total = recent_events.len();
@@ -1460,13 +1489,25 @@ pub async fn build_digest_for_user(
     for m in fyi_msgs.iter() {
         message_ids.push(m.id);
     }
+    // Non-contact messages must also be marked delivered to prevent
+    // reappearing in the next digest cycle.
+    for m in nc_critical.iter() {
+        message_ids.push(m.id);
+    }
+    for m in nc_important.iter() {
+        message_ids.push(m.id);
+    }
+    for m in nc_fyi.iter() {
+        message_ids.push(m.id);
+    }
 
     // Header wording: disambiguate "msgs" (unread/pending messages from
     // the last 24h) from "events today" (ontology events with a due_at
     // timestamp inside the user's local day). Previously the header
     // said just "1 today" which users read as "1 new thing today" and
     // got confused about what was being counted.
-    let total_messages = critical_msgs.len() + important_msgs.len() + fyi_msgs.len();
+    let total_messages =
+        critical_msgs.len() + important_msgs.len() + fyi_msgs.len() + non_contact_count;
     let total_today = today_events.len();
     let header = match (total_messages, total_today) {
         (0, t) => format!("{} event{} today", t, if t == 1 { "" } else { "s" }),

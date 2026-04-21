@@ -476,16 +476,45 @@ fn insert_classified_message(
     summary: &str,
     created_at: i32,
 ) -> i64 {
+    insert_classified_message_ext(
+        state,
+        user_id,
+        room_id,
+        sender,
+        content,
+        urgency,
+        category,
+        summary,
+        created_at,
+        Some(1),    // default: known contact
+        "whatsapp", // default: whatsapp platform
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_classified_message_ext(
+    state: &std::sync::Arc<backend::AppState>,
+    user_id: i32,
+    room_id: &str,
+    sender: &str,
+    content: &str,
+    urgency: &str,
+    category: &str,
+    summary: &str,
+    created_at: i32,
+    person_id: Option<i32>,
+    platform: &str,
+) -> i64 {
     let msg = state
         .ontology_repository
         .insert_message(&NewOntMessage {
             user_id,
             room_id: room_id.to_string(),
-            platform: "whatsapp".to_string(),
+            platform: platform.to_string(),
             sender_name: sender.to_string(),
             sender_key: None,
             content: content.to_string(),
-            person_id: None,
+            person_id,
             created_at,
         })
         .unwrap();
@@ -960,4 +989,214 @@ async fn digest_returns_none_when_everything_is_filtered() {
         result.is_none(),
         "digest should be None when only spam exists"
     );
+}
+
+// =============================================================================
+// Non-contact filtering
+// =============================================================================
+
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn digest_filters_non_contact_messages() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    state
+        .user_core
+        .update_critical_enabled(user.id, Some("off".to_string()))
+        .unwrap();
+    state
+        .user_core
+        .update_digest_enabled(user.id, true)
+        .unwrap();
+
+    let now: i32 = 1_775_894_400;
+
+    // 2 contact messages (person_id = Some(1))
+    insert_classified_message(
+        &state,
+        user.id,
+        "!room_alice",
+        "Alice",
+        "hey",
+        "medium",
+        "social",
+        "Alice says hey",
+        now - 600,
+    );
+    insert_classified_message(
+        &state,
+        user.id,
+        "!room_bob",
+        "Bob",
+        "meeting at 3",
+        "medium",
+        "work",
+        "Bob scheduled a meeting",
+        now - 500,
+    );
+
+    // 3 non-contact messages (person_id = None, platform = whatsapp)
+    for i in 0..3 {
+        insert_classified_message_ext(
+            &state,
+            user.id,
+            &format!("!room_unk{}", i),
+            &format!("Unknown{}", i),
+            "random msg",
+            "medium",
+            "social",
+            &format!("Unknown{} sent something", i),
+            now - 400 - i,
+            None,
+            "whatsapp",
+        );
+    }
+
+    // 1 email message (person_id = None, platform = email) - should be shown
+    insert_classified_message_ext(
+        &state,
+        user.id,
+        "!room_email",
+        "newsletter@co.com",
+        "Weekly update",
+        "medium",
+        "logistics",
+        "Weekly newsletter",
+        now - 300,
+        None,
+        "email",
+    );
+
+    let settings = state.user_core.get_user_settings(user.id).unwrap();
+    let (digest_text, message_ids) = build_digest_for_user(&state, user.id, &settings, now, 0)
+        .await
+        .expect("digest should be built");
+
+    println!(
+        "\n=== NON-CONTACT FILTER DIGEST ===\n{}\n=== END ===\n",
+        digest_text
+    );
+
+    // Contacts shown individually
+    assert!(digest_text.contains("- Alice:"));
+    assert!(digest_text.contains("- Bob:"));
+
+    // Email shown individually (exempt from non-contact filter)
+    assert!(digest_text.contains("- newsletter@co.com:"));
+
+    // Non-contacts NOT shown individually
+    assert!(!digest_text.contains("Unknown0"));
+    assert!(!digest_text.contains("Unknown1"));
+    assert!(!digest_text.contains("Unknown2"));
+
+    // Collapsed count present
+    assert!(
+        digest_text.contains("+3 from unknown senders"),
+        "expected '+3 from unknown senders' in digest, got:\n{}",
+        digest_text
+    );
+
+    // ALL 6 messages marked delivered (contacts + non-contacts + email)
+    assert_eq!(message_ids.len(), 6);
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn digest_shows_no_unknown_line_when_all_contacts() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    state
+        .user_core
+        .update_critical_enabled(user.id, Some("off".to_string()))
+        .unwrap();
+    state
+        .user_core
+        .update_digest_enabled(user.id, true)
+        .unwrap();
+
+    let now: i32 = 1_775_894_400;
+
+    insert_classified_message(
+        &state,
+        user.id,
+        "!room1",
+        "Alice",
+        "hey",
+        "medium",
+        "social",
+        "Alice says hey",
+        now - 600,
+    );
+    insert_classified_message(
+        &state,
+        user.id,
+        "!room2",
+        "Bob",
+        "yo",
+        "medium",
+        "social",
+        "Bob says yo",
+        now - 500,
+    );
+
+    let settings = state.user_core.get_user_settings(user.id).unwrap();
+    let (digest_text, _) = build_digest_for_user(&state, user.id, &settings, now, 0)
+        .await
+        .expect("digest");
+
+    assert!(
+        !digest_text.contains("unknown senders"),
+        "no unknown senders line when all messages are from contacts"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+async fn digest_handles_only_non_contacts() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    state
+        .user_core
+        .update_critical_enabled(user.id, Some("off".to_string()))
+        .unwrap();
+    state
+        .user_core
+        .update_digest_enabled(user.id, true)
+        .unwrap();
+
+    let now: i32 = 1_775_894_400;
+
+    // Only non-contact messages
+    for i in 0..4 {
+        insert_classified_message_ext(
+            &state,
+            user.id,
+            &format!("!room_nc{}", i),
+            &format!("Stranger{}", i),
+            "hi",
+            "medium",
+            "social",
+            &format!("Stranger{} msg", i),
+            now - 600 - i,
+            None,
+            "whatsapp",
+        );
+    }
+
+    let settings = state.user_core.get_user_settings(user.id).unwrap();
+    let (digest_text, message_ids) = build_digest_for_user(&state, user.id, &settings, now, 0)
+        .await
+        .expect("digest should still be built for non-contacts");
+
+    println!(
+        "\n=== ONLY NON-CONTACTS DIGEST ===\n{}\n=== END ===\n",
+        digest_text
+    );
+
+    // Should have the collapsed count
+    assert!(digest_text.contains("+4 from unknown senders"));
+    // No individual stranger messages
+    assert!(!digest_text.contains("Stranger0"));
+    // All marked delivered
+    assert_eq!(message_ids.len(), 4);
 }

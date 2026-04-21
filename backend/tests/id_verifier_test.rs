@@ -251,6 +251,56 @@ fn verify_no_ids_anywhere_is_passthrough() {
     let resp = "Hello, how are you today?";
     let v = verify(resp, &valid);
     assert!(!v.dropped_line);
+    assert!(!v.missing_citations);
     assert_eq!(v.user_facing, resp);
     assert_eq!(v.history, resp);
+}
+
+// =============================================================================
+// missing_citations: LLM ignored the citation requirement entirely
+// =============================================================================
+
+#[test]
+fn verify_missing_citations_when_multiple_valid_ids_and_no_tags() {
+    // Tool results had 3 items with ids, but the LLM wrote pure prose
+    // without citing any of them.
+    let valid: HashSet<i64> = [101, 102, 103].into_iter().collect();
+    let resp = "You have 3 new messages from friends. Check your inbox.";
+    let v = verify(resp, &valid);
+    assert!(!v.dropped_line);
+    assert!(v.missing_citations);
+    // Content passes through unchanged - the verifier flags it but
+    // doesn't strip prose lines (the retry logic handles it).
+    assert_eq!(v.user_facing, resp);
+    assert_eq!(v.history, resp);
+}
+
+#[test]
+fn verify_no_missing_citations_when_single_valid_id() {
+    // Only one item in tool results - threshold not met, so prose is ok.
+    let valid: HashSet<i64> = [101].into_iter().collect();
+    let resp = "You have a message from Alice about the project.";
+    let v = verify(resp, &valid);
+    assert!(!v.dropped_line);
+    assert!(!v.missing_citations);
+}
+
+#[test]
+fn verify_no_missing_citations_when_tags_present() {
+    // LLM properly cited ids - no missing_citations flag.
+    let valid: HashSet<i64> = [101, 102].into_iter().collect();
+    let resp = "1. Alice [id=101]\n2. Bob [id=102]";
+    let v = verify(resp, &valid);
+    assert!(!v.dropped_line);
+    assert!(!v.missing_citations);
+}
+
+#[test]
+fn verify_no_missing_citations_when_empty_valid_ids() {
+    // No tools returned ids - nothing to cite. Pure conversational response.
+    let valid: HashSet<i64> = HashSet::new();
+    let resp = "Sure, I can help you with that!";
+    let v = verify(resp, &valid);
+    assert!(!v.dropped_line);
+    assert!(!v.missing_citations);
 }

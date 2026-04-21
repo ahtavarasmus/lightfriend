@@ -82,7 +82,7 @@ impl AiConfig {
     pub fn model(&self, provider: AiProvider, purpose: ModelPurpose) -> &str {
         match (provider, purpose) {
             (AiProvider::OpenRouter, ModelPurpose::Default) => "openai/gpt-4o-2024-11-20",
-            (AiProvider::Tinfoil, ModelPurpose::Default) => "kimi-k2-5",
+            (AiProvider::Tinfoil, ModelPurpose::Default) => "kimi-k2-6",
             // Voice: fast non-reasoning model for low-latency responses
             (AiProvider::Tinfoil, ModelPurpose::Voice) => "gemma4-31b",
             (AiProvider::OpenRouter, ModelPurpose::Voice) => "openai/gpt-4o-2024-11-20",

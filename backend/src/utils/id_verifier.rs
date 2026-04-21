@@ -89,6 +89,10 @@ pub struct VerifiedResponse {
 
     /// True if at least one line was dropped for failing verification.
     pub dropped_line: bool,
+
+    /// True when tool results contained multiple IDs but the response
+    /// cited none at all - the LLM ignored the citation requirement.
+    pub missing_citations: bool,
 }
 
 /// Verify every `[id=N]` cited in `response` against `valid_ids` and
@@ -111,6 +115,7 @@ pub struct VerifiedResponse {
 pub fn verify(response: &str, valid_ids: &HashSet<i64>) -> VerifiedResponse {
     let re = id_re();
     let mut dropped_line = false;
+    let mut any_citations_found = false;
 
     let mut history_lines: Vec<String> = Vec::new();
     let mut user_lines: Vec<String> = Vec::new();
@@ -127,6 +132,8 @@ pub fn verify(response: &str, valid_ids: &HashSet<i64>) -> VerifiedResponse {
             user_lines.push(line.to_string());
             continue;
         }
+
+        any_citations_found = true;
 
         let all_ok = ids_on_line.iter().all(|id| valid_ids.contains(id));
         if !all_ok {
@@ -172,10 +179,15 @@ pub fn verify(response: &str, valid_ids: &HashSet<i64>) -> VerifiedResponse {
         user_facing.push_str(STRIPPED_FOOTER);
     }
 
+    // Tool results had multiple cited items but the LLM wrote pure prose
+    // without citing any of them - the citation requirement was ignored.
+    let missing_citations = valid_ids.len() >= 2 && !any_citations_found;
+
     VerifiedResponse {
         user_facing,
         history,
         dropped_line,
+        missing_citations,
     }
 }
 
