@@ -96,6 +96,7 @@ async fn llm_call_with_retry(
                     options.emit_status(ChatStatus::Retrying {
                         attempt: attempt + 1,
                         max: max_retries,
+                        error: last_error.clone(),
                     });
                     tokio::time::sleep(tokio::time::Duration::from_millis(500 * attempt as u64))
                         .await;
@@ -267,10 +268,28 @@ pub struct TextBeeWebhookPayload {
 #[derive(Debug, Clone)]
 pub enum ChatStatus {
     Thinking,
-    Reasoning { snippet: String },
-    ToolCall { name: String },
-    Retrying { attempt: u32, max: u32 },
-    RetryingFollowup { attempt: u32, max: u32 },
+    Reasoning {
+        snippet: String,
+    },
+    ToolCall {
+        name: String,
+    },
+    /// Provider call failed, about to retry. `error` carries the
+    /// underlying error text so the web SSE layer can surface it to
+    /// browser devtools for diagnosis — the enclave runs without
+    /// --debug-mode and its tracing logs aren't reachable from the
+    /// host, so this is the only way we see what Tinfoil/OpenRouter
+    /// actually returned.
+    Retrying {
+        attempt: u32,
+        max: u32,
+        error: String,
+    },
+    RetryingFollowup {
+        attempt: u32,
+        max: u32,
+        error: String,
+    },
 }
 
 /// Options for process_sms to control test behavior
@@ -992,7 +1011,15 @@ pub async fn process_sms(
     let mut loop_messages = completion_messages.clone();
 
     const MAX_ROUNDS: u32 = 5;
-    const MAX_RETRIES: u32 = 3;
+    // Provider-error retries per LLM call. Bumped from 3 to 5 because
+    // Tinfoil/OpenRouter show enough transient flakiness that 3
+    // attempts (total ~4.5s of backoff) often gives up too early —
+    // the user sees "Provider error" and no reply. 5 attempts buys
+    // another ~3.5s of backoff (4th wait = 2s, 5th wait = 2.5s at the
+    // 500ms * attempt schedule) which is usually enough to ride out a
+    // blip. Still capped so a sustained outage fails fast instead of
+    // hanging the user for a minute.
+    const MAX_RETRIES: u32 = 5;
 
     let mut final_response = String::new();
 
@@ -1365,6 +1392,7 @@ pub async fn process_sms(
                 options.emit_status(ChatStatus::Retrying {
                     attempt: retry,
                     max: 3,
+                    error: "id-verifier stripped hallucinated citation".to_string(),
                 });
 
                 loop_messages.push(chat_completion::ChatCompletionMessage {

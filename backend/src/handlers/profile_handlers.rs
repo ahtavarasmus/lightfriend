@@ -1983,14 +1983,22 @@ pub async fn web_chat_stream(
                                 serde_json::json!({"step": "reasoning", "message": snippet}).to_string(),
                             ));
                         }
-                        Some(ChatStatus::Retrying { attempt, max }) => {
+                        Some(ChatStatus::Retrying { attempt, max, error }) => {
                             yield Ok(axum::response::sse::Event::default().data(
-                                serde_json::json!({"step": "retry", "message": format!("Provider error, retrying... (attempt {}/{})", attempt, max)}).to_string(),
+                                serde_json::json!({
+                                    "step": "retry",
+                                    "message": format!("Provider error, retrying... (attempt {}/{})", attempt, max),
+                                    "error": error,
+                                }).to_string(),
                             ));
                         }
-                        Some(ChatStatus::RetryingFollowup { attempt, max }) => {
+                        Some(ChatStatus::RetryingFollowup { attempt, max, error }) => {
                             yield Ok(axum::response::sse::Event::default().data(
-                                serde_json::json!({"step": "retry", "message": format!("Provider error, retrying... (attempt {}/{})", attempt, max)}).to_string(),
+                                serde_json::json!({
+                                    "step": "retry",
+                                    "message": format!("Provider error, retrying... (attempt {}/{})", attempt, max),
+                                    "error": error,
+                                }).to_string(),
                             ));
                         }
                         None => {
@@ -2009,8 +2017,8 @@ pub async fn web_chat_stream(
                             ChatStatus::Thinking => serde_json::json!({"step": "thinking", "message": "Thinking..."}),
                             ChatStatus::Reasoning { snippet } => serde_json::json!({"step": "reasoning", "message": snippet}),
                             ChatStatus::ToolCall { name } => serde_json::json!({"step": "tool_call", "message": format!("Using {}...", name.replace('_', " "))}),
-                            ChatStatus::Retrying { attempt, max } => serde_json::json!({"step": "retry", "message": format!("Retrying... ({}/{})", attempt, max)}),
-                            ChatStatus::RetryingFollowup { attempt, max } => serde_json::json!({"step": "retry", "message": format!("Retrying... ({}/{})", attempt, max)}),
+                            ChatStatus::Retrying { attempt, max, error } => serde_json::json!({"step": "retry", "message": format!("Retrying... ({}/{})", attempt, max), "error": error}),
+                            ChatStatus::RetryingFollowup { attempt, max, error } => serde_json::json!({"step": "retry", "message": format!("Retrying... ({}/{})", attempt, max), "error": error}),
                         };
                         yield Ok(axum::response::sse::Event::default().data(msg.to_string()));
                     }
