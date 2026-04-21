@@ -1342,9 +1342,10 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
     let tc_platform = use_state(|| "whatsapp".to_string());
     let tc_chat_name = use_state(|| String::new());
     let tc_chat_room_id = use_state(|| None::<String>);
-    let tc_chat_search_results = use_state(|| Vec::<(String, String, Option<String>)>::new()); // (display_name, room_id, person_name)
+    // Dropdown open/close state for the THEN-block chat picker. No longer
+    // tracks its own loading flag or search results Vec — the shared
+    // `all_contacts` index drives the list, filtered client-side.
     let tc_chat_search_open = use_state(|| false);
-    let tc_chat_searching = use_state(|| false);
     let tc_message = use_state(|| String::new());
     let tc_email_to = use_state(|| String::new());
     let tc_email_subject = use_state(|| String::new());
@@ -2577,17 +2578,27 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
         &*keyword_input,
     );
 
-    // Strict-combobox guard: if the WHEN filter is by-sender with non-empty
-    // text and no picked contact, block Save. The inline field hint
-    // ("Pick a contact from the dropdown…") already tells the user why,
-    // so we just disable the button here — clean UX without a separate
-    // toast or modal. Shadows `rule_complete` so Save + Test both respect
-    // the guard.
+    // Strict-combobox guards: the autocomplete IS the correctness layer —
+    // if the user typed into either sender/chat field but didn't pick
+    // from the dropdown, Save is disabled. No inline scolding; the Save
+    // button going dim is the only signal. Typing continues to work for
+    // fuzzy search, and as soon as they pick a row the guard releases.
+    //
+    // 1. WHEN sender field (trigger-side)
     let sender_pick_required = matches!(*when_mode, WhenMode::Event)
         && *event_filter_key == "sender"
         && !(*event_filter_value).is_empty()
         && selected_contact.is_none();
-    let rule_complete = rule_complete && !sender_pick_required;
+    // 2. THEN send_chat_message chat field (action-side). The user is
+    //    only subject to this check when the action is a tool-call and
+    //    the tool is send_chat_message. Having non-empty text without a
+    //    resolved room_id means they either typed freely or their earlier
+    //    pick got invalidated by a subsequent manual edit.
+    let chat_pick_required = matches!(*action_mode, ActionMode::ToolCall)
+        && *tool_name == "send_chat_message"
+        && !(*tc_chat_name).is_empty()
+        && tc_chat_room_id.is_none();
+    let rule_complete = rule_complete && !sender_pick_required && !chat_pick_required;
 
     if !props.is_open {
         return html! {};
@@ -2859,8 +2870,6 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                     scored.sort_by(|a, b| b.0.cmp(&a.0));
                                                     scored.into_iter().take(50).map(|(_, c)| c).collect()
                                                 };
-                                                let sender_unresolved = !(*event_filter_value).is_empty()
-                                                    && selected_contact.is_none();
                                                 html! {
                                                 <div class="rb-field" style="position: relative;">
                                                     <div class="rb-field-label">{"Person / Group"}</div>
@@ -2896,13 +2905,15 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                             Callback::from(move |_: FocusEvent| sd.set(true))
                                                         }}
                                                     />
+                                                    // Surface the load error so the user knows
+                                                    // why the dropdown is empty. The unresolved-
+                                                    // pick state (user typed but didn't pick) is
+                                                    // enforced silently by Save being disabled —
+                                                    // no inline scolding while the user is still
+                                                    // typing.
                                                     if let Some(err) = (*contacts_load_error).as_ref() {
                                                         <div class="rb-field-hint" style="color: #d33;">
                                                             {format!("Couldn't load contacts: {}", err)}
-                                                        </div>
-                                                    } else if sender_unresolved {
-                                                        <div class="rb-field-hint" style="color: #d33;">
-                                                            {"Pick a contact from the dropdown — rules need a confirmed identity so they fire on the right person."}
                                                         </div>
                                                     }
                                                     if *sender_dropdown_open && !(*contacts_loading) {
@@ -2931,13 +2942,17 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                                     }
                                                                 }
                                                                 rows.into_iter().map(|(c, group_mode)| {
+                                                                    // Backend now hands us a
+                                                                    // canonical subtitle:
+                                                                    //   "Person · N channel(s)"
+                                                                    //   "DM · whatsapp"
+                                                                    //   "Group · signal"
+                                                                    // so we can just render
+                                                                    // `{name} — {subtitle}` with
+                                                                    // an optional group-mode
+                                                                    // suffix.
                                                                     let display = {
-                                                                        let base = match (&c.platform, &c.subtitle) {
-                                                                            (Some(p), Some(s)) => format!("{} · {}", p, s),
-                                                                            (Some(p), None) => p.clone(),
-                                                                            (None, Some(s)) => s.clone(),
-                                                                            (None, None) => String::new(),
-                                                                        };
+                                                                        let base = c.subtitle.clone().unwrap_or_default();
                                                                         let mode_label = match group_mode.as_deref() {
                                                                             Some("mention_only") => " (mention only)",
                                                                             Some("all") if c.is_group => " (all)",
@@ -3730,16 +3745,16 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                     class="rb-select"
                                                     onchange={{
                                                         let s = tc_platform.clone();
-                                                        let sr = tc_chat_search_results.clone();
                                                         let cn = tc_chat_name.clone();
                                                         let rid = tc_chat_room_id.clone();
                                                         Callback::from(move |e: Event| {
                                                             if let Some(sel) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
                                                                 s.set(sel.value());
-                                                                // Clear chat selection when platform changes
+                                                                // Clear chat selection when platform changes —
+                                                                // the local filter will re-narrow against
+                                                                // the new platform on next render.
                                                                 cn.set(String::new());
                                                                 rid.set(None);
-                                                                sr.set(Vec::new());
                                                             }
                                                         })
                                                     }}
@@ -3749,112 +3764,130 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                     <option value="signal" selected={*tc_platform == "signal"}>{"Signal"}</option>
                                                 </select>
                                             </div>
-                                            <div class="rb-field" style="position: relative;">
-                                                <div class="rb-field-label">{"Chat"}</div>
-                                                <input
-                                                    class="rb-input"
-                                                    type="text"
-                                                    placeholder="Search chats..."
-                                                    value={(*tc_chat_name).clone()}
-                                                    oninput={{
-                                                        let cn = tc_chat_name.clone();
-                                                        let rid = tc_chat_room_id.clone();
-                                                        let sr = tc_chat_search_results.clone();
-                                                        let so = tc_chat_search_open.clone();
-                                                        let sg = tc_chat_searching.clone();
-                                                        let plat = (*tc_platform).clone();
-                                                        Callback::from(move |e: InputEvent| {
-                                                            if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
-                                                                let v = input.value();
-                                                                cn.set(v.clone());
-                                                                rid.set(None);
-                                                                if v.len() >= 2 {
-                                                                    so.set(true);
-                                                                    sg.set(true);
-                                                                    let sr = sr.clone();
-                                                                    let sg = sg.clone();
-                                                                    let plat = plat.clone();
-                                                                    let query = v;
-                                                                    spawn_local(async move {
-                                                                        let url = format!(
-                                                                            "/api/persons/search/{}?q={}",
-                                                                            plat,
-                                                                            js_sys::encode_uri_component(&query)
-                                                                        );
-                                                                        if let Ok(r) = Api::get(&url).send().await {
-                                                                            if let Ok(data) = r.json::<serde_json::Value>().await {
-                                                                                if let Some(results) = data.get("results").and_then(|r| r.as_array()) {
-                                                                                    let rooms: Vec<(String, String, Option<String>)> = results.iter()
-                                                                                        .filter_map(|r| {
-                                                                                            let name = r.get("display_name")?.as_str()?.to_string();
-                                                                                            let room_id = r.get("room_id")?.as_str()?.to_string();
-                                                                                            let person = r.get("person_name").and_then(|v| v.as_str()).map(|s| s.to_string());
-                                                                                            Some((name, room_id, person))
-                                                                                        })
-                                                                                        .collect();
-                                                                                    sr.set(rooms);
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                        sg.set(false);
-                                                                    });
-                                                                } else {
-                                                                    so.set(false);
-                                                                    sr.set(Vec::new());
-                                                                }
-                                                            }
+                                            // Chat picker now reuses the same /api/dashboard/contacts
+                                            // index as the WHEN block — one fetch at modal open,
+                                            // local fuzzy filter, strict combobox. Fixes the old
+                                            // "No chats found" path that fired whenever the
+                                            // platform's Matrix bridge was offline (the old
+                                            // /api/persons/search/{service} required a live
+                                            // bridge; the contacts index falls back to
+                                            // historical senders from ont_messages).
+                                            //
+                                            // Only rows with a concrete room_id for the chosen
+                                            // platform are shown — those are the ones we can
+                                            // actually send to. Historical senders without a
+                                            // stored room_id are filtered out here so users
+                                            // don't pick a THEN chat the tool can't resolve.
+                                            { {
+                                                let plat = (*tc_platform).clone();
+                                                let q_trimmed = (*tc_chat_name).to_lowercase().trim().to_string();
+                                                let sendable: Vec<Contact> = all_contacts
+                                                    .iter()
+                                                    .filter(|c| {
+                                                        c.platform.as_deref() == Some(plat.as_str())
+                                                            && c.room_id.is_some()
+                                                    })
+                                                    .cloned()
+                                                    .collect();
+                                                let filtered: Vec<Contact> = if q_trimmed.is_empty() {
+                                                    sendable.iter().take(50).cloned().collect()
+                                                } else {
+                                                    let mut scored: Vec<(i32, Contact)> = sendable
+                                                        .iter()
+                                                        .filter_map(|c| {
+                                                            score_contact(&q_trimmed, c)
+                                                                .map(|s| (s, c.clone()))
                                                         })
-                                                    }}
-                                                    onfocus={{
-                                                        let so = tc_chat_search_open.clone();
-                                                        let cn = tc_chat_name.clone();
-                                                        Callback::from(move |_: FocusEvent| {
-                                                            if cn.len() >= 2 {
-                                                                so.set(true);
-                                                            }
-                                                        })
-                                                    }}
-                                                    onblur={{
-                                                        let so = tc_chat_search_open.clone();
-                                                        Callback::from(move |_: FocusEvent| {
-                                                            let so = so.clone();
-                                                            gloo_timers::callback::Timeout::new(200, move || {
-                                                                so.set(false);
-                                                            }).forget();
-                                                        })
-                                                    }}
-                                                />
-                                                if *tc_chat_search_open {
-                                                    <div class="rb-autocomplete">
-                                                        if *tc_chat_searching {
-                                                            <div class="rb-autocomplete-item" style="color: #666;">{"Searching..."}</div>
-                                                        } else if tc_chat_search_results.is_empty() {
-                                                            <div class="rb-autocomplete-item" style="color: #666;">{"No chats found"}</div>
-                                                        } else {
-                                                            {for tc_chat_search_results.iter().map(|(name, room_id, _person)| {
-                                                                let display_name = name.clone();
-                                                                let set_name = name.clone();
-                                                                let set_rid = room_id.clone();
-                                                                let cn = tc_chat_name.clone();
-                                                                let rid = tc_chat_room_id.clone();
-                                                                let so = tc_chat_search_open.clone();
-                                                                html! {
-                                                                    <div class="rb-autocomplete-item"
-                                                                        onmousedown={Callback::from(move |e: MouseEvent| {
-                                                                            e.prevent_default();
-                                                                            cn.set(set_name.clone());
-                                                                            rid.set(Some(set_rid.clone()));
-                                                                            so.set(false);
-                                                                        })}
-                                                                    >
-                                                                        {display_name}
-                                                                    </div>
-                                                                }
-                                                            })}
+                                                        .collect();
+                                                    scored.sort_by(|a, b| b.0.cmp(&a.0));
+                                                    scored.into_iter().take(50).map(|(_, c)| c).collect()
+                                                };
+                                                html! {
+                                                <div class="rb-field" style="position: relative;">
+                                                    <div class="rb-field-label">{"Chat"}</div>
+                                                    <input
+                                                        class="rb-input"
+                                                        type="text"
+                                                        placeholder={
+                                                            if *contacts_loading { "Loading contacts…" }
+                                                            else { "Type to search..." }
                                                         }
-                                                    </div>
+                                                        disabled={*contacts_loading}
+                                                        value={(*tc_chat_name).clone()}
+                                                        oninput={{
+                                                            let cn = tc_chat_name.clone();
+                                                            let rid = tc_chat_room_id.clone();
+                                                            let so = tc_chat_search_open.clone();
+                                                            Callback::from(move |e: InputEvent| {
+                                                                if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
+                                                                    cn.set(input.value());
+                                                                    // Manual edit invalidates the
+                                                                    // prior pick — Save blocks
+                                                                    // until the user re-picks.
+                                                                    rid.set(None);
+                                                                    so.set(true);
+                                                                }
+                                                            })
+                                                        }}
+                                                        onfocus={{
+                                                            let so = tc_chat_search_open.clone();
+                                                            Callback::from(move |_: FocusEvent| so.set(true))
+                                                        }}
+                                                        onblur={{
+                                                            let so = tc_chat_search_open.clone();
+                                                            Callback::from(move |_: FocusEvent| {
+                                                                let so = so.clone();
+                                                                gloo_timers::callback::Timeout::new(200, move || {
+                                                                    so.set(false);
+                                                                }).forget();
+                                                            })
+                                                        }}
+                                                    />
+                                                    if let Some(err) = (*contacts_load_error).as_ref() {
+                                                        <div class="rb-field-hint" style="color: #d33;">
+                                                            {format!("Couldn't load contacts: {}", err)}
+                                                        </div>
+                                                    }
+                                                    if *tc_chat_search_open && !(*contacts_loading) {
+                                                        <div class="rb-autocomplete">
+                                                            if filtered.is_empty() {
+                                                                <div class="rb-autocomplete-item" style="color: #666;">
+                                                                    {format!("No {} chats found. Message the person once (or reconnect the bridge) so they show up here.", plat)}
+                                                                </div>
+                                                            } else {
+                                                                {for filtered.into_iter().map(|c| {
+                                                                    let display = {
+                                                                        let base = c.subtitle.clone().unwrap_or_default();
+                                                                        if base.is_empty() {
+                                                                            c.display_name.clone()
+                                                                        } else {
+                                                                            format!("{} — {}", c.display_name, base)
+                                                                        }
+                                                                    };
+                                                                    let set_name = c.display_name.clone();
+                                                                    let set_rid = c.room_id.clone().unwrap_or_default();
+                                                                    let cn = tc_chat_name.clone();
+                                                                    let rid = tc_chat_room_id.clone();
+                                                                    let so = tc_chat_search_open.clone();
+                                                                    html! {
+                                                                        <div class="rb-autocomplete-item"
+                                                                            onmousedown={Callback::from(move |e: MouseEvent| {
+                                                                                e.prevent_default();
+                                                                                cn.set(set_name.clone());
+                                                                                rid.set(Some(set_rid.clone()));
+                                                                                so.set(false);
+                                                                            })}
+                                                                        >
+                                                                            {display}
+                                                                        </div>
+                                                                    }
+                                                                })}
+                                                            }
+                                                        </div>
+                                                    }
+                                                </div>
                                                 }
-                                            </div>
+                                            } }
                                             <div class="rb-field">
                                                 <div class="rb-field-label">{"Message"}</div>
                                                 <textarea

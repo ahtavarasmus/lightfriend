@@ -1279,6 +1279,14 @@ pub async fn get_contacts(
 
     let mut contacts: Vec<Contact> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Tracks (platform, lowercased_name) pairs already covered by a
+    // person-channel entry. Source 2 (ont_messages senders) and source 4
+    // (bridge rooms) consult this to avoid emitting redundant rows that
+    // would show the same human under two subtly different subtitles
+    // ("DM · whatsapp · 1 msg" vs "DM · whatsapp"). One entry per real
+    // chat keeps the dropdown tidy.
+    let mut covered_chat_keys: std::collections::HashSet<(String, String)> =
+        std::collections::HashSet::new();
     let push =
         |contacts: &mut Vec<Contact>, seen: &mut std::collections::HashSet<String>, c: Contact| {
             if seen.insert(c.id.clone()) {
@@ -1300,52 +1308,59 @@ pub async fn get_contacts(
     for person in &persons {
         let display = person.display_name().to_string();
 
-        // Person-level entry (matches any of their channels).
-        push(
-            &mut contacts,
-            &mut seen,
-            Contact {
-                id: format!("person:{}", person.person.id),
-                display_name: display.clone(),
-                subtitle: if person.channels.is_empty() {
-                    None
-                } else {
-                    Some(format!("Person · {} channel(s)", person.channels.len()))
-                },
-                platform: None,
-                room_id: None,
-                person_id: Some(person.person.id),
-                is_group: false,
-                source: "person".to_string(),
-            },
-        );
-
-        // Per-channel entries (so user can pick a specific platform).
-        for ch in &person.channels {
-            let handle = ch.handle.as_deref().unwrap_or("");
-            let room = ch.room_id.clone();
+        // Person-level aggregate entry — only meaningful when the person
+        // has at least one channel (otherwise nothing would trigger it).
+        if !person.channels.is_empty() {
             push(
                 &mut contacts,
                 &mut seen,
                 Contact {
-                    id: format!("channel:{}:{}", person.person.id, ch.platform),
+                    id: format!("person:{}", person.person.id),
                     display_name: display.clone(),
-                    subtitle: Some(if handle.is_empty() {
-                        ch.platform.clone()
-                    } else {
-                        format!("{} · {}", ch.platform, handle)
-                    }),
-                    platform: Some(ch.platform.clone()),
-                    room_id: room,
+                    subtitle: Some(format!("Person · {} channel(s)", person.channels.len())),
+                    platform: None,
+                    room_id: None,
                     person_id: Some(person.person.id),
                     is_group: false,
                     source: "person".to_string(),
                 },
             );
         }
+
+        // Per-channel entries (so user can pick a specific platform DM).
+        // Person channels are always 1-on-1 DMs (groups surface via
+        // bridge-room source 4 only), so subtitle is always "DM · <plat>".
+        for ch in &person.channels {
+            push(
+                &mut contacts,
+                &mut seen,
+                Contact {
+                    id: format!("channel:{}:{}", person.person.id, ch.platform),
+                    display_name: display.clone(),
+                    subtitle: Some(format!("DM · {}", ch.platform)),
+                    platform: Some(ch.platform.clone()),
+                    room_id: ch.room_id.clone(),
+                    person_id: Some(person.person.id),
+                    is_group: false,
+                    source: "channel".to_string(),
+                },
+            );
+            // Register both the display name and the channel handle (phone
+            // number, username, etc.) — ont_messages sender names and
+            // bridge-room display names may match either form.
+            covered_chat_keys.insert((ch.platform.clone(), display.to_lowercase()));
+            if let Some(h) = &ch.handle {
+                let h_trim = h.trim().to_lowercase();
+                if !h_trim.is_empty() {
+                    covered_chat_keys.insert((ch.platform.clone(), h_trim));
+                }
+            }
+        }
     }
 
-    // 2. Distinct senders from ont_messages (chats not yet merged into persons).
+    // 2. Distinct senders from ont_messages (chats not yet merged into a
+    //    Person). Skip any sender already covered by a person-channel so
+    //    we don't show the same human twice.
     let senders = {
         let repo = state.ontology_repository.clone();
         tokio::task::spawn_blocking(move || repo.get_distinct_senders(user_id).unwrap_or_default())
@@ -1353,14 +1368,18 @@ pub async fn get_contacts(
             .unwrap_or_default()
     };
 
-    for (sender_name, platform, count) in &senders {
+    for (sender_name, platform, _count) in &senders {
+        let key = (platform.clone(), sender_name.trim().to_lowercase());
+        if covered_chat_keys.contains(&key) {
+            continue;
+        }
         push(
             &mut contacts,
             &mut seen,
             Contact {
                 id: format!("chat:{}:{}", platform, sender_name.to_lowercase()),
                 display_name: sender_name.clone(),
-                subtitle: Some(format!("{} · {} msg", platform, count)),
+                subtitle: Some(format!("DM · {}", platform)),
                 platform: Some(platform.clone()),
                 room_id: None,
                 person_id: None,
@@ -1368,40 +1387,24 @@ pub async fn get_contacts(
                 source: "chat".to_string(),
             },
         );
+        // Future source-4 matches (bridge rooms) should dedup against
+        // this too — the same WA phone number, for example, may also
+        // show up as a bridge room.
+        covered_chat_keys.insert(key);
     }
 
-    // 3. WhatsApp bridge DB contacts (phonebook entries, including never-messaged).
-    if state.whatsapp_bridge_repository.is_some() {
-        let bridge_contacts =
-            crate::utils::bridge_contacts::get_whatsapp_contacts(&state, user_id).await;
-        for c in &bridge_contacts {
-            let sub = match (&c.phone, c.is_phone_contact) {
-                (Some(p), true) => Some(format!("WhatsApp · {} · in phonebook", p)),
-                (Some(p), false) => Some(format!("WhatsApp · {}", p)),
-                (None, _) => Some("WhatsApp".to_string()),
-            };
-            push(
-                &mut contacts,
-                &mut seen,
-                Contact {
-                    id: format!("wa_contact:{}", c.jid),
-                    display_name: c.name.clone(),
-                    subtitle: sub,
-                    platform: Some("whatsapp".to_string()),
-                    room_id: None,
-                    person_id: None,
-                    is_group: false,
-                    source: "wa_contact".to_string(),
-                },
-            );
-        }
-    }
-
-    // 4. Signal / Telegram bridge rooms (Matrix enumeration, best-effort).
+    // 3. Signal / Telegram bridge rooms (Matrix enumeration, best-effort).
     // Wrapped in a 2.5s wall-clock deadline so a slow/unresponsive Matrix
     // client can't hang the endpoint. DB sources above already cover the
-    // common case — bridge rooms add never-messaged contacts for those
-    // two platforms only.
+    // common case — bridge rooms add never-messaged contacts and groups
+    // for those two platforms only.
+    //
+    // We dropped the old "WhatsApp phonebook" source: its entries
+    // duplicated person-channels and distinct-senders with a noisier
+    // subtitle ("in phonebook") and users never asked for it by name.
+    // If a WA contact is reachable, they already show up via sources 1
+    // and 2. If they're only in the phonebook and never messaged, a
+    // rule couldn't trigger for them anyway.
     let services = ["signal", "telegram"];
     let searches = services.iter().map(|service| {
         let state = state.clone();
@@ -1432,10 +1435,20 @@ pub async fn get_contacts(
         if let Ok(Ok(rooms)) = result {
             for room in rooms {
                 let display = crate::utils::bridge::remove_bridge_suffix(&room.display_name);
+                // Dedup DMs against person-channels / ont_messages senders
+                // (groups never collide, they have unique room_ids and
+                // the subtitle is explicitly "Group").
+                if !room.is_group {
+                    let key = (service.clone(), display.trim().to_lowercase());
+                    if covered_chat_keys.contains(&key) {
+                        continue;
+                    }
+                    covered_chat_keys.insert(key);
+                }
                 let sub = Some(if room.is_group {
-                    format!("{} · group", service)
+                    format!("Group · {}", service)
                 } else {
-                    service.clone()
+                    format!("DM · {}", service)
                 });
                 push(
                     &mut contacts,
@@ -1460,15 +1473,16 @@ pub async fn get_contacts(
         }
     }
 
-    // Sort: non-group chats with messages first, then bridge-only entries,
-    // stable by display name within a bucket. Frontend filters locally so
+    // Sort: aggregate Persons first (most useful for cross-platform rules),
+    // then per-channel DMs, then chat senders, then bridge-only entries.
+    // Stable by display name within a bucket. Frontend filters locally so
     // this ordering only affects the "zero-query" default view.
     contacts.sort_by(|a, b| {
         let bucket = |c: &Contact| -> u8 {
             match c.source.as_str() {
                 "person" => 0,
-                "chat" => 1,
-                "wa_contact" => 2,
+                "channel" => 1,
+                "chat" => 2,
                 "bridge_room" | "bridge_group" => 3,
                 _ => 4,
             }
