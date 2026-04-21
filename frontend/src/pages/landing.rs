@@ -83,6 +83,8 @@ pub fn landing() -> Html {
     // State for expanded FAQ item (-1 = none, 0+ = which one)
     let expanded_faq = use_state(|| -1i32);
 
+    // State for expanded capability card (-1 = none, 0-3 = which one)
+    let expanded_cap = use_state(|| -1i32);
 
     // SMS demo scenarios: (label, icon_class, messages)
     // is_user=false means Lightfriend sends it proactively
@@ -245,6 +247,57 @@ pub fn landing() -> Html {
         }
     }).collect();
 
+    // Capability cards data: (icon_class, title, one_liner, detail_html)
+    let cap_data: Vec<(&str, &str, &str, Html)> = vec![
+        ("fas fa-comments", "Message your apps", "Text and call WhatsApp, Telegram, Signal, and email from any phone.", html! {
+            <p>{"Reply to messages, send new ones, and get summaries of long threads - all via SMS or voice call. This is what makes switching to a dumbphone possible in the first place."}</p>
+        }),
+        ("fas fa-bell", "Critical alerts", "Urgent messages reach you instantly. Everything else waits.", html! {
+            <p>{"AI evaluates every incoming message across all your apps. Time-critical ones - lunch invites, emergencies, deadlines - get forwarded immediately as SMS or a phone call. No setup needed, works out of the box."}</p>
+        }),
+        ("fas fa-list-check", "Daily digests", "Stay informed without the noise. Get a summary when you want it.", html! {
+            <p>{"Non-urgent messages are batched into a digest delivered on your schedule. Keeps you in the loop without constant interruptions throughout the day."}</p>
+        }),
+        ("fas fa-sliders", "Custom rules", "Build your own automations. Optional, for when defaults aren't enough.", html! {
+            <>
+                <p>{"Create WHEN/IF/THEN rules: trigger on message arrival, a schedule, or a keyword. Conditions can use AI evaluation, keyword matching, or sender filters - like always forwarding messages from a specific person. Actions include forwarding, summarizing, replying, or running a check."}</p>
+                <p>{"Set simple reminders. Schedule recurring checks. Everything is optional and customizable."}</p>
+            </>
+        }),
+    ];
+
+    let cap_cards_html: Vec<Html> = cap_data.into_iter().enumerate().map(|(idx, (icon, title, one_liner, detail))| {
+        let expanded = expanded_cap.clone();
+        let i = idx as i32;
+        let is_open = *expanded == i;
+        let onclick = {
+            let expanded = expanded.clone();
+            Callback::from(move |e: MouseEvent| {
+                e.prevent_default();
+                if *expanded == i {
+                    expanded.set(-1);
+                } else {
+                    expanded.set(i);
+                }
+            })
+        };
+        html! {
+            <div class={classes!("cap-card", if is_open { "open" } else { "" })} onclick={onclick}>
+                <div class="cap-card-header">
+                    <i class={icon}></i>
+                    <div class="cap-card-text">
+                        <span class="cap-card-title">{title}</span>
+                        <span class="cap-card-liner">{one_liner}</span>
+                    </div>
+                    <span class="cap-card-toggle">{if is_open { "\u{2212}" } else { "+" }}</span>
+                </div>
+                <div class="cap-card-detail">
+                    {detail}
+                </div>
+            </div>
+        }
+    }).collect();
+
     // Generate particle elements for hero background
     let particles_html: Vec<Html> = (0..25).map(|i| {
         let left = ((i * 17 + 5) % 100) as f64;
@@ -344,6 +397,15 @@ pub fn landing() -> Html {
             </section>
 
             // TODO: Image carousel goes here when "Removed" style photos are ready
+
+            // Capabilities section - what you can do with Lightfriend
+            <section class="capabilities-section scroll-animate">
+                <h2 class="capabilities-title">{"What you get"}</h2>
+                <div class="capabilities-grid">
+                    { for cap_cards_html }
+                </div>
+                <p class="capabilities-footnote">{"Gets better over time - Lightfriend learns what matters to you."}</p>
+            </section>
 
             // Privacy section
             <section class="privacy-hook scroll-animate">
@@ -711,6 +773,111 @@ pub fn landing() -> Html {
         }
         .freedom-highlight {
             font-size: 1.4rem;
+        }
+    }
+    /* Capabilities section */
+    .capabilities-section {
+        padding: 5rem 2rem;
+        background: #0d0d0d;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        position: relative;
+        z-index: 2;
+    }
+    .capabilities-title {
+        font-size: 2rem;
+        color: #fff;
+        font-weight: 700;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .capabilities-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+        max-width: 750px;
+        margin: 0 auto;
+    }
+    .cap-card {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        overflow: hidden;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    .cap-card:hover {
+        border-color: rgba(255, 255, 255, 0.25);
+    }
+    .cap-card.open {
+        border-color: rgba(126, 178, 255, 0.3);
+    }
+    .cap-card-header {
+        padding: 1.2rem;
+        display: flex;
+        align-items: flex-start;
+        gap: 0.8rem;
+    }
+    .cap-card-header i {
+        font-size: 1.2rem;
+        color: #7EB2FF;
+        margin-top: 0.15rem;
+        flex-shrink: 0;
+    }
+    .cap-card-text {
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+        flex: 1;
+        min-width: 0;
+    }
+    .cap-card-title {
+        font-size: 1rem;
+        font-weight: 600;
+        color: #fff;
+    }
+    .cap-card-liner {
+        font-size: 0.85rem;
+        color: #999;
+        line-height: 1.5;
+    }
+    .cap-card-toggle {
+        font-size: 1.3rem;
+        color: #7EB2FF;
+        flex-shrink: 0;
+        margin-left: 0.5rem;
+    }
+    .cap-card-detail {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.5s ease;
+        padding: 0 1.2rem;
+    }
+    .cap-card.open .cap-card-detail {
+        max-height: 500px;
+        padding: 0 1.2rem 1.2rem;
+    }
+    .cap-card-detail p {
+        font-size: 0.9rem;
+        color: #999;
+        line-height: 1.6;
+        margin-bottom: 0.5rem;
+    }
+    .capabilities-footnote {
+        text-align: center;
+        color: #666;
+        font-size: 0.85rem;
+        margin-top: 1.5rem;
+        font-style: italic;
+    }
+    @media (max-width: 768px) {
+        .capabilities-section {
+            padding: 3rem 1.5rem;
+        }
+        .capabilities-title {
+            font-size: 1.5rem;
+        }
+        .capabilities-grid {
+            grid-template-columns: 1fr;
         }
     }
     /* Privacy hook section */
