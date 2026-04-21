@@ -14,6 +14,49 @@ struct RuleSourceOption {
     meta: serde_json::Value,
 }
 
+/// Mirrors backend `dashboard_handlers::Contact`.
+///
+/// Fetched once when the rule builder opens via GET /api/dashboard/contacts.
+/// The builder filters this list locally on every keystroke — no per-
+/// keystroke network, no debounce, no race conditions. When the user
+/// picks an entry from the dropdown we capture the whole Contact (not
+/// just the display name) so the trigger match can use `room_id` /
+/// `person_id` for deterministic routing instead of fuzzy-comparing
+/// free-text names at fire time.
+#[derive(Clone, PartialEq, Deserialize, Debug)]
+pub struct Contact {
+    pub id: String,
+    pub display_name: String,
+    #[serde(default)]
+    pub subtitle: Option<String>,
+    #[serde(default)]
+    pub platform: Option<String>,
+    #[serde(default)]
+    pub room_id: Option<String>,
+    #[serde(default)]
+    pub person_id: Option<i32>,
+    #[serde(default)]
+    pub is_group: bool,
+    pub source: String,
+}
+
+/// Score a contact against a lowercased query. Higher = better match.
+/// Order: exact (3) > starts-with (2) > contains (1) > no match (None).
+/// Runs in the browser per keystroke across the whole contact list —
+/// stays under a millisecond for lists of several thousand.
+fn score_contact(query_lower: &str, c: &Contact) -> Option<i32> {
+    let name = c.display_name.to_lowercase();
+    if name == query_lower {
+        Some(3)
+    } else if name.starts_with(query_lower) {
+        Some(2)
+    } else if name.contains(query_lower) {
+        Some(1)
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum SourceConfig {
@@ -1265,8 +1308,17 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
     let event_delay = use_state(|| 600i32); // default: 10 min delay before rule fires
                                             // (display_name, platform, is_group, group_mode)
                                             // group_mode: None for non-groups, Some("all") or Some("mention_only") for groups
-    let sender_suggestions =
-        use_state(|| Vec::<(String, Option<String>, bool, Option<String>)>::new());
+    // Full contact index fetched once per builder session. The dropdown
+    // filters this locally (see `score_contact`) — no per-keystroke HTTP.
+    let all_contacts = use_state(Vec::<Contact>::new);
+    let contacts_loading = use_state(|| true);
+    let contacts_load_error = use_state(|| None::<String>);
+    // The currently picked contact (strict combobox): set on dropdown
+    // click, cleared on any manual keystroke, required for Save when the
+    // filter is by-sender. Save-time we persist the resolved identity
+    // (room_id / person_id) onto the rule so triggers match
+    // deterministically instead of by free-text name.
+    let selected_contact = use_state(|| None::<Contact>);
     let sender_dropdown_open = use_state(|| false);
     let selected_group_mode = use_state(|| None::<String>); // None = not a group, Some("all") or Some("mention_only")
 
@@ -1319,80 +1371,87 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
     let test_steps = use_state(|| Vec::<(String, String, String)>::new()); // (css_class, icon, text)
     let test_es_ref = use_mut_ref(|| None::<web_sys::EventSource>);
 
-    // Fetch senders for autocomplete (persons + chat room names + group chats)
+    // Auto-resolve: when editing an old rule (or after contacts finish
+    // loading), try to match the existing sender text against a known
+    // contact and populate `selected_contact`. Makes edits work without
+    // forcing the user to re-pick, and handles the race where contacts
+    // finish loading after the rule data hydrates the fields.
     {
-        let sender_suggestions = sender_suggestions.clone();
-        let current_filter_value = event_filter_value.clone();
+        let all_contacts = all_contacts.clone();
+        let event_filter_value = event_filter_value.clone();
+        let event_filter_key = event_filter_key.clone();
+        let selected_contact = selected_contact.clone();
         use_effect_with_deps(
-            move |(open, query)| {
-                let handle = if !*open || query.trim().len() < 2 {
-                    sender_suggestions.set(Vec::new());
-                    None
-                } else {
-                    let sender_suggestions = sender_suggestions.clone();
-                    let current_filter_value = current_filter_value.clone();
-                    let query = query.trim().to_string();
-                    Some(gloo_timers::callback::Timeout::new(250, move || {
-                        spawn_local(async move {
-                            let url = format!(
-                                "/api/dashboard/senders?q={}",
-                                js_sys::encode_uri_component(&query)
-                            );
-                            let Ok(r) = Api::get(&url).send().await else {
-                                sender_suggestions.set(Vec::new());
-                                return;
-                            };
-                            let Ok(senders) = r.json::<Vec<serde_json::Value>>().await else {
-                                sender_suggestions.set(Vec::new());
-                                return;
-                            };
-
-                            let mut suggestions: Vec<(
-                                String,
-                                Option<String>,
-                                bool,
-                                Option<String>,
-                            )> = Vec::new();
-                            for s in &senders {
-                                let name = match s.get("name").and_then(|n| n.as_str()) {
-                                    Some(n) => n.to_string(),
-                                    None => continue,
-                                };
-                                let platform = s
-                                    .get("platform")
-                                    .and_then(|p| p.as_str())
-                                    .map(|p| p.to_string());
-                                let is_group =
-                                    s.get("is_group").and_then(|g| g.as_bool()).unwrap_or(false);
-                                if is_group {
-                                    // Add two entries for groups: (all) and (mention only)
-                                    suggestions.push((
-                                        name.clone(),
-                                        platform.clone(),
-                                        true,
-                                        Some("all".to_string()),
-                                    ));
-                                    suggestions.push((
-                                        name,
-                                        platform,
-                                        true,
-                                        Some("mention_only".to_string()),
-                                    ));
-                                } else {
-                                    suggestions.push((name, platform, false, None));
-                                }
+            move |(contacts, value, key)| {
+                let should_resolve = *key == "sender"
+                    && !value.is_empty()
+                    && selected_contact.is_none();
+                if should_resolve {
+                    let v_lower = value.to_lowercase();
+                    // Exact display-name match (case-insensitive). If
+                    // multiple contacts share a display name we prefer
+                    // the one with a room_id (most specific) so triggers
+                    // match deterministically — shouldn't happen often
+                    // since the backend already dedupes by id.
+                    let mut best: Option<Contact> = None;
+                    for c in contacts.iter() {
+                        if c.display_name.to_lowercase() == v_lower {
+                            let better_than_current =
+                                best.as_ref().map(|b| b.room_id.is_none()).unwrap_or(true);
+                            if better_than_current && c.room_id.is_some() {
+                                best = Some(c.clone());
+                            } else if best.is_none() {
+                                best = Some(c.clone());
                             }
-                            if current_filter_value.trim() != query {
-                                return;
-                            }
-                            sender_suggestions.set(suggestions);
-                        });
-                    }))
-                };
-
-                move || drop(handle)
+                        }
+                    }
+                    if let Some(c) = best {
+                        selected_contact.set(Some(c));
+                    }
+                }
+                || ()
             },
-            ((*sender_dropdown_open), (*event_filter_value).clone()),
+            (
+                (*all_contacts).clone(),
+                (*event_filter_value).clone(),
+                (*event_filter_key).clone(),
+            ),
+        );
+    }
+
+    // Fetch the full contact index ONCE when the builder mounts. Every
+    // keystroke in the sender field filters this list locally — no
+    // per-keystroke network, no debounce, no provider lag. See
+    // `Contact`, `score_contact`, and the `filtered_contacts`
+    // derivation in the render section below.
+    {
+        let all_contacts = all_contacts.clone();
+        let contacts_loading = contacts_loading.clone();
+        let contacts_load_error = contacts_load_error.clone();
+        use_effect_with_deps(
+            move |_| {
+                spawn_local(async move {
+                    match Api::get("/api/dashboard/contacts").send().await {
+                        Ok(r) => match r.json::<Vec<Contact>>().await {
+                            Ok(list) => {
+                                all_contacts.set(list);
+                                contacts_loading.set(false);
+                            }
+                            Err(e) => {
+                                contacts_load_error
+                                    .set(Some(format!("parse error: {}", e)));
+                                contacts_loading.set(false);
+                            }
+                        },
+                        Err(e) => {
+                            contacts_load_error.set(Some(format!("{}", e)));
+                            contacts_loading.set(false);
+                        }
+                    }
+                });
+                || ()
+            },
+            (),
         );
     }
 
@@ -2178,6 +2237,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
         let tc_mcp_params = tc_mcp_params.clone();
         let else_flow_submit = else_flow.clone();
         let selected_group_mode = selected_group_mode.clone();
+        let selected_contact = selected_contact.clone();
         let saving = saving.clone();
         let error_msg = error_msg.clone();
         let on_saved = props.on_saved.clone();
@@ -2216,12 +2276,30 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                     });
                     let fv = (*event_filter_value).clone();
                     let fk = (*event_filter_key).clone();
+                    let fk_is_sender = fk == "sender";
                     if fk != "none" && !fv.is_empty() {
                         config["filters"] = serde_json::json!({ fk: fv });
                     }
                     // Include group_mode if a group chat sender is selected
                     if let Some(ref gm) = *selected_group_mode {
                         config["group_mode"] = serde_json::json!(gm);
+                    }
+                    // Strict combobox: when the user picked a contact from
+                    // the autocomplete we persist the resolved identity
+                    // (room_id or person_id) on the rule. At trigger time
+                    // the rule engine prefers these over the free-text
+                    // sender filter, so a rule built against "Karen" fires
+                    // correctly even if the canonical room/sender name is
+                    // "Karen Smith (WA)".
+                    if fk_is_sender {
+                        if let Some(c) = &*selected_contact {
+                            if let Some(rid) = &c.room_id {
+                                config["resolved_room_id"] = serde_json::json!(rid);
+                            }
+                            if let Some(pid) = c.person_id {
+                                config["resolved_person_id"] = serde_json::json!(pid);
+                            }
+                        }
                     }
                     ("ontology_change".to_string(), config.to_string())
                 }
@@ -2499,6 +2577,18 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
         &*keyword_input,
     );
 
+    // Strict-combobox guard: if the WHEN filter is by-sender with non-empty
+    // text and no picked contact, block Save. The inline field hint
+    // ("Pick a contact from the dropdown…") already tells the user why,
+    // so we just disable the button here — clean UX without a separate
+    // toast or modal. Shadows `rule_complete` so Save + Test both respect
+    // the guard.
+    let sender_pick_required = matches!(*when_mode, WhenMode::Event)
+        && *event_filter_key == "sender"
+        && !(*event_filter_value).is_empty()
+        && selected_contact.is_none();
+    let rule_complete = rule_complete && !sender_pick_required;
+
     if !props.is_open {
         return html! {};
     }
@@ -2738,24 +2828,66 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                     <option value="content" selected={*event_filter_key == "content"}>{"Content"}</option>
                                                 </select>
                                             </div>
-                                            if *event_filter_key == "sender" {
+                                            // Strict combobox: user MUST pick an entry from the
+                                            // dropdown. Typing manually clears the resolved
+                                            // identity; Save is disabled until they pick
+                                            // again. Autocomplete == authoritative contact.
+                                            //
+                                            // We wrap the sender/content branch in a Rust `{}`
+                                            // block (which the html! macro evaluates as a
+                                            // single expression) so we can declare local
+                                            // variables — filtered list, unresolved flag —
+                                            // before building the Html. Yew's inline `if`
+                                            // doesn't allow `let` bindings; an expression
+                                            // block does.
+                                            { if *event_filter_key == "sender" {
+                                                let q_trimmed = (*event_filter_value).to_lowercase().trim().to_string();
+                                                // Local fuzzy filter over the pre-fetched
+                                                // contact index. Stays sub-millisecond even
+                                                // with thousands of entries because we sort
+                                                // then truncate to 50.
+                                                let filtered: Vec<Contact> = if q_trimmed.is_empty() {
+                                                    all_contacts.iter().take(50).cloned().collect()
+                                                } else {
+                                                    let mut scored: Vec<(i32, Contact)> = all_contacts
+                                                        .iter()
+                                                        .filter_map(|c| {
+                                                            score_contact(&q_trimmed, c)
+                                                                .map(|s| (s, c.clone()))
+                                                        })
+                                                        .collect();
+                                                    scored.sort_by(|a, b| b.0.cmp(&a.0));
+                                                    scored.into_iter().take(50).map(|(_, c)| c).collect()
+                                                };
+                                                let sender_unresolved = !(*event_filter_value).is_empty()
+                                                    && selected_contact.is_none();
+                                                html! {
                                                 <div class="rb-field" style="position: relative;">
                                                     <div class="rb-field-label">{"Person / Group"}</div>
                                                     <input
                                                         class="rb-input"
                                                         type="text"
-                                                        placeholder="Type to search..."
+                                                        placeholder={
+                                                            if *contacts_loading { "Loading contacts…" }
+                                                            else { "Type to search..." }
+                                                        }
+                                                        disabled={*contacts_loading}
                                                         value={(*event_filter_value).clone()}
                                                         oninput={{
                                                             let fv = event_filter_value.clone();
                                                             let sd = sender_dropdown_open.clone();
                                                             let sgm = selected_group_mode.clone();
+                                                            let sc = selected_contact.clone();
                                                             Callback::from(move |e: InputEvent| {
                                                                 if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
                                                                     fv.set(input.value());
                                                                     sd.set(true);
-                                                                    // Clear group mode when user types (deselects group)
+                                                                    // Manual edit invalidates
+                                                                    // the prior pick — Save
+                                                                    // now blocks until the user
+                                                                    // picks again.
                                                                     sgm.set(None);
+                                                                    sc.set(None);
                                                                 }
                                                             })
                                                         }}
@@ -2764,36 +2896,68 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                             Callback::from(move |_: FocusEvent| sd.set(true))
                                                         }}
                                                     />
-                                                    if *sender_dropdown_open {
+                                                    if let Some(err) = (*contacts_load_error).as_ref() {
+                                                        <div class="rb-field-hint" style="color: #d33;">
+                                                            {format!("Couldn't load contacts: {}", err)}
+                                                        </div>
+                                                    } else if sender_unresolved {
+                                                        <div class="rb-field-hint" style="color: #d33;">
+                                                            {"Pick a contact from the dropdown — rules need a confirmed identity so they fire on the right person."}
+                                                        </div>
+                                                    }
+                                                    if *sender_dropdown_open && !(*contacts_loading) {
                                                         <div class="rb-autocomplete">
-                                                            { for sender_suggestions.iter()
-                                                                .filter(|(name, _, _, _)| {
-                                                                    let q = event_filter_value.to_lowercase();
-                                                                    q.is_empty() || name.to_lowercase().contains(&q)
-                                                                })
-                                                                .map(|(name, platform, is_group, group_mode)| {
-                                                                    let display = if *is_group {
-                                                                        let mode_label = match group_mode.as_deref() {
-                                                                            Some("mention_only") => "(mention only)",
-                                                                            _ => "(all)",
-                                                                        };
-                                                                        match platform {
-                                                                            Some(p) => format!("{} ({}) (group){}", name, p, mode_label),
-                                                                            None => format!("{} (group){}", name, mode_label),
-                                                                        }
+                                                            if filtered.is_empty() {
+                                                                <div class="rb-autocomplete-empty">
+                                                                    {"No matching contacts. Message the person once so they show up here."}
+                                                                </div>
+                                                            }
+                                                            { for {
+                                                                // Flatten (contact × group_mode)
+                                                                // pairs into a single Vec so the
+                                                                // inner closures don't need to
+                                                                // capture outer state handles
+                                                                // twice. Each pair is rendered
+                                                                // once; handles are cloned per
+                                                                // iteration of the flat .map()
+                                                                // below (cheap Arc clones).
+                                                                let mut rows: Vec<(Contact, Option<String>)> = Vec::new();
+                                                                for contact in filtered.into_iter() {
+                                                                    if contact.is_group {
+                                                                        rows.push((contact.clone(), Some("all".to_string())));
+                                                                        rows.push((contact, Some("mention_only".to_string())));
                                                                     } else {
-                                                                        match platform {
-                                                                            Some(p) => format!("{} ({})", name, p),
-                                                                            None => name.clone(),
+                                                                        rows.push((contact, None));
+                                                                    }
+                                                                }
+                                                                rows.into_iter().map(|(c, group_mode)| {
+                                                                    let display = {
+                                                                        let base = match (&c.platform, &c.subtitle) {
+                                                                            (Some(p), Some(s)) => format!("{} · {}", p, s),
+                                                                            (Some(p), None) => p.clone(),
+                                                                            (None, Some(s)) => s.clone(),
+                                                                            (None, None) => String::new(),
+                                                                        };
+                                                                        let mode_label = match group_mode.as_deref() {
+                                                                            Some("mention_only") => " (mention only)",
+                                                                            Some("all") if c.is_group => " (all)",
+                                                                            _ => "",
+                                                                        };
+                                                                        if base.is_empty() {
+                                                                            format!("{}{}", c.display_name, mode_label)
+                                                                        } else {
+                                                                            format!("{} — {}{}", c.display_name, base, mode_label)
                                                                         }
                                                                     };
-                                                                    let set_val = name.clone();
                                                                     let fv = event_filter_value.clone();
                                                                     let sd = sender_dropdown_open.clone();
                                                                     let sgm = selected_group_mode.clone();
-                                                                    let gm = group_mode.clone();
-                                                                    let is_grp = *is_group;
+                                                                    let sc = selected_contact.clone();
                                                                     let lm = logic_mode.clone();
+                                                                    let is_grp = c.is_group;
+                                                                    let gm = group_mode.clone();
+                                                                    let set_val = c.display_name.clone();
+                                                                    let c_for_cb = c.clone();
                                                                     html! {
                                                                         <div class="rb-autocomplete-item"
                                                                             onmousedown={{
@@ -2801,9 +2965,10 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                                                     e.prevent_default();
                                                                                     fv.set(set_val.clone());
                                                                                     sd.set(false);
+                                                                                    sc.set(Some(c_for_cb.clone()));
                                                                                     if is_grp {
                                                                                         sgm.set(gm.clone());
-                                                                                        // Force logic mode to non-LLM when group is selected
+                                                                                        // Group → force non-LLM logic
                                                                                         lm.set(LogicMode::Always);
                                                                                     } else {
                                                                                         sgm.set(None);
@@ -2815,11 +2980,13 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                                         </div>
                                                                     }
                                                                 })
-                                                            }
+                                                            }}
                                                         </div>
                                                     }
                                                 </div>
+                                                }
                                             } else if *event_filter_key == "content" {
+                                                html! {
                                                 <div class="rb-field">
                                                     <div class="rb-field-label">{"Contains"}</div>
                                                     <input
@@ -2837,7 +3004,10 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                         }}
                                                     />
                                                 </div>
-                                            }
+                                                }
+                                            } else {
+                                                html! {}
+                                            } }
                                         </div>
                                         <div class="rb-field" style="margin-top: 0.5rem;">
                                             <div class="rb-field-label">{"Frequency"}</div>

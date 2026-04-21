@@ -191,6 +191,18 @@ pub struct TriggerConfig {
     pub entity_type: Option<String>,
     pub change: Option<String>,
     pub filters: Option<HashMap<String, String>>,
+    /// Resolved Matrix room id for the sender, captured at rule-save time
+    /// from a combobox pick in the rule builder. When present this is the
+    /// authoritative sender match — the `sender` name filter is ignored.
+    /// Eliminates the old bug where a rule with sender="Alice" never fired
+    /// because the canonical name was "Alice Smith (WA)". Old rules saved
+    /// before this field existed still work via the legacy name filter.
+    pub resolved_room_id: Option<String>,
+    /// Resolved ontology person id, captured when the user picks a
+    /// person-level entry (covers all their channels across platforms).
+    /// Checked after `resolved_room_id` — if neither is set, fall back to
+    /// the legacy name filter.
+    pub resolved_person_id: Option<i32>,
     // For schedule triggers
     pub schedule: Option<String>,
     pub pattern: Option<String>,
@@ -253,13 +265,50 @@ pub fn matches_trigger(
         return false;
     }
 
+    // Resolved-identity sender match (preferred over name filter when
+    // present). This is the authoritative check set at rule-save time when
+    // the user picks from the autocomplete — deterministic, no fuzzy, no
+    // case/display-name surprises.
+    //
+    // Priority:
+    //   1. resolved_room_id → match entity.room_id exactly
+    //   2. resolved_person_id → match entity.person_id exactly
+    //   3. neither → fall through to legacy sender-name filter below
+    let has_resolved_sender =
+        config.resolved_room_id.is_some() || config.resolved_person_id.is_some();
+    if let Some(ref rrid) = config.resolved_room_id {
+        let got = entity_snapshot
+            .get("room_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if got != rrid {
+            return false;
+        }
+    } else if let Some(rpid) = config.resolved_person_id {
+        let got = entity_snapshot
+            .get("person_id")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(-1);
+        if got != rpid as i64 {
+            return false;
+        }
+    }
+
     // Check filters against entity snapshot
     if let Some(ref filters) = config.filters {
         for (key, expected_value) in filters {
             if key == "sender" {
-                // Sender matching: try person_name first (canonical), then
-                // sender_name (room display name, already suffix-stripped).
-                // Both use case-insensitive exact match.
+                // Skip the name filter if we already matched by resolved
+                // identity — the name is kept on the rule only for display
+                // (showing the user which contact the rule targets). Old
+                // rules without resolved_* fall through to the legacy
+                // case-insensitive name match below.
+                if has_resolved_sender {
+                    continue;
+                }
+                // Legacy path: case-insensitive exact match on person_name
+                // (canonical) or sender_name (room display name). Kept for
+                // rules saved before the combobox resolved the identity.
                 let expected_lower = expected_value.trim().to_lowercase();
                 let person_name = entity_snapshot
                     .get("person_name")

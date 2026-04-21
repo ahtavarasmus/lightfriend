@@ -325,7 +325,18 @@ async fn main() {
         match std::env::var("WHATSAPP_BRIDGE_DATABASE_URL") {
             Ok(url) => {
                 let manager = diesel::r2d2::ConnectionManager::<diesel::PgConnection>::new(url);
-                match diesel::r2d2::Pool::builder().max_size(5).build(manager) {
+                // max_size=20: this pool is read-heavy from the rule-builder
+                // typeahead (each keystroke fetches contacts). The old
+                // max_size=5 limit combined with repositories that panic via
+                // `.expect()` on pool.get() meant a few concurrent requests
+                // could exhaust the pool and crash the request. 20 is a
+                // modest cushion — each connection is ~10MB RSS so this is
+                // ~200MB worst case, well within the enclave's 8GB budget.
+                match diesel::r2d2::Pool::builder()
+                    .max_size(20)
+                    .connection_timeout(std::time::Duration::from_secs(3))
+                    .build(manager)
+                {
                     Ok(pool) => {
                         tracing::info!("WhatsApp bridge repository configured");
                         Some(Arc::new(backend::WhatsAppBridgeRepository::new(pool)))
@@ -458,6 +469,7 @@ async fn main() {
         digest_cooldowns: DashMap::new(),
         activity_feed_tx: tokio::sync::broadcast::channel(64).0,
         pending_purges: backend::services::data_purge::new_registry(),
+        rule_builder_contact_cache: Arc::new(DashMap::new()),
     });
     // SMS server route - validates signature using user lookup
     let twilio_sms_routes = Router::new()
@@ -1126,6 +1138,10 @@ async fn main() {
         .route(
             "/api/dashboard/senders",
             get(dashboard_handlers::get_senders),
+        )
+        .route(
+            "/api/dashboard/contacts",
+            get(dashboard_handlers::get_contacts),
         )
         .route(
             "/api/dashboard/rule-sources",

@@ -166,6 +166,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         digest_cooldowns: dashmap::DashMap::new(),
         activity_feed_tx: tokio::sync::broadcast::channel(64).0,
         pending_purges: crate::services::data_purge::new_registry(),
+        rule_builder_contact_cache: Arc::new(DashMap::new()),
         blog_store: Arc::new(
             crate::blog::content::BlogStore::load("/nonexistent")
                 .unwrap_or_else(|_| crate::blog::content::BlogStore::empty()),

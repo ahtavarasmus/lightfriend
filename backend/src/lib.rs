@@ -291,6 +291,21 @@ pub struct AppState {
     /// frontend poll `/api/profile/purge-data/status/:purge_id` for live
     /// step-by-step progress while the purge runs.
     pub pending_purges: services::data_purge::PurgeRegistry,
+    /// Per-user contact index cache for the rule builder's autocomplete.
+    /// `/api/dashboard/contacts` builds this once (from 4 sources: ontology
+    /// persons, distinct message senders, WhatsApp bridge DB contacts,
+    /// Signal/Telegram Matrix rooms) and caches for 60s so repeat opens of
+    /// the rule builder (or concurrent tabs) are instant. The frontend
+    /// filters client-side on each keystroke — no per-keystroke network.
+    pub rule_builder_contact_cache: Arc<
+        DashMap<
+            i32,
+            (
+                std::time::Instant,
+                Vec<handlers::dashboard_handlers::Contact>,
+            ),
+        >,
+    >,
 }
 
 impl AppState {

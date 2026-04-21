@@ -919,6 +919,20 @@ pub struct SenderListQuery {
 /// GET /api/dashboard/senders
 /// Returns known senders for rule builder autocomplete.
 /// Combines: persons (with their channels) + distinct senders from ont_messages.
+///
+/// Freeze-resistance notes:
+/// - Sync Diesel calls (`get_persons_with_channels`, `get_distinct_senders`)
+///   run under `spawn_blocking` so they can't stall tokio worker threads.
+///   Each repository method uses `pool.get().expect(...)` which panics on
+///   pool exhaustion — a panic in `spawn_blocking` surfaces as an Err and
+///   we degrade to an empty Vec, rather than taking the whole request down.
+/// - The Matrix bridge-room search phase is wrapped in a 2.5s overall
+///   deadline. Individual per-service timeout lowered from 8s → 2s to
+///   match. If we can't enumerate bridge rooms fast enough, we return
+///   whatever we have from the DB sources — the user still sees
+///   autocomplete, just without fresh bridge-room contacts. They can
+///   always type the full name; the send-path's fuzzy match still
+///   resolves correctly.
 pub async fn get_senders(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -942,11 +956,21 @@ pub async fn get_senders(
         query_len
     );
 
-    // 1. Persons with channels (highest priority)
-    let persons = state
-        .ontology_repository
-        .get_persons_with_channels(user_id, 500, 0)
-        .unwrap_or_default();
+    // 1. Persons with channels (highest priority).
+    // Off-runtime: this is a sync Diesel call (3 queries joined in-app).
+    // Running it directly under axum ties up a tokio worker thread, which
+    // on a 16-thread runtime starves the executor under concurrent
+    // typeahead requests. `.unwrap_or_default()` on both the JoinError and
+    // the query error gives us graceful degradation if the pool is tight.
+    let persons = {
+        let repo = state.ontology_repository.clone();
+        tokio::task::spawn_blocking(move || {
+            repo.get_persons_with_channels(user_id, 500, 0)
+                .unwrap_or_default()
+        })
+        .await
+        .unwrap_or_default()
+    };
 
     for person in &persons {
         let display = person.display_name().to_string();
@@ -990,11 +1014,14 @@ pub async fn get_senders(
         }
     }
 
-    // 2. Distinct senders from ont_messages (chat rooms not yet assigned to persons)
-    let senders = state
-        .ontology_repository
-        .get_distinct_senders(user_id)
-        .unwrap_or_default();
+    // 2. Distinct senders from ont_messages (chat rooms not yet assigned to persons).
+    // Same spawn_blocking treatment as step 1 for the same reasons.
+    let senders = {
+        let repo = state.ontology_repository.clone();
+        tokio::task::spawn_blocking(move || repo.get_distinct_senders(user_id).unwrap_or_default())
+            .await
+            .unwrap_or_default()
+    };
 
     for (sender_name, platform, count) in &senders {
         if search_lower
@@ -1065,6 +1092,18 @@ pub async fn get_senders(
     // scanning every room when the dropdown first opens; large Matrix accounts
     // can otherwise block UI. WhatsApp intentionally uses only the bridge DB in
     // this endpoint during the prod coverage test.
+    //
+    // Two nested deadlines keep this from freezing the dropdown:
+    //   - Per-service timeout: 2s (was 8s). Signal and Telegram run in parallel
+    //     via join_all, so the two together are still bounded by the longer
+    //     of the two, not the sum.
+    //   - Outer wall-clock deadline: 2.5s on the whole bridge phase. If
+    //     join_all hasn't resolved by then (e.g. Matrix client is locked by
+    //     a concurrent sync, per-service timers fire slowly, etc.) we skip
+    //     ahead and return what we already have from the DB sources.
+    // The autocomplete stays responsive; worst case the user doesn't see a
+    // never-before-messaged Signal/TG contact and has to type the full
+    // name, which the send-path's fuzzy match still resolves.
     let services = ["signal", "telegram"];
     if let Some(search_term) = search.as_ref().filter(|q| q.chars().count() >= 2) {
         let searches = services.iter().map(|service| {
@@ -1073,7 +1112,7 @@ pub async fn get_senders(
             let search_term = search_term.clone();
             async move {
                 let result = tokio::time::timeout(
-                    Duration::from_secs(8),
+                    Duration::from_secs(2),
                     crate::utils::bridge::search_bridge_rooms_by_name(
                         &service,
                         &state,
@@ -1086,7 +1125,23 @@ pub async fn get_senders(
             }
         });
 
-        for (service, result) in join_all(searches).await {
+        let bridge_results = match tokio::time::timeout(
+            Duration::from_millis(2500),
+            join_all(searches),
+        )
+        .await
+        {
+            Ok(v) => v,
+            Err(_) => {
+                tracing::warn!(
+                    "get_senders: user {} bridge phase hit 2.5s wall-clock deadline, returning partial results",
+                    user_id
+                );
+                Vec::new()
+            }
+        };
+
+        for (service, result) in bridge_results {
             match result {
                 Ok(Ok(rooms)) => {
                     tracing::info!(
@@ -1153,6 +1208,290 @@ pub async fn get_senders(
     );
 
     Ok(Json(options))
+}
+
+// -----------------------------------------------------------------------
+// Contact index (new rule builder autocomplete — fetch-once, client-side filter)
+// -----------------------------------------------------------------------
+
+/// One row in the rule-builder's contact dropdown. Richer than SenderOption
+/// because the frontend now stores the full picked contact (not just the
+/// display string) on the rule, so trigger matching can use `room_id` or
+/// `person_id` instead of fuzzy-comparing the free-text name.
+///
+/// Why this differs from SenderOption:
+/// - `id`: stable unique key the frontend uses for dedup and selection
+///   tracking. Format is `<source>:<platform>:<identifier>` so two entries
+///   with the same display name never collide.
+/// - `room_id`: the Matrix room the trigger should fire on. When present,
+///   the rule engine matches `entity.room_id == room_id` — deterministic,
+///   no fuzzy.
+/// - `person_id`: the ontology person when this entry represents a merged
+///   person (possibly across multiple channels). Used when the user picks
+///   a person-level entry rather than a channel-specific one.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Contact {
+    pub id: String,
+    pub display_name: String,
+    pub subtitle: Option<String>,
+    pub platform: Option<String>,
+    pub room_id: Option<String>,
+    pub person_id: Option<i32>,
+    #[serde(default)]
+    pub is_group: bool,
+    pub source: String,
+}
+
+/// GET /api/dashboard/contacts
+/// Returns the full contact index for the rule builder's autocomplete.
+///
+/// Design:
+/// - Unlike the older `/senders?q=...` endpoint, this takes no query param.
+///   The frontend fetches ONCE when the rule builder modal opens and
+///   filters locally (WASM) on every keystroke. That removes the
+///   per-keystroke network round-trip entirely — autocomplete is
+///   sub-millisecond after initial load.
+/// - Cached per-user in `state.rule_builder_contact_cache` with a 60s
+///   TTL so repeat opens (or concurrent tabs) reuse the same index.
+/// - Graceful degradation: DB sources (persons, distinct senders,
+///   WhatsApp bridge DB) always return. Matrix bridge-room search
+///   (Signal/Telegram) is best-effort behind a 2.5s wall-clock deadline;
+///   if it doesn't resolve, we still return the DB-sourced contacts.
+pub async fn get_contacts(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<Vec<Contact>>, (StatusCode, Json<serde_json::Value>)> {
+    let user_id = auth_user.user_id;
+
+    // Cache hit path.
+    if let Some(entry) = state.rule_builder_contact_cache.get(&user_id) {
+        let (at, cached) = entry.value();
+        if at.elapsed() < Duration::from_secs(60) {
+            tracing::debug!(
+                "get_contacts: user {} cache hit ({} contacts, age {}s)",
+                user_id,
+                cached.len(),
+                at.elapsed().as_secs()
+            );
+            return Ok(Json(cached.clone()));
+        }
+    }
+
+    let mut contacts: Vec<Contact> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let push =
+        |contacts: &mut Vec<Contact>, seen: &mut std::collections::HashSet<String>, c: Contact| {
+            if seen.insert(c.id.clone()) {
+                contacts.push(c);
+            }
+        };
+
+    // 1. Persons + their channels. spawn_blocking keeps sync Diesel off the runtime.
+    let persons = {
+        let repo = state.ontology_repository.clone();
+        tokio::task::spawn_blocking(move || {
+            repo.get_persons_with_channels(user_id, 2000, 0)
+                .unwrap_or_default()
+        })
+        .await
+        .unwrap_or_default()
+    };
+
+    for person in &persons {
+        let display = person.display_name().to_string();
+
+        // Person-level entry (matches any of their channels).
+        push(
+            &mut contacts,
+            &mut seen,
+            Contact {
+                id: format!("person:{}", person.person.id),
+                display_name: display.clone(),
+                subtitle: if person.channels.is_empty() {
+                    None
+                } else {
+                    Some(format!("Person · {} channel(s)", person.channels.len()))
+                },
+                platform: None,
+                room_id: None,
+                person_id: Some(person.person.id),
+                is_group: false,
+                source: "person".to_string(),
+            },
+        );
+
+        // Per-channel entries (so user can pick a specific platform).
+        for ch in &person.channels {
+            let handle = ch.handle.as_deref().unwrap_or("");
+            let room = ch.room_id.clone();
+            push(
+                &mut contacts,
+                &mut seen,
+                Contact {
+                    id: format!("channel:{}:{}", person.person.id, ch.platform),
+                    display_name: display.clone(),
+                    subtitle: Some(if handle.is_empty() {
+                        ch.platform.clone()
+                    } else {
+                        format!("{} · {}", ch.platform, handle)
+                    }),
+                    platform: Some(ch.platform.clone()),
+                    room_id: room,
+                    person_id: Some(person.person.id),
+                    is_group: false,
+                    source: "person".to_string(),
+                },
+            );
+        }
+    }
+
+    // 2. Distinct senders from ont_messages (chats not yet merged into persons).
+    let senders = {
+        let repo = state.ontology_repository.clone();
+        tokio::task::spawn_blocking(move || repo.get_distinct_senders(user_id).unwrap_or_default())
+            .await
+            .unwrap_or_default()
+    };
+
+    for (sender_name, platform, count) in &senders {
+        push(
+            &mut contacts,
+            &mut seen,
+            Contact {
+                id: format!("chat:{}:{}", platform, sender_name.to_lowercase()),
+                display_name: sender_name.clone(),
+                subtitle: Some(format!("{} · {} msg", platform, count)),
+                platform: Some(platform.clone()),
+                room_id: None,
+                person_id: None,
+                is_group: false,
+                source: "chat".to_string(),
+            },
+        );
+    }
+
+    // 3. WhatsApp bridge DB contacts (phonebook entries, including never-messaged).
+    if state.whatsapp_bridge_repository.is_some() {
+        let bridge_contacts =
+            crate::utils::bridge_contacts::get_whatsapp_contacts(&state, user_id).await;
+        for c in &bridge_contacts {
+            let sub = match (&c.phone, c.is_phone_contact) {
+                (Some(p), true) => Some(format!("WhatsApp · {} · in phonebook", p)),
+                (Some(p), false) => Some(format!("WhatsApp · {}", p)),
+                (None, _) => Some("WhatsApp".to_string()),
+            };
+            push(
+                &mut contacts,
+                &mut seen,
+                Contact {
+                    id: format!("wa_contact:{}", c.jid),
+                    display_name: c.name.clone(),
+                    subtitle: sub,
+                    platform: Some("whatsapp".to_string()),
+                    room_id: None,
+                    person_id: None,
+                    is_group: false,
+                    source: "wa_contact".to_string(),
+                },
+            );
+        }
+    }
+
+    // 4. Signal / Telegram bridge rooms (Matrix enumeration, best-effort).
+    // Wrapped in a 2.5s wall-clock deadline so a slow/unresponsive Matrix
+    // client can't hang the endpoint. DB sources above already cover the
+    // common case — bridge rooms add never-messaged contacts for those
+    // two platforms only.
+    let services = ["signal", "telegram"];
+    let searches = services.iter().map(|service| {
+        let state = state.clone();
+        let service = service.to_string();
+        async move {
+            let result = tokio::time::timeout(
+                Duration::from_secs(2),
+                crate::utils::bridge::search_bridge_rooms_by_name(&service, &state, user_id, ""),
+            )
+            .await;
+            (service, result)
+        }
+    });
+
+    let bridge_results =
+        match tokio::time::timeout(Duration::from_millis(2500), join_all(searches)).await {
+            Ok(v) => v,
+            Err(_) => {
+                tracing::warn!(
+                    "get_contacts: user {} bridge phase hit 2.5s deadline, skipping",
+                    user_id
+                );
+                Vec::new()
+            }
+        };
+
+    for (service, result) in bridge_results {
+        if let Ok(Ok(rooms)) = result {
+            for room in rooms {
+                let display = crate::utils::bridge::remove_bridge_suffix(&room.display_name);
+                let sub = Some(if room.is_group {
+                    format!("{} · group", service)
+                } else {
+                    service.clone()
+                });
+                push(
+                    &mut contacts,
+                    &mut seen,
+                    Contact {
+                        id: format!("bridge_room:{}", room.room_id),
+                        display_name: display,
+                        subtitle: sub,
+                        platform: Some(service.clone()),
+                        room_id: Some(room.room_id),
+                        person_id: None,
+                        is_group: room.is_group,
+                        source: if room.is_group {
+                            "bridge_group"
+                        } else {
+                            "bridge_room"
+                        }
+                        .to_string(),
+                    },
+                );
+            }
+        }
+    }
+
+    // Sort: non-group chats with messages first, then bridge-only entries,
+    // stable by display name within a bucket. Frontend filters locally so
+    // this ordering only affects the "zero-query" default view.
+    contacts.sort_by(|a, b| {
+        let bucket = |c: &Contact| -> u8 {
+            match c.source.as_str() {
+                "person" => 0,
+                "chat" => 1,
+                "wa_contact" => 2,
+                "bridge_room" | "bridge_group" => 3,
+                _ => 4,
+            }
+        };
+        bucket(a).cmp(&bucket(b)).then(
+            a.display_name
+                .to_lowercase()
+                .cmp(&b.display_name.to_lowercase()),
+        )
+    });
+
+    tracing::info!(
+        "get_contacts: user {} built index with {} contacts",
+        user_id,
+        contacts.len()
+    );
+
+    // Store in cache.
+    state
+        .rule_builder_contact_cache
+        .insert(user_id, (std::time::Instant::now(), contacts.clone()));
+
+    Ok(Json(contacts))
 }
 
 /// POST /api/events/{id}/dismiss
