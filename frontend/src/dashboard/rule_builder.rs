@@ -1346,6 +1346,13 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
     // tracks its own loading flag or search results Vec — the shared
     // `all_contacts` index drives the list, filtered client-side.
     let tc_chat_search_open = use_state(|| false);
+    // Tracks whether the user picked a row from the dropdown (as opposed
+    // to just typing free text). Required for the strict-combobox guard
+    // because `tc_chat_room_id` can legitimately be None for sendable
+    // contacts: send_chat_message starts cold DMs via handle when no
+    // portal room exists yet, so filtering by room_id.is_some() would
+    // hide valid targets. Cleared on typing and platform change.
+    let tc_selected_chat_contact = use_state(|| None::<Contact>);
     let tc_message = use_state(|| String::new());
     let tc_email_to = use_state(|| String::new());
     let tc_email_subject = use_state(|| String::new());
@@ -1416,6 +1423,71 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                 (*all_contacts).clone(),
                 (*event_filter_value).clone(),
                 (*event_filter_key).clone(),
+            ),
+        );
+    }
+
+    // Auto-resolve for the THEN-block chat picker. When editing an
+    // existing rule we hydrate `tc_chat_name` / `tc_chat_room_id` /
+    // `tc_platform` from the saved config, but `tc_selected_chat_contact`
+    // (which drives the strict-combobox guard) is fresh. This effect
+    // re-populates it against `all_contacts` so the rule can save
+    // without forcing the user to re-pick a row they never touched.
+    //
+    // Match priority:
+    //   1. Exact room_id match (strongest — unambiguous Matrix room)
+    //   2. Exact display_name + platform match (handles ont_messages
+    //      senders and person-channels that lack a stored room_id)
+    {
+        let all_contacts = all_contacts.clone();
+        let tc_chat_name = tc_chat_name.clone();
+        let tc_chat_room_id = tc_chat_room_id.clone();
+        let tc_platform = tc_platform.clone();
+        let tc_selected_chat_contact = tc_selected_chat_contact.clone();
+        let action_mode_val = (*action_mode).clone();
+        let tool_name_val = (*tool_name).clone();
+        use_effect_with_deps(
+            move |(contacts, chat_name, platform, room_id)| {
+                let applicable = matches!(action_mode_val, ActionMode::ToolCall)
+                    && tool_name_val == "send_chat_message"
+                    && !chat_name.is_empty()
+                    && tc_selected_chat_contact.is_none();
+                if applicable {
+                    let plat = platform.clone();
+                    let name_lower = chat_name.to_lowercase();
+                    let rid_opt: &Option<String> = room_id;
+                    let mut best: Option<Contact> = None;
+                    // Pass 1: exact room_id match
+                    if let Some(rid) = rid_opt.as_ref() {
+                        for c in contacts.iter() {
+                            if c.room_id.as_deref() == Some(rid.as_str()) {
+                                best = Some(c.clone());
+                                break;
+                            }
+                        }
+                    }
+                    // Pass 2: display_name + platform match
+                    if best.is_none() {
+                        for c in contacts.iter() {
+                            if c.platform.as_deref() == Some(plat.as_str())
+                                && c.display_name.to_lowercase() == name_lower
+                            {
+                                best = Some(c.clone());
+                                break;
+                            }
+                        }
+                    }
+                    if let Some(c) = best {
+                        tc_selected_chat_contact.set(Some(c));
+                    }
+                }
+                || ()
+            },
+            (
+                (*all_contacts).clone(),
+                (*tc_chat_name).clone(),
+                (*tc_platform).clone(),
+                (*tc_chat_room_id).clone(),
             ),
         );
     }
@@ -1570,6 +1642,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
         let tc_platform = tc_platform.clone();
         let tc_chat_name = tc_chat_name.clone();
         let tc_chat_room_id = tc_chat_room_id.clone();
+        let tc_selected_chat_contact_init = tc_selected_chat_contact.clone();
         let tc_message = tc_message.clone();
         let tc_email_to = tc_email_to.clone();
         let tc_email_subject = tc_email_subject.clone();
@@ -1589,6 +1662,9 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
         use_effect_with_deps(
             move |editing: &Option<RuleData>| {
                 user_touched_form.set(false);
+                // Clear any stale pick from a previous rule so the
+                // auto-resolve effect starts with a clean slate.
+                tc_selected_chat_contact_init.set(None);
                 if let Some(rule) = editing {
                     name.set(rule.name.clone());
                     expanded_card.set(None); // all collapsed in view mode
@@ -1862,6 +1938,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                     tc_platform.set("whatsapp".to_string());
                     tc_chat_name.set(String::new());
                     tc_chat_room_id.set(None);
+                    tc_selected_chat_contact_init.set(None);
                     tc_message.set(String::new());
                     tc_email_to.set(String::new());
                     tc_email_subject.set(String::new());
@@ -2589,15 +2666,16 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
         && *event_filter_key == "sender"
         && !(*event_filter_value).is_empty()
         && selected_contact.is_none();
-    // 2. THEN send_chat_message chat field (action-side). The user is
-    //    only subject to this check when the action is a tool-call and
-    //    the tool is send_chat_message. Having non-empty text without a
-    //    resolved room_id means they either typed freely or their earlier
-    //    pick got invalidated by a subsequent manual edit.
+    // 2. THEN send_chat_message chat field (action-side). Same contract:
+    //    non-empty text without a dropdown pick blocks save. Uses the
+    //    "did they pick a row" flag (tc_selected_chat_contact), NOT
+    //    room_id — the tool can cold-DM via handle for contacts that
+    //    don't have a stored portal room yet, so room_id=None is still
+    //    a valid sendable state as long as the pick was deliberate.
     let chat_pick_required = matches!(*action_mode, ActionMode::ToolCall)
         && *tool_name == "send_chat_message"
         && !(*tc_chat_name).is_empty()
-        && tc_chat_room_id.is_none();
+        && tc_selected_chat_contact.is_none();
     let rule_complete = rule_complete && !sender_pick_required && !chat_pick_required;
 
     if !props.is_open {
@@ -3747,6 +3825,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                         let s = tc_platform.clone();
                                                         let cn = tc_chat_name.clone();
                                                         let rid = tc_chat_room_id.clone();
+                                                        let pick = tc_selected_chat_contact.clone();
                                                         Callback::from(move |e: Event| {
                                                             if let Some(sel) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
                                                                 s.set(sel.value());
@@ -3755,6 +3834,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                                 // the new platform on next render.
                                                                 cn.set(String::new());
                                                                 rid.set(None);
+                                                                pick.set(None);
                                                             }
                                                         })
                                                     }}
@@ -3773,20 +3853,18 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                             // bridge; the contacts index falls back to
                                             // historical senders from ont_messages).
                                             //
-                                            // Only rows with a concrete room_id for the chosen
-                                            // platform are shown — those are the ones we can
-                                            // actually send to. Historical senders without a
-                                            // stored room_id are filtered out here so users
-                                            // don't pick a THEN chat the tool can't resolve.
+                                            // Filter is platform-scoped only. We do NOT require
+                                            // room_id — send_chat_message cold-DMs via handle
+                                            // when no portal room exists yet, so filtering by
+                                            // room_id would hide valid send targets (like
+                                            // WhatsApp contacts whose DM hasn't been opened
+                                            // yet). The send tool resolves room_id at fire time.
                                             { {
                                                 let plat = (*tc_platform).clone();
                                                 let q_trimmed = (*tc_chat_name).to_lowercase().trim().to_string();
                                                 let sendable: Vec<Contact> = all_contacts
                                                     .iter()
-                                                    .filter(|c| {
-                                                        c.platform.as_deref() == Some(plat.as_str())
-                                                            && c.room_id.is_some()
-                                                    })
+                                                    .filter(|c| c.platform.as_deref() == Some(plat.as_str()))
                                                     .cloned()
                                                     .collect();
                                                 let filtered: Vec<Contact> = if q_trimmed.is_empty() {
@@ -3818,6 +3896,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                             let cn = tc_chat_name.clone();
                                                             let rid = tc_chat_room_id.clone();
                                                             let so = tc_chat_search_open.clone();
+                                                            let pick = tc_selected_chat_contact.clone();
                                                             Callback::from(move |e: InputEvent| {
                                                                 if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
                                                                     cn.set(input.value());
@@ -3825,6 +3904,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                                     // prior pick — Save blocks
                                                                     // until the user re-picks.
                                                                     rid.set(None);
+                                                                    pick.set(None);
                                                                     so.set(true);
                                                                 }
                                                             })
@@ -3865,16 +3945,29 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                                                         }
                                                                     };
                                                                     let set_name = c.display_name.clone();
-                                                                    let set_rid = c.room_id.clone().unwrap_or_default();
+                                                                    // room_id may be None for
+                                                                    // cold-DM-capable contacts
+                                                                    // (person-channels with just
+                                                                    // a handle, historical
+                                                                    // ont_messages senders).
+                                                                    // Preserve that None — the
+                                                                    // save logic conditionally
+                                                                    // includes room_id and the
+                                                                    // send tool resolves at
+                                                                    // fire time.
+                                                                    let set_rid = c.room_id.clone();
+                                                                    let c_for_pick = c.clone();
                                                                     let cn = tc_chat_name.clone();
                                                                     let rid = tc_chat_room_id.clone();
+                                                                    let pick = tc_selected_chat_contact.clone();
                                                                     let so = tc_chat_search_open.clone();
                                                                     html! {
                                                                         <div class="rb-autocomplete-item"
                                                                             onmousedown={Callback::from(move |e: MouseEvent| {
                                                                                 e.prevent_default();
                                                                                 cn.set(set_name.clone());
-                                                                                rid.set(Some(set_rid.clone()));
+                                                                                rid.set(set_rid.clone());
+                                                                                pick.set(Some(c_for_pick.clone()));
                                                                                 so.set(false);
                                                                             })}
                                                                         >
