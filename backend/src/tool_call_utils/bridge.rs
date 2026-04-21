@@ -475,7 +475,7 @@ pub async fn handle_send_chat_message(
         StatusCode::OK,
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         Json(TwilioResponse {
-            message: "Message queued".to_string(),
+            message: queued_msg,
             created_item_id: None,
         }),
     ))
