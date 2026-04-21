@@ -303,6 +303,8 @@ pub struct ProcessSmsOptions {
     pub status_tx: Option<tokio::sync::mpsc::Sender<ChatStatus>>,
     /// Mock tool responses: when a tool name matches a key, return the value instead of executing.
     pub mock_tool_responses: Option<std::collections::HashMap<String, String>>,
+    /// Use fast non-reasoning model instead of the default reasoning model
+    pub fast_mode: bool,
 }
 
 impl ProcessSmsOptions {
@@ -318,16 +320,18 @@ impl ProcessSmsOptions {
             mock_llm_response: None,
             status_tx: None,
             mock_tool_responses: None,
+            fast_mode: false,
         }
     }
 
     /// Create options for web chat with status streaming
-    pub fn web_chat_streaming(tx: tokio::sync::mpsc::Sender<ChatStatus>) -> Self {
+    pub fn web_chat_streaming(tx: tokio::sync::mpsc::Sender<ChatStatus>, fast_mode: bool) -> Self {
         Self {
             skip_twilio_send: true,
             mock_llm_response: None,
             status_tx: Some(tx),
             mock_tool_responses: None,
+            fast_mode,
         }
     }
 
@@ -340,6 +344,7 @@ impl ProcessSmsOptions {
             mock_llm_response: Some(mock_response),
             status_tx: None,
             mock_tool_responses: None,
+            fast_mode: false,
         }
     }
 
@@ -808,7 +813,13 @@ pub async fn process_sms(
 
     // Build agent context (settings, timezone, contacts, LLM client, tools)
     let wants_history = !payload.body.to_lowercase().starts_with("forget");
+    let model_purpose = if options.fast_mode {
+        ModelPurpose::Voice
+    } else {
+        ModelPurpose::Default
+    };
     let mut builder = ContextBuilder::for_resolved_user(state, user.clone())
+        .with_model_purpose(model_purpose)
         .with_user_context()
         .with_tools()
         .with_mcp_tools();
@@ -1387,16 +1398,16 @@ pub async fn process_sms(
         // LLM ignored citations entirely, retry with a correction hint.
         // Up to 3 retries. If it still fails, silently drop the bad lines.
         if verified.dropped_line || verified.missing_citations {
-            for retry in 1..=3 {
+            for retry in 1..=5 {
                 let error_msg = if verified.missing_citations {
                     "id-verifier detected missing citations"
                 } else {
                     "id-verifier stripped hallucinated citation"
                 };
-                tracing::info!("{}, retry {}/3", error_msg, retry);
+                tracing::info!("{}, retry {}/5", error_msg, retry);
                 options.emit_status(ChatStatus::Retrying {
                     attempt: retry,
-                    max: 3,
+                    max: 5,
                     error: error_msg.to_string(),
                 });
 
@@ -1463,7 +1474,7 @@ pub async fn process_sms(
             // After retries, if still dropping lines or missing citations,
             // silently strip without the footer
             if verified.dropped_line || verified.missing_citations {
-                tracing::info!("Id verifier still flagging after 3 retries, silently dropping");
+                tracing::info!("Id verifier still flagging after 5 retries, silently dropping");
                 verified.user_facing = verified
                     .user_facing
                     .replace(crate::utils::id_verifier::STRIPPED_FOOTER, "")

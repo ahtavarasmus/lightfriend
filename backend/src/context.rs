@@ -131,6 +131,7 @@ pub struct ContextBuilder {
     want_mcp_tools: bool,
     want_history: bool,
     history_depth_override: Option<i32>,
+    model_purpose: ModelPurpose,
 }
 
 impl ContextBuilder {
@@ -145,6 +146,7 @@ impl ContextBuilder {
             want_mcp_tools: false,
             want_history: false,
             history_depth_override: None,
+            model_purpose: ModelPurpose::Default,
         }
     }
 
@@ -159,6 +161,7 @@ impl ContextBuilder {
             want_mcp_tools: false,
             want_history: false,
             history_depth_override: None,
+            model_purpose: ModelPurpose::Default,
         }
     }
 
@@ -174,7 +177,13 @@ impl ContextBuilder {
             want_mcp_tools: false,
             want_history: false,
             history_depth_override: None,
+            model_purpose: ModelPurpose::Default,
         }
+    }
+
+    pub fn with_model_purpose(mut self, purpose: ModelPurpose) -> Self {
+        self.model_purpose = purpose;
+        self
     }
 
     /// Fetch user settings, info, timezone, contacts.
@@ -245,7 +254,7 @@ impl ContextBuilder {
         let model = self
             .state
             .ai_config
-            .model(provider, ModelPurpose::Default)
+            .model(provider, self.model_purpose)
             .to_string();
 
         let current_time_unix = std::time::SystemTime::now()

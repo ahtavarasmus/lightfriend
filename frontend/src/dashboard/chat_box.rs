@@ -211,6 +211,32 @@ const CHAT_STYLES: &str = r#"
     background: rgba(255, 255, 255, 0.2);
     color: rgba(255, 255, 255, 0.8);
 }
+.chat-loading-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 0.4rem;
+    font-size: 0.8rem;
+}
+.chat-loading-actions button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.15rem 0;
+    font-size: 0.8rem;
+}
+.chat-loading-actions .quick-btn {
+    color: #FFD54F;
+}
+.chat-loading-actions .quick-btn:hover {
+    text-decoration: underline;
+}
+.chat-loading-actions .stop-btn {
+    color: #999;
+}
+.chat-loading-actions .stop-btn:hover {
+    color: #ccc;
+    text-decoration: underline;
+}
 /* Task preview panel */
 .item-preview-panel {
     background: rgba(30, 144, 255, 0.1);
@@ -412,6 +438,8 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
     let chat_loading = use_state(|| false);
     let chat_status = use_state(|| "...".to_string()); // Status text shown during loading
     let chat_error = use_state(|| None::<String>);
+    let fast_mode = use_state(|| false);
+    let active_es: UseStateHandle<Option<web_sys::EventSource>> = use_state(|| None);
     let chat_input_ref = use_node_ref();
 
     // Image attachment state for web chat (paste from clipboard only)
@@ -552,6 +580,8 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
         let on_item_created = props.on_item_created.clone();
         let on_preview_close = props.on_preview_close.clone();
         let chat_input_ref = chat_input_ref.clone();
+        let fast_mode = fast_mode.clone();
+        let active_es = active_es.clone();
 
         Callback::from(move |_| {
             let message = (*chat_input).clone();
@@ -578,6 +608,8 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
             let on_item_cleared = on_item_cleared.clone();
             let on_item_created = on_item_created.clone();
             let chat_input_ref = chat_input_ref.clone();
+            let fast_mode = fast_mode.clone();
+            let active_es = active_es.clone();
 
             // Set user message and clear previous reply (only for regular chat, not item editing)
             let is_item_edit = focused_item.is_some();
@@ -658,10 +690,12 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             return;
                         }
                     } else {
+                        let fast_param = if *fast_mode { "&fast_mode=true" } else { "" };
                         format!(
-                            "{}/api/chat/web-stream?message={}",
+                            "{}/api/chat/web-stream?message={}{}",
                             crate::config::get_backend_url(),
-                            encoded_msg
+                            encoded_msg,
+                            fast_param
                         )
                     };
 
@@ -739,6 +773,8 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                     let on_item_created_msg = on_item_created.clone();
                     let chat_input_ref_msg = chat_input_ref_sse.clone();
                     let es_ref = es.clone();
+                    let active_es_msg = active_es.clone();
+                    let fast_mode_msg = fast_mode.clone();
 
                     let onmessage = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
                         if let Some(data_str) = event.data().as_string() {
@@ -827,6 +863,8 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                             let _ = input.focus();
                                         }
                                         es_ref.close();
+                                        active_es_msg.set(None);
+                                        fast_mode_msg.set(false);
                                     }
                                     "error" => {
                                         let msg = data["message"]
@@ -848,6 +886,8 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                             let _ = window.dispatch_event(&event);
                                         }
                                         es_ref.close();
+                                        active_es_msg.set(None);
+                                        fast_mode_msg.set(false);
                                     }
                                     _ => {}
                                 }
@@ -876,6 +916,9 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
 
                     es.set_onerror(Some(onerror.as_ref().unchecked_ref()));
                     onerror.forget();
+
+                    // Store EventSource so the stop button can close it
+                    active_es.set(Some(es));
                 }); // end spawn_local for SSE path
             } else {
                 // POST path for image uploads
@@ -1181,6 +1224,54 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
         html! { <div class="chat-suggestions">{for chips}</div> }
     };
 
+    let quick_click = {
+        let fast_mode = fast_mode.clone();
+        let active_es = active_es.clone();
+        let chat_loading = chat_loading.clone();
+        let chat_input = chat_input.clone();
+        let chat_user_msg = chat_user_msg.clone();
+        let chat_bot_reply = chat_bot_reply.clone();
+        Callback::from(move |_: MouseEvent| {
+            if let Some(es) = (*active_es).as_ref() {
+                es.close();
+            }
+            active_es.set(None);
+            chat_loading.set(false);
+            chat_bot_reply.set(None);
+            fast_mode.set(true);
+            // Restore the user's message so the next render's on_send can read it
+            if let Some(msg) = (*chat_user_msg).clone() {
+                chat_input.set(msg);
+            }
+            // Click the send button after Yew re-renders with the new state
+            gloo_timers::callback::Timeout::new(100, move || {
+                use wasm_bindgen::JsCast;
+                if let Some(window) = web_sys::window() {
+                    if let Some(doc) = window.document() {
+                        if let Some(btn) = doc.query_selector(".chat-btn.send").ok().flatten() {
+                            if let Some(el) = btn.dyn_ref::<web_sys::HtmlElement>() {
+                                el.click();
+                            }
+                        }
+                    }
+                }
+            }).forget();
+        })
+    };
+    let stop_click = {
+        let active_es = active_es.clone();
+        let chat_loading = chat_loading.clone();
+        let chat_status = chat_status.clone();
+        Callback::from(move |_: MouseEvent| {
+            if let Some(es) = (*active_es).as_ref() {
+                es.close();
+            }
+            active_es.set(None);
+            chat_loading.set(false);
+            chat_status.set("Stopped".to_string());
+        })
+    };
+
     html! {
         <>
             <style>{CHAT_STYLES}</style>
@@ -1194,7 +1285,15 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             },
                             // Loading state in task edit mode (no user message shown)
                             (None, None, true) => html! {
-                                <div class="chat-msg assistant loading"><span class="chat-thinking-dot"></span>{&status_text}</div>
+                                <>
+                                    <div class="chat-msg assistant loading"><span class="chat-thinking-dot"></span>{&status_text}</div>
+                                    <div class="chat-loading-actions">
+                                        if !*fast_mode {
+                                            <button class="quick-btn" onclick={quick_click.clone()}><i class="fa-solid fa-bolt"></i>{" Quick response"}</button>
+                                        }
+                                        <button class="stop-btn" onclick={stop_click.clone()}>{"Stop"}</button>
+                                    </div>
+                                </>
                             },
                             // No messages, not loading - show suggestion chips
                             (None, None, false) => suggestion_chips.clone(),
@@ -1203,6 +1302,12 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                 <>
                                     <div class="chat-msg user">{user_msg}</div>
                                     <div class="chat-msg assistant loading"><span class="chat-thinking-dot"></span>{&status_text}</div>
+                                    <div class="chat-loading-actions">
+                                        if !*fast_mode {
+                                            <button class="quick-btn" onclick={quick_click.clone()}><i class="fa-solid fa-bolt"></i>{" Quick response"}</button>
+                                        }
+                                        <button class="stop-btn" onclick={stop_click.clone()}>{"Stop"}</button>
+                                    </div>
                                 </>
                             },
                             // Regular chat: both messages
@@ -1218,7 +1323,15 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             },
                             // Task edit mode: loading with existing reply
                             (None, Some(_), true) => html! {
-                                <div class="chat-msg assistant loading"><span class="chat-thinking-dot"></span>{&status_text}</div>
+                                <>
+                                    <div class="chat-msg assistant loading"><span class="chat-thinking-dot"></span>{&status_text}</div>
+                                    <div class="chat-loading-actions">
+                                        if !*fast_mode {
+                                            <button class="quick-btn" onclick={quick_click.clone()}><i class="fa-solid fa-bolt"></i>{" Quick response"}</button>
+                                        }
+                                        <button class="stop-btn" onclick={stop_click.clone()}>{"Stop"}</button>
+                                    </div>
+                                </>
                             },
                         }
                     }

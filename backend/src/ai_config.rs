@@ -130,7 +130,7 @@ impl AiConfig {
             .and_then(|m| m.as_str())
             .unwrap_or_default();
 
-        if model == "gemma4-31b" {
+        if model == "gemma4-31b" || model == "kimi-k2-6" {
             if let Some(obj) = body.as_object_mut() {
                 obj.insert("enable_thinking".into(), serde_json::json!(false));
             }

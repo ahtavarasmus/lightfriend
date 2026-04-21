@@ -78,6 +78,7 @@ async fn send_message(state: &Arc<AppState>, user: &User, body: &str) -> TwilioR
         mock_llm_response: None,
         status_tx: None,
         mock_tool_responses: None,
+        fast_mode: false,
     };
 
     let (_status, _headers, axum::Json(response)) =
@@ -111,6 +112,7 @@ async fn send_message_with_mocks(
         mock_llm_response: None,
         status_tx: None,
         mock_tool_responses: Some(mocks),
+        fast_mode: false,
     };
 
     let (_status, _headers, axum::Json(response)) =
