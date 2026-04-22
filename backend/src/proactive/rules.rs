@@ -1456,14 +1456,38 @@ pub async fn emit_ontology_change(
                     return;
                 }
 
-                if let Err(e) = crate::proactive::system_behaviors::run_urgency_classification(
-                    &state_urgency,
-                    user_id,
-                    &snap_urgency,
-                )
-                .await
-                {
-                    error!("Urgency classification failed for user {}: {}", user_id, e);
+                // Retry up to 3 times on transient failure (LLM timeout, network error).
+                // Without retry, a single flaky call leaves the message with NULL urgency
+                // forever, making it invisible to urgency-based digest queries.
+                let mut last_err: Option<String> = None;
+                for attempt in 1..=3 {
+                    match crate::proactive::system_behaviors::run_urgency_classification(
+                        &state_urgency,
+                        user_id,
+                        &snap_urgency,
+                    )
+                    .await
+                    {
+                        Ok(()) => {
+                            last_err = None;
+                            break;
+                        }
+                        Err(e) => {
+                            last_err = Some(e.to_string());
+                            if attempt < 3 {
+                                tokio::time::sleep(tokio::time::Duration::from_secs(
+                                    30 * attempt as u64,
+                                ))
+                                .await;
+                            }
+                        }
+                    }
+                }
+                if let Some(e) = last_err {
+                    error!(
+                        "Urgency classification failed for user {} after 3 attempts: {}",
+                        user_id, e
+                    );
                 }
             });
         }

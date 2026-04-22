@@ -597,9 +597,9 @@ fn render_entry(
                     if entry.entry_type == "message" || entry.entry_type == "screened" {
                         if let Some(ref u) = entry.urgency {
                             <span style={match u.as_str() {
-                                "high" => "color: #ff6b6b; font-size: 0.7rem; margin-left: 0.4rem; font-weight: 600;",
-                                "medium" => "color: #ffd93d; font-size: 0.7rem; margin-left: 0.4rem; font-weight: 600;",
-                                _ => "color: #666; font-size: 0.7rem; margin-left: 0.4rem; font-weight: 600;",
+                                "high" => "color: #ff6b6b; font-size: 0.65rem; margin-left: 0.4rem; padding: 1px 5px; border-radius: 3px; background: rgba(255,107,107,0.15); font-weight: 600;",
+                                "medium" => "color: #ffd93d; font-size: 0.65rem; margin-left: 0.4rem; padding: 1px 5px; border-radius: 3px; background: rgba(255,217,61,0.12); font-weight: 600;",
+                                _ => "color: #aaa; font-size: 0.65rem; margin-left: 0.4rem; padding: 1px 5px; border-radius: 3px; background: rgba(170,170,170,0.12); font-weight: 600;",
                             }}>{u}</span>
                         }
                     }

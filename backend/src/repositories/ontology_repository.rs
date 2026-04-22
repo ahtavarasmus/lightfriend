@@ -1722,6 +1722,16 @@ impl OntologyRepository {
             .load::<OntMessage>(&mut conn)
     }
 
+    /// Fetch messages by a list of IDs. Used by the digest builder to re-read
+    /// messages after lazy classification to pick up their newly-set urgency
+    /// and summary.
+    pub fn get_messages_by_ids(&self, ids: &[i64]) -> Result<Vec<OntMessage>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_messages::table
+            .filter(ont_messages::id.eq_any(ids))
+            .load::<OntMessage>(&mut conn)
+    }
+
     /// Safety net for messages where urgency classification failed or was
     /// skipped (token budget, LLM error, seen-check). These have NULL urgency
     /// and are invisible to `get_pending_messages_by_urgency` because SQL IN

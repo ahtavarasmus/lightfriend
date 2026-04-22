@@ -376,8 +376,10 @@ pub async fn run_urgency_classification(
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
-                "Concise summary starting with sender name, e.g. 'Mom: ...' (under 160 chars, no URLs). \
-                 Used for SMS notification if urgent, digest teaser otherwise."
+                "Summary starting with sender name, e.g. 'Mom: ...'. No URLs. \
+                 Length depends on urgency: \
+                 - high: up to 160 chars. This goes directly as an SMS to a user who muted all other notifications — include enough context to act (who, what, when, what's the ask). \
+                 - medium / low: 30-60 chars max. This becomes a teaser in a bundled digest alongside many others — just a slight hint of what's happened. The user can reply to ask for full context."
                     .to_string(),
             ),
             ..Default::default()

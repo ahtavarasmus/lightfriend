@@ -1142,9 +1142,15 @@ pub fn category_score(category: Option<&str>) -> i32 {
     }
 }
 
-/// Per-message teaser cap. We show just enough to grab interest — the user can
-/// reply to ask for the full message via SMS.
-const DIGEST_TEASER_CAP: usize = 50;
+/// Per-message teaser cap for the FYI section (medium / low urgency). Matches
+/// the LLM's 30-60 char summary target for non-urgent messages; the cap mainly
+/// guards the unclassified-fallback case where we show raw content.
+const DIGEST_TEASER_CAP: usize = 100;
+
+/// Per-message teaser cap for Critical / Important sections (high urgency when
+/// pushes are off, so the digest is the only channel). Matches the LLM's 160 char
+/// summary target for high-urgency messages — they need enough context to act.
+const DIGEST_HIGH_SIGNAL_TEASER_CAP: usize = 160;
 
 /// How many high-signal items to show individually before collapsing to counts.
 const HIGH_SIGNAL_CAP: usize = 3;
@@ -1202,9 +1208,24 @@ pub fn strip_sender_prefix(summary: &str, sender: &str) -> String {
 /// summary, and aggressively truncates since this is an interest hook, not
 /// the full content.
 fn format_digest_message(msg: &crate::models::ontology_models::OntMessage) -> String {
-    let raw_summary = msg.summary.as_deref().unwrap_or(&msg.content);
+    format_digest_message_with_cap(msg, DIGEST_TEASER_CAP)
+}
+
+/// Tighter cap for NULL-urgency / NULL-summary messages where we fall back
+/// to raw content — raw message bodies can be paragraphs long, keep the
+/// teaser terse so it doesn't dominate the digest.
+const DIGEST_UNCLASSIFIED_FALLBACK_CAP: usize = 60;
+
+fn format_digest_message_with_cap(
+    msg: &crate::models::ontology_models::OntMessage,
+    cap: usize,
+) -> String {
+    let (raw_summary, effective_cap) = match msg.summary.as_deref() {
+        Some(s) => (s, cap),
+        None => (msg.content.as_str(), DIGEST_UNCLASSIFIED_FALLBACK_CAP),
+    };
     let cleaned = strip_sender_prefix(raw_summary, &msg.sender_name);
-    let short: String = cleaned.chars().take(DIGEST_TEASER_CAP).collect();
+    let short: String = cleaned.chars().take(effective_cap).collect();
     let trimmed = short.trim();
     if trimmed.is_empty() {
         format!("- {}", msg.sender_name)
@@ -1227,7 +1248,7 @@ fn render_high_signal_section(
     let shown: Vec<String> = messages
         .iter()
         .take(HIGH_SIGNAL_CAP)
-        .map(format_digest_message)
+        .map(|m| format_digest_message_with_cap(m, DIGEST_HIGH_SIGNAL_TEASER_CAP))
         .collect();
     let mut block = format!("{}:\n{}", title, shown.join("\n"));
     if total > HIGH_SIGNAL_CAP {
@@ -1330,12 +1351,62 @@ pub async fn build_digest_for_user(
     // -------- Section 5: Unclassified (NULL urgency) safety net --------
     // Messages where classification failed or was skipped (token budget,
     // LLM error, seen-check) have NULL urgency and are invisible to all
-    // urgency-based queries. Merge them into FYI so they still appear.
-    let mut unclassified_msgs = state
+    // urgency-based queries. Try to classify them now (lazy) so they get
+    // a proper summary; whatever remains NULL falls through with content
+    // as the teaser fallback.
+    let unclassified_msgs = state
         .ontology_repository
         .get_pending_unclassified_messages(user_id, since_window, 30)
         .unwrap_or_default();
-    fyi_msgs.append(&mut unclassified_msgs);
+
+    // Cap to 5 to bound digest build time (each classification = 1 LLM call).
+    const LAZY_CLASSIFY_LIMIT: usize = 5;
+    let classify_ids: Vec<i64> = unclassified_msgs
+        .iter()
+        .take(LAZY_CLASSIFY_LIMIT)
+        .map(|m| m.id)
+        .collect();
+
+    for msg in unclassified_msgs.iter().take(LAZY_CLASSIFY_LIMIT) {
+        let snapshot = serde_json::json!({
+            "message_id": msg.id,
+            "platform": msg.platform,
+            "sender_name": msg.sender_name,
+            "sender_key": msg.sender_key,
+            "content": msg.content,
+            "room_id": msg.room_id,
+            "person_id": msg.person_id,
+            "is_group": false,
+        });
+        let _ = crate::proactive::system_behaviors::run_urgency_classification(
+            state, user_id, &snapshot,
+        )
+        .await;
+    }
+
+    // Re-fetch the attempted messages; any that got classified now have
+    // proper urgency + summary. Route them to the right section; those
+    // still NULL stay in the unclassified-fallback bucket.
+    let mut still_unclassified: Vec<crate::models::ontology_models::OntMessage> = unclassified_msgs
+        .into_iter()
+        .skip(LAZY_CLASSIFY_LIMIT)
+        .collect();
+
+    if !classify_ids.is_empty() {
+        let refreshed = state
+            .ontology_repository
+            .get_messages_by_ids(&classify_ids)
+            .unwrap_or_default();
+        for m in refreshed {
+            match m.urgency.as_deref() {
+                Some("critical") => critical_msgs.push(m),
+                Some("high") => important_msgs.push(m),
+                Some("medium") | Some("low") => fyi_msgs.push(m),
+                _ => still_unclassified.push(m),
+            }
+        }
+    }
+    fyi_msgs.append(&mut still_unclassified);
 
     // -------- Filter: drop messages the user has already seen --------
     // seen_at is populated by read receipt events from bridges and user replies.
