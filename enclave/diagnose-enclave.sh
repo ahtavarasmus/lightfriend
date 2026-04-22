@@ -2,18 +2,52 @@
 # Diagnostic script - runs inside the enclave when host connects to VSOCK port 9008.
 # Dumps all supervisor service status, bridge health, and recent logs.
 #
-# PRIVACY: This script is open-source and auditable on GitHub.
-# It NEVER logs message content, user data, phone numbers, or credentials.
-# Bridge logs are filtered to remove any message body/content fields.
-# Only operational status (connected/disconnected, errors, sync state) is captured.
+# PRIVACY MODEL (this script is open-source and auditable on GitHub):
+#   Allowed in output: the account owner's own identifiers — their phone number,
+#   email, Lightfriend user_id, Matrix appuser id, Twilio SIDs, and operational
+#   metadata (connection state, error messages, timing, RSS, etc.).
+#   Never in output: message content, contact names, contact phone numbers,
+#   contact WhatsApp/Signal/Telegram IDs, group chat identifiers, OAuth
+#   bearer tokens, API keys, webhook secrets, JWTs.
+# Bridge logs (mautrix-*) get aggressive sanitization because they're full of
+# contact data; backend logs get light sanitization (secrets only) because
+# operator-visible user identifiers are expected there.
 
-# Helper: strip potential message content from bridge logs.
-# Keeps error lines, status changes, connection events. Removes message bodies.
+# Bridge log sanitizer: strips message content AND contact identifiers.
+# Applied to mautrix-whatsapp, mautrix-signal, mautrix-telegram logs.
 sanitize_bridge_log() {
     sed -E \
         -e 's/(body|message|text|content|caption)="[^"]*"/\1="[REDACTED]"/gi' \
         -e 's/(body|message|text|content|caption): .*/\1: [REDACTED]/gi' \
-        -e 's/("body"|"message"|"text"|"content"|"caption"): ?"[^"]*"/\1: "[REDACTED]"/gi'
+        -e 's/("body"|"message"|"text"|"content"|"caption"): ?"[^"]*"/\1: "[REDACTED]"/gi' \
+        -e 's/"name":"[^"]*"/"name":"[CONTACT]"/g' \
+        -e 's/"pushname":"[^"]*"/"pushname":"[CONTACT]"/g' \
+        -e 's/"first_name":"[^"]*"/"first_name":"[CONTACT]"/g' \
+        -e 's/"last_name":"[^"]*"/"last_name":"[CONTACT]"/g' \
+        -e 's/sender_name=[^ ]+/sender_name=[CONTACT]/g' \
+        -e 's/[0-9]{5,20}@s\.whatsapp\.net/[WA_JID]/g' \
+        -e 's/[0-9]{5,20}@lid/[WA_LID]/g' \
+        -e 's/[0-9]{5,20}@g\.us/[WA_GROUP]/g' \
+        -e 's/lid-[0-9]+/[WA_LID]/g' \
+        -e 's/"number":"\+?[0-9]+"/"number":"[CONTACT_PHONE]"/g' \
+        -e 's/"sender_login":"[^"]*"/"sender_login":"[CONTACT]"/g' \
+        -e 's/destination_service_id=[a-f0-9-]{36}/destination_service_id=[SIG_UUID]/g' \
+        -e 's/source_id=[0-9]+/source_id=[CONTACT]/g' \
+        -e 's/(telethon\.)[0-9]+(\.)/\1[TG_UID]\2/g'
+}
+
+# Backend log sanitizer: the operator is expected to see user identifiers
+# (phone, email, user_id), so only strip credentials. Applied to the backend
+# (lightfriend) stdout and stderr tails, including rotated files.
+sanitize_backend_log() {
+    sed -E \
+        -e 's/([Bb]earer )[A-Za-z0-9._~+/=-]{8,}/\1[REDACTED]/g' \
+        -e 's/([Aa]uthorization:[[:space:]]*)[^[:space:],}"]+/\1[REDACTED]/g' \
+        -e 's/("(access_token|refresh_token|id_token|api_key|apiKey|client_secret|secret|password|passwd|webhook_secret|bearer|auth|token)"[[:space:]]*:[[:space:]]*)"[^"]*"/\1"[REDACTED]"/gi' \
+        -e 's/(^|[^A-Za-z0-9_])(access_token|refresh_token|id_token|api_key|apiKey|client_secret|password|passwd|webhook_secret|bearer)=([^&"[:space:]]+)/\1\2=[REDACTED]/gi' \
+        -e 's/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/[JWT]/g' \
+        -e 's/sk-[A-Za-z0-9]{20,}/[API_KEY]/g' \
+        -e 's/xoxb-[A-Za-z0-9-]{20,}/[API_KEY]/g'
 }
 
 echo "=== Enclave Diagnostics $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
@@ -23,11 +57,54 @@ echo ""
 # Health checks can hang if services are unresponsive, so we dump
 # the actual application logs upfront to always capture them.
 echo "--- backend stderr (last 80 lines) ---"
-tail -80 /var/log/supervisor/lightfriend-err.log 2>/dev/null || echo "  empty"
+tail -80 /var/log/supervisor/lightfriend-err.log 2>/dev/null | sanitize_backend_log || echo "  empty"
 echo ""
 
 echo "--- backend stdout (last 100 lines, excluding IDLE noise) ---"
-tail -500 /var/log/supervisor/lightfriend.log 2>/dev/null | grep -v "IDLE established\|Spawned IDLE task\|Job creator created\|Uninited" | tail -100 || echo "  empty"
+tail -500 /var/log/supervisor/lightfriend.log 2>/dev/null | grep -v "IDLE established\|Spawned IDLE task\|Job creator created\|Uninited" | tail -100 | sanitize_backend_log || echo "  empty"
+echo ""
+
+# ── Crash context: previous-life supervisor logs + kernel events ──
+# The current lightfriend.log/.err starts fresh after each supervisor restart.
+# Panic/backtrace that caused the restart lives in the rotated .log.1/.err.log.1.
+# Also surface supervisord's own record of restart events and any kernel OOM kills.
+echo "--- backend PREVIOUS stderr (lightfriend-err.log.1 last 120 lines) ---"
+tail -120 /var/log/supervisor/lightfriend-err.log.1 2>/dev/null | sanitize_backend_log || echo "  no .1 (never rotated)"
+echo ""
+
+echo "--- backend PREVIOUS stdout tail (lightfriend.log.1 last 150 lines, IDLE stripped) ---"
+tail -500 /var/log/supervisor/lightfriend.log.1 2>/dev/null \
+    | grep -v "IDLE established\|Spawned IDLE task\|Job creator created\|Uninited" \
+    | tail -150 | sanitize_backend_log || echo "  no .1 (never rotated)"
+echo ""
+
+echo "--- backend two-lives-ago stdout tail (lightfriend.log.2 last 60 lines) ---"
+tail -60 /var/log/supervisor/lightfriend.log.2 2>/dev/null | sanitize_backend_log || echo "  no .2"
+echo ""
+
+echo "--- crash signatures across all backend log rotations ---"
+# Match Rust panics, backtraces, fatal tokio runtime events, signal-based kills.
+# Grep both stdout and stderr rotations. Show file:line for correlation.
+grep -HnE "panicked at|thread '[^']*' panicked|stack backtrace:|fatal runtime error|process didn't exit successfully|SIGKILL|SIGSEGV|SIGABRT|SIGBUS|abort\(\)|Killed\s*$|\(core dumped\)|thread panic|UNWIND" \
+    /var/log/supervisor/lightfriend.log /var/log/supervisor/lightfriend.log.1 /var/log/supervisor/lightfriend.log.2 \
+    /var/log/supervisor/lightfriend-err.log /var/log/supervisor/lightfriend-err.log.1 /var/log/supervisor/lightfriend-err.log.2 \
+    2>/dev/null | tail -80 | sanitize_backend_log || echo "  none found"
+echo ""
+
+echo "--- supervisord restart events for lightfriend (last 50) ---"
+grep -E "lightfriend.*(entered|exited|terminated|killed|spawned|fatal|backoff|ABNORMAL)" \
+    /var/log/supervisor/supervisord.log /var/log/supervisor/supervisord.log.1 /var/log/supervisor/supervisord.log.2 \
+    2>/dev/null | tail -50 || echo "  none"
+echo ""
+
+echo "--- kernel ring buffer tail (dmesg last 120 lines) ---"
+dmesg -T --ctime 2>/dev/null | tail -120 || dmesg 2>/dev/null | tail -120 || echo "  dmesg not readable"
+echo ""
+
+echo "--- kernel OOM / killed-process events ---"
+dmesg -T --ctime 2>/dev/null | grep -iE "out of memory|oom[_-]kill|killed process|invoked oom-killer|memory cgroup out of memory" | tail -40 \
+    || dmesg 2>/dev/null | grep -iE "out of memory|oom[_-]kill|killed process|invoked oom-killer" | tail -40 \
+    || echo "  no OOM events or dmesg not readable"
 echo ""
 
 echo "--- cloudflared stderr (last 40 lines) ---"
