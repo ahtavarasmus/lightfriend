@@ -592,7 +592,18 @@ fn render_entry(
                 <i class={entry.icon.clone()}></i>
             </div>
             <div class="feed-body">
-                <div class="feed-title">{&entry.title}</div>
+                <div class="feed-title">
+                    {&entry.title}
+                    if entry.entry_type == "message" || entry.entry_type == "screened" {
+                        if let Some(ref u) = entry.urgency {
+                            <span style={match u.as_str() {
+                                "high" => "color: #ff6b6b; font-size: 0.7rem; margin-left: 0.4rem; font-weight: 600;",
+                                "medium" => "color: #ffd93d; font-size: 0.7rem; margin-left: 0.4rem; font-weight: 600;",
+                                _ => "color: #666; font-size: 0.7rem; margin-left: 0.4rem; font-weight: 600;",
+                            }}>{u}</span>
+                        }
+                    }
+                </div>
                 if !is_expanded {
                     if let Some(ref detail) = entry.detail {
                         <div class="feed-detail">{detail}</div>

@@ -99,7 +99,7 @@ pub async fn send_notification(
     notification: &str,
     content_type: String,
     first_message: Option<String>,
-) {
+) -> bool {
     send_notification_with_context(
         state,
         user_id,
@@ -108,7 +108,7 @@ pub async fn send_notification(
         first_message,
         None,
     )
-    .await;
+    .await
 }
 
 pub async fn send_notification_with_context(
@@ -118,7 +118,7 @@ pub async fn send_notification_with_context(
     content_type: String,
     first_message: Option<String>,
     _meta: Option<NotificationMeta>,
-) {
+) -> bool {
     let current_time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -127,11 +127,11 @@ pub async fn send_notification_with_context(
         Ok(Some(user)) => user,
         Ok(None) => {
             tracing::error!("User {} not found for notification", user_id);
-            return;
+            return false;
         }
         Err(e) => {
             tracing::error!("Failed to get user {}: {}", user_id, e);
-            return;
+            return false;
         }
     };
 
@@ -139,7 +139,7 @@ pub async fn send_notification_with_context(
         Ok(settings) => settings,
         Err(e) => {
             tracing::error!("Failed to get settings for user {}: {}", user_id, e);
-            return;
+            return false;
         }
     };
 
@@ -147,7 +147,7 @@ pub async fn send_notification_with_context(
         Ok(info) => info,
         Err(e) => {
             tracing::error!("Failed to get info for user {}: {}", user_id, e);
-            return;
+            return false;
         }
     };
 
@@ -163,6 +163,8 @@ pub async fn send_notification_with_context(
         user_settings.notification_type.as_deref().unwrap_or("sms")
     };
 
+    let mut sms_delivered = false;
+
     match notification_type {
         "call" => {
             if let Err(e) =
@@ -173,7 +175,7 @@ pub async fn send_notification_with_context(
                     user.id,
                     e
                 );
-                return;
+                return false;
             }
 
             if crate::utils::usage::check_user_credits(state, &user, "noti_call", None)
@@ -217,6 +219,7 @@ pub async fn send_notification_with_context(
                 .await
             {
                 Ok(response_sid) => {
+                    sms_delivered = true;
                     tracing::info!("SMS sent for call notification user {}", user_id);
                     let entry = crate::pg_models::NewPgMessageHistory {
                         user_id: user.id,
@@ -256,7 +259,7 @@ pub async fn send_notification_with_context(
                 crate::utils::usage::check_user_credits(state, &user, "noti_msg", None).await
             {
                 tracing::warn!("User {} has insufficient credits: {}", user.id, e);
-                return;
+                return false;
             }
             match state
                 .twilio_message_service
@@ -264,6 +267,7 @@ pub async fn send_notification_with_context(
                 .await
             {
                 Ok(response_sid) => {
+                    sms_delivered = true;
                     tracing::info!("Sent notification to user {}", user_id);
                     let entry = crate::pg_models::NewPgMessageHistory {
                         user_id: user.id,
@@ -316,4 +320,5 @@ pub async fn send_notification_with_context(
 
     // Notify activity feed SSE subscribers after any notification attempt
     state.notify_activity_feed(user_id);
+    sms_delivered
 }

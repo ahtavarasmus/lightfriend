@@ -1109,6 +1109,26 @@ pub fn admin_dashboard() -> Html {
                                                     <div class="stat-value">{stats.total_tokens}</div>
                                                     <div class="stat-label">{"Total Tokens"}</div>
                                                 </div>
+                                                <div class="stat-card">
+                                                    <div class="stat-value">{
+                                                        if !stats.daily_stats.is_empty() {
+                                                            format!("{}", stats.total_tokens / stats.daily_stats.len() as i64)
+                                                        } else {
+                                                            "-".to_string()
+                                                        }
+                                                    }</div>
+                                                    <div class="stat-label">{"Avg Tokens/Day"}</div>
+                                                </div>
+                                                <div class="stat-card">
+                                                    <div class="stat-value">{
+                                                        if !stats.daily_stats.is_empty() && !stats.per_user.is_empty() {
+                                                            format!("{}", stats.total_tokens / stats.daily_stats.len() as i64 / stats.per_user.len() as i64)
+                                                        } else {
+                                                            "-".to_string()
+                                                        }
+                                                    }</div>
+                                                    <div class="stat-label">{"Avg Tokens/User/Day"}</div>
+                                                </div>
                                             </div>
 
                                             <h3>{"By Callsite"}</h3>
@@ -2738,12 +2758,46 @@ pub fn admin_dashboard() -> Html {
                         font-weight: 600;
                     }
 
+                    .stats-grid {
+                        display: flex;
+                        gap: 1rem;
+                        margin-bottom: 1rem;
+                        flex-wrap: wrap;
+                    }
+
+                    .stat-value {
+                        display: block;
+                        font-size: 1.5rem;
+                        font-weight: bold;
+                        color: white;
+                    }
+
                     .stats-table {
                         width: 100%;
                         border-collapse: collapse;
                         background: rgba(0, 0, 0, 0.3);
                         border-radius: 8px;
                         overflow: hidden;
+                    }
+
+                    .stats-table th {
+                        color: #7EB2FF;
+                        font-weight: 600;
+                        padding: 0.5rem;
+                        text-align: left;
+                        border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+                        background: rgba(0, 0, 0, 0.2);
+                    }
+
+                    .stats-table td {
+                        color: #ddd;
+                        padding: 0.5rem;
+                        text-align: left;
+                        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+                    }
+
+                    .stats-table tr:hover {
+                        background: rgba(255, 255, 255, 0.05);
                     }
 
                     .stats-header {

@@ -1634,7 +1634,7 @@ pub async fn start_climate_notify(
                     "Your {} is ready to drive! Cabin temp is {:.1}°C.",
                     &vehicle_name, temp
                 );
-                crate::proactive::utils::send_notification(
+                let _ = crate::proactive::utils::send_notification(
                     &state_clone,
                     user_id,
                     &msg,
@@ -1651,7 +1651,7 @@ pub async fn start_climate_notify(
                     "Your {} should be ready by now (climate running 20+ min).",
                     &vehicle_name
                 );
-                crate::proactive::utils::send_notification(
+                let _ = crate::proactive::utils::send_notification(
                     &state_clone,
                     user_id,
                     &msg,
@@ -1665,7 +1665,7 @@ pub async fn start_climate_notify(
             }
             Err(error_msg) => {
                 if error_msg.contains("turned off") {
-                    crate::proactive::utils::send_notification(
+                    let _ = crate::proactive::utils::send_notification(
                         &state_clone,
                         user_id,
                         "Tesla climate was turned off before reaching target temperature.",
@@ -1837,7 +1837,7 @@ pub async fn start_charging_notify(
                         "Your {} has finished charging! Battery is now at {}%.",
                         &vehicle_name, battery_level
                     );
-                    crate::proactive::utils::send_notification(
+                    let _ = crate::proactive::utils::send_notification(
                         &state_clone,
                         user_id,
                         &msg,

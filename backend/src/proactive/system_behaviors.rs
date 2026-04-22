@@ -19,9 +19,9 @@ const COOLDOWN_SECS: i32 = 3600; // 1 hour per room
 const NOTIFICATION_CONTEXT_WINDOW_SECS: i32 = 3 * 3600;
 
 /// Daily token budget per user for proactive AI processing (system_important, rules, etc.)
-/// 5M tokens/month target (~$7.50/user/month at $1.50/M input tokens).
-/// 5M / 30 days = ~166K tokens/day. Normal users use 5-20K/day.
-const DAILY_TOKEN_BUDGET_PER_USER: i64 = 166_000;
+/// 10M tokens/month target (~$15/user/month at $1.50/M input tokens).
+/// 10M / 30 days = ~332K tokens/day. Normal users use 5-20K/day.
+const DAILY_TOKEN_BUDGET_PER_USER: i64 = 332_000;
 
 /// Strip URLs and trailing connector phrases from a notification string.
 /// SMS chars are expensive and tracking links balloon length, so we drop
@@ -493,8 +493,9 @@ pub async fn run_urgency_classification(
                         "system_important".to_string()
                     };
 
-                    send_notification(state, user_id, notification_message, content_type, None)
-                        .await;
+                    let _ =
+                        send_notification(state, user_id, notification_message, content_type, None)
+                            .await;
                 }
             } else if sender_name != "You" {
                 let _ = state.user_repository.log_usage(LogUsageParams {
@@ -1132,7 +1133,7 @@ pub async fn run_commitment_detection(
                                                 "Tracked item updated: \"{}\"\nDeadline changed based on new message from {}.",
                                                 old.description, sender_name
                                             );
-                                            send_notification(
+                                            let _ = send_notification(
                                                 state,
                                                 user_id,
                                                 &change_msg,

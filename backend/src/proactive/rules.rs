@@ -1049,7 +1049,7 @@ async fn execute_flow_action(
                 .and_then(|v| v.as_str())
                 .unwrap_or("sms");
             let content_type = format!("rule_{}", method);
-            send_notification(state, rule.user_id, message, content_type, None).await;
+            let _ = send_notification(state, rule.user_id, message, content_type, None).await;
             info!(
                 "Rule {} ({}): sent {} notification",
                 rule.id, rule.name, method

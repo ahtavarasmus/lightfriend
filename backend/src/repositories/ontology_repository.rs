@@ -1722,6 +1722,29 @@ impl OntologyRepository {
             .load::<OntMessage>(&mut conn)
     }
 
+    /// Safety net for messages where urgency classification failed or was
+    /// skipped (token budget, LLM error, seen-check). These have NULL urgency
+    /// and are invisible to `get_pending_messages_by_urgency` because SQL IN
+    /// does not match NULL.
+    pub fn get_pending_unclassified_messages(
+        &self,
+        user_id: i32,
+        since: i32,
+        limit: i64,
+    ) -> Result<Vec<OntMessage>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::urgency.is_null())
+            .filter(ont_messages::created_at.ge(since))
+            .filter(ont_messages::digest_delivered_at.is_null())
+            .filter(ont_messages::seen_at.is_null())
+            .filter(ont_messages::sender_name.ne("You"))
+            .order(ont_messages::created_at.desc())
+            .limit(limit)
+            .load::<OntMessage>(&mut conn)
+    }
+
     /// Tracked events with `due_at` falling inside the user's local current day.
     /// Caller passes the day boundaries as UTC unix timestamps (compute from
     /// `now + tz_offset_secs`). Excludes done/dismissed events.

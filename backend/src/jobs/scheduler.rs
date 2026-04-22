@@ -902,7 +902,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 .unwrap_or_default();
             for event in &due_events {
                 let message = format!("Event reminder: {}", event.description);
-                crate::proactive::utils::send_notification(
+                let _ = crate::proactive::utils::send_notification(
                     &state,
                     event.user_id,
                     &message,
@@ -1327,6 +1327,16 @@ pub async fn build_digest_for_user(
         .get_pending_messages_by_urgency(user_id, &["medium", "low"], since_window, 30)
         .unwrap_or_default();
 
+    // -------- Section 5: Unclassified (NULL urgency) safety net --------
+    // Messages where classification failed or was skipped (token budget,
+    // LLM error, seen-check) have NULL urgency and are invisible to all
+    // urgency-based queries. Merge them into FYI so they still appear.
+    let mut unclassified_msgs = state
+        .ontology_repository
+        .get_pending_unclassified_messages(user_id, since_window, 30)
+        .unwrap_or_default();
+    fyi_msgs.append(&mut unclassified_msgs);
+
     // -------- Filter: drop messages the user has already seen --------
     // seen_at is populated by read receipt events from bridges and user replies.
     let drop_seen = |msgs: &mut Vec<crate::models::ontology_models::OntMessage>| {
@@ -1650,7 +1660,7 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
             digest_text
         );
 
-        crate::proactive::utils::send_notification(
+        let delivered = crate::proactive::utils::send_notification(
             state,
             user_id,
             &digest_text,
@@ -1659,32 +1669,40 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
         )
         .await;
 
-        // Record cooldown and mark as delivered
-        state.digest_cooldowns.insert(user_id, now);
-        if !message_ids.is_empty() {
-            if let Err(e) = state
-                .ontology_repository
-                .mark_digest_delivered(&message_ids, now)
-            {
-                error!(
-                    "Failed to mark digest messages as delivered for user {}: {}",
-                    user_id, e
-                );
+        if delivered {
+            // Record cooldown and mark as delivered only on successful SMS
+            state.digest_cooldowns.insert(user_id, now);
+            if !message_ids.is_empty() {
+                if let Err(e) = state
+                    .ontology_repository
+                    .mark_digest_delivered(&message_ids, now)
+                {
+                    error!(
+                        "Failed to mark digest messages as delivered for user {}: {}",
+                        user_id, e
+                    );
+                }
             }
-        }
 
-        debug!(
-            "Delivered digest to user {} (msgs={}, slot={:02}:{:02}, mode={})",
-            user_id,
-            message_ids.len(),
-            current_slot / 60,
-            current_slot % 60,
-            if settings.digest_time.is_some() {
-                "manual"
-            } else {
-                "auto"
-            }
-        );
+            debug!(
+                "Delivered digest to user {} (msgs={}, slot={:02}:{:02}, mode={})",
+                user_id,
+                message_ids.len(),
+                current_slot / 60,
+                current_slot % 60,
+                if settings.digest_time.is_some() {
+                    "manual"
+                } else {
+                    "auto"
+                }
+            );
+        } else {
+            tracing::warn!(
+                "Digest SMS failed for user {} ({} msgs); will retry next window",
+                user_id,
+                message_ids.len(),
+            );
+        }
     }
 }
 

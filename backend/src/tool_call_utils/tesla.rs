@@ -491,7 +491,7 @@ fn spawn_climate_monitoring(
                         "Your {} is ready to drive! Cabin temp is {:.1}°C.",
                         &vehicle_name, temp
                     );
-                    crate::proactive::utils::send_notification(
+                    let _ = crate::proactive::utils::send_notification(
                         &state_clone,
                         user_id,
                         &msg,
@@ -524,7 +524,7 @@ fn spawn_climate_monitoring(
                     );
                 } else {
                     let msg = format!("Your {} should be ready by now (climate running 20+ min). Please check if needed.", &vehicle_name);
-                    crate::proactive::utils::send_notification(
+                    let _ = crate::proactive::utils::send_notification(
                         &state_clone,
                         user_id,
                         &msg,
@@ -544,7 +544,7 @@ fn spawn_climate_monitoring(
                     user_id, error_msg
                 );
                 if is_stopped {
-                    crate::proactive::utils::send_notification(
+                    let _ = crate::proactive::utils::send_notification(
                         &state_clone,
                         user_id,
                         "Tesla climate was turned off before reaching target temperature.",
