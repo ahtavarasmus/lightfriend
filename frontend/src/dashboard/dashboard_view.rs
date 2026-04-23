@@ -1863,13 +1863,10 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                         <p>{"AI evaluates every incoming message and notifies you via SMS when something is time-sensitive or urgent. Routine messages are silently collected for your next digest."}</p>
                                         <h4>{"Urgency levels"}</h4>
                                         <ul>
-                                            <li><strong>{"Critical: "}</strong>{"immediate danger, medical emergency, security breach"}</li>
-                                            <li><strong>{"High: "}</strong>{"a 2-hour delay would cause real consequences - missed meeting, financial loss, time-sensitive decision"}</li>
-                                            <li><strong>{"Medium: "}</strong>{"important but can wait a few hours - friend asking to meet later, non-urgent work question"}</li>
-                                            <li><strong>{"Low: "}</strong>{"routine updates, casual conversation"}</li>
-                                            <li><strong>{"None: "}</strong>{"spam, automated messages"}</li>
+                                            <li><strong>{"Now: "}</strong>{"genuine emergency or time-critical situation where a delay of hours would cause irreversible harm - safety, health, locked out, stranded, critical deadline"}</li>
+                                            <li><strong>{"Later: "}</strong>{"everything else - important-but-not-urgent, routine, casual, or spam"}</li>
                                         </ul>
-                                        <p>{"You get notified only for critical or high urgency. The AI also considers sender relationship, messaging patterns, time of day, and cross-platform escalation (e.g., someone messaging you on both WhatsApp and Signal)."}</p>
+                                        <p>{"You get an immediate SMS only for \"now\" messages. Everything else is bundled into your next scheduled digest. The AI also considers sender relationship, messaging patterns, time of day, and cross-platform escalation (e.g., someone messaging you on both WhatsApp and Signal)."}</p>
                                         <p style="margin-top: 0.5rem; font-size: 0.85rem;">
                                             <a
                                                 href="https://github.com/ahtavarasmus/lightfriend/blob/master/backend/src/proactive/system_behaviors.rs#L249"
@@ -2044,7 +2041,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                         </ul>
                                         <h4>{"What's included"}</h4>
                                         <ul>
-                                            <li>{"Medium and low urgency messages from all connected platforms"}</li>
+                                            <li>{"\"Later\"-tier messages from all connected platforms (everything that didn't trigger an immediate SMS)"}</li>
                                             <li>{"Each message summarized with sender, platform, and key content"}</li>
                                             <li>{"Messages grouped by conversation for easy scanning"}</li>
                                         </ul>

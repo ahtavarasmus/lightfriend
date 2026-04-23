@@ -701,11 +701,10 @@ async fn full_digest_renders_all_sections() {
     );
     println!("message_ids included: {:?}", message_ids);
 
-    // Section ordering: header → Today → Critical → Important → FYI → New → Done
+    // Section ordering: header → Today → Important → FYI → New → Done
+    // (Critical and Important were collapsed into a single "Important" section
+    // when the urgency enum was reduced to now/later.)
     let today_pos = digest_text.find("Today:").expect("Today section missing");
-    let crit_pos = digest_text
-        .find("Critical:")
-        .expect("Critical section missing");
     let imp_pos = digest_text
         .find("Important:")
         .expect("Important section missing");
@@ -713,8 +712,7 @@ async fn full_digest_renders_all_sections() {
     let new_pos = digest_text.find("New:").expect("New section missing");
     let done_pos = digest_text.find("Done:").expect("Done section missing");
 
-    assert!(today_pos < crit_pos);
-    assert!(crit_pos < imp_pos);
+    assert!(today_pos < imp_pos);
     assert!(imp_pos < fyi_pos);
     assert!(fyi_pos < new_pos);
     assert!(new_pos < done_pos);
@@ -724,10 +722,12 @@ async fn full_digest_renders_all_sections() {
     assert!(digest_text.contains("Buy milk"));
     assert!(digest_text.contains("12:00") && digest_text.contains("15:00"));
 
-    // Critical message present (sender + teaser)
+    // Critical-tier message (legacy "critical" value, now bucketed into "now")
+    // present under the unified Important section
     assert!(digest_text.contains("- Mom:"));
 
-    // Important: both senders, sorted by category score (financial before work)
+    // High-tier messages (legacy "high" value) also under Important,
+    // sorted by category score (financial before work)
     assert!(digest_text.contains("- Bank:"));
     assert!(digest_text.contains("- Boss:"));
     let bank_pos = digest_text.find("- Bank:").unwrap();
@@ -920,18 +920,12 @@ async fn digest_stays_compact_on_busy_day() {
         digest_text
     );
 
-    // Critical caps at 3 with overflow indicator
-    assert!(digest_text.contains("Critical:"));
-    assert!(
-        digest_text.contains("+ 2 more"),
-        "5 crit → 3 shown + '+2 more'"
-    );
-
-    // Important caps at 3 with overflow indicator
+    // Critical + High legacy values both bucket into "now" → render under
+    // a single Important section, capped at 3 with overflow.
     assert!(digest_text.contains("Important:"));
     assert!(
-        digest_text.contains("+ 5 more"),
-        "8 imp → 3 shown + '+5 more'"
+        digest_text.contains("+ 10 more"),
+        "5 crit + 8 high = 13 → 3 shown + '+10 more'"
     );
 
     // FYI shows per-item summaries capped at 5

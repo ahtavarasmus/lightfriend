@@ -1078,7 +1078,22 @@ impl OntologyRepository {
             .load::<OntMessage>(&mut conn)
     }
 
-    /// Get recently high-classified messages from the same sender/platform.
+    /// Find the most recent non-"You" sender_name seen in a given room.
+    /// Used to probe signals for debug views when we only know a person + room,
+    /// not the exact sender_name the classifier saw.
+    pub fn find_primary_sender_name_in_room(&self, user_id: i32, room_id: &str) -> Option<String> {
+        let mut conn = self.pool.get().ok()?;
+        ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::room_id.eq(room_id))
+            .filter(ont_messages::sender_name.ne("You"))
+            .order(ont_messages::created_at.desc())
+            .select(ont_messages::sender_name)
+            .first::<String>(&mut conn)
+            .ok()
+    }
+
+    /// Get recently "now"-classified messages from the same sender/platform.
     ///
     /// This gives urgency classification durable context about alerts the user
     /// probably already received, even when similar emails/messages arrive in
@@ -1092,7 +1107,7 @@ impl OntologyRepository {
             .filter(ont_messages::user_id.eq(params.user_id))
             .filter(ont_messages::platform.eq(params.platform))
             .filter(ont_messages::sender_name.ne("You"))
-            .filter(ont_messages::urgency.eq("high"))
+            .filter(ont_messages::urgency.eq("now"))
             .filter(ont_messages::created_at.ge(params.since_ts))
             .into_boxed();
 
@@ -1689,7 +1704,7 @@ impl OntologyRepository {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         ont_messages::table
             .filter(ont_messages::user_id.eq(user_id))
-            .filter(ont_messages::urgency.eq_any(&["medium", "low"]))
+            .filter(ont_messages::urgency.eq("later"))
             .filter(ont_messages::digest_delivered_at.is_null())
             .filter(ont_messages::seen_at.is_null())
             .filter(ont_messages::sender_name.ne("You"))
@@ -1784,7 +1799,7 @@ impl OntologyRepository {
         Ok(())
     }
 
-    /// Mark medium-urgency messages in a room as digest-delivered (user replied, no need to remind).
+    /// Mark "later"-urgency messages in a room as digest-delivered (user replied, no need to remind).
     pub fn mark_room_digest_delivered(
         &self,
         user_id: i32,
@@ -1796,7 +1811,7 @@ impl OntologyRepository {
             ont_messages::table
                 .filter(ont_messages::user_id.eq(user_id))
                 .filter(ont_messages::room_id.eq(room_id))
-                .filter(ont_messages::urgency.eq("medium"))
+                .filter(ont_messages::urgency.eq("later"))
                 .filter(ont_messages::digest_delivered_at.is_null())
                 .filter(ont_messages::sender_name.ne("You")),
         )
@@ -1877,7 +1892,7 @@ impl OntologyRepository {
     pub fn get_users_with_pending_digests(&self) -> Result<Vec<i32>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         ont_messages::table
-            .filter(ont_messages::urgency.eq_any(&["critical", "high", "medium", "low"]))
+            .filter(ont_messages::urgency.eq_any(&["now", "later"]))
             .filter(ont_messages::digest_delivered_at.is_null())
             .filter(ont_messages::seen_at.is_null())
             .filter(ont_messages::sender_name.ne("You"))

@@ -1142,14 +1142,14 @@ pub fn category_score(category: Option<&str>) -> i32 {
     }
 }
 
-/// Per-message teaser cap for the FYI section (medium / low urgency). Matches
+/// Per-message teaser cap for the FYI section ("later" urgency). Matches
 /// the LLM's 30-60 char summary target for non-urgent messages; the cap mainly
 /// guards the unclassified-fallback case where we show raw content.
 const DIGEST_TEASER_CAP: usize = 100;
 
-/// Per-message teaser cap for Critical / Important sections (high urgency when
+/// Per-message teaser cap for the Important section ("now" urgency when
 /// pushes are off, so the digest is the only channel). Matches the LLM's 160 char
-/// summary target for high-urgency messages — they need enough context to act.
+/// summary target — these messages need enough context to act.
 const DIGEST_HIGH_SIGNAL_TEASER_CAP: usize = 160;
 
 /// How many high-signal items to show individually before collapsing to counts.
@@ -1310,45 +1310,46 @@ pub async fn build_digest_for_user(
         .get_events_due_on_local_day(user_id, local_day_start, local_day_end)
         .unwrap_or_default();
 
-    // -------- Section 2/3: Critical + Important --------
-    // Both are filtered out when the user has critical pushes ON, because in
-    // that case the system already sent an SMS/call for both critical AND high
-    // urgency messages — repeating them in the digest would be redundant.
-    let critical_disabled = settings
+    // -------- Section 2: Important ("now" urgency) --------
+    // Filtered out when the user has push notifications ON, because in that
+    // case the system already sent an SMS for these — repeating them in the
+    // digest would be redundant. When pushes are OFF, the digest is the only
+    // channel for "now"-urgency messages.
+    //
+    // The query also accepts legacy values ("critical", "high") so messages
+    // classified before the now/later cutover still flow through during the
+    // transition window.
+    let pushes_off = settings
         .critical_enabled
         .as_deref()
         .map(|v| v.eq_ignore_ascii_case("off"))
         .unwrap_or(false);
 
-    let mut critical_msgs = if critical_disabled {
+    let mut now_msgs = if pushes_off {
         state
             .ontology_repository
-            .get_pending_messages_by_urgency(user_id, &["critical"], since_window, 20)
+            .get_pending_messages_by_urgency(
+                user_id,
+                &["now", "high", "critical"],
+                since_window,
+                20,
+            )
             .unwrap_or_default()
     } else {
         Vec::new()
     };
 
-    let mut important_msgs = if critical_disabled {
-        state
-            .ontology_repository
-            .get_pending_messages_by_urgency(user_id, &["high"], since_window, 20)
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-
-    // -------- Section 4: FYI (medium + low urgency) --------
-    // We include "low" here too because otherwise users whose emails all get
-    // classified at the non-urgent end (which is most normal traffic: bills,
-    // newsletters, routine updates) would never see anything in a digest and
-    // think the feature is broken. Spam is still filtered by category below.
-    let mut fyi_msgs = state
+    // -------- Section 3: FYI ("later" urgency) --------
+    // Default destination for everything that's not an immediate-attention
+    // message. Spam is still filtered by category below.
+    //
+    // Accepts legacy values ("medium", "low") for the same transition reason.
+    let mut later_msgs = state
         .ontology_repository
-        .get_pending_messages_by_urgency(user_id, &["medium", "low"], since_window, 30)
+        .get_pending_messages_by_urgency(user_id, &["later", "medium", "low"], since_window, 30)
         .unwrap_or_default();
 
-    // -------- Section 5: Unclassified (NULL urgency) safety net --------
+    // -------- Section 4: Unclassified (NULL urgency) safety net --------
     // Messages where classification failed or was skipped (token budget,
     // LLM error, seen-check) have NULL urgency and are invisible to all
     // urgency-based queries. Try to classify them now (lazy) so they get
@@ -1398,32 +1399,31 @@ pub async fn build_digest_for_user(
             .get_messages_by_ids(&classify_ids)
             .unwrap_or_default();
         for m in refreshed {
+            // Accept legacy values (critical/high/medium/low) alongside now/later
+            // during the transition window.
             match m.urgency.as_deref() {
-                Some("critical") => critical_msgs.push(m),
-                Some("high") => important_msgs.push(m),
-                Some("medium") | Some("low") => fyi_msgs.push(m),
+                Some("now") | Some("high") | Some("critical") => now_msgs.push(m),
+                Some("later") | Some("medium") | Some("low") => later_msgs.push(m),
                 _ => still_unclassified.push(m),
             }
         }
     }
-    fyi_msgs.append(&mut still_unclassified);
+    later_msgs.append(&mut still_unclassified);
 
     // -------- Filter: drop messages the user has already seen --------
     // seen_at is populated by read receipt events from bridges and user replies.
     let drop_seen = |msgs: &mut Vec<crate::models::ontology_models::OntMessage>| {
         msgs.retain(|m| m.seen_at.is_none());
     };
-    drop_seen(&mut critical_msgs);
-    drop_seen(&mut important_msgs);
-    drop_seen(&mut fyi_msgs);
+    drop_seen(&mut now_msgs);
+    drop_seen(&mut later_msgs);
 
     // -------- Filter: drop spam --------
     let drop_spam = |msgs: &mut Vec<crate::models::ontology_models::OntMessage>| {
         msgs.retain(|m| m.category.as_deref() != Some("spam"));
     };
-    drop_spam(&mut critical_msgs);
-    drop_spam(&mut important_msgs);
-    drop_spam(&mut fyi_msgs);
+    drop_spam(&mut now_msgs);
+    drop_spam(&mut later_msgs);
 
     // -------- Filter: separate non-contact messages --------
     // Non-contact = person_id is None AND platform is not email.
@@ -1444,10 +1444,9 @@ pub async fn build_digest_for_user(
             *msgs = contact;
             non_contact
         };
-    let nc_critical = partition_contacts(&mut critical_msgs);
-    let nc_important = partition_contacts(&mut important_msgs);
-    let nc_fyi = partition_contacts(&mut fyi_msgs);
-    let non_contact_count = nc_critical.len() + nc_important.len() + nc_fyi.len();
+    let nc_now = partition_contacts(&mut now_msgs);
+    let nc_later = partition_contacts(&mut later_msgs);
+    let non_contact_count = nc_now.len() + nc_later.len();
 
     // -------- Sort each section by category score, then recency --------
     let sort_section = |msgs: &mut Vec<crate::models::ontology_models::OntMessage>| {
@@ -1459,9 +1458,8 @@ pub async fn build_digest_for_user(
                 .then_with(|| b.created_at.cmp(&a.created_at))
         });
     };
-    sort_section(&mut critical_msgs);
-    sort_section(&mut important_msgs);
-    sort_section(&mut fyi_msgs);
+    sort_section(&mut now_msgs);
+    sort_section(&mut later_msgs);
 
     // -------- Recently added / completed events --------
     let six_hours_ago = now - 6 * 3600;
@@ -1505,16 +1503,14 @@ pub async fn build_digest_for_user(
         digest_parts.push(today_line);
     }
 
-    // High-signal sections: per-item teasers
-    if let Some(block) = render_high_signal_section("Critical", &critical_msgs) {
-        digest_parts.push(block);
-    }
-    if let Some(block) = render_high_signal_section("Important", &important_msgs) {
+    // Important: per-item teasers for "now"-urgency messages that landed in
+    // the digest (only happens when the user has SMS pushes off).
+    if let Some(block) = render_high_signal_section("Important", &now_msgs) {
         digest_parts.push(block);
     }
 
-    // FYI: collapsed to a single inline sender list
-    if let Some(line) = render_fyi_inline(&fyi_msgs) {
+    // FYI: per-item summaries for "later"-urgency messages.
+    if let Some(line) = render_fyi_inline(&later_msgs) {
         digest_parts.push(line);
     }
 
@@ -1561,24 +1557,18 @@ pub async fn build_digest_for_user(
     // in the next digest). We mark the FULL list, not just the rendered top —
     // otherwise overflow items would loop.
     let mut message_ids: Vec<i64> = Vec::new();
-    for m in critical_msgs.iter() {
+    for m in now_msgs.iter() {
         message_ids.push(m.id);
     }
-    for m in important_msgs.iter() {
-        message_ids.push(m.id);
-    }
-    for m in fyi_msgs.iter() {
+    for m in later_msgs.iter() {
         message_ids.push(m.id);
     }
     // Non-contact messages must also be marked delivered to prevent
     // reappearing in the next digest cycle.
-    for m in nc_critical.iter() {
+    for m in nc_now.iter() {
         message_ids.push(m.id);
     }
-    for m in nc_important.iter() {
-        message_ids.push(m.id);
-    }
-    for m in nc_fyi.iter() {
+    for m in nc_later.iter() {
         message_ids.push(m.id);
     }
 
@@ -1587,8 +1577,7 @@ pub async fn build_digest_for_user(
     // timestamp inside the user's local day). Previously the header
     // said just "1 today" which users read as "1 new thing today" and
     // got confused about what was being counted.
-    let total_messages =
-        critical_msgs.len() + important_msgs.len() + fyi_msgs.len() + non_contact_count;
+    let total_messages = now_msgs.len() + later_msgs.len() + non_contact_count;
     let total_today = today_events.len();
     let header = match (total_messages, total_today) {
         (0, t) => format!("{} event{} today", t, if t == 1 { "" } else { "s" }),
@@ -1610,12 +1599,11 @@ pub async fn build_digest_for_user(
 /// and deliver a sectioned recap at the user's local digest window.
 async fn deliver_smart_digests(state: &Arc<AppState>) {
     // Iterate EVERY user with digest_enabled=true, not just users with
-    // pending high/medium messages. The old `get_users_with_pending_digests`
-    // gate silently dropped users whose emails all classified as
-    // urgency='low' or 'none' — they would never hit their scheduled
-    // digest time even though new emails were flowing in. The entry gate
-    // must be "is the user opted in", not "does the user have high-urgency
-    // traffic right now".
+    // pending messages. The old `get_users_with_pending_digests` gate
+    // silently dropped users whose traffic was all "later" tier — they
+    // would never hit their scheduled digest time even though new
+    // messages were flowing in. The entry gate must be "is the user
+    // opted in", not "does the user have urgent traffic right now".
     //
     // `build_digest_for_user` already returns `None` for a truly empty
     // digest, so this change doesn't produce noise for users with no

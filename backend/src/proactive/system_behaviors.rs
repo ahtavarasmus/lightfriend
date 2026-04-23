@@ -312,13 +312,13 @@ pub async fn run_urgency_classification(
         \"it was me\", \"on it\", \"handled\", or similar, treat same-sender follow-ups as already \
         acknowledged unless this is clearly a new situation.\n\
         \n\
-        Classify the urgency:\n\
-        - high: genuine emergency or time-critical situation where a delay of hours would cause \
-        irreversible harm (safety, health, locked out, stranded, critical deadline). A friend \
-        casually asking for help, making plans, or requesting a favor is NOT high even if they \
-        say \"today\" or \"tomorrow\" - that's medium at most.\n\
-        - medium: important but can wait hours\n\
-        - low: routine, casual, or spam",
+        Decide whether this needs the user's attention immediately, or can wait for the next scheduled digest:\n\
+        - now: genuine emergency or time-critical situation where a delay of hours would cause \
+        irreversible harm (safety, health, locked out, stranded, critical deadline). The user gets an \
+        immediate SMS. A friend casually asking for help, making plans, or requesting a favor is NOT \
+        \"now\" even if they say \"today\" or \"tomorrow\".\n\
+        - later: everything else — important-but-not-urgent, routine, casual, or spam. Bundled into \
+        the next scheduled digest.",
         now_formatted, signal_report
     );
 
@@ -344,12 +344,11 @@ pub async fn run_urgency_classification(
         "urgency".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Urgency level".to_string()),
-            enum_values: Some(vec![
-                "high".to_string(),
-                "medium".to_string(),
-                "low".to_string(),
-            ]),
+            description: Some(
+                "now = needs attention immediately (triggers SMS). later = can wait for the next digest."
+                    .to_string(),
+            ),
+            enum_values: Some(vec!["now".to_string(), "later".to_string()]),
             ..Default::default()
         }),
     );
@@ -378,8 +377,8 @@ pub async fn run_urgency_classification(
             description: Some(
                 "Summary starting with sender name, e.g. 'Mom: ...'. No URLs. \
                  Length depends on urgency: \
-                 - high: up to 160 chars. This goes directly as an SMS to a user who muted all other notifications — include enough context to act (who, what, when, what's the ask). \
-                 - medium / low: 30-60 chars max. This becomes a teaser in a bundled digest alongside many others — just a slight hint of what's happened. The user can reply to ask for full context."
+                 - now: up to 160 chars. This goes directly as an SMS to a user who muted all other notifications — include enough context to act (who, what, when, what's the ask). \
+                 - later: 30-60 chars max. This becomes a teaser in a bundled digest alongside many others — just a slight hint of what's happened. The user can reply to ask for full context."
                     .to_string(),
             ),
             ..Default::default()
@@ -446,15 +445,15 @@ pub async fn run_urgency_classification(
             let urgency = parsed
                 .get("urgency")
                 .and_then(|v| v.as_str())
-                .unwrap_or("low");
+                .unwrap_or("later");
             let category = parsed
                 .get("category")
                 .and_then(|v| v.as_str())
                 .unwrap_or("social");
             let summary = parsed.get("summary").and_then(|v| v.as_str()).unwrap_or("");
 
-            // high = notify, unless it's our own outgoing message
-            let should_notify = urgency == "high" && sender_name != "You";
+            // now = notify, unless it's our own outgoing message
+            let should_notify = urgency == "now" && sender_name != "You";
 
             info!(
                 "Urgency classification for user {}: urgency={}, category={}, notify={}",
@@ -606,7 +605,7 @@ fn build_recent_notification_context(
                 format!(
                     "- {} ago: urgency={}, category={}, summary={}",
                     ago,
-                    m.urgency.as_deref().unwrap_or("high"),
+                    m.urgency.as_deref().unwrap_or("now"),
                     m.category.as_deref().unwrap_or("unknown"),
                     concise_for_prompt(summary, 180)
                 )
