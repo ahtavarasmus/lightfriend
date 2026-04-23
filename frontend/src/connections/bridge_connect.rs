@@ -887,6 +887,14 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                                 {format!("{}:{:02} remaining", *remaining_seconds / 60, *remaining_seconds % 60)}
                                             </div>
                                         }
+                                        <div class="action-buttons">
+                                            <button onclick={
+                                                let disconnect = disconnect.clone();
+                                                Callback::from(move |_| disconnect.emit(()))
+                                            } class="cancel-button">
+                                                {"Cancel"}
+                                            </button>
+                                        </div>
                                     </div>
                                 } else {
                                     <div class="loading-container">
