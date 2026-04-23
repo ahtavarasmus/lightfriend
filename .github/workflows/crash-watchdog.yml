@@ -1,0 +1,159 @@
+name: Enclave Crash Watchdog
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'  # Every 15 minutes
+  workflow_dispatch: {}      # Manual trigger for testing
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  check-crashes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Check enclave for crash signatures
+        env:
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          HASH_PARAM: /lightfriend/last-crash-alert-hash
+        run: |
+          set -uo pipefail
+
+          # ── Resolve active enclave instance from SSM parameter ──
+          ACTIVE=$(aws ssm get-parameter --name /lightfriend/instance-id \
+            --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+          if [ -z "$ACTIVE" ] || [ "$ACTIVE" = "None" ]; then
+            echo "No active instance ID in SSM; skipping"
+            exit 0
+          fi
+
+          STATE=$(aws ec2 describe-instances --instance-ids "$ACTIVE" \
+            --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo "unknown")
+          if [ "$STATE" != "running" ]; then
+            echo "Active instance $ACTIVE is in state $STATE; skipping"
+            exit 0
+          fi
+
+          echo "Checking instance $ACTIVE for crash signatures..."
+
+          # ── Invoke diag via VSOCK:9008, grep for crash patterns ──
+          # Patterns chosen narrowly to minimize false positives:
+          #   - Rust panics
+          #   - Kernel OOM / killed process
+          #   - Supervisord non-graceful exits (SIGTERM = graceful, excluded)
+          #   - Segfault core dumps
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "$ACTIVE" \
+            --document-name AWS-RunShellScript \
+            --parameters 'commands=["timeout 60 socat - VSOCK-CONNECT:16:9008 2>&1 | grep -E \"panicked at|thread .+panicked|Out of memory:|oom-kill|oom-killer|Killed process |exit status [0-9]+; not expected|entered FATAL state|terminated by SIG(KILL|SEGV|ABRT|BUS)|\\(core dumped\\)\" | head -40"]' \
+            --query 'Command.CommandId' --output text 2>/dev/null || echo "")
+
+          if [ -z "$CMD_ID" ]; then
+            echo "Failed to send SSM command; skipping"
+            exit 0
+          fi
+
+          echo "Sent SSM command $CMD_ID; waiting for completion..."
+
+          # ── Wait up to 90s for completion ──
+          STATUS="Pending"
+          for i in $(seq 1 30); do
+            STATUS=$(aws ssm list-command-invocations --command-id "$CMD_ID" \
+              --query 'CommandInvocations[0].Status' --output text 2>/dev/null || echo "Pending")
+            [ "$STATUS" = "None" ] && STATUS="Pending"
+            case "$STATUS" in
+              Success) break ;;
+              Failed|Cancelled|TimedOut)
+                echo "SSM command ended with status $STATUS; skipping"
+                exit 0
+                ;;
+            esac
+            sleep 3
+          done
+
+          if [ "$STATUS" != "Success" ]; then
+            echo "SSM command did not complete within 90s (last status: $STATUS); skipping"
+            exit 0
+          fi
+
+          FINDINGS=$(aws ssm list-command-invocations --command-id "$CMD_ID" --details \
+            --query 'CommandInvocations[0].CommandPlugins[0].Output' --output text 2>/dev/null || echo "")
+
+          # Strip trailing whitespace/newlines for clean comparison
+          FINDINGS=$(echo "$FINDINGS" | sed -e 's/[[:space:]]*$//')
+
+          if [ -z "$FINDINGS" ]; then
+            echo "OK: no crash signatures on $ACTIVE"
+            exit 0
+          fi
+
+          # ── Normalize for hashing: strip line numbers, timestamps, PIDs ──
+          # So a panic in log.1 and log.2 (or across rotations) dedups to the same hash.
+          NORMALIZED=$(echo "$FINDINGS" \
+            | sed -E \
+                -e 's|^/var/log/[^:]+:[0-9]+:||' \
+                -e 's|[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9:.,Z+-]+||g' \
+                -e 's|\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:,]+\]||g' \
+                -e 's|pid=[0-9]+|pid=N|g' \
+                -e 's|PID [0-9]+|PID N|g' \
+            | sort -u)
+          HASH=$(echo "$NORMALIZED" | sha256sum | awk '{print $1}')
+
+          LAST_HASH=$(aws ssm get-parameter --name "$HASH_PARAM" \
+            --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+
+          if [ "$HASH" = "$LAST_HASH" ]; then
+            echo "OK: same crash signature as last alert (hash $HASH); skipping notification"
+            exit 0
+          fi
+
+          echo "NEW CRASH SIGNATURES on $ACTIVE (hash $HASH, previous $LAST_HASH):"
+          echo "$FINDINGS"
+
+          # ── Send alert email via Resend SMTP ──
+          SUBJECT="ALERT: Lightfriend enclave crash signatures detected"
+          BODY="Lightfriend Crash Watchdog\n\n"
+          BODY="${BODY}New crash signatures detected on enclave instance ${ACTIVE}.\n\n"
+          BODY="${BODY}Matched patterns (panics, OOM, supervisord FATAL, fatal signals):\n\n"
+          BODY="${BODY}${FINDINGS}\n\n"
+          BODY="${BODY}----\n"
+          BODY="${BODY}Pull full diag output:\n"
+          BODY="${BODY}  CMD=\$(aws ssm send-command --instance-ids ${ACTIVE} --document-name AWS-RunShellScript --parameters 'commands=[\"timeout 60 socat - VSOCK-CONNECT:16:9008 > /tmp/diag.out 2>&1 && wc -l /tmp/diag.out\"]' --query Command.CommandId --output text)\n"
+          BODY="${BODY}  then sed -n '<range>p' /tmp/diag.out on the host via SSM to page through sections\n"
+
+          cat > /tmp/email.txt <<EOF
+          From: Lightfriend Watchdog <notifications@lightfriend.ai>
+          To: rasmus@lightfriend.ai
+          Subject: ${SUBJECT}
+          Content-Type: text/plain; charset=utf-8
+
+          $(echo -e "$BODY")
+          EOF
+
+          # Strip leading whitespace from heredoc (10 spaces match YAML indent)
+          sed -i 's/^          //' /tmp/email.txt
+
+          curl -s --url "smtps://smtp.resend.com:465" \
+            --mail-from "notifications@lightfriend.ai" \
+            --mail-rcpt "rasmus@lightfriend.ai" \
+            --upload-file /tmp/email.txt \
+            --user "${SMTP_USERNAME}:${SMTP_PASSWORD}" \
+            --ssl-reqd
+
+          echo "Crash alert email sent to rasmus@lightfriend.ai"
+
+          # ── Persist hash for dedup on next run ──
+          # Non-fatal if role lacks ssm:PutParameter — you'll just get duplicate emails.
+          aws ssm put-parameter --name "$HASH_PARAM" --value "$HASH" --type String --overwrite \
+            || echo "WARN: failed to write $HASH_PARAM (dedup may not work next run)"
+
+          # Fail the workflow so the alert is visible (red) in GitHub Actions history
+          exit 1
