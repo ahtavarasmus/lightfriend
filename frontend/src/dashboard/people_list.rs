@@ -121,6 +121,76 @@ const PEOPLE_STYLES: &str = r#"
     color: #555;
     padding: 0.5rem 0;
 }
+.people-baseline {
+    font-size: 0.7rem;
+    color: #666;
+    padding: 0.15rem 0.1rem 0.3rem 0.1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    margin-bottom: 0.25rem;
+}
+.people-baseline .num {
+    color: #9cb4d9;
+    font-variant-numeric: tabular-nums;
+}
+.person-signals {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-top: 0.3rem;
+    padding-top: 0.3rem;
+    border-top: 1px dashed rgba(255, 255, 255, 0.06);
+}
+.person-signals-header {
+    font-size: 0.65rem;
+    color: #777;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.person-signals-loading {
+    font-size: 0.72rem;
+    color: #555;
+}
+.sig-channel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.3rem 0.4rem;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 4px;
+    font-size: 0.72rem;
+    color: #bbb;
+}
+.sig-channel .plat-label {
+    color: #7EB2FF;
+    font-weight: 500;
+    text-transform: capitalize;
+}
+.sig-channel .sig-row {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+.sig-channel .sig-kv {
+    color: #888;
+}
+.sig-channel .sig-kv .v {
+    color: #ccc;
+    font-variant-numeric: tabular-nums;
+}
+.sig-channel .sig-kv .v-warn { color: #e0b268; }
+.sig-channel .sig-kv .v-good { color: #7ed9a6; }
+.sig-channel .sig-empty {
+    color: #555;
+    font-style: italic;
+}
+.sig-channel .sig-prompt {
+    color: #888;
+    font-size: 0.68rem;
+    font-style: italic;
+    padding: 0.15rem 0;
+    border-top: 1px dotted rgba(255, 255, 255, 0.05);
+    margin-top: 0.15rem;
+}
 
 /* ---- Add/Edit form ---- */
 .pf-form {
@@ -253,6 +323,172 @@ pub struct PersonEditData {
     pub value: String,
 }
 
+#[derive(Clone, PartialEq, Deserialize)]
+pub struct BaselineResponse {
+    pub response_time_secs: f64,
+    pub total_replies: i64,
+}
+
+#[derive(Clone, PartialEq, Deserialize)]
+pub struct SignalsPayload {
+    pub message_count_30d: i64,
+    pub last_contact_ago_secs: Option<i64>,
+    pub response_time_secs: f64,
+    pub response_time_confidence: f64,
+    pub response_time_n: i64,
+    pub baseline_response_time_secs: f64,
+    pub temporal_anomaly: Option<String>,
+    pub platform_count: i32,
+    pub is_first_contact: bool,
+    pub has_custom_settings: bool,
+}
+
+#[derive(Clone, PartialEq, Deserialize)]
+pub struct ChannelSignalsEntry {
+    pub channel_id: i32,
+    pub platform: String,
+    pub handle: Option<String>,
+    pub room_id: Option<String>,
+    pub sender_name: Option<String>,
+    pub signals: Option<SignalsPayload>,
+    pub formatted_for_prompt: Option<String>,
+}
+
+#[derive(Clone, PartialEq, Deserialize)]
+pub struct PersonSignalsResponse {
+    pub baseline: BaselineResponse,
+    pub channels: Vec<ChannelSignalsEntry>,
+}
+
+fn format_duration_secs(secs: f64) -> String {
+    if secs <= 0.0 {
+        return "-".to_string();
+    }
+    if secs < 60.0 {
+        format!("{:.0}s", secs)
+    } else if secs < 3600.0 {
+        format!("{:.1}m", secs / 60.0)
+    } else if secs < 86400.0 {
+        format!("{:.1}h", secs / 3600.0)
+    } else {
+        format!("{:.1}d", secs / 86400.0)
+    }
+}
+
+fn format_ago_secs(secs: i64) -> String {
+    if secs < 60 {
+        format!("{}s ago", secs)
+    } else if secs < 3600 {
+        format!("{}m ago", secs / 60)
+    } else if secs < 86400 {
+        format!("{}h ago", secs / 3600)
+    } else {
+        format!("{}d ago", secs / 86400)
+    }
+}
+
+fn display_platform(p: &str) -> &str {
+    match p {
+        "whatsapp" => "WhatsApp",
+        "telegram" => "Telegram",
+        "signal" => "Signal",
+        "email" => "Email",
+        other => other,
+    }
+}
+
+fn render_channel_signals(ce: &ChannelSignalsEntry, baseline_secs: f64) -> Html {
+    let plat = display_platform(&ce.platform).to_string();
+    match &ce.signals {
+        None => html! {
+            <div class="sig-channel">
+                <span class="plat-label">{plat}</span>
+                <span class="sig-empty">{"No linked room or no messages yet."}</span>
+            </div>
+        },
+        Some(sig) if sig.message_count_30d == 0 => html! {
+            <div class="sig-channel">
+                <span class="plat-label">{plat}</span>
+                <span class="sig-empty">{"No messages in the last 30 days."}</span>
+            </div>
+        },
+        Some(sig) => {
+            let response_str = format_duration_secs(sig.response_time_secs);
+            let ratio = if baseline_secs > 0.0 && sig.response_time_secs > 0.0 {
+                Some(baseline_secs / sig.response_time_secs)
+            } else {
+                None
+            };
+            let (ratio_label, ratio_class): (String, &'static str) = match ratio {
+                Some(r) if sig.response_time_confidence >= 0.2 && r >= 1.5 => {
+                    (format!("{:.1}x faster than avg", r), "v-good")
+                }
+                Some(r) if sig.response_time_confidence >= 0.2 && r <= 0.67 => {
+                    (format!("{:.1}x slower than avg", 1.0 / r), "v-warn")
+                }
+                Some(_) if sig.response_time_confidence >= 0.2 => {
+                    ("near avg".to_string(), "v")
+                }
+                _ => ("low confidence".to_string(), "v"),
+            };
+
+            html! {
+                <div class="sig-channel">
+                    <span class="plat-label">{plat}</span>
+                    <div class="sig-row">
+                        <span class="sig-kv">
+                            {"response: "}
+                            <span class={classes!("v", ratio_class)}>{response_str}</span>
+                            {" ("}{ratio_label}{", n="}{sig.response_time_n}{")"}
+                        </span>
+                    </div>
+                    <div class="sig-row">
+                        <span class="sig-kv">
+                            {"30d: "}<span class="v">{sig.message_count_30d}</span>{" msgs"}
+                        </span>
+                        {
+                            if let Some(ago) = sig.last_contact_ago_secs {
+                                html! {
+                                    <span class="sig-kv">
+                                        {"prev: "}<span class="v">{format_ago_secs(ago)}</span>
+                                    </span>
+                                }
+                            } else { html! {} }
+                        }
+                        <span class="sig-kv">
+                            {"platforms: "}<span class="v">{sig.platform_count}</span>
+                        </span>
+                        {
+                            if sig.is_first_contact {
+                                html! { <span class="sig-kv"><span class="v v-warn">{"first contact"}</span></span> }
+                            } else { html! {} }
+                        }
+                        {
+                            if sig.has_custom_settings {
+                                html! { <span class="sig-kv"><span class="v">{"custom notif"}</span></span> }
+                            } else { html! {} }
+                        }
+                    </div>
+                    {
+                        if let Some(ref anomaly) = sig.temporal_anomaly {
+                            html! {
+                                <div class="sig-row">
+                                    <span class="sig-kv"><span class="v v-warn">{anomaly}</span></span>
+                                </div>
+                            }
+                        } else { html! {} }
+                    }
+                    {
+                        if let Some(ref prompt_text) = ce.formatted_for_prompt {
+                            html! { <div class="sig-prompt">{"\""}{prompt_text}{"\""}</div> }
+                        } else { html! {} }
+                    }
+                </div>
+            }
+        }
+    }
+}
+
 impl PersonResponse {
     fn display_name(&self) -> &str {
         self.edits
@@ -281,6 +517,10 @@ pub fn people_list() -> Html {
     let expanded_id = use_state(|| None::<i32>);
     let adding = use_state(|| false);
     let refresh_seq = use_state(|| 0u32);
+    let baseline = use_state(|| None::<BaselineResponse>);
+    let person_signals =
+        use_state(|| std::collections::HashMap::<i32, PersonSignalsResponse>::new());
+    let signals_loading_for = use_state(|| None::<i32>);
 
     // Add form state
     let add_name = use_state(|| String::new());
@@ -317,6 +557,25 @@ pub fn people_list() -> Html {
                 || ()
             },
             seq,
+        );
+    }
+
+    // Fetch user baseline once on mount
+    {
+        let baseline = baseline.clone();
+        use_effect_with_deps(
+            move |_| {
+                let baseline = baseline.clone();
+                spawn_local(async move {
+                    if let Ok(r) = Api::get("/api/me/baseline").send().await {
+                        if let Ok(data) = r.json::<BaselineResponse>().await {
+                            baseline.set(Some(data));
+                        }
+                    }
+                });
+                || ()
+            },
+            (),
         );
     }
 
@@ -596,6 +855,27 @@ pub fn people_list() -> Html {
                         {"Add"}
                     </button>
                 </div>
+                {
+                    if let Some(b) = baseline.as_ref() {
+                        if b.total_replies > 0 {
+                            html! {
+                                <div class="people-baseline">
+                                    {"Your avg response: "}
+                                    <span class="num">{format_duration_secs(b.response_time_secs)}</span>
+                                    {format!(" (from {} replies, 90d)", b.total_replies)}
+                                </div>
+                            }
+                        } else {
+                            html! {
+                                <div class="people-baseline">
+                                    {"Your avg response: not enough data yet (need 10+ replies in 90d)"}
+                                </div>
+                            }
+                        }
+                    } else {
+                        html! {}
+                    }
+                }
 
                 if *adding {
                     <div class="pf-form">
@@ -659,11 +939,35 @@ pub fn people_list() -> Html {
 
                     let on_click = {
                         let expanded_id = expanded_id.clone();
+                        let person_signals = person_signals.clone();
+                        let signals_loading_for = signals_loading_for.clone();
                         Callback::from(move |_: MouseEvent| {
                             if *expanded_id == Some(pid) {
                                 expanded_id.set(None);
                             } else {
                                 expanded_id.set(Some(pid));
+                                if !person_signals.contains_key(&pid)
+                                    && *signals_loading_for != Some(pid)
+                                {
+                                    let person_signals = person_signals.clone();
+                                    let signals_loading_for = signals_loading_for.clone();
+                                    signals_loading_for.set(Some(pid));
+                                    spawn_local(async move {
+                                        let url = format!("/api/persons/{}/signals", pid);
+                                        if let Ok(r) = Api::get(&url).send().await {
+                                            if let Ok(data) =
+                                                r.json::<PersonSignalsResponse>().await
+                                            {
+                                                let mut map = (*person_signals).clone();
+                                                map.insert(pid, data);
+                                                person_signals.set(map);
+                                            }
+                                        }
+                                        if *signals_loading_for == Some(pid) {
+                                            signals_loading_for.set(None);
+                                        }
+                                    });
+                                }
                             }
                         })
                     };
@@ -740,6 +1044,33 @@ pub fn people_list() -> Html {
                                             </div>
                                         }
                                     })}
+                                    {
+                                        if let Some(sig_resp) = person_signals.get(&pid) {
+                                            html! {
+                                                <div class="person-signals">
+                                                    <span class="person-signals-header">{"Classifier signals"}</span>
+                                                    {
+                                                        if sig_resp.channels.iter().all(|c| c.signals.is_none()) {
+                                                            html! {
+                                                                <div class="sig-empty" style="font-size: 0.72rem; color: #555;">
+                                                                    {"No message history yet for this person."}
+                                                                </div>
+                                                            }
+                                                        } else {
+                                                            html! { <></> }
+                                                        }
+                                                    }
+                                                    { for sig_resp.channels.iter().map(|ce| render_channel_signals(ce, sig_resp.baseline.response_time_secs)) }
+                                                </div>
+                                            }
+                                        } else if *signals_loading_for == Some(pid) {
+                                            html! {
+                                                <div class="person-signals-loading">{"Loading signals..."}</div>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
                                     <div class="person-actions-row">
                                         <button class="person-del-btn" onclick={on_delete}>
                                             <i class="fa-solid fa-trash-can" style="margin-right: 0.25rem;"></i>

@@ -254,12 +254,14 @@ pub struct NewOntRule {
 
 // -- Bayesian signal primitives --
 
+#[derive(Debug, Clone, Serialize)]
 pub struct BayesianEstimate {
     pub value: f64,      // posterior estimate in original units (e.g. seconds)
     pub confidence: f64, // 0.0 to 1.0
     pub n: i64,          // number of observations
 }
 
+#[derive(Debug, Clone, Serialize)]
 pub struct UserBaseline {
     pub response_time_secs: f64, // geometric mean across all contacts (90-day window)
     pub total_replies: i64,      // how many reply observations the baseline is built from
@@ -289,6 +291,7 @@ pub fn bayesian_log_mean(observed_geomean: f64, n: i64, prior: f64, k: f64) -> B
 
 // -- Sender signals for importance evaluation --
 
+#[derive(Debug, Clone, Serialize)]
 pub struct SenderSignals {
     pub message_count_30d: i64,
     pub last_contact_ago_secs: Option<i64>,

@@ -3,7 +3,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 
@@ -356,4 +356,159 @@ pub async fn merge_persons(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(serde_json::to_value(full).unwrap_or_default()))
+}
+
+// --- Signals (debug / introspection) ---
+
+#[derive(Serialize)]
+pub struct UserBaselineResponse {
+    pub response_time_secs: f64,
+    pub total_replies: i64,
+}
+
+#[derive(Serialize)]
+pub struct SignalsPayload {
+    pub message_count_30d: i64,
+    pub last_contact_ago_secs: Option<i64>,
+    pub response_time_secs: f64,
+    pub response_time_confidence: f64,
+    pub response_time_n: i64,
+    pub baseline_response_time_secs: f64,
+    pub temporal_anomaly: Option<String>,
+    pub platform_count: i32,
+    pub is_first_contact: bool,
+    pub has_custom_settings: bool,
+}
+
+#[derive(Serialize)]
+pub struct ChannelSignalsEntry {
+    pub channel_id: i32,
+    pub platform: String,
+    pub handle: Option<String>,
+    pub room_id: Option<String>,
+    pub sender_name: Option<String>,
+    pub signals: Option<SignalsPayload>,
+    pub formatted_for_prompt: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct PersonSignalsResponse {
+    pub baseline: UserBaselineResponse,
+    pub channels: Vec<ChannelSignalsEntry>,
+}
+
+fn now_secs() -> i32 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i32
+}
+
+fn user_tz_offset_secs(state: &AppState, user_id: i32) -> i32 {
+    use crate::repositories::user_core::UserCoreOps;
+    use chrono::Offset;
+    let tz_str = state
+        .user_core
+        .get_user_info(user_id)
+        .ok()
+        .and_then(|info| info.timezone)
+        .unwrap_or_else(|| "UTC".to_string());
+    let tz: chrono_tz::Tz = tz_str.parse().unwrap_or(chrono_tz::UTC);
+    let local = chrono::Utc::now().with_timezone(&tz);
+    let fixed: chrono::FixedOffset = local.offset().fix();
+    fixed.local_minus_utc()
+}
+
+/// GET /api/me/baseline
+/// Returns the caller's 90-day geometric-mean response time across all contacts.
+pub async fn get_user_baseline(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Json<UserBaselineResponse> {
+    let b = state
+        .ontology_repository
+        .compute_user_baseline(auth_user.user_id, now_secs());
+    Json(UserBaselineResponse {
+        response_time_secs: b.response_time_secs,
+        total_replies: b.total_replies,
+    })
+}
+
+/// GET /api/persons/:id/signals
+/// Returns the classification-prompt signals for each of this person's channels,
+/// plus the user's baseline for context.
+pub async fn get_person_signals(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(person_id): Path<i32>,
+) -> Result<Json<PersonSignalsResponse>, StatusCode> {
+    let user_id = auth_user.user_id;
+    let person = state
+        .ontology_repository
+        .get_person_with_channels(user_id, person_id)
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    let now = now_secs();
+    let tz_offset_secs = user_tz_offset_secs(&state, user_id);
+    let baseline = state
+        .ontology_repository
+        .compute_user_baseline(user_id, now);
+
+    let mut channels = Vec::with_capacity(person.channels.len());
+    for ch in &person.channels {
+        let room_id = ch.room_id.clone();
+        let sender_name = match room_id.as_deref() {
+            Some(rid) => state
+                .ontology_repository
+                .find_primary_sender_name_in_room(user_id, rid),
+            None => None,
+        };
+
+        let (signals, formatted) = match (room_id.as_deref(), sender_name.as_deref()) {
+            (Some(rid), Some(sname)) => {
+                let sig = state.ontology_repository.compute_sender_signals(
+                    user_id,
+                    rid,
+                    sname,
+                    now,
+                    tz_offset_secs,
+                    Some(person_id),
+                    &baseline,
+                );
+                let formatted = sig.format_for_prompt(sname);
+                let payload = SignalsPayload {
+                    message_count_30d: sig.message_count_30d,
+                    last_contact_ago_secs: sig.last_contact_ago_secs,
+                    response_time_secs: sig.response_time.value,
+                    response_time_confidence: sig.response_time.confidence,
+                    response_time_n: sig.response_time.n,
+                    baseline_response_time_secs: sig.baseline_response_time_secs,
+                    temporal_anomaly: sig.temporal_anomaly,
+                    platform_count: sig.platform_count,
+                    is_first_contact: sig.is_first_contact,
+                    has_custom_settings: sig.has_custom_settings,
+                };
+                (Some(payload), Some(formatted))
+            }
+            _ => (None, None),
+        };
+
+        channels.push(ChannelSignalsEntry {
+            channel_id: ch.id,
+            platform: ch.platform.clone(),
+            handle: ch.handle.clone(),
+            room_id,
+            sender_name,
+            signals,
+            formatted_for_prompt: formatted,
+        });
+    }
+
+    Ok(Json(PersonSignalsResponse {
+        baseline: UserBaselineResponse {
+            response_time_secs: baseline.response_time_secs,
+            total_replies: baseline.total_replies,
+        },
+        channels,
+    }))
 }

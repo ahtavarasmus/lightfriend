@@ -1194,6 +1194,11 @@ async fn main() {
             "/api/persons/search/{service}",
             get(person_handlers::search_chats),
         )
+        .route(
+            "/api/persons/{id}/signals",
+            get(person_handlers::get_person_signals),
+        )
+        .route("/api/me/baseline", get(person_handlers::get_user_baseline))
         // Rule (automation) routes
         .route(
             "/api/rules",
