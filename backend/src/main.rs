@@ -539,6 +539,10 @@ async fn main() {
             get(trust_chain_handlers::get_trust_chain),
         )
         .route(
+            "/api/trust-chain/history",
+            get(trust_chain_handlers::get_trust_chain_history),
+        )
+        .route(
             "/api/trust-chain/verify",
             post(trust_chain_handlers::verify_live),
         )

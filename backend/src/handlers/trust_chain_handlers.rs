@@ -1,9 +1,11 @@
-use axum::Json;
+use axum::{extract::Query, Json};
+use futures::future::join_all;
 use rand::RngCore;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::HashMap,
     sync::OnceLock,
     time::{Duration, Instant},
 };
@@ -25,14 +27,33 @@ const IMAGE_ACTIVATED_TOPIC: &str =
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(5);
-const TRUST_CHAIN_CACHE_TTL: Duration = Duration::from_secs(60);
+const CORE_CACHE_TTL: Duration = Duration::from_secs(60);
+const EVENTS_CACHE_TTL: Duration = Duration::from_secs(300);
+const GITHUB_REPO: &str = "ahtavarasmus/lightfriend";
 
-static TRUST_CHAIN_CACHE: OnceLock<RwLock<Option<CachedTrustChain>>> = OnceLock::new();
+const DEFAULT_HISTORY_LIMIT: usize = 10;
+const MAX_HISTORY_LIMIT: usize = 50;
+
+static CORE_CACHE: OnceLock<RwLock<Option<CachedCore>>> = OnceLock::new();
+static EVENTS_CACHE: OnceLock<RwLock<Option<CachedEvents>>> = OnceLock::new();
+static COMMIT_CACHE: OnceLock<RwLock<HashMap<String, CommitInfo>>> = OnceLock::new();
 
 #[derive(Clone)]
-struct CachedTrustChain {
+struct CachedCore {
     fetched_at: Instant,
     response: TrustChainResponse,
+}
+
+#[derive(Clone)]
+struct CachedEvents {
+    fetched_at: Instant,
+    builds: Vec<HistoricalBuild>,
+}
+
+#[derive(Clone, Default)]
+struct CommitInfo {
+    message: Option<String>,
+    pr_number: Option<u64>,
 }
 
 // -- Response types --
@@ -52,7 +73,20 @@ pub struct TrustChainResponse {
     pub build_metadata_url: Option<String>,
     pub blockchain: Option<BlockchainInfo>,
     pub attestation: Option<AttestationInfo>,
-    pub history: Vec<HistoricalBuild>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct TrustChainHistoryResponse {
+    pub builds: Vec<HistoricalBuild>,
+    pub total: usize,
+    pub offset: usize,
+    pub has_more: bool,
+}
+
+#[derive(Deserialize)]
+pub struct HistoryQuery {
+    pub limit: Option<usize>,
+    pub offset: Option<usize>,
 }
 
 #[derive(Clone, Serialize)]
@@ -82,6 +116,8 @@ pub struct HistoricalBuild {
     pub activate_tx: Option<String>,
     pub activate_timestamp: Option<String>,
     pub is_current: bool,
+    pub commit_message: Option<String>,
+    pub pr_number: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -307,6 +343,17 @@ async fn fetch_event_logs(
     }
 }
 
+async fn maybe_fetch_timestamp(
+    client: &Client,
+    rpc_url: &str,
+    block_hex: Option<String>,
+) -> Option<String> {
+    match block_hex {
+        Some(bn) => fetch_block_timestamp(client, rpc_url, &bn).await,
+        None => None,
+    }
+}
+
 async fn fetch_block_timestamp(client: &Client, rpc_url: &str, block_hex: &str) -> Option<String> {
     let payload = serde_json::json!({
         "jsonrpc": "2.0",
@@ -369,28 +416,100 @@ fn u256_to_usize(bytes: &[u8; 32]) -> Option<usize> {
     Some(u64::from_be_bytes(arr) as usize)
 }
 
-async fn fetch_blockchain_data(
+/// Fetch blockchain info for ONLY the current image. Fast path for /api/trust-chain.
+/// Uses topic-filtered eth_getLogs so the RPC only returns 0-1 matching events per topic.
+async fn fetch_current_blockchain_info(
     client: &Client,
     rpc_url: &str,
     contract: &str,
     current_image_id: &str,
-) -> (Option<BlockchainInfo>, Vec<HistoricalBuild>) {
-    // Check if current image is approved
-    let approved = check_contract_approval(client, rpc_url, contract, current_image_id)
-        .await
-        .unwrap_or(false);
+) -> Option<BlockchainInfo> {
+    let approval_fut = check_contract_approval(client, rpc_url, contract, current_image_id);
+    let proposed_fut = fetch_event_logs(
+        client,
+        rpc_url,
+        contract,
+        IMAGE_PROPOSED_TOPIC,
+        Some(current_image_id),
+    );
+    let activated_fut = fetch_event_logs(
+        client,
+        rpc_url,
+        contract,
+        IMAGE_ACTIVATED_TOPIC,
+        Some(current_image_id),
+    );
 
-    // Fetch all ImageProposed events
-    let proposed_logs =
-        fetch_event_logs(client, rpc_url, contract, IMAGE_PROPOSED_TOPIC, None).await;
+    let (approved_opt, proposed_logs, activated_logs) =
+        tokio::join!(approval_fut, proposed_fut, activated_fut);
+    let approved = approved_opt.unwrap_or(false);
 
-    // Fetch all ImageActivated events
-    let activated_logs =
-        fetch_event_logs(client, rpc_url, contract, IMAGE_ACTIVATED_TOPIC, None).await;
+    let (propose_tx, propose_block) = proposed_logs
+        .first()
+        .map(|log| {
+            (
+                log.get("transactionHash")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                log.get("blockNumber")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+            )
+        })
+        .unwrap_or((None, None));
+    let (activate_tx, activate_block) = activated_logs
+        .first()
+        .map(|log| {
+            (
+                log.get("transactionHash")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                log.get("blockNumber")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+            )
+        })
+        .unwrap_or((None, None));
 
-    // Build a map of imageId -> activation info
-    let mut activated_map: std::collections::HashMap<String, (String, Option<String>)> =
-        std::collections::HashMap::new();
+    let (propose_timestamp, activate_timestamp) = tokio::join!(
+        maybe_fetch_timestamp(client, rpc_url, propose_block),
+        maybe_fetch_timestamp(client, rpc_url, activate_block),
+    );
+
+    if propose_tx.is_none() && activate_tx.is_none() && !approved {
+        return None;
+    }
+
+    Some(BlockchainInfo {
+        approved,
+        propose_tx,
+        propose_timestamp,
+        activate_tx,
+        activate_timestamp,
+    })
+}
+
+/// Fetch ALL historical builds from the chain. Cached for 5 minutes.
+/// Returned newest-first. commit_message/pr_number are left None here — fill them per page.
+async fn get_all_historical_builds(
+    client: &Client,
+    rpc_url: &str,
+    contract: &str,
+    current_image_id: &str,
+) -> Vec<HistoricalBuild> {
+    let cache = EVENTS_CACHE.get_or_init(|| RwLock::new(None));
+    if let Some(cached) = cache.read().await.as_ref() {
+        if cached.fetched_at.elapsed() < EVENTS_CACHE_TTL {
+            return cached.builds.clone();
+        }
+    }
+
+    let proposed_fut = fetch_event_logs(client, rpc_url, contract, IMAGE_PROPOSED_TOPIC, None);
+    let activated_fut = fetch_event_logs(client, rpc_url, contract, IMAGE_ACTIVATED_TOPIC, None);
+    let (proposed_logs, activated_logs) = tokio::join!(proposed_fut, activated_fut);
+
+    // Map imageId -> (tx, block)
+    let mut activated_map: HashMap<String, (String, Option<String>)> = HashMap::new();
     for log in &activated_logs {
         let topics = log.get("topics").and_then(|t| t.as_array());
         let tx_hash = log
@@ -401,7 +520,6 @@ async fn fetch_blockchain_data(
             .get("blockNumber")
             .and_then(|v| v.as_str())
             .map(String::from);
-
         if let (Some(topics), Some(tx)) = (topics, tx_hash) {
             if let Some(image_id_val) = topics.get(1).and_then(|v| v.as_str()) {
                 activated_map.insert(image_id_val.to_string(), (tx, block));
@@ -409,16 +527,24 @@ async fn fetch_blockchain_data(
         }
     }
 
-    // Build history from proposed events
-    let mut history = Vec::new();
-    let mut current_blockchain = None;
+    // Decode proposed events into partial entries (without timestamps yet)
+    struct PartialEntry {
+        image_id: String,
+        commit_hash: String,
+        propose_tx: String,
+        propose_block: Option<String>,
+        activate_tx: Option<String>,
+        activate_block: Option<String>,
+    }
 
+    let mut partials: Vec<PartialEntry> = Vec::new();
     for log in &proposed_logs {
         let topics = log.get("topics").and_then(|t| t.as_array());
         let tx_hash = log
             .get("transactionHash")
             .and_then(|v| v.as_str())
-            .map(String::from);
+            .unwrap_or_default()
+            .to_string();
         let block_num = log
             .get("blockNumber")
             .and_then(|v| v.as_str())
@@ -431,71 +557,173 @@ async fn fetch_blockchain_data(
                 .and_then(|v| v.as_str())
                 .unwrap_or_default()
                 .to_string();
-            let commit_hash = decode_commit_hash_from_log_data(data).unwrap_or_default();
-
-            let propose_tx = tx_hash.clone().unwrap_or_default();
-            let propose_timestamp = if let Some(ref bn) = block_num {
-                fetch_block_timestamp(client, rpc_url, bn).await
-            } else {
-                None
-            };
-
-            let (activate_tx, activate_timestamp) =
-                if let Some((atx, ablock)) = activated_map.get(&image_id) {
-                    let ats = if let Some(ref abn) = ablock {
-                        fetch_block_timestamp(client, rpc_url, abn).await
-                    } else {
-                        None
-                    };
-                    (Some(atx.clone()), ats)
-                } else {
-                    (None, None)
-                };
-
-            let is_current = image_id == current_image_id;
-
-            if is_current {
-                current_blockchain = Some(BlockchainInfo {
-                    approved,
-                    propose_tx: Some(propose_tx.clone()),
-                    propose_timestamp: propose_timestamp.clone(),
-                    activate_tx: activate_tx.clone(),
-                    activate_timestamp: activate_timestamp.clone(),
-                });
+            if image_id.is_empty() {
+                continue;
             }
+            let commit_hash = decode_commit_hash_from_log_data(data).unwrap_or_default();
+            let (activate_tx, activate_block) = activated_map
+                .get(&image_id)
+                .map(|(tx, b)| (Some(tx.clone()), b.clone()))
+                .unwrap_or((None, None));
 
-            history.push(HistoricalBuild {
+            partials.push(PartialEntry {
                 image_id,
                 commit_hash,
-                propose_tx,
-                propose_timestamp,
+                propose_tx: tx_hash,
+                propose_block: block_num,
                 activate_tx,
-                activate_timestamp,
-                is_current,
+                activate_block,
             });
         }
     }
 
-    // Reverse so newest is first
-    history.reverse();
+    // Parallel fetch of ALL timestamps (two per entry: propose + activate)
+    let ts_futures = partials.iter().flat_map(|p| {
+        [
+            maybe_fetch_timestamp(client, rpc_url, p.propose_block.clone()),
+            maybe_fetch_timestamp(client, rpc_url, p.activate_block.clone()),
+        ]
+    });
+    let timestamps = join_all(ts_futures).await;
 
-    // If we have approval but no matching proposed event, create minimal blockchain info
-    if current_blockchain.is_none() && approved {
-        current_blockchain = Some(BlockchainInfo {
-            approved: true,
-            propose_tx: None,
-            propose_timestamp: None,
-            activate_tx: None,
-            activate_timestamp: None,
-        });
-    }
+    let mut builds: Vec<HistoricalBuild> = partials
+        .into_iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let propose_timestamp = timestamps.get(i * 2).cloned().flatten();
+            let activate_timestamp = timestamps.get(i * 2 + 1).cloned().flatten();
+            let is_current = p.image_id == current_image_id;
+            HistoricalBuild {
+                image_id: p.image_id,
+                commit_hash: p.commit_hash,
+                propose_tx: p.propose_tx,
+                propose_timestamp,
+                activate_tx: p.activate_tx,
+                activate_timestamp,
+                is_current,
+                commit_message: None,
+                pr_number: None,
+            }
+        })
+        .collect();
 
-    (current_blockchain, history)
+    // Sort newest-first by propose_timestamp (fall back to insertion order reversed)
+    builds.sort_by(|a, b| {
+        b.propose_timestamp
+            .as_deref()
+            .unwrap_or("")
+            .cmp(a.propose_timestamp.as_deref().unwrap_or(""))
+    });
+
+    *cache.write().await = Some(CachedEvents {
+        fetched_at: Instant::now(),
+        builds: builds.clone(),
+    });
+
+    builds
 }
 
-// -- Handler --
+/// Look up (and populate the cache for) commit info for a single SHA.
+async fn fetch_commit_info(client: &Client, sha: &str) -> CommitInfo {
+    if sha.is_empty() {
+        return CommitInfo::default();
+    }
 
-async fn build_trust_chain_response() -> TrustChainResponse {
+    let cache = COMMIT_CACHE.get_or_init(|| RwLock::new(HashMap::new()));
+    if let Some(info) = cache.read().await.get(sha) {
+        return info.clone();
+    }
+
+    let url = format!(
+        "https://api.github.com/repos/{}/commits/{}",
+        GITHUB_REPO, sha
+    );
+    let mut req = client
+        .get(&url)
+        .header("User-Agent", "lightfriend-trust-chain")
+        .header("Accept", "application/vnd.github+json")
+        .timeout(FETCH_TIMEOUT);
+    if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+        if !token.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", token));
+        }
+    }
+
+    let info = match req.send().await {
+        Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+            Ok(v) => parse_commit_response(&v),
+            Err(e) => {
+                tracing::warn!(
+                    "trust_chain: failed to parse github commit json for {}: {}",
+                    sha,
+                    e
+                );
+                CommitInfo::default()
+            }
+        },
+        Ok(resp) => {
+            tracing::warn!(
+                "trust_chain: github commit fetch non-2xx for {}: status={}",
+                sha,
+                resp.status()
+            );
+            CommitInfo::default()
+        }
+        Err(e) => {
+            tracing::warn!("trust_chain: github commit fetch failed for {}: {}", sha, e);
+            CommitInfo::default()
+        }
+    };
+
+    // Only cache successful lookups so failed fetches retry next time.
+    if info.message.is_some() {
+        cache.write().await.insert(sha.to_string(), info.clone());
+    }
+
+    info
+}
+
+fn parse_commit_response(v: &serde_json::Value) -> CommitInfo {
+    let full_message = v
+        .get("commit")
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.as_str())
+        .unwrap_or("");
+    let subject = full_message.lines().next().unwrap_or("").trim();
+    let subject_opt = if subject.is_empty() {
+        None
+    } else {
+        Some(subject.to_string())
+    };
+
+    // Squash-merge commits from GitHub include "(#123)" at the end of the subject.
+    let pr_number = subject
+        .rsplit_once(" (#")
+        .and_then(|(_, tail)| tail.strip_suffix(')'))
+        .and_then(|n| n.parse::<u64>().ok());
+
+    CommitInfo {
+        message: subject_opt,
+        pr_number,
+    }
+}
+
+/// Enrich a slice of builds with commit_message/pr_number in parallel.
+async fn enrich_commit_info(client: &Client, builds: &mut [HistoricalBuild]) {
+    let fetches = builds
+        .iter()
+        .map(|b| fetch_commit_info(client, &b.commit_hash))
+        .collect::<Vec<_>>();
+    let infos = join_all(fetches).await;
+    for (build, info) in builds.iter_mut().zip(infos.into_iter()) {
+        build.commit_message = info.message;
+        build.pr_number = info.pr_number;
+    }
+}
+
+// -- Handlers --
+
+async fn build_trust_chain_core_response() -> TrustChainResponse {
     let commit_sha = std::env::var("CURRENT_COMMIT_SHA").ok();
     let workflow_run_id = std::env::var("CURRENT_WORKFLOW_RUN_ID").ok();
     let image_ref = std::env::var("CURRENT_IMAGE_REF").ok();
@@ -507,7 +735,6 @@ async fn build_trust_chain_response() -> TrustChainResponse {
     let build_metadata_url = std::env::var("CURRENT_BUILD_METADATA_URL").ok();
     let rpc_url = std::env::var("ARBITRUM_RPC_URL").ok();
 
-    // Compute image_id from PCRs
     let image_id = match (&pcr0, &pcr1, &pcr2) {
         (Some(p0), Some(p1), Some(p2)) => compute_image_id(p0, p1, p2),
         _ => None,
@@ -518,55 +745,55 @@ async fn build_trust_chain_response() -> TrustChainResponse {
         .build()
         .unwrap_or_default();
 
-    // Fetch built_at from gh-pages metadata
-    let built_at = if let Some(ref url) = build_metadata_url {
-        fetch_build_metadata(&client, url)
+    let built_at_fut = async {
+        if let Some(ref url) = build_metadata_url {
+            fetch_build_metadata(&client, url)
+                .await
+                .and_then(|m| m.built_at)
+        } else {
+            None
+        }
+    };
+
+    let blockchain_fut = async {
+        if let (Some(ref rpc), Some(ref contract), Some(ref img_id)) =
+            (&rpc_url, &kms_contract_address, &image_id)
+        {
+            fetch_current_blockchain_info(&client, rpc, contract, img_id).await
+        } else {
+            tracing::warn!(
+                "trust_chain: skipping blockchain fetch - ARBITRUM_RPC_URL set={}, MARLIN_KMS_CONTRACT_ADDRESS set={}, image_id set={} (all three required)",
+                rpc_url.is_some(),
+                kms_contract_address.is_some(),
+                image_id.is_some()
+            );
+            None
+        }
+    };
+
+    let attestation_fut = async {
+        match client
+            .get("http://127.0.0.1:1300/attestation/hex")
+            .timeout(Duration::from_secs(3))
+            .send()
             .await
-            .and_then(|m| m.built_at)
-    } else {
-        None
-    };
-
-    // Fetch blockchain data if we have RPC URL, contract, and image_id
-    let (blockchain, history) = if let (Some(ref rpc), Some(ref contract), Some(ref img_id)) =
-        (&rpc_url, &kms_contract_address, &image_id)
-    {
-        fetch_blockchain_data(&client, rpc, contract, img_id).await
-    } else {
-        tracing::warn!(
-            "trust_chain: skipping blockchain fetch - ARBITRUM_RPC_URL set={}, MARLIN_KMS_CONTRACT_ADDRESS set={}, image_id set={} (all three required)",
-            rpc_url.is_some(),
-            kms_contract_address.is_some(),
-            image_id.is_some()
-        );
-        (None, vec![])
-    };
-
-    // Try to fetch live attestation from the enclave to show attestation values
-    let attestation = match client
-        .get("http://127.0.0.1:1300/attestation/hex")
-        .timeout(Duration::from_secs(3))
-        .send()
-        .await
-    {
-        Ok(resp) => match resp.text().await {
-            Ok(hex_doc) => {
-                let doc_bytes = hex_doc.len() / 2;
-                // The attestation doc contains PCRs but parsing CBOR is complex.
-                // Instead, we confirm the enclave attestation server is reachable
-                // and report the expected PCRs (which ARE from the running enclave's env).
-                Some(AttestationInfo {
+        {
+            Ok(resp) => match resp.text().await {
+                Ok(hex_doc) => Some(AttestationInfo {
                     available: true,
                     pcr0: pcr0.clone(),
                     pcr1: pcr1.clone(),
                     pcr2: pcr2.clone(),
-                    doc_byte_size: Some(doc_bytes),
-                })
-            }
+                    doc_byte_size: Some(hex_doc.len() / 2),
+                }),
+                Err(_) => None,
+            },
             Err(_) => None,
-        },
-        Err(_) => None,
+        }
     };
+
+    let (built_at, blockchain, attestation) =
+        tokio::join!(built_at_fut, blockchain_fut, attestation_fut);
 
     TrustChainResponse {
         commit_sha,
@@ -582,26 +809,70 @@ async fn build_trust_chain_response() -> TrustChainResponse {
         build_metadata_url,
         blockchain,
         attestation,
-        history,
     }
 }
 
 pub async fn get_trust_chain() -> Json<TrustChainResponse> {
-    let cache = TRUST_CHAIN_CACHE.get_or_init(|| RwLock::new(None));
+    let cache = CORE_CACHE.get_or_init(|| RwLock::new(None));
 
     if let Some(cached) = cache.read().await.as_ref() {
-        if cached.fetched_at.elapsed() < TRUST_CHAIN_CACHE_TTL {
+        if cached.fetched_at.elapsed() < CORE_CACHE_TTL {
             return Json(cached.response.clone());
         }
     }
 
-    let response = build_trust_chain_response().await;
-    *cache.write().await = Some(CachedTrustChain {
+    let response = build_trust_chain_core_response().await;
+    *cache.write().await = Some(CachedCore {
         fetched_at: Instant::now(),
         response: response.clone(),
     });
 
     Json(response)
+}
+
+pub async fn get_trust_chain_history(
+    Query(params): Query<HistoryQuery>,
+) -> Json<TrustChainHistoryResponse> {
+    let limit = params
+        .limit
+        .unwrap_or(DEFAULT_HISTORY_LIMIT)
+        .clamp(1, MAX_HISTORY_LIMIT);
+    let offset = params.offset.unwrap_or(0);
+
+    let pcr0 = std::env::var("CURRENT_PCR0").ok();
+    let pcr1 = std::env::var("CURRENT_PCR1").ok();
+    let pcr2 = std::env::var("CURRENT_PCR2").ok();
+    let kms_contract_address = std::env::var("MARLIN_KMS_CONTRACT_ADDRESS").ok();
+    let rpc_url = std::env::var("ARBITRUM_RPC_URL").ok();
+    let image_id = match (&pcr0, &pcr1, &pcr2) {
+        (Some(p0), Some(p1), Some(p2)) => compute_image_id(p0, p1, p2),
+        _ => None,
+    };
+
+    let client = Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap_or_default();
+
+    let all_builds = match (&rpc_url, &kms_contract_address, &image_id) {
+        (Some(rpc), Some(contract), Some(img_id)) => {
+            get_all_historical_builds(&client, rpc, contract, img_id).await
+        }
+        _ => vec![],
+    };
+
+    let total = all_builds.len();
+    let start = offset.min(total);
+    let end = (start + limit).min(total);
+    let mut page: Vec<HistoricalBuild> = all_builds[start..end].to_vec();
+    enrich_commit_info(&client, &mut page).await;
+
+    Json(TrustChainHistoryResponse {
+        builds: page,
+        total,
+        offset: start,
+        has_more: end < total,
+    })
 }
 
 // -- Live verification endpoint --

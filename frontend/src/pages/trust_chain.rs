@@ -24,7 +24,14 @@ struct TrustChainData {
     build_metadata_url: Option<String>,
     blockchain: Option<BlockchainInfo>,
     attestation: Option<AttestationInfo>,
-    history: Vec<HistoricalBuild>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct TrustChainHistoryData {
+    builds: Vec<HistoricalBuild>,
+    total: usize,
+    offset: usize,
+    has_more: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -54,7 +61,13 @@ struct HistoricalBuild {
     activate_tx: Option<String>,
     activate_timestamp: Option<String>,
     is_current: bool,
+    #[serde(default)]
+    commit_message: Option<String>,
+    #[serde(default)]
+    pr_number: Option<u64>,
 }
+
+const HISTORY_PAGE_SIZE: usize = 10;
 
 // -- Helpers --
 
@@ -87,7 +100,12 @@ pub fn trust_chain_page() -> Html {
     });
 
     let data = use_state(|| None::<TrustChainData>);
-    let loading = use_state(|| true);
+    let core_loading = use_state(|| true);
+    let history_builds = use_state(Vec::<HistoricalBuild>::new);
+    let history_has_more = use_state(|| false);
+    let history_loading = use_state(|| true);
+    let history_loading_more = use_state(|| false);
+    let history_error = use_state(|| false);
 
     {
         use_effect_with_deps(
@@ -101,27 +119,96 @@ pub fn trust_chain_page() -> Html {
         );
     }
 
+    // Fetch core + first history page in parallel on mount.
     {
         let data = data.clone();
-        let loading = loading.clone();
+        let core_loading = core_loading.clone();
+        let history_builds = history_builds.clone();
+        let history_has_more = history_has_more.clone();
+        let history_loading = history_loading.clone();
+        let history_error = history_error.clone();
         use_effect_with_deps(
             move |_| {
-                wasm_bindgen_futures::spawn_local(async move {
-                    let url = format!("{}/api/trust-chain", get_backend_url());
-                    if let Ok(resp) = Request::get(&url).send().await {
-                        if let Ok(d) = resp.json::<TrustChainData>().await {
-                            data.set(Some(d));
+                // Core fetch
+                {
+                    let data = data.clone();
+                    let core_loading = core_loading.clone();
+                    wasm_bindgen_futures::spawn_local(async move {
+                        let url = format!("{}/api/trust-chain", get_backend_url());
+                        if let Ok(resp) = Request::get(&url).send().await {
+                            if let Ok(d) = resp.json::<TrustChainData>().await {
+                                data.set(Some(d));
+                            }
                         }
-                    }
-                    loading.set(false);
-                });
+                        core_loading.set(false);
+                    });
+                }
+                // History fetch
+                {
+                    let history_builds = history_builds.clone();
+                    let history_has_more = history_has_more.clone();
+                    let history_loading = history_loading.clone();
+                    let history_error = history_error.clone();
+                    wasm_bindgen_futures::spawn_local(async move {
+                        let url = format!(
+                            "{}/api/trust-chain/history?limit={}&offset=0",
+                            get_backend_url(),
+                            HISTORY_PAGE_SIZE
+                        );
+                        match Request::get(&url).send().await {
+                            Ok(resp) => match resp.json::<TrustChainHistoryData>().await {
+                                Ok(h) => {
+                                    history_builds.set(h.builds);
+                                    history_has_more.set(h.has_more);
+                                }
+                                Err(_) => history_error.set(true),
+                            },
+                            Err(_) => history_error.set(true),
+                        }
+                        history_loading.set(false);
+                    });
+                }
                 || ()
             },
             (),
         );
     }
 
+    let load_more = {
+        let history_builds = history_builds.clone();
+        let history_has_more = history_has_more.clone();
+        let history_loading_more = history_loading_more.clone();
+        Callback::from(move |_: MouseEvent| {
+            if *history_loading_more {
+                return;
+            }
+            let offset = history_builds.len();
+            history_loading_more.set(true);
+            let history_builds = history_builds.clone();
+            let history_has_more = history_has_more.clone();
+            let history_loading_more = history_loading_more.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let url = format!(
+                    "{}/api/trust-chain/history?limit={}&offset={}",
+                    get_backend_url(),
+                    HISTORY_PAGE_SIZE,
+                    offset
+                );
+                if let Ok(resp) = Request::get(&url).send().await {
+                    if let Ok(h) = resp.json::<TrustChainHistoryData>().await {
+                        let mut combined = (*history_builds).clone();
+                        combined.extend(h.builds);
+                        history_builds.set(combined);
+                        history_has_more.set(h.has_more);
+                    }
+                }
+                history_loading_more.set(false);
+            });
+        })
+    };
+
     let d = (*data).clone();
+    let builds = (*history_builds).clone();
 
     html! {
         <>
@@ -144,19 +231,30 @@ pub fn trust_chain_page() -> Html {
                 </a>
             </div>
 
-            if *loading {
-                <div class="tc-loading">
-                    <i class="fa-solid fa-spinner fa-spin"></i>{" Loading..."}
-                </div>
-            } else if let Some(ref d) = d {
-                {render_diagram()}
+            {render_diagram()}
+
+            if let Some(ref d) = d {
                 <PillarsSection data={d.clone()} />
-                {render_history_chain(d)}
-                {render_verify_section(d)}
-            } else {
-                <div class="tc-loading">
-                    {"Could not load trust chain data."}
+            } else if *core_loading {
+                <div class="tc-section-skeleton">
+                    <i class="fa-solid fa-spinner fa-spin"></i>{" Verifying on-chain state…"}
                 </div>
+            } else {
+                <div class="tc-section-skeleton">{"Could not load trust chain data."}</div>
+            }
+
+            {render_history_section(
+                &d,
+                &builds,
+                *history_loading,
+                *history_loading_more,
+                *history_has_more,
+                *history_error,
+                load_more,
+            )}
+
+            if let Some(ref d) = d {
+                {render_verify_section(d)}
             }
 
             <div class="tc-footer-links">
@@ -496,20 +594,19 @@ fn render_pillar_isolated(d: &TrustChainData, show_extra: bool, toggle: Callback
 // HISTORY CHAIN
 // =============================================
 
-fn render_history_chain(d: &TrustChainData) -> Html {
-    let mut builds: Vec<&HistoricalBuild> = d.history.iter().collect();
-    if builds.is_empty() {
-        return html! {};
-    }
-
-    // Sort by propose_timestamp ascending (oldest first)
-    builds.sort_by(|a, b| {
-        a.propose_timestamp.as_deref().unwrap_or("")
-            .cmp(&b.propose_timestamp.as_deref().unwrap_or(""))
-    });
-
-    let contract_addr = d.kms_contract_address.as_deref()
-        .unwrap_or("0x2e51F48F7440b415D9De30b4D73a18C8E9428982");
+fn render_history_section(
+    d: &Option<TrustChainData>,
+    builds: &[HistoricalBuild],
+    loading: bool,
+    loading_more: bool,
+    has_more: bool,
+    error: bool,
+    load_more: Callback<MouseEvent>,
+) -> Html {
+    let contract_addr = d
+        .as_ref()
+        .and_then(|d| d.kms_contract_address.clone())
+        .unwrap_or_else(|| "0x2e51F48F7440b415D9De30b4D73a18C8E9428982".to_string());
 
     html! {
         <div class="tc-history">
@@ -518,62 +615,43 @@ fn render_history_chain(d: &TrustChainData) -> Html {
                 {"Every version of Lightfriend is permanently recorded on the Arbitrum blockchain. Each entry links to its source code and on-chain proof."}
             </p>
 
-            <div class="tc-history-chain">
-                {for builds.iter().enumerate().map(|(i, build)| {
-                    let commit_short = short_hash(&build.commit_hash, 7);
-                    let image_id_short = short_hash(&build.image_id, 12);
-                    let is_last = i == builds.len() - 1;
-                    let is_current = build.is_current;
-                    let commit_url = format!("https://github.com/ahtavarasmus/lightfriend/commit/{}", build.commit_hash);
-
-                    html! {
+            if loading && builds.is_empty() {
+                <div class="tc-history-skeleton">
+                    <i class="fa-solid fa-spinner fa-spin"></i>
+                    {" Loading build history…"}
+                </div>
+            } else if error && builds.is_empty() {
+                <div class="tc-history-skeleton">{"Could not load history."}</div>
+            } else if builds.is_empty() {
+                <div class="tc-history-skeleton">{"No builds recorded yet."}</div>
+            } else {
+                <div class="tc-history-chain">
+                    {for builds.iter().enumerate().map(|(i, build)| {
+                        let is_last = i == builds.len() - 1;
+                        render_history_card(build, is_last)
+                    })}
+                    if has_more {
                         <div class="tc-history-entry">
-                            <div class={classes!("tc-history-node", is_current.then(|| "current"))}>
-                                <div class="tc-history-dot">
-                                    if is_current {
-                                        <i class="fa-solid fa-circle-check"></i>
-                                    } else {
-                                        <i class="fa-solid fa-circle"></i>
-                                    }
-                                </div>
-
-                                <div class="tc-history-card">
-                                    if is_current {
-                                        <span class="tc-history-badge">{"running"}</span>
-                                    }
-
-                                    <div class="tc-history-fp">
-                                        <i class="fa-solid fa-fingerprint"></i>
-                                        <code>{&image_id_short}</code>
-                                    </div>
-
-                                    <div class="tc-history-links">
-                                        <a href={commit_url} target="_blank" rel="noopener noreferrer" title="View source code">
-                                            <i class="fa-solid fa-code-commit"></i>
-                                            {format!(" {}", commit_short)}
-                                        </a>
-                                        if !build.propose_tx.is_empty() {
-                                            <a href={format!("https://arbiscan.io/tx/{}", build.propose_tx)} target="_blank" rel="noopener noreferrer" title="View on-chain proof">
-                                                <i class="fa-solid fa-link"></i>
-                                                {" arbiscan"}
-                                            </a>
-                                        }
-                                    </div>
-
-                                    if let Some(ref ts) = build.propose_timestamp {
-                                        <span class="tc-history-date">{format_date(ts)}</span>
-                                    }
-                                </div>
+                            <div class="tc-history-connector">
+                                <i class="fa-solid fa-arrow-left"></i>
                             </div>
-                            if !is_last {
-                                <div class="tc-history-connector">
-                                    <i class="fa-solid fa-arrow-right"></i>
-                                </div>
-                            }
+                            <button
+                                class="tc-history-load-more"
+                                onclick={load_more}
+                                disabled={loading_more}
+                            >
+                                if loading_more {
+                                    <i class="fa-solid fa-spinner fa-spin"></i>
+                                    {" Loading…"}
+                                } else {
+                                    <i class="fa-solid fa-plus"></i>
+                                    {" Load older"}
+                                }
+                            </button>
                         </div>
                     }
-                })}
-            </div>
+                </div>
+            }
 
             <div class="tc-history-footer">
                 <a href={format!("https://arbiscan.io/address/{}#events", contract_addr)} target="_blank" rel="noopener noreferrer">
@@ -582,6 +660,94 @@ fn render_history_chain(d: &TrustChainData) -> Html {
             </div>
         </div>
     }
+}
+
+fn render_history_card(build: &HistoricalBuild, is_last: bool) -> Html {
+    let commit_short = short_hash(&build.commit_hash, 7);
+    let image_id_short = short_hash(&build.image_id, 12);
+    let is_current = build.is_current;
+    let commit_url = format!(
+        "https://github.com/ahtavarasmus/lightfriend/commit/{}",
+        build.commit_hash
+    );
+    let (subject, full_message) = commit_display(build);
+
+    html! {
+        <div class="tc-history-entry">
+            <div class={classes!("tc-history-node", is_current.then(|| "current"))}>
+                <div class="tc-history-dot">
+                    if is_current {
+                        <i class="fa-solid fa-circle-check"></i>
+                    } else {
+                        <i class="fa-solid fa-circle"></i>
+                    }
+                </div>
+
+                <div class="tc-history-card">
+                    if is_current {
+                        <span class="tc-history-badge">{"running"}</span>
+                    }
+
+                    if let Some(ref s) = subject {
+                        <div class="tc-history-message" title={full_message.clone().unwrap_or_default()}>
+                            {s.clone()}
+                        </div>
+                    }
+
+                    <div class="tc-history-fp">
+                        <i class="fa-solid fa-fingerprint"></i>
+                        <code>{&image_id_short}</code>
+                    </div>
+
+                    <div class="tc-history-links">
+                        <a href={commit_url} target="_blank" rel="noopener noreferrer" title="View source code">
+                            <i class="fa-solid fa-code-commit"></i>
+                            {format!(" {}", commit_short)}
+                        </a>
+                        if let Some(pr) = build.pr_number {
+                            <a href={format!("https://github.com/ahtavarasmus/lightfriend/pull/{}", pr)} target="_blank" rel="noopener noreferrer" title="View pull request">
+                                <i class="fa-solid fa-code-pull-request"></i>
+                                {format!(" #{}", pr)}
+                            </a>
+                        }
+                        if !build.propose_tx.is_empty() {
+                            <a href={format!("https://arbiscan.io/tx/{}", build.propose_tx)} target="_blank" rel="noopener noreferrer" title="View on-chain proof">
+                                <i class="fa-solid fa-link"></i>
+                                {" arbiscan"}
+                            </a>
+                        }
+                    </div>
+
+                    if let Some(ref ts) = build.propose_timestamp {
+                        <span class="tc-history-date">{format_date(ts)}</span>
+                    }
+                </div>
+            </div>
+            if !is_last {
+                <div class="tc-history-connector">
+                    <i class="fa-solid fa-arrow-left"></i>
+                </div>
+            }
+        </div>
+    }
+}
+
+/// Returns (truncated subject for the card, full text for the tooltip).
+fn commit_display(build: &HistoricalBuild) -> (Option<String>, Option<String>) {
+    let Some(msg) = build.commit_message.as_deref() else {
+        return (None, None);
+    };
+    let trimmed = msg.trim();
+    if trimmed.is_empty() {
+        return (None, None);
+    }
+    let subject = if trimmed.chars().count() > 70 {
+        let truncated: String = trimmed.chars().take(67).collect();
+        format!("{}…", truncated)
+    } else {
+        trimmed.to_string()
+    };
+    (Some(subject), Some(trimmed.to_string()))
 }
 
 // =============================================
@@ -665,6 +831,23 @@ const STYLES: &str = r#"
 .tc-intro-link:hover { text-decoration: underline; }
 
 .tc-loading { text-align: center; padding: 3rem; color: rgba(255,255,255,0.3); }
+.tc-section-skeleton {
+    text-align: center;
+    padding: 1.5rem;
+    color: rgba(255,255,255,0.3);
+    font-size: 0.85rem;
+    border: 1px dashed rgba(255,255,255,0.08);
+    border-radius: 10px;
+    margin-bottom: 2rem;
+}
+.tc-section-skeleton i { margin-right: 0.4rem; }
+.tc-history-skeleton {
+    text-align: center;
+    padding: 2rem 1rem;
+    color: rgba(255,255,255,0.3);
+    font-size: 0.82rem;
+}
+.tc-history-skeleton i { margin-right: 0.3rem; }
 
 /* ---- Diagram ---- */
 .tc-diagram { margin-bottom: 2rem; }
@@ -961,7 +1144,7 @@ const STYLES: &str = r#"
     flex-direction: column;
     align-items: center;
     gap: 0.35rem;
-    min-width: 120px;
+    min-width: 180px;
 }
 .tc-history-dot {
     font-size: 0.65rem;
@@ -978,7 +1161,8 @@ const STYLES: &str = r#"
     padding: 0.6rem 0.75rem;
     background: rgba(255,255,255,0.02);
     text-align: center;
-    min-width: 110px;
+    width: 180px;
+    box-sizing: border-box;
 }
 .tc-history-node.current .tc-history-card {
     border-color: rgba(76, 175, 80, 0.25);
@@ -993,6 +1177,19 @@ const STYLES: &str = r#"
     letter-spacing: 0.08em;
     color: #4CAF50;
     margin-bottom: 0.25rem;
+}
+
+.tc-history-message {
+    font-size: 0.7rem;
+    line-height: 1.35;
+    color: rgba(255,255,255,0.72);
+    margin: 0 0 0.35rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-break: break-word;
+    cursor: help;
 }
 
 .tc-history-fp {
@@ -1033,6 +1230,31 @@ const STYLES: &str = r#"
     padding: 0 0.25rem;
     margin-top: 0.5rem;
 }
+
+.tc-history-load-more {
+    border: 1px dashed rgba(76, 175, 80, 0.3);
+    border-radius: 8px;
+    background: rgba(76, 175, 80, 0.03);
+    color: rgba(76, 175, 80, 0.85);
+    font-family: inherit;
+    font-size: 0.75rem;
+    padding: 1.2rem 0.75rem;
+    cursor: pointer;
+    width: 130px;
+    min-height: 88px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    margin-top: 0.75rem;
+    transition: background 0.15s, border-color 0.15s;
+}
+.tc-history-load-more:hover:not(:disabled) {
+    background: rgba(76, 175, 80, 0.08);
+    border-color: rgba(76, 175, 80, 0.5);
+}
+.tc-history-load-more:disabled { cursor: default; opacity: 0.7; }
 
 .tc-history-footer {
     margin-top: 0.75rem;
