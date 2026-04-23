@@ -564,11 +564,19 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
         })
     };
 
-    // Function to disconnect - instant response, cleanup in background
+    // Function to disconnect - instant response, cleanup in background.
+    // Also used as the Cancel action during an in-progress connect, so it
+    // resets all connecting-related state back to the "ready to connect" UI.
     let disconnect = {
         let connection_status = connection_status.clone();
         let error = error.clone();
         let show_disconnect_modal = show_disconnect_modal.clone();
+        let is_connecting = is_connecting.clone();
+        let was_connecting = was_connecting.clone();
+        let auth_data = auth_data.clone();
+        let pairing_code = pairing_code.clone();
+        let phone_login_mode = phone_login_mode.clone();
+        let remaining_seconds = remaining_seconds.clone();
         let bridge_id = bridge_id.to_string();
         let bridge_name = bridge_name.to_string();
         Callback::from(move |_| {
@@ -585,6 +593,12 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                 connected_account: None,
             }));
             show_disconnect_modal.set(false);
+            is_connecting.set(false);
+            was_connecting.set(false);
+            auth_data.set(None);
+            pairing_code.set(None);
+            phone_login_mode.set(false);
+            remaining_seconds.set(0);
             // Fire and forget - backend cleanup happens in background
             spawn_local(async move {
                 let url = format!("/api/auth/{}/disconnect", bridge_id);
