@@ -317,7 +317,7 @@ fn test_mark_room_digest_delivered() {
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
     let now = 1000000;
 
-    // Insert medium-urgency messages in room A
+    // Insert later-urgency messages in room A
     let msg1 = state
         .ontology_repository
         .insert_message(&NewOntMessage {
@@ -333,7 +333,7 @@ fn test_mark_room_digest_delivered() {
         .unwrap();
     state
         .ontology_repository
-        .update_message_classification(msg1.id, "medium", "chat", None, None, None)
+        .update_message_classification(msg1.id, "later", "chat", None, None, None)
         .unwrap();
 
     let msg2 = state
@@ -351,10 +351,10 @@ fn test_mark_room_digest_delivered() {
         .unwrap();
     state
         .ontology_repository
-        .update_message_classification(msg2.id, "medium", "chat", None, None, None)
+        .update_message_classification(msg2.id, "later", "chat", None, None, None)
         .unwrap();
 
-    // Insert medium-urgency message in room B (should NOT be affected)
+    // Insert later-urgency message in room B (should NOT be affected)
     let msg3 = state
         .ontology_repository
         .insert_message(&NewOntMessage {
@@ -370,10 +370,10 @@ fn test_mark_room_digest_delivered() {
         .unwrap();
     state
         .ontology_repository
-        .update_message_classification(msg3.id, "medium", "chat", None, None, None)
+        .update_message_classification(msg3.id, "later", "chat", None, None, None)
         .unwrap();
 
-    // Insert high-urgency message in room A (should NOT be affected by digest marking)
+    // Insert now-urgency message in room A (should NOT be affected by digest marking)
     let msg4 = state
         .ontology_repository
         .insert_message(&NewOntMessage {
@@ -389,7 +389,7 @@ fn test_mark_room_digest_delivered() {
         .unwrap();
     state
         .ontology_repository
-        .update_message_classification(msg4.id, "high", "request", None, None, None)
+        .update_message_classification(msg4.id, "now", "request", None, None, None)
         .unwrap();
 
     // Mark room A digest delivered
@@ -397,7 +397,7 @@ fn test_mark_room_digest_delivered() {
         .ontology_repository
         .mark_room_digest_delivered(user.id, "!roomA", now + 100)
         .unwrap();
-    assert_eq!(affected, 2); // only the two medium messages in room A
+    assert_eq!(affected, 2); // only the two later-urgency messages in room A
 
     // Room B message should still be pending
     let pending = state
