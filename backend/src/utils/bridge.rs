@@ -15,10 +15,59 @@ use matrix_sdk::{
     },
     Client as MatrixClient,
 };
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{
+    collections::HashSet,
+    sync::{
+        atomic::{AtomicI64, AtomicU64, Ordering},
+        Arc, OnceLock,
+    },
+    time::Duration,
+};
 
 use crate::AppState;
 use serde::{Deserialize, Serialize};
+
+/// Atomic counters for `handle_bridge_message` invocations, exposed via the
+/// `/api/admin/handler-stats` admin endpoint. Lets us confirm at runtime that
+/// portal events are reaching the handler post-deploy without scraping logs.
+/// Each pair tracks "invoked" (handler fired for this service) and "stored"
+/// (message was successfully written to ont_messages — survives all filters).
+pub static HANDLER_INVOCATIONS_TG: AtomicU64 = AtomicU64::new(0);
+pub static HANDLER_INVOCATIONS_WA: AtomicU64 = AtomicU64::new(0);
+pub static HANDLER_INVOCATIONS_SIGNAL: AtomicU64 = AtomicU64::new(0);
+pub static HANDLER_STORED_TG: AtomicU64 = AtomicU64::new(0);
+pub static HANDLER_STORED_WA: AtomicU64 = AtomicU64::new(0);
+pub static HANDLER_STORED_SIGNAL: AtomicU64 = AtomicU64::new(0);
+/// Set once on first handler invocation; readable by the stats endpoint to
+/// compute "events per minute since boot".
+pub static HANDLER_BOOT_TS: OnceLock<AtomicI64> = OnceLock::new();
+
+fn bump_invocation(service: &str) {
+    HANDLER_BOOT_TS.get_or_init(|| {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        AtomicI64::new(now)
+    });
+    let counter = match service {
+        "telegram" => &HANDLER_INVOCATIONS_TG,
+        "whatsapp" => &HANDLER_INVOCATIONS_WA,
+        "signal" => &HANDLER_INVOCATIONS_SIGNAL,
+        _ => return,
+    };
+    counter.fetch_add(1, Ordering::Relaxed);
+}
+
+fn bump_stored(service: &str) {
+    let counter = match service {
+        "telegram" => &HANDLER_STORED_TG,
+        "whatsapp" => &HANDLER_STORED_WA,
+        "signal" => &HANDLER_STORED_SIGNAL,
+        _ => return,
+    };
+    counter.fetch_add(1, Ordering::Relaxed);
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BridgeRoom {
@@ -1704,6 +1753,13 @@ pub async fn handle_bridge_message(
         }
     };
 
+    // Service is now known. Bump the handler-invocation counter so the
+    // /api/admin/handler-stats diagnostic endpoint can show that portal
+    // events ARE reaching the handler post-deploy. This counter ticks
+    // BEFORE the connecting/sub/plan filters below so we count raw event
+    // arrivals, not just stored messages.
+    bump_invocation(&service);
+
     // Skip portal messages for a service that is currently connecting
     // (the connection monitor handles those). Only skip the connecting service,
     // not all services.
@@ -1785,9 +1841,11 @@ pub async fn handle_bridge_message(
                 .as_secs() as i32,
         };
         let state_clone = state.clone();
+        let stored_service = service.clone();
         tokio::spawn(async move {
             match state_clone.ontology_repository.insert_message(&msg) {
                 Ok(created) => {
+                    bump_stored(&stored_service);
                     let snapshot = serde_json::json!({
                         "message_id": created.id,
                         "platform": msg.platform,
@@ -2011,9 +2069,11 @@ pub async fn handle_bridge_message(
             .as_secs() as i32,
     };
     let state_clone = state.clone();
+    let stored_service = service.clone();
     tokio::spawn(async move {
         match state_clone.ontology_repository.insert_message(&msg) {
             Ok(created) => {
+                bump_stored(&stored_service);
                 let mut snapshot = serde_json::json!({
                     "message_id": created.id,
                     "platform": msg.platform,
@@ -2249,11 +2309,15 @@ async fn fetch_bridge_contacts(
         .get_room(&room_id)
         .ok_or_else(|| anyhow!("Management room not found in client"))?;
 
-    // Determine bridge command prefix
+    // Determine bridge command. WA/Signal (bridgev2) expose `list contacts`
+    // and we filter client-side. mautrix-telegram v0.15.3 (Python) has no
+    // such command — `list contacts` returns "Unknown command", silently
+    // hanging this function for 7.5s every call. Use its actual contact
+    // search command instead, which filters server-side.
     let cmd = match service {
-        "whatsapp" => "!wa list contacts",
-        "signal" => "!signal list contacts",
-        "telegram" => "!tg list contacts",
+        "whatsapp" => "!wa list contacts".to_string(),
+        "signal" => "!signal list contacts".to_string(),
+        "telegram" => format!("!tg search {}", search_term.trim()),
         _ => return Err(anyhow!("Unknown service: {}", service)),
     };
 
@@ -2262,7 +2326,7 @@ async fn fetch_bridge_contacts(
         cmd,
         mgmt_room_id
     );
-    room.send(RoomMessageEventContent::text_plain(cmd)).await?;
+    room.send(RoomMessageEventContent::text_plain(&cmd)).await?;
 
     // Get bridge bot user ID
     let bridge_bot_var = match service {

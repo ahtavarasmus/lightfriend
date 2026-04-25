@@ -867,6 +867,34 @@ if shared_secret:
     if re.search(login_secret_pattern, text):
         text = re.sub(login_secret_pattern, login_secret_block, text, count=1)
 
+# Force `appservice_double_puppet.localhost: as_token:<DOUBLE_PUPPET_SECRET>`
+# on every restart. Without this block the bridge cannot force-join users to
+# portal rooms (`!tg ping-matrix` reports "not logged in with your Matrix
+# account") and inbound Telegram messages never reach lightfriend because no
+# portal events fire `handle_bridge_message`. Older persisted configs may be
+# missing or have stale values; patch in place since the bridge config file
+# is preserved across restarts (only generated from template if absent).
+double_puppet_secret = os.environ.get("DOUBLE_PUPPET_SECRET", "")
+if double_puppet_secret:
+    appservice_dp_block = (
+        "    appservice_double_puppet:\n"
+        f"        localhost: as_token:{double_puppet_secret}\n"
+    )
+    appservice_dp_pattern = r"(?ms)^    appservice_double_puppet:\n(?:        .*?\n)+?(?=    [A-Za-z_][A-Za-z0-9_]*:|\Z)"
+    if re.search(appservice_dp_pattern, text):
+        text = re.sub(appservice_dp_pattern, appservice_dp_block, text, count=1)
+        print("  Patched appservice_double_puppet block", flush=True)
+    else:
+        # Block missing entirely - inject after login_shared_secret_map (which
+        # we just ensured exists above when MATRIX_HOMESERVER_SHARED_SECRET is
+        # set). Falls back to inserting before the next sibling key.
+        anchor_pattern = r"(?ms)^(    login_shared_secret_map:\n(?:        .*?\n)+?)(?=    [A-Za-z_][A-Za-z0-9_]*:)"
+        text, n = re.subn(anchor_pattern, r"\1" + appservice_dp_block, text, count=1)
+        if n:
+            print("  Inserted appservice_double_puppet block (was missing)", flush=True)
+        else:
+            print("  WARNING: could not locate insertion point for appservice_double_puppet", flush=True)
+
 # Patch proxy fields from current .env (config may have stale values from backup).
 # Inside the enclave the SOCKS5 residential proxy is reachable via the local VSOCK
 # bridge at 127.0.0.1:1080 (see STEP 0c1), NOT at the original external address.

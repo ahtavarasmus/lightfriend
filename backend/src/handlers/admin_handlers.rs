@@ -1660,13 +1660,22 @@ pub async fn probe_bridge_command(
         }
     };
 
-    // Whitelist cmd - read-only only, no side effects
+    // Whitelist cmd - read-only only, no side effects.
+    //
+    // ping-matrix / sync-state / ping-bot added for mautrix-telegram v0.15.3
+    // diagnostics: ping-matrix is the authoritative test for whether the
+    // bridge has Matrix-side double-puppet auth for the user (without it the
+    // bridge can't force-join portal rooms and inbound messages never reach
+    // `handle_bridge_message`). sync-state and ping-bot are also pure reads.
     match cmd.as_str() {
-        "help" | "ping" | "version" | "list-logins" => {}
+        "help" | "ping" | "version" | "list-logins" | "ping-matrix" | "sync-state" | "ping-bot" => {
+        }
         _ => {
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "invalid cmd (expected help|ping|version|list-logins)"})),
+                Json(
+                    json!({"error": "invalid cmd (expected help|ping|version|list-logins|ping-matrix|sync-state|ping-bot)"}),
+                ),
             ));
         }
     };
@@ -2134,5 +2143,308 @@ pub async fn recent_bot_messages(
         "window_start_ts_ms": window_start_ts_ms,
         "message_count": bot_messages.len(),
         "messages": bot_messages,
+    })))
+}
+
+/// Read-only summary of the caller's Matrix client room state.
+///
+/// Answers the diagnostic question: is a bridge force-joining the user to
+/// portal rooms, or are they sitting in `invited` state (or missing entirely)?
+/// Classifies each room by bridge by scanning joined-member localparts for
+/// the `telegram_` / `whatsapp_` / `signal_` ghost prefixes.
+pub async fn matrix_rooms_summary(
+    State(state): State<Arc<AppState>>,
+    auth_user: crate::handlers::auth_middleware::AuthUser,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    use matrix_sdk::config::SyncSettings as MatrixSyncSettings;
+    use matrix_sdk::RoomMemberships;
+    use tokio::time::Duration;
+
+    let client = crate::utils::matrix_auth::get_cached_client(auth_user.user_id, &state)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("matrix client: {}", e)})),
+            )
+        })?;
+
+    let _ = client
+        .sync_once(MatrixSyncSettings::default().timeout(Duration::from_secs(5)))
+        .await;
+
+    let joined = client.joined_rooms();
+    let invited = client.invited_rooms();
+
+    let classify = |localpart: &str| -> &'static str {
+        if localpart.starts_with("telegram_") {
+            "telegram"
+        } else if localpart.starts_with("whatsapp_") {
+            "whatsapp"
+        } else if localpart.starts_with("signal_") {
+            "signal"
+        } else {
+            ""
+        }
+    };
+
+    let mut joined_by_bridge: std::collections::BTreeMap<String, u32> =
+        std::collections::BTreeMap::new();
+    let mut joined_sample: Vec<serde_json::Value> = Vec::new();
+    for room in &joined {
+        let bridge_tag = match room.members(RoomMemberships::JOIN).await {
+            Ok(members) => {
+                let mut found: &str = "";
+                for m in &members {
+                    let tag = classify(m.user_id().localpart());
+                    if !tag.is_empty() {
+                        found = tag;
+                        break;
+                    }
+                }
+                if found.is_empty() {
+                    "other".to_string()
+                } else {
+                    found.to_string()
+                }
+            }
+            Err(_) => "members_error".to_string(),
+        };
+        *joined_by_bridge.entry(bridge_tag.clone()).or_insert(0) += 1;
+        if joined_sample.len() < 30 {
+            let display = room
+                .display_name()
+                .await
+                .ok()
+                .map(|n| n.to_string())
+                .unwrap_or_default();
+            joined_sample.push(json!({
+                "room_id": room.room_id().to_string(),
+                "display_name": display,
+                "bridge": bridge_tag,
+            }));
+        }
+    }
+
+    let mut invited_sample: Vec<serde_json::Value> = Vec::new();
+    for room in invited.iter().take(30) {
+        let display = room
+            .display_name()
+            .await
+            .ok()
+            .map(|n| n.to_string())
+            .unwrap_or_default();
+        invited_sample.push(json!({
+            "room_id": room.room_id().to_string(),
+            "display_name": display,
+        }));
+    }
+
+    Ok(Json(json!({
+        "joined_count": joined.len(),
+        "invited_count": invited.len(),
+        "joined_by_bridge": joined_by_bridge,
+        "joined_sample": joined_sample,
+        "invited_sample": invited_sample,
+    })))
+}
+
+/// Read a bridge's effective config file from inside the enclave and return a
+/// SAFE summary: presence/format of key fields, never the secret values.
+/// Lets us confirm post-deploy that `ensure_telegram_config_compat`'s patches
+/// (especially `appservice_double_puppet`) actually landed in the persisted
+/// config — without that confirmation, if `ping-matrix` still fails after
+/// deploy we can't tell whether the patcher silently no-op'd or the bridge
+/// is ignoring a config that's actually correct.
+///
+/// GET /api/admin/bridge-config-summary/{bridge_type}
+pub async fn bridge_config_summary(
+    State(_state): State<Arc<AppState>>,
+    _auth_user: crate::handlers::auth_middleware::AuthUser,
+    axum::extract::Path(bridge_type): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if !matches!(bridge_type.as_str(), "telegram" | "whatsapp" | "signal") {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "invalid bridge_type"})),
+        ));
+    }
+
+    let path = format!("/data/bridges/{}/config.yaml", bridge_type);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": format!("could not read {}: {}", path, e)
+                })),
+            ));
+        }
+    };
+
+    // Pull a few load-bearing fields by line-prefix grep. We never echo the
+    // raw secret value; we only report whether the key is present and the
+    // format prefix (so e.g. an `as_token:` prefix can be distinguished from
+    // a stale literal). This keeps the endpoint safe to expose even though
+    // it's admin-only.
+    let mut presence: std::collections::BTreeMap<String, serde_json::Value> =
+        std::collections::BTreeMap::new();
+
+    let mut record_presence = |key: &str, label: &str| {
+        // Match either `key:` at start of line or 4-space indented `key:`
+        // (mautrix configs nest under bridge:/appservice: blocks).
+        let needle_a = format!("\n{}:", key);
+        let needle_b = format!("    {}:", key);
+        let found = text.contains(&needle_a)
+            || text.starts_with(&format!("{}:", key))
+            || text
+                .lines()
+                .any(|l| l.trim_start().starts_with(&format!("{}:", key)));
+        presence.insert(label.to_string(), serde_json::Value::Bool(found));
+        let _ = needle_b; // keep naming consistent in case we extend matching later
+    };
+
+    record_presence("appservice_double_puppet", "has_appservice_double_puppet");
+    record_presence("login_shared_secret_map", "has_login_shared_secret_map");
+    record_presence("double_puppet", "has_double_puppet_block");
+    record_presence("sync_with_custom_puppets", "has_sync_with_custom_puppets");
+    record_presence("encryption", "has_encryption_block");
+
+    // For telegram: extract the as_token: prefix line under
+    // appservice_double_puppet to confirm the format is correct (without
+    // ever leaking the token itself).
+    let mut adp_format_ok = false;
+    let mut sync_with_custom_puppets_value: Option<String> = None;
+    let mut in_adp = false;
+    let mut indent_adp: usize = 0;
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        let indent = line.len() - trimmed.len();
+        if trimmed.starts_with("appservice_double_puppet:") {
+            in_adp = true;
+            indent_adp = indent;
+            continue;
+        }
+        if in_adp {
+            if trimmed.is_empty() {
+                continue;
+            }
+            if indent <= indent_adp {
+                in_adp = false;
+            } else if let Some((_, after_colon)) = trimmed.split_once(':') {
+                let val = after_colon.trim();
+                if val.starts_with("as_token:") && val.len() > "as_token:".len() + 4 {
+                    adp_format_ok = true;
+                }
+            }
+        }
+        if let Some(rest) = trimmed.strip_prefix("sync_with_custom_puppets:") {
+            sync_with_custom_puppets_value = Some(rest.trim().to_string());
+        }
+    }
+
+    Ok(Json(json!({
+        "bridge_type": bridge_type,
+        "config_path": path,
+        "size_bytes": text.len(),
+        "presence": presence,
+        "appservice_double_puppet_format_ok": adp_format_ok,
+        "sync_with_custom_puppets_value": sync_with_custom_puppets_value,
+    })))
+}
+
+/// Read-only counters for `handle_bridge_message` invocations and successful
+/// stores. Tells us at runtime whether portal events are flowing AND whether
+/// they're surviving the subscription/plan/age filters into ont_messages.
+///
+/// GET /api/admin/handler-stats
+pub async fn handler_stats(
+    State(_state): State<Arc<AppState>>,
+    _auth_user: crate::handlers::auth_middleware::AuthUser,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    use crate::utils::bridge::{
+        HANDLER_BOOT_TS, HANDLER_INVOCATIONS_SIGNAL, HANDLER_INVOCATIONS_TG,
+        HANDLER_INVOCATIONS_WA, HANDLER_STORED_SIGNAL, HANDLER_STORED_TG, HANDLER_STORED_WA,
+    };
+    use std::sync::atomic::Ordering;
+
+    let boot_ts = HANDLER_BOOT_TS
+        .get()
+        .map(|a| a.load(Ordering::Relaxed))
+        .unwrap_or(0);
+    Ok(Json(json!({
+        "since_boot_ts": boot_ts,
+        "invocations": {
+            "telegram": HANDLER_INVOCATIONS_TG.load(Ordering::Relaxed),
+            "whatsapp": HANDLER_INVOCATIONS_WA.load(Ordering::Relaxed),
+            "signal":   HANDLER_INVOCATIONS_SIGNAL.load(Ordering::Relaxed),
+        },
+        "stored": {
+            "telegram": HANDLER_STORED_TG.load(Ordering::Relaxed),
+            "whatsapp": HANDLER_STORED_WA.load(Ordering::Relaxed),
+            "signal":   HANDLER_STORED_SIGNAL.load(Ordering::Relaxed),
+        },
+    })))
+}
+
+/// Admin pass-through to inspect recent ont_messages rows for a service.
+/// Lets us check the inbound pipeline end-to-end (Matrix sync → handler →
+/// filters → DB) without needing to round-trip through the SMS LLM tool.
+///
+/// GET /api/admin/recent-ont-messages?service=telegram&since_mins=60&limit=20
+#[derive(Deserialize)]
+pub struct RecentOntMessagesQuery {
+    pub service: Option<String>,
+    pub since_mins: Option<u64>,
+    pub limit: Option<i64>,
+}
+
+pub async fn recent_ont_messages(
+    State(state): State<Arc<AppState>>,
+    auth_user: crate::handlers::auth_middleware::AuthUser,
+    axum::extract::Query(q): axum::extract::Query<RecentOntMessagesQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let service = q.service.as_deref();
+    let since_mins = q.since_mins.unwrap_or(60).min(1440); // cap at 24h
+    let limit = q.limit.unwrap_or(50).clamp(1, 200);
+
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i32)
+        .unwrap_or(0);
+    let since_ts = now_secs.saturating_sub((since_mins * 60) as i32);
+
+    let messages = state
+        .ontology_repository
+        .get_recent_messages_filtered(auth_user.user_id, service, since_ts, limit)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("query failed: {}", e)})),
+            )
+        })?;
+
+    let rows: Vec<serde_json::Value> = messages
+        .iter()
+        .map(|m| {
+            json!({
+                "id": m.id,
+                "platform": m.platform,
+                "sender_name": m.sender_name,
+                "room_id": m.room_id,
+                "created_at": m.created_at,
+                "content_len": m.content.chars().count(),
+                "person_id": m.person_id,
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "service": service,
+        "since_mins": since_mins,
+        "since_ts": since_ts,
+        "count": rows.len(),
+        "messages": rows,
     })))
 }

@@ -725,6 +725,22 @@ async fn main() {
             "/api/admin/bridge-recent-bot-messages/{bridge_type}",
             get(admin_handlers::recent_bot_messages),
         )
+        .route(
+            "/api/admin/matrix-rooms-summary",
+            get(admin_handlers::matrix_rooms_summary),
+        )
+        .route(
+            "/api/admin/bridge-config-summary/{bridge_type}",
+            get(admin_handlers::bridge_config_summary),
+        )
+        .route(
+            "/api/admin/handler-stats",
+            get(admin_handlers::handler_stats),
+        )
+        .route(
+            "/api/admin/recent-ont-messages",
+            get(admin_handlers::recent_ont_messages),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             handlers::auth_middleware::require_admin,
