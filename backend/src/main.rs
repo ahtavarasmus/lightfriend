@@ -749,6 +749,10 @@ async fn main() {
             "/api/admin/repair-telegram-doublepuppet",
             post(admin_handlers::repair_telegram_doublepuppet),
         )
+        .route(
+            "/api/admin/supervisor-log/{program}",
+            get(admin_handlers::supervisor_log),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             handlers::auth_middleware::require_admin,

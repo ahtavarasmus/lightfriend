@@ -857,92 +857,41 @@ text = re.sub(
     count=1,
 )
 
-shared_secret = os.environ.get("MATRIX_HOMESERVER_SHARED_SECRET", "")
-if shared_secret:
+# mautrix-python's CustomPuppet._login_with_shared_secret recognizes the
+# `as_token:` prefix as the appservice-mode trigger (see
+# mautrix/bridge/custom_puppet.py:174-175). Without that prefix the bridge
+# tries m.login.devture.shared_secret / m.login.password which tuwunel
+# does not implement → AutologinError → ping-matrix says "not logged in
+# with your Matrix account" → bridge can't force-join users to portals →
+# inbound Telegram messages never reach handle_bridge_message.
+#
+# The earlier version of this patcher used MATRIX_HOMESERVER_SHARED_SECRET
+# as the raw value and was the regression source. Use the doublepuppet
+# appservice token (already registered with tuwunel as the `doublepuppet`
+# appservice in tuwunel.toml.template) and prefix it correctly.
+double_puppet_secret = os.environ.get("DOUBLE_PUPPET_SECRET", "")
+if double_puppet_secret:
     login_secret_block = (
         "    login_shared_secret_map:\n"
-        f"        localhost: {shared_secret}\n"
+        f"        localhost: as_token:{double_puppet_secret}\n"
     )
     login_secret_pattern = r"(?ms)^    login_shared_secret_map:\n(?:        .*?\n)+?(?=    [A-Za-z_][A-Za-z0-9_]*:|\Z)"
     if re.search(login_secret_pattern, text):
         text = re.sub(login_secret_pattern, login_secret_block, text, count=1)
-
-# Force `appservice_double_puppet.localhost: as_token:<DOUBLE_PUPPET_SECRET>`
-# on every restart. Without this block the bridge cannot force-join users to
-# portal rooms (`!tg ping-matrix` reports "not logged in with your Matrix
-# account") and inbound Telegram messages never reach lightfriend because no
-# portal events fire `handle_bridge_message`. Older persisted configs may be
-# missing or have stale values; patch in place since the bridge config file
-# is preserved across restarts (only generated from template if absent).
-#
-# Line-based instead of regex because the previous regex anchor silently
-# no-op'd against the real prod config layout — and a no-op leaves the bug
-# undetectable until the bridge fails. Always-print so /var/log/supervisor
-# tells us unambiguously what happened on each restart.
-double_puppet_secret = os.environ.get("DOUBLE_PUPPET_SECRET", "")
-print(f"  appservice_double_puppet patcher: DOUBLE_PUPPET_SECRET visible={bool(double_puppet_secret)} len={len(double_puppet_secret)}", flush=True)
-if not double_puppet_secret:
-    print("  appservice_double_puppet patcher: SKIP — DOUBLE_PUPPET_SECRET not set", flush=True)
-else:
-    lines = text.split("\n")
-    # Locate the indented bridge: block keys we care about.
-    adp_idx = None       # line of existing `    appservice_double_puppet:` if any
-    adp_end = None       # one past last line belonging to that block
-    lssm_idx = None      # line of `    login_shared_secret_map:`
-    lssm_end = None      # one past last line of lssm block
-    for i, line in enumerate(lines):
-        stripped = line.lstrip()
-        # Bridge-section keys are 4-space indented
-        is_bridge_key = line.startswith("    ") and not line.startswith("        ") and stripped and not stripped.startswith("#")
-        if line.startswith("    appservice_double_puppet:"):
-            adp_idx = i
-            # Walk forward: included lines are 8+ indent or blank
-            j = i + 1
-            while j < len(lines):
-                if lines[j].startswith("        ") or lines[j].strip() == "":
-                    j += 1
-                    continue
-                break
-            adp_end = j
-        elif line.startswith("    login_shared_secret_map:"):
-            lssm_idx = i
-            j = i + 1
-            while j < len(lines):
-                if lines[j].startswith("        ") or lines[j].strip() == "":
-                    j += 1
-                    continue
-                break
-            lssm_end = j
-        _ = is_bridge_key  # reserved for future block-boundary checks
-
-    new_block_lines = [
-        "    appservice_double_puppet:",
-        f"        localhost: as_token:{double_puppet_secret}",
-    ]
-
-    if adp_idx is not None and adp_end is not None:
-        # Replace existing block in place. Preserve any blank line that was
-        # between this block and the next sibling key.
-        trailing_blank = ""
-        if adp_end < len(lines) and lines[adp_end - 1].strip() == "":
-            trailing_blank = ""  # blank already present, replacement keeps natural flow
-        lines = lines[:adp_idx] + new_block_lines + lines[adp_end:]
-        print(f"  appservice_double_puppet patcher: REPLACED existing block at line {adp_idx + 1}", flush=True)
-        _ = trailing_blank
-    elif lssm_idx is not None and lssm_end is not None:
-        # Insert AFTER login_shared_secret_map block but BEFORE any blank
-        # line that precedes the next sibling, so the new block lives next
-        # to its semantic neighbor.
-        insert_at = lssm_end
-        # If the line at lssm_end is blank, insert before it (puts the new
-        # block adjacent to lssm and keeps the blank separator before the
-        # next group).
-        lines = lines[:insert_at] + new_block_lines + lines[insert_at:]
-        print(f"  appservice_double_puppet patcher: INSERTED after login_shared_secret_map (line {insert_at + 1})", flush=True)
+        print("  Patched login_shared_secret_map.localhost = as_token:<DOUBLE_PUPPET_SECRET>", flush=True)
     else:
-        print("  appservice_double_puppet patcher: WARNING — neither existing block nor login_shared_secret_map anchor found in config", flush=True)
+        print("  WARNING: login_shared_secret_map block not found in config", flush=True)
+else:
+    print("  WARNING: DOUBLE_PUPPET_SECRET not set, skipping login_shared_secret_map patch", flush=True)
 
-    text = "\n".join(lines)
+# Note: previous versions of this patcher inserted an
+# `appservice_double_puppet:` block here. That field does NOT exist in
+# mautrix-telegram v0.15.3 (verified against the bridge's
+# example-config.yaml + custom_puppet.py source). The Python bridge
+# silently strips unknown fields when it rewrites config on startup, so
+# the patch was a no-op every time. Removed in favor of patching
+# login_shared_secret_map.localhost above to use `as_token:<TOKEN>`,
+# which IS the v0.15.3 way to enable appservice-mode doublepuppet.
 
 # Patch proxy fields from current .env (config may have stale values from backup).
 # Inside the enclave the SOCKS5 residential proxy is reachable via the local VSOCK

@@ -2587,51 +2587,79 @@ pub async fn bootstrap_telegram_doublepuppet(
         )
     })?;
 
-    let cmd = format!("!tg login-matrix {}", access_token);
-    let responses = crate::utils::bridge::probe_bridge_room(
+    // mautrix-telegram v0.15.3 uses a TWO-STEP in-Matrix login-matrix flow,
+    // not the single-shot `!tg login-matrix <token>` form some bridges use:
+    //
+    //   1. user sends `!tg login-matrix` (no args)
+    //   2. bot replies "please send your Matrix access token here"
+    //   3. user sends the access token as a plain text message (no command prefix)
+    //   4. bot stores it as the user's double-puppet credential and replies success
+    //
+    // Send both steps from the backend with the access token we already
+    // pulled from the cached matrix-sdk session, so we never echo the
+    // token back to the caller.
+    let prompt_responses = crate::utils::bridge::probe_bridge_room(
         &client,
         &room,
         &bot_user_id,
-        &cmd,
-        Duration::from_secs(10),
+        "!tg login-matrix",
+        Duration::from_secs(8),
     )
     .await
     .map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("probe failed: {}", e)})),
+            Json(json!({"error": format!("probe step 1 failed: {}", e)})),
+        )
+    })?;
+
+    let token_responses = crate::utils::bridge::probe_bridge_room(
+        &client,
+        &room,
+        &bot_user_id,
+        access_token.as_str(),
+        Duration::from_secs(15),
+    )
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("probe step 2 failed: {}", e)})),
         )
     })?;
 
     Ok(Json(json!({
-        "command_sent": "!tg login-matrix <REDACTED>",
-        "response_count": responses.len(),
-        "responses": responses,
+        "step1_command": "!tg login-matrix",
+        "step1_responses": prompt_responses,
+        "step2_command": "<TOKEN_REDACTED>",
+        "step2_responses": token_responses,
     })))
 }
 
-/// In-process repair of the persisted mautrix-telegram config: add the
-/// appservice_double_puppet block and bump permissions so login-matrix is
-/// available, then restart the bridge via supervisorctl. This is the
-/// runtime fallback when the entrypoint's boot-time patcher silently
-/// no-ops on prod (which it has, twice).
+/// In-process repair of the persisted mautrix-telegram config: bump
+/// permissions on the running config and optionally restart the bridge.
 ///
 /// POST /api/admin/repair-telegram-doublepuppet?restart=1
 ///
-/// Patches applied (idempotent):
-///   1. appservice_double_puppet.localhost: as_token:${DOUBLE_PUPPET_SECRET}
-///      — replaces existing block in place, or inserts after
-///      login_shared_secret_map. Without this the bridge has no Matrix-side
-///      auth for users so it can't force-join them to portal rooms.
-///   2. permissions: '*': puppeting  →  '*': full
-///      — the bridge restricts `login-matrix` to users with `full`
-///      privileges. Bumping the wildcard upgrades everyone (acceptable in
-///      single-tenant enclaves; the template's `@admin:localhost: admin`
-///      override is preserved).
+/// Single patch (idempotent):
+///   permissions: '*': puppeting  →  '*': full
+///   — v0.15.3 restricts the manual `!tg login-matrix` command to users
+///   with `full` privileges. Bumping the wildcard unlocks the manual
+///   bootstrap flow that bootstrap_telegram_doublepuppet drives. The
+///   template's `@admin:localhost: admin` override is preserved.
 ///
 /// File write is atomic (write-tmp + fsync + rename). Bridge restart is
-/// optional (default on); supervisorctl restart triggers a clean reload of
-/// the patched config.
+/// optional (default on); supervisorctl restart triggers a clean reload
+/// of the patched config so the new permission takes effect.
+///
+/// History: an earlier version of this endpoint also tried to inject
+/// `appservice_double_puppet.localhost` into the config, but that field
+/// was confirmed against mautrix-telegram v0.15.3's example-config.yaml
+/// to be a non-existent field for that version (it's bridgev2-specific).
+/// The Python bridge silently strips unknown fields when it rewrites
+/// config on startup, so the patch was a no-op after every restart.
+/// Doublepuppet bootstrap is now handled at runtime via the supported
+/// `!tg login-matrix` flow in bootstrap_telegram_doublepuppet.
 #[derive(Deserialize)]
 pub struct RepairTelegramQuery {
     pub restart: Option<u8>,
@@ -2643,13 +2671,6 @@ pub async fn repair_telegram_doublepuppet(
     axum::extract::Query(q): axum::extract::Query<RepairTelegramQuery>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let path = "/data/bridges/telegram/config.yaml";
-    let secret = std::env::var("DOUBLE_PUPPET_SECRET").unwrap_or_default();
-    if secret.is_empty() {
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "DOUBLE_PUPPET_SECRET not set in backend env"})),
-        ));
-    }
 
     let original = std::fs::read_to_string(path).map_err(|e| {
         (
@@ -2660,69 +2681,63 @@ pub async fn repair_telegram_doublepuppet(
 
     let mut lines: Vec<String> = original.split('\n').map(|s| s.to_string()).collect();
 
-    // Patch 1: ensure appservice_double_puppet block. Detect existing
-    // block by 4-space-indent + key prefix; walk forward through indented
-    // (8+) and blank lines to find block end.
-    let mut adp_idx_existing: Option<usize> = None;
-    let mut adp_end_existing: Option<usize> = None;
-    let mut lssm_idx: Option<usize> = None;
-    let mut lssm_end: Option<usize> = None;
-    for (i, line) in lines.iter().enumerate() {
-        if line.starts_with("    appservice_double_puppet:") {
-            adp_idx_existing = Some(i);
-            let mut j = i + 1;
-            while j < lines.len() {
-                if lines[j].starts_with("        ") || lines[j].trim().is_empty() {
-                    j += 1;
-                    continue;
-                }
-                break;
-            }
-            adp_end_existing = Some(j);
-        }
-        if line.starts_with("    login_shared_secret_map:") {
-            lssm_idx = Some(i);
-            let mut j = i + 1;
-            while j < lines.len() {
-                if lines[j].starts_with("        ") || lines[j].trim().is_empty() {
-                    j += 1;
-                    continue;
-                }
-                break;
-            }
-            lssm_end = Some(j);
-        }
-    }
-
-    let new_block = [
-        "    appservice_double_puppet:".to_string(),
-        format!("        localhost: as_token:{}", secret),
-    ];
-
-    let adp_action: &str = if let (Some(start), Some(end)) = (adp_idx_existing, adp_end_existing) {
-        let mut rebuilt = Vec::with_capacity(lines.len());
-        rebuilt.extend(lines[..start].iter().cloned());
-        rebuilt.extend(new_block.iter().cloned());
-        rebuilt.extend(lines[end..].iter().cloned());
-        lines = rebuilt;
-        "replaced"
-    } else if let (Some(_), Some(end)) = (lssm_idx, lssm_end) {
-        let mut rebuilt = Vec::with_capacity(lines.len() + new_block.len());
-        rebuilt.extend(lines[..end].iter().cloned());
-        rebuilt.extend(new_block.iter().cloned());
-        rebuilt.extend(lines[end..].iter().cloned());
-        lines = rebuilt;
-        "inserted"
-    } else {
+    // Patch 1 — fix login_shared_secret_map.localhost value to use the
+    // appservice-mode prefix.
+    //
+    // Verified against mautrix-python's CustomPuppet._login_with_shared_secret
+    // (mautrix/bridge/custom_puppet.py:168-175): when the secret value
+    // starts with `as_token:`, the bridge takes the appservice path —
+    // _fresh_intent stores the raw token and calls IntentAPI in as_token
+    // mode (line 142-153). Without that prefix, the bridge falls through
+    // to m.login.devture.shared_secret / m.login.password flows, which
+    // tuwunel does NOT support → AutologinError → silent failure.
+    //
+    // The persisted config has the raw MATRIX_HOMESERVER_SHARED_SECRET as
+    // the value (introduced in f6bdd397 "Ship trustless and bridge login
+    // fixes" — that commit got the format wrong). Replace with the
+    // doublepuppet appservice token instead, prefixed correctly.
+    let dps = std::env::var("DOUBLE_PUPPET_SECRET").unwrap_or_default();
+    if dps.is_empty() {
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                "error": "could not locate appservice_double_puppet anchor (login_shared_secret_map missing)",
-            })),
+            Json(json!({"error": "DOUBLE_PUPPET_SECRET not set in backend env"})),
         ));
+    }
+    let want_lssm_value = format!("        localhost: as_token:{}", dps);
+
+    let mut lssm_value_line_idx: Option<usize> = None;
+    for (i, line) in lines.iter().enumerate() {
+        if line.starts_with("    login_shared_secret_map:") {
+            // The next line at 8-space indent (skipping blanks/comments) is
+            // the localhost value line. We only patch the localhost entry
+            // since that's the only homeserver this enclave bridges with.
+            let mut j = i + 1;
+            while j < lines.len() {
+                let lt = lines[j].trim_start();
+                if lt.is_empty() || lt.starts_with('#') {
+                    j += 1;
+                    continue;
+                }
+                if lines[j].starts_with("        localhost:") {
+                    lssm_value_line_idx = Some(j);
+                }
+                break;
+            }
+            break;
+        }
+    }
+    let lssm_action: &str = if let Some(idx) = lssm_value_line_idx {
+        if lines[idx].trim_end() != want_lssm_value {
+            lines[idx] = want_lssm_value;
+            "rewritten_with_as_token"
+        } else {
+            "already_correct"
+        }
+    } else {
+        "anchor_or_localhost_not_found"
     };
 
-    // Patch 2: bump permission for `*` from `puppeting` to `full`. Match
+    // Patch 2 — bump permission for `*` from `puppeting` to `full`. Match
     // the YAML quoting variants we've seen in mautrix-telegram templates:
     //   '*': puppeting
     //   "*": puppeting
@@ -2747,7 +2762,7 @@ pub async fn repair_telegram_doublepuppet(
     if new_text == original {
         return Ok(Json(json!({
             "path": path,
-            "appservice_double_puppet": adp_action,
+            "login_shared_secret_map": lssm_action,
             "permissions": perms_action,
             "wrote": false,
             "restarted": false,
@@ -2797,11 +2812,107 @@ pub async fn repair_telegram_doublepuppet(
 
     Ok(Json(json!({
         "path": path,
-        "appservice_double_puppet": adp_action,
+        "login_shared_secret_map": lssm_action,
         "permissions": perms_action,
         "wrote": true,
         "restarted": do_restart,
         "supervisorctl": restart_result,
-        "note": "wait ~10s for bridge to come back up before re-running ping-matrix",
+        "note": "wait ~10s for bridge to come back up; new telegram logins will auto-bootstrap doublepuppet, or use bootstrap_telegram_doublepuppet to do it manually for the existing login",
+    })))
+}
+
+/// Tail of supervisord-managed program's stdout + stderr logs, optionally
+/// filtered by regex. Lets us read the bridge's own auth-attempt errors
+/// (AutologinError, "Failed to verify access token", _login_with_shared_secret
+/// debug output, etc) without needing to ssh into the enclave or deploy
+/// another diag endpoint.
+///
+/// GET /api/admin/supervisor-log/{program}?lines=200&pattern=...
+///
+/// Whitelisted programs match the supervisord.conf entries that are safe
+/// to expose via admin auth: bridge processes + lightfriend + tuwunel.
+/// `lines` defaults to 200 and is capped at 2000 (logs rotate at 2MB).
+/// `pattern` is treated as a substring match (not regex) for simplicity
+/// and to avoid catastrophic-backtracking risk; case-sensitive.
+#[derive(Deserialize)]
+pub struct SupervisorLogQuery {
+    pub lines: Option<usize>,
+    pub pattern: Option<String>,
+    /// "stdout" (default), "stderr", or "both"
+    pub stream: Option<String>,
+}
+
+pub async fn supervisor_log(
+    State(_state): State<Arc<AppState>>,
+    _auth_user: crate::handlers::auth_middleware::AuthUser,
+    axum::extract::Path(program): axum::extract::Path<String>,
+    axum::extract::Query(q): axum::extract::Query<SupervisorLogQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Whitelist of safe programs. Maps the supervisor program name to its
+    // logfile basename (some programs are named differently from their
+    // logfile, e.g. mautrix-telegram → telegram.log).
+    let logfile_base = match program.as_str() {
+        "telegram" | "mautrix-telegram" => "telegram",
+        "whatsapp" | "mautrix-whatsapp" => "whatsapp",
+        "signal" | "mautrix-signal" => "signal",
+        "lightfriend" => "lightfriend",
+        "tuwunel" => "tuwunel",
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "invalid program (allowed: telegram, whatsapp, signal, lightfriend, tuwunel)"
+                })),
+            ));
+        }
+    };
+
+    let lines_cap = q.lines.unwrap_or(200).min(2000);
+    let pattern = q.pattern.unwrap_or_default();
+    let stream = q.stream.as_deref().unwrap_or("stdout");
+
+    // Pick which file(s) to read. Both is concatenated stdout+stderr.
+    let paths: Vec<String> = match stream {
+        "stderr" => vec![format!("/var/log/supervisor/{}-err.log", logfile_base)],
+        "both" => vec![
+            format!("/var/log/supervisor/{}.log", logfile_base),
+            format!("/var/log/supervisor/{}-err.log", logfile_base),
+        ],
+        _ => vec![format!("/var/log/supervisor/{}.log", logfile_base)],
+    };
+
+    let mut all_lines: Vec<(String, String)> = Vec::new(); // (source, line)
+    for p in &paths {
+        let label = p.rsplit('/').next().unwrap_or(p).to_string();
+        match std::fs::read_to_string(p) {
+            Ok(text) => {
+                for l in text.lines() {
+                    if pattern.is_empty() || l.contains(&pattern) {
+                        all_lines.push((label.clone(), l.to_string()));
+                    }
+                }
+            }
+            Err(e) => {
+                all_lines.push((label, format!("<could not read {}: {}>", p, e)));
+            }
+        }
+    }
+
+    // Take the last `lines_cap` after filtering.
+    let total_matched = all_lines.len();
+    let start = all_lines.len().saturating_sub(lines_cap);
+    let tail: Vec<serde_json::Value> = all_lines[start..]
+        .iter()
+        .map(|(src, line)| json!({"file": src, "text": line}))
+        .collect();
+
+    Ok(Json(json!({
+        "program": program,
+        "stream": stream,
+        "pattern": pattern,
+        "lines_returned": tail.len(),
+        "total_matched": total_matched,
+        "paths_read": paths,
+        "lines": tail,
     })))
 }
