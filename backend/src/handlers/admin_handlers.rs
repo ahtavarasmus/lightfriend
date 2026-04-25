@@ -2609,3 +2609,199 @@ pub async fn bootstrap_telegram_doublepuppet(
         "responses": responses,
     })))
 }
+
+/// In-process repair of the persisted mautrix-telegram config: add the
+/// appservice_double_puppet block and bump permissions so login-matrix is
+/// available, then restart the bridge via supervisorctl. This is the
+/// runtime fallback when the entrypoint's boot-time patcher silently
+/// no-ops on prod (which it has, twice).
+///
+/// POST /api/admin/repair-telegram-doublepuppet?restart=1
+///
+/// Patches applied (idempotent):
+///   1. appservice_double_puppet.localhost: as_token:${DOUBLE_PUPPET_SECRET}
+///      — replaces existing block in place, or inserts after
+///      login_shared_secret_map. Without this the bridge has no Matrix-side
+///      auth for users so it can't force-join them to portal rooms.
+///   2. permissions: '*': puppeting  →  '*': full
+///      — the bridge restricts `login-matrix` to users with `full`
+///      privileges. Bumping the wildcard upgrades everyone (acceptable in
+///      single-tenant enclaves; the template's `@admin:localhost: admin`
+///      override is preserved).
+///
+/// File write is atomic (write-tmp + fsync + rename). Bridge restart is
+/// optional (default on); supervisorctl restart triggers a clean reload of
+/// the patched config.
+#[derive(Deserialize)]
+pub struct RepairTelegramQuery {
+    pub restart: Option<u8>,
+}
+
+pub async fn repair_telegram_doublepuppet(
+    State(_state): State<Arc<AppState>>,
+    _auth_user: crate::handlers::auth_middleware::AuthUser,
+    axum::extract::Query(q): axum::extract::Query<RepairTelegramQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let path = "/data/bridges/telegram/config.yaml";
+    let secret = std::env::var("DOUBLE_PUPPET_SECRET").unwrap_or_default();
+    if secret.is_empty() {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "DOUBLE_PUPPET_SECRET not set in backend env"})),
+        ));
+    }
+
+    let original = std::fs::read_to_string(path).map_err(|e| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": format!("read {}: {}", path, e)})),
+        )
+    })?;
+
+    let mut lines: Vec<String> = original.split('\n').map(|s| s.to_string()).collect();
+
+    // Patch 1: ensure appservice_double_puppet block. Detect existing
+    // block by 4-space-indent + key prefix; walk forward through indented
+    // (8+) and blank lines to find block end.
+    let mut adp_idx_existing: Option<usize> = None;
+    let mut adp_end_existing: Option<usize> = None;
+    let mut lssm_idx: Option<usize> = None;
+    let mut lssm_end: Option<usize> = None;
+    for (i, line) in lines.iter().enumerate() {
+        if line.starts_with("    appservice_double_puppet:") {
+            adp_idx_existing = Some(i);
+            let mut j = i + 1;
+            while j < lines.len() {
+                if lines[j].starts_with("        ") || lines[j].trim().is_empty() {
+                    j += 1;
+                    continue;
+                }
+                break;
+            }
+            adp_end_existing = Some(j);
+        }
+        if line.starts_with("    login_shared_secret_map:") {
+            lssm_idx = Some(i);
+            let mut j = i + 1;
+            while j < lines.len() {
+                if lines[j].starts_with("        ") || lines[j].trim().is_empty() {
+                    j += 1;
+                    continue;
+                }
+                break;
+            }
+            lssm_end = Some(j);
+        }
+    }
+
+    let new_block = [
+        "    appservice_double_puppet:".to_string(),
+        format!("        localhost: as_token:{}", secret),
+    ];
+
+    let adp_action: &str = if let (Some(start), Some(end)) = (adp_idx_existing, adp_end_existing) {
+        let mut rebuilt = Vec::with_capacity(lines.len());
+        rebuilt.extend(lines[..start].iter().cloned());
+        rebuilt.extend(new_block.iter().cloned());
+        rebuilt.extend(lines[end..].iter().cloned());
+        lines = rebuilt;
+        "replaced"
+    } else if let (Some(_), Some(end)) = (lssm_idx, lssm_end) {
+        let mut rebuilt = Vec::with_capacity(lines.len() + new_block.len());
+        rebuilt.extend(lines[..end].iter().cloned());
+        rebuilt.extend(new_block.iter().cloned());
+        rebuilt.extend(lines[end..].iter().cloned());
+        lines = rebuilt;
+        "inserted"
+    } else {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": "could not locate appservice_double_puppet anchor (login_shared_secret_map missing)",
+            })),
+        ));
+    };
+
+    // Patch 2: bump permission for `*` from `puppeting` to `full`. Match
+    // the YAML quoting variants we've seen in mautrix-telegram templates:
+    //   '*': puppeting
+    //   "*": puppeting
+    //   *: puppeting   (rare but defensive)
+    let mut perms_action = "noop";
+    let perm_targets = [
+        "        '*': puppeting",
+        "        \"*\": puppeting",
+        "        *: puppeting",
+    ];
+    let perm_replacement = "        '*': full";
+    for line in lines.iter_mut() {
+        if perm_targets.iter().any(|t| line.trim_end() == *t) {
+            *line = perm_replacement.to_string();
+            perms_action = "bumped_to_full";
+            break;
+        }
+    }
+
+    let new_text = lines.join("\n");
+
+    if new_text == original {
+        return Ok(Json(json!({
+            "path": path,
+            "appservice_double_puppet": adp_action,
+            "permissions": perms_action,
+            "wrote": false,
+            "restarted": false,
+            "note": "config already in target state",
+        })));
+    }
+
+    // Atomic write: <path>.tmp → fsync → rename.
+    let tmp_path = format!("{}.tmp", path);
+    std::fs::write(&tmp_path, &new_text).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("write tmp: {}", e)})),
+        )
+    })?;
+    if let Ok(f) = std::fs::File::open(&tmp_path) {
+        let _ = f.sync_all();
+    }
+    std::fs::rename(&tmp_path, path).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("rename: {}", e)})),
+        )
+    })?;
+
+    // Restart bridge via supervisorctl unless caller opted out.
+    let do_restart = q.restart.unwrap_or(1) != 0;
+    let restart_result = if do_restart {
+        let out = std::process::Command::new("supervisorctl")
+            .args(["restart", "mautrix-telegram"])
+            .output();
+        match out {
+            Ok(o) => {
+                let stdout = String::from_utf8_lossy(&o.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&o.stderr).to_string();
+                Some(json!({
+                    "exit_code": o.status.code(),
+                    "stdout": stdout.trim(),
+                    "stderr": stderr.trim(),
+                }))
+            }
+            Err(e) => Some(json!({"error": format!("spawn supervisorctl: {}", e)})),
+        }
+    } else {
+        None
+    };
+
+    Ok(Json(json!({
+        "path": path,
+        "appservice_double_puppet": adp_action,
+        "permissions": perms_action,
+        "wrote": true,
+        "restarted": do_restart,
+        "supervisorctl": restart_result,
+        "note": "wait ~10s for bridge to come back up before re-running ping-matrix",
+    })))
+}

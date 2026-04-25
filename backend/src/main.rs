@@ -745,6 +745,10 @@ async fn main() {
             "/api/admin/bootstrap-telegram-doublepuppet",
             post(admin_handlers::bootstrap_telegram_doublepuppet),
         )
+        .route(
+            "/api/admin/repair-telegram-doublepuppet",
+            post(admin_handlers::repair_telegram_doublepuppet),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             handlers::auth_middleware::require_admin,
