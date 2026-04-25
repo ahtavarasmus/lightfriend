@@ -2344,6 +2344,55 @@ pub async fn bridge_config_summary(
         }
     }
 
+    // Env-var visibility from the backend process. The entrypoint patcher
+    // runs in a different process (bash + python heredoc) earlier in boot,
+    // but supervisord-managed children (us) are launched with the same env
+    // file at /etc/lightfriend/env. If we can't see DOUBLE_PUPPET_SECRET
+    // here, the patcher likely couldn't either, which would explain a
+    // silent no-op of the appservice_double_puppet patch.
+    let env_dps = std::env::var("DOUBLE_PUPPET_SECRET").ok();
+    let env_mhss = std::env::var("MATRIX_HOMESERVER_SHARED_SECRET").ok();
+
+    // Sanitized snippet around login_shared_secret_map: the actual
+    // surrounding lines (50 either side) with secret values redacted.
+    // Lets us confirm that (a) the regex anchor would actually match the
+    // real layout, and (b) which keys come immediately after the anchor —
+    // the patcher's lookahead requires `    [A-Za-z_]:` to follow.
+    let snippet = {
+        let lines: Vec<&str> = text.lines().collect();
+        let anchor_idx = lines
+            .iter()
+            .position(|l| l.trim_start().starts_with("login_shared_secret_map:"));
+        anchor_idx.map(|idx| {
+            let start = idx.saturating_sub(20);
+            let end = (idx + 50).min(lines.len());
+            let mut out = Vec::with_capacity(end - start);
+            for (i, line) in lines[start..end].iter().enumerate() {
+                // Redact any value after `:` for a key whose name suggests
+                // a secret. Keep keys + indentation + structural tokens.
+                let absolute = start + i;
+                let display = if line.contains("as_token:")
+                    || line.contains("hs_token:")
+                    || line.to_lowercase().contains("secret")
+                    || line.to_lowercase().contains("password")
+                    || line.to_lowercase().contains("token:")
+                    || line.to_lowercase().contains("api_id")
+                    || line.to_lowercase().contains("api_hash")
+                {
+                    if let Some((before_colon, _)) = line.split_once(':') {
+                        format!("{}: <REDACTED>", before_colon)
+                    } else {
+                        "<REDACTED>".to_string()
+                    }
+                } else {
+                    line.to_string()
+                };
+                out.push(json!({"line": absolute + 1, "text": display}));
+            }
+            out
+        })
+    };
+
     Ok(Json(json!({
         "bridge_type": bridge_type,
         "config_path": path,
@@ -2351,6 +2400,11 @@ pub async fn bridge_config_summary(
         "presence": presence,
         "appservice_double_puppet_format_ok": adp_format_ok,
         "sync_with_custom_puppets_value": sync_with_custom_puppets_value,
+        "env_DOUBLE_PUPPET_SECRET_visible": env_dps.is_some(),
+        "env_DOUBLE_PUPPET_SECRET_len": env_dps.as_deref().map(|s| s.len()).unwrap_or(0),
+        "env_MATRIX_HOMESERVER_SHARED_SECRET_visible": env_mhss.is_some(),
+        "env_MATRIX_HOMESERVER_SHARED_SECRET_len": env_mhss.as_deref().map(|s| s.len()).unwrap_or(0),
+        "anchor_snippet": snippet,
     })))
 }
 
