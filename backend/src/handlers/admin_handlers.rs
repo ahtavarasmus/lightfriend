@@ -2502,3 +2502,110 @@ pub async fn recent_ont_messages(
         "messages": rows,
     })))
 }
+
+/// One-shot manual bootstrap of mautrix-telegram doublepuppet.
+///
+/// When `appservice_double_puppet` automatic config doesn't take effect (the
+/// entrypoint patcher silently no-op'd or the bridge ignored it), the Python
+/// bridge still supports the legacy `!tg login-matrix <access_token>` flow:
+/// the user provides their own Matrix access token, the bridge stores it, and
+/// from then on uses it as the per-user double puppet for force-joins.
+///
+/// This endpoint extracts the caller's Matrix access token from the cached
+/// matrix-sdk session and forwards it to the bridge bot. Idempotent — running
+/// it twice just re-stores the same token.
+///
+/// POST /api/admin/bootstrap-telegram-doublepuppet
+pub async fn bootstrap_telegram_doublepuppet(
+    State(state): State<Arc<AppState>>,
+    auth_user: crate::handlers::auth_middleware::AuthUser,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    use matrix_sdk::ruma::{OwnedRoomId, OwnedUserId};
+    use tokio::time::Duration;
+
+    let bridge = state
+        .user_repository
+        .get_bridge(auth_user.user_id, "telegram")
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("db: {}", e)})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "telegram bridge not found for user"})),
+            )
+        })?;
+    let room_id_str = bridge.room_id.unwrap_or_default();
+    let room_id = OwnedRoomId::try_from(room_id_str.as_str()).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "invalid room id on bridge record"})),
+        )
+    })?;
+
+    let client = crate::utils::matrix_auth::get_cached_client(auth_user.user_id, &state)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("matrix client: {}", e)})),
+            )
+        })?;
+
+    let access_token = client
+        .matrix_auth()
+        .session()
+        .map(|s| s.tokens.access_token.clone())
+        .unwrap_or_default();
+    if access_token.is_empty() {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "matrix client has no access token cached"})),
+        ));
+    }
+
+    let room = client.get_room(&room_id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "bridge management room not joined by client"})),
+        )
+    })?;
+
+    let bridge_bot = std::env::var("TELEGRAM_BRIDGE_BOT").map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "TELEGRAM_BRIDGE_BOT env var not set"})),
+        )
+    })?;
+    let bot_user_id = OwnedUserId::try_from(bridge_bot.as_str()).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "invalid bridge bot user id"})),
+        )
+    })?;
+
+    let cmd = format!("!tg login-matrix {}", access_token);
+    let responses = crate::utils::bridge::probe_bridge_room(
+        &client,
+        &room,
+        &bot_user_id,
+        &cmd,
+        Duration::from_secs(10),
+    )
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("probe failed: {}", e)})),
+        )
+    })?;
+
+    Ok(Json(json!({
+        "command_sent": "!tg login-matrix <REDACTED>",
+        "response_count": responses.len(),
+        "responses": responses,
+    })))
+}

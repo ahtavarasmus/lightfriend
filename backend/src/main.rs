@@ -741,6 +741,10 @@ async fn main() {
             "/api/admin/recent-ont-messages",
             get(admin_handlers::recent_ont_messages),
         )
+        .route(
+            "/api/admin/bootstrap-telegram-doublepuppet",
+            post(admin_handlers::bootstrap_telegram_doublepuppet),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             handlers::auth_middleware::require_admin,
