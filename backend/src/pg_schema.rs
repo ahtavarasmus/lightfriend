@@ -439,6 +439,7 @@ diesel::table! {
         classification_result -> Nullable<Text>,
         resolved_at -> Nullable<Int4>,
         seen_at -> Nullable<Int4>,
+        matrix_event_id -> Nullable<Text>,
     }
 }
 

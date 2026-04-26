@@ -1017,13 +1017,45 @@ impl OntologyRepository {
     // Messages
     // -----------------------------------------------------------------------
 
-    /// Insert a message into ont_messages, returning the created row.
-    pub fn insert_message(&self, msg: &NewOntMessage) -> Result<OntMessage, DieselError> {
+    /// Insert a message into ont_messages with two layers of dedup.
+    ///
+    /// Returns `(row, is_new)`. When `is_new` is false, the returned row is
+    /// a pre-existing duplicate; the caller should skip side effects that
+    /// fire only once per event (counters, ontology change notifications,
+    /// urgency classification) to avoid double-counting.
+    ///
+    /// Layer 1 — `matrix_event_id` deterministic dedup (added 2026-04-26):
+    /// Matrix event_ids are homeserver-generated, globally unique, and
+    /// immutable. When matrix-sdk's `since` token rewinds (after a client
+    /// restart or sync state loss), the homeserver re-streams events with
+    /// the same event_ids. A unique partial index on `(user_id,
+    /// matrix_event_id) WHERE matrix_event_id IS NOT NULL` catches these
+    /// regardless of how much time has passed between deliveries.
+    ///
+    /// Layer 2 — 5-minute content-window dedup (preserved): catches bridge
+    /// re-emissions where the same source-platform message is bridged as a
+    /// fresh Matrix event with a new event_id (different event_id, same
+    /// content, close in time). Also catches IMAP and other non-Matrix
+    /// inputs that don't have an event_id at all.
+    pub fn insert_message(&self, msg: &NewOntMessage) -> Result<(OntMessage, bool), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
-        // Dedup: skip if an identical message exists within a 5-minute window.
-        // Matrix can deliver the same event multiple times on reconnect/sync.
-        let window = 300; // 5 minutes
+        // Layer 1: event_id lookup (cheap — partial unique index).
+        if let Some(eid) = msg.matrix_event_id.as_deref() {
+            if let Ok(dup) = ont_messages::table
+                .filter(ont_messages::user_id.eq(msg.user_id))
+                .filter(ont_messages::matrix_event_id.eq(eid))
+                .first::<OntMessage>(&mut conn)
+            {
+                return Ok((dup, false));
+            }
+        }
+
+        // Layer 2: 5-minute content window. Catches bridge re-emissions
+        // that bypass the event_id check (different event_id, same content
+        // close in time) and non-Matrix inputs (IMAP, etc.) that lack an
+        // event_id entirely.
+        let window = 300;
         let existing = ont_messages::table
             .filter(ont_messages::user_id.eq(msg.user_id))
             .filter(ont_messages::room_id.eq(&msg.room_id))
@@ -1034,12 +1066,34 @@ impl OntologyRepository {
             .first::<OntMessage>(&mut conn);
 
         if let Ok(dup) = existing {
-            return Ok(dup);
+            return Ok((dup, false));
         }
 
-        diesel::insert_into(ont_messages::table)
+        // Insert. Race guard: if two concurrent inserts both pass the
+        // lookups but one wins the unique-index race, surface the dup
+        // cleanly instead of bubbling a UniqueViolation up to the caller.
+        match diesel::insert_into(ont_messages::table)
             .values(msg)
-            .get_result(&mut conn)
+            .get_result::<OntMessage>(&mut conn)
+        {
+            Ok(row) => Ok((row, true)),
+            Err(DieselError::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            )) => {
+                if let Some(eid) = msg.matrix_event_id.as_deref() {
+                    if let Ok(dup) = ont_messages::table
+                        .filter(ont_messages::user_id.eq(msg.user_id))
+                        .filter(ont_messages::matrix_event_id.eq(eid))
+                        .first::<OntMessage>(&mut conn)
+                    {
+                        return Ok((dup, false));
+                    }
+                }
+                Err(DieselError::RollbackTransaction)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Look up an existing email-sourced message by its deterministic

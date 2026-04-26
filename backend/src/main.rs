@@ -753,6 +753,10 @@ async fn main() {
             "/api/admin/supervisor-log/{program}",
             get(admin_handlers::supervisor_log),
         )
+        .route(
+            "/api/admin/dedupe-ont-messages",
+            post(admin_handlers::dedupe_ont_messages),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             handlers::auth_middleware::require_admin,

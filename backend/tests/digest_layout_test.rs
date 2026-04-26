@@ -133,7 +133,7 @@ fn pending_messages_by_urgency_filters_by_level() {
     let now = 2_000_000;
 
     // Insert one message of each urgency
-    let crit = state
+    let (crit, _is_new) = state
         .ontology_repository
         .insert_message(&NewOntMessage {
             user_id: user.id,
@@ -144,6 +144,7 @@ fn pending_messages_by_urgency_filters_by_level() {
             content: "emergency".to_string(),
             person_id: None,
             created_at: now,
+                    matrix_event_id: None,
         })
         .unwrap();
     state
@@ -151,7 +152,7 @@ fn pending_messages_by_urgency_filters_by_level() {
         .update_message_classification(crit.id, "critical", "emergency", None, None, None)
         .unwrap();
 
-    let high = state
+    let (high, _is_new) = state
         .ontology_repository
         .insert_message(&NewOntMessage {
             user_id: user.id,
@@ -162,6 +163,7 @@ fn pending_messages_by_urgency_filters_by_level() {
             content: "urgent".to_string(),
             person_id: None,
             created_at: now,
+                    matrix_event_id: None,
         })
         .unwrap();
     state
@@ -169,7 +171,7 @@ fn pending_messages_by_urgency_filters_by_level() {
         .update_message_classification(high.id, "high", "work", None, None, None)
         .unwrap();
 
-    let med = state
+    let (med, _is_new) = state
         .ontology_repository
         .insert_message(&NewOntMessage {
             user_id: user.id,
@@ -180,6 +182,7 @@ fn pending_messages_by_urgency_filters_by_level() {
             content: "fyi".to_string(),
             person_id: None,
             created_at: now,
+                    matrix_event_id: None,
         })
         .unwrap();
     state
@@ -226,7 +229,7 @@ fn pending_messages_by_urgency_excludes_already_delivered() {
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
     let now = 2_100_000;
 
-    let msg = state
+    let (msg, _is_new) = state
         .ontology_repository
         .insert_message(&NewOntMessage {
             user_id: user.id,
@@ -237,6 +240,7 @@ fn pending_messages_by_urgency_excludes_already_delivered() {
             content: "hey".to_string(),
             person_id: None,
             created_at: now,
+                    matrix_event_id: None,
         })
         .unwrap();
     state
@@ -265,7 +269,7 @@ fn pending_messages_by_urgency_excludes_resolved() {
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
     let now = 2_200_000;
 
-    let msg = state
+    let (msg, _is_new) = state
         .ontology_repository
         .insert_message(&NewOntMessage {
             user_id: user.id,
@@ -276,6 +280,7 @@ fn pending_messages_by_urgency_excludes_resolved() {
             content: "urgent".to_string(),
             person_id: None,
             created_at: now,
+                    matrix_event_id: None,
         })
         .unwrap();
     state
@@ -304,7 +309,7 @@ fn pending_messages_by_urgency_respects_since_window() {
     let now = 2_300_000;
 
     // Old message (3 days ago)
-    let old = state
+    let (old, _is_new) = state
         .ontology_repository
         .insert_message(&NewOntMessage {
             user_id: user.id,
@@ -315,6 +320,7 @@ fn pending_messages_by_urgency_respects_since_window() {
             content: "stale".to_string(),
             person_id: None,
             created_at: now - 3 * 86400,
+                    matrix_event_id: None,
         })
         .unwrap();
     state
@@ -323,7 +329,7 @@ fn pending_messages_by_urgency_respects_since_window() {
         .unwrap();
 
     // Recent message (1 hour ago)
-    let recent = state
+    let (recent, _is_new) = state
         .ontology_repository
         .insert_message(&NewOntMessage {
             user_id: user.id,
@@ -334,6 +340,7 @@ fn pending_messages_by_urgency_respects_since_window() {
             content: "recent".to_string(),
             person_id: None,
             created_at: now - 3600,
+                    matrix_event_id: None,
         })
         .unwrap();
     state
@@ -505,7 +512,7 @@ fn insert_classified_message_ext(
     person_id: Option<i32>,
     platform: &str,
 ) -> i64 {
-    let msg = state
+    let (msg, _is_new) = state
         .ontology_repository
         .insert_message(&NewOntMessage {
             user_id,
@@ -516,6 +523,7 @@ fn insert_classified_message_ext(
             content: content.to_string(),
             person_id,
             created_at,
+                    matrix_event_id: None,
         })
         .unwrap();
     state

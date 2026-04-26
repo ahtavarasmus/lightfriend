@@ -63,7 +63,7 @@ async fn get_messages_for_event_returns_oldest_to_newest_linked_messages() {
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
     let now = chrono::Utc::now().timestamp() as i32;
 
-    let first_message = state
+    let (first_message, _is_new) = state
         .ontology_repository
         .insert_message(&backend::models::ontology_models::NewOntMessage {
             user_id: user.id,
@@ -74,9 +74,10 @@ async fn get_messages_for_event_returns_oldest_to_newest_linked_messages() {
             content: "Original package confirmation".to_string(),
             person_id: None,
             created_at: now - 200,
+                    matrix_event_id: None,
         })
         .unwrap();
-    let second_message = state
+    let (second_message, _is_new) = state
         .ontology_repository
         .insert_message(&backend::models::ontology_models::NewOntMessage {
             user_id: user.id,
@@ -87,6 +88,7 @@ async fn get_messages_for_event_returns_oldest_to_newest_linked_messages() {
             content: "Latest delivery update".to_string(),
             person_id: None,
             created_at: now - 50,
+                    matrix_event_id: None,
         })
         .unwrap();
 

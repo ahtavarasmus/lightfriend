@@ -2419,7 +2419,8 @@ pub async fn handler_stats(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     use crate::utils::bridge::{
         HANDLER_BOOT_TS, HANDLER_INVOCATIONS_SIGNAL, HANDLER_INVOCATIONS_TG,
-        HANDLER_INVOCATIONS_WA, HANDLER_STORED_SIGNAL, HANDLER_STORED_TG, HANDLER_STORED_WA,
+        HANDLER_INVOCATIONS_WA, HANDLER_SKIPPED_DUPLICATE_SIGNAL, HANDLER_SKIPPED_DUPLICATE_TG,
+        HANDLER_SKIPPED_DUPLICATE_WA, HANDLER_STORED_SIGNAL, HANDLER_STORED_TG, HANDLER_STORED_WA,
     };
     use std::sync::atomic::Ordering;
 
@@ -2438,6 +2439,11 @@ pub async fn handler_stats(
             "telegram": HANDLER_STORED_TG.load(Ordering::Relaxed),
             "whatsapp": HANDLER_STORED_WA.load(Ordering::Relaxed),
             "signal":   HANDLER_STORED_SIGNAL.load(Ordering::Relaxed),
+        },
+        "skipped_duplicate": {
+            "telegram": HANDLER_SKIPPED_DUPLICATE_TG.load(Ordering::Relaxed),
+            "whatsapp": HANDLER_SKIPPED_DUPLICATE_WA.load(Ordering::Relaxed),
+            "signal":   HANDLER_SKIPPED_DUPLICATE_SIGNAL.load(Ordering::Relaxed),
         },
     })))
 }
@@ -2914,5 +2920,163 @@ pub async fn supervisor_log(
         "total_matched": total_matched,
         "paths_read": paths,
         "lines": tail,
+    })))
+}
+
+/// One-time backfill: identify and (optionally) delete duplicate
+/// ont_messages rows that pre-date the matrix_event_id-based dedup added
+/// in migration 28.
+///
+/// POST /api/admin/dedupe-ont-messages?dry_run=1[&user_id=N][&window_secs=1800]
+///
+/// Defaults:
+///   dry_run=1     report only, no deletes
+///   user_id=ø     scan all users
+///   window_secs=1800  (30 min) — pairs further apart than this are kept
+///                     because they're likely legitimate re-sends, not dups
+///
+/// Algorithm: group rows by (user_id, room_id, sender_name, content).
+/// Within each group, sort by created_at, walk; whenever a consecutive
+/// pair is within `window_secs` of each other, mark the later row as a
+/// duplicate of the earlier. The earliest row in each cluster is kept.
+///
+/// Why 30 min window: matches the bridge-message age cutoff in
+/// `handle_bridge_message` (HALF_HOUR_MS), and the worst observed gap was
+/// ~14 min from a matrix-sdk re-sync. 30 min gives generous headroom
+/// without conflating legitimate same-content messages sent days apart.
+#[derive(Deserialize)]
+pub struct DedupeOntMessagesQuery {
+    pub dry_run: Option<u8>,
+    pub user_id: Option<i32>,
+    pub window_secs: Option<i32>,
+}
+
+pub async fn dedupe_ont_messages(
+    State(state): State<Arc<AppState>>,
+    _auth_user: crate::handlers::auth_middleware::AuthUser,
+    axum::extract::Query(q): axum::extract::Query<DedupeOntMessagesQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    use crate::pg_schema::ont_messages;
+    use diesel::prelude::*;
+
+    let dry_run = q.dry_run.unwrap_or(1) != 0;
+    let window = q.window_secs.unwrap_or(1800).clamp(60, 86400);
+
+    let mut conn = state.ontology_repository.pool.get().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("db conn: {}", e)})),
+        )
+    })?;
+
+    // Pull only the columns we need to keep memory bounded. Even with
+    // 100k rows this is ~10MB.
+    let mut q_filter = ont_messages::table.into_boxed();
+    if let Some(uid) = q.user_id {
+        q_filter = q_filter.filter(ont_messages::user_id.eq(uid));
+    }
+    let rows: Vec<(i64, i32, String, String, String, i32)> = q_filter
+        .select((
+            ont_messages::id,
+            ont_messages::user_id,
+            ont_messages::room_id,
+            ont_messages::sender_name,
+            ont_messages::content,
+            ont_messages::created_at,
+        ))
+        .load(&mut conn)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("query failed: {}", e)})),
+            )
+        })?;
+    let total_rows = rows.len();
+
+    // Group by (user_id, room_id, sender_name, content).
+    type DedupGroupKey = (i32, String, String, String);
+    type DedupGroupRows = Vec<(i64, i32)>;
+    let mut groups: std::collections::HashMap<DedupGroupKey, DedupGroupRows> =
+        std::collections::HashMap::new();
+    for (id, user_id, room_id, sender_name, content, created_at) in rows {
+        groups
+            .entry((user_id, room_id, sender_name, content))
+            .or_default()
+            .push((id, created_at));
+    }
+
+    // For each group, find clusters of rows within `window` seconds of each
+    // other and mark all but the earliest in each cluster for deletion.
+    let mut to_delete: Vec<i64> = Vec::new();
+    let mut sample_groups: Vec<serde_json::Value> = Vec::new();
+    for ((user_id, room_id, sender_name, _content), mut rows) in groups {
+        if rows.len() < 2 {
+            continue;
+        }
+        rows.sort_by_key(|(_, ts)| *ts);
+        let mut cluster_anchor_ts = rows[0].1;
+        let mut cluster_keep_id = rows[0].0;
+        let mut cluster_marked_in_this_run: Vec<i64> = Vec::new();
+        for &(id, ts) in rows.iter().skip(1) {
+            if ts - cluster_anchor_ts <= window {
+                // Same cluster — this row is a dup of cluster_keep_id.
+                to_delete.push(id);
+                cluster_marked_in_this_run.push(id);
+            } else {
+                // New cluster. Reset anchor; keep this row.
+                cluster_anchor_ts = ts;
+                cluster_keep_id = id;
+                cluster_marked_in_this_run.clear();
+            }
+        }
+        let _ = cluster_keep_id;
+        if !cluster_marked_in_this_run.is_empty() && sample_groups.len() < 20 {
+            sample_groups.push(json!({
+                "user_id": user_id,
+                "room_id": room_id,
+                "sender_name": sender_name,
+                "delete_ids": cluster_marked_in_this_run,
+            }));
+        }
+    }
+
+    let delete_count = to_delete.len();
+
+    if !dry_run && !to_delete.is_empty() {
+        // Delete in batches to keep statement size manageable.
+        const BATCH: usize = 500;
+        let mut deleted_total = 0usize;
+        for chunk in to_delete.chunks(BATCH) {
+            let n = diesel::delete(ont_messages::table.filter(ont_messages::id.eq_any(chunk)))
+                .execute(&mut conn)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": format!("delete batch failed: {}", e),
+                            "deleted_so_far": deleted_total,
+                        })),
+                    )
+                })?;
+            deleted_total += n;
+        }
+        return Ok(Json(json!({
+            "dry_run": false,
+            "scanned_rows": total_rows,
+            "window_secs": window,
+            "duplicates_found": delete_count,
+            "deleted": deleted_total,
+            "sample_groups": sample_groups,
+        })));
+    }
+
+    Ok(Json(json!({
+        "dry_run": dry_run,
+        "scanned_rows": total_rows,
+        "window_secs": window,
+        "duplicates_found": delete_count,
+        "deleted": 0,
+        "sample_groups": sample_groups,
+        "note": if dry_run { "dry_run=1: no rows were deleted. POST with ?dry_run=0 to actually delete." } else { "no duplicates found" },
     })))
 }

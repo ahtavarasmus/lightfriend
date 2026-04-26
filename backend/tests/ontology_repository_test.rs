@@ -318,7 +318,7 @@ fn test_mark_room_digest_delivered() {
     let now = 1000000;
 
     // Insert later-urgency messages in room A
-    let msg1 = state
+    let (msg1, _is_new) = state
         .ontology_repository
         .insert_message(&NewOntMessage {
             user_id: user.id,
@@ -329,6 +329,7 @@ fn test_mark_room_digest_delivered() {
             content: "hey".to_string(),
             person_id: None,
             created_at: now,
+                    matrix_event_id: None,
         })
         .unwrap();
     state
@@ -336,7 +337,7 @@ fn test_mark_room_digest_delivered() {
         .update_message_classification(msg1.id, "later", "chat", None, None, None)
         .unwrap();
 
-    let msg2 = state
+    let (msg2, _is_new) = state
         .ontology_repository
         .insert_message(&NewOntMessage {
             user_id: user.id,
@@ -347,6 +348,7 @@ fn test_mark_room_digest_delivered() {
             content: "are you there?".to_string(),
             person_id: None,
             created_at: now + 10,
+                    matrix_event_id: None,
         })
         .unwrap();
     state
@@ -355,7 +357,7 @@ fn test_mark_room_digest_delivered() {
         .unwrap();
 
     // Insert later-urgency message in room B (should NOT be affected)
-    let msg3 = state
+    let (msg3, _is_new) = state
         .ontology_repository
         .insert_message(&NewOntMessage {
             user_id: user.id,
@@ -366,6 +368,7 @@ fn test_mark_room_digest_delivered() {
             content: "hello".to_string(),
             person_id: None,
             created_at: now,
+                    matrix_event_id: None,
         })
         .unwrap();
     state
@@ -374,7 +377,7 @@ fn test_mark_room_digest_delivered() {
         .unwrap();
 
     // Insert now-urgency message in room A (should NOT be affected by digest marking)
-    let msg4 = state
+    let (msg4, _is_new) = state
         .ontology_repository
         .insert_message(&NewOntMessage {
             user_id: user.id,
@@ -385,6 +388,7 @@ fn test_mark_room_digest_delivered() {
             content: "urgent!".to_string(),
             person_id: None,
             created_at: now + 20,
+                    matrix_event_id: None,
         })
         .unwrap();
     state
@@ -418,7 +422,7 @@ fn test_mark_messages_seen_in_room() {
     let now = 1000000;
 
     // Insert critical message in room A
-    let msg1 = state
+    let (msg1, _is_new) = state
         .ontology_repository
         .insert_message(&NewOntMessage {
             user_id: user.id,
@@ -429,6 +433,7 @@ fn test_mark_messages_seen_in_room() {
             content: "emergency!".to_string(),
             person_id: None,
             created_at: now,
+                    matrix_event_id: None,
         })
         .unwrap();
     state
@@ -437,7 +442,7 @@ fn test_mark_messages_seen_in_room() {
         .unwrap();
 
     // Insert high message in room A
-    let msg2 = state
+    let (msg2, _is_new) = state
         .ontology_repository
         .insert_message(&NewOntMessage {
             user_id: user.id,
@@ -448,6 +453,7 @@ fn test_mark_messages_seen_in_room() {
             content: "need help".to_string(),
             person_id: None,
             created_at: now + 10,
+                    matrix_event_id: None,
         })
         .unwrap();
     state
@@ -456,7 +462,7 @@ fn test_mark_messages_seen_in_room() {
         .unwrap();
 
     // Insert medium message in room A (should NOT be resolved)
-    let msg3 = state
+    let (msg3, _is_new) = state
         .ontology_repository
         .insert_message(&NewOntMessage {
             user_id: user.id,
@@ -467,6 +473,7 @@ fn test_mark_messages_seen_in_room() {
             content: "btw".to_string(),
             person_id: None,
             created_at: now + 20,
+                    matrix_event_id: None,
         })
         .unwrap();
     state
@@ -475,7 +482,7 @@ fn test_mark_messages_seen_in_room() {
         .unwrap();
 
     // Insert high message in room B (should NOT be resolved)
-    let msg4 = state
+    let (msg4, _is_new) = state
         .ontology_repository
         .insert_message(&NewOntMessage {
             user_id: user.id,
@@ -486,6 +493,7 @@ fn test_mark_messages_seen_in_room() {
             content: "urgent too".to_string(),
             person_id: None,
             created_at: now,
+                    matrix_event_id: None,
         })
         .unwrap();
     state

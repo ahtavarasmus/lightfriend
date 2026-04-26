@@ -445,9 +445,12 @@ pub async fn insert_email_into_ontology(
         content: content.clone(),
         person_id: matched_person_id,
         created_at: now,
+        // IMAP messages have no Matrix event_id; dedup falls back to the
+        // 5-min content window inside insert_message.
+        matrix_event_id: None,
     };
 
-    let created = state
+    let (created, _is_new) = state
         .ontology_repository
         .insert_message(&msg)
         .map_err(|e| format!("Failed to insert email ont_message: {}", e))?;

@@ -164,6 +164,7 @@ pub struct OntMessage {
     pub classification_result: Option<String>,
     pub resolved_at: Option<i32>,
     pub seen_at: Option<i32>,
+    pub matrix_event_id: Option<String>,
 }
 
 #[derive(Insertable, Debug)]
@@ -177,6 +178,7 @@ pub struct NewOntMessage {
     pub content: String,
     pub person_id: Option<i32>,
     pub created_at: i32,
+    pub matrix_event_id: Option<String>,
 }
 
 // -- ont_events --

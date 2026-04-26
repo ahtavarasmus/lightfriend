@@ -107,7 +107,7 @@ async fn test_insert_email_dedup_against_preexisting_row() {
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
 
     // Simulate the cron winning the race: insert a row directly.
-    let pre_existing = state
+    let (pre_existing, _is_new) = state
         .ontology_repository
         .insert_message(&NewOntMessage {
             user_id: user.id,
@@ -118,6 +118,7 @@ async fn test_insert_email_dedup_against_preexisting_row() {
             content: "cron inserted".to_string(),
             person_id: None,
             created_at: Utc::now().timestamp() as i32,
+                    matrix_event_id: None,
         })
         .unwrap();
 

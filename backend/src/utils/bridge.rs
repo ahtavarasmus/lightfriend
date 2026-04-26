@@ -38,6 +38,13 @@ pub static HANDLER_INVOCATIONS_SIGNAL: AtomicU64 = AtomicU64::new(0);
 pub static HANDLER_STORED_TG: AtomicU64 = AtomicU64::new(0);
 pub static HANDLER_STORED_WA: AtomicU64 = AtomicU64::new(0);
 pub static HANDLER_STORED_SIGNAL: AtomicU64 = AtomicU64::new(0);
+/// Bumped when `insert_message` returns is_new=false — i.e. matrix-sdk
+/// re-sync redelivered an event we already stored, or the bridge re-emitted
+/// a message close in time. Should grow alongside `invocations` if dedup is
+/// doing real work; flat means we're not seeing duplicate deliveries.
+pub static HANDLER_SKIPPED_DUPLICATE_TG: AtomicU64 = AtomicU64::new(0);
+pub static HANDLER_SKIPPED_DUPLICATE_WA: AtomicU64 = AtomicU64::new(0);
+pub static HANDLER_SKIPPED_DUPLICATE_SIGNAL: AtomicU64 = AtomicU64::new(0);
 /// Set once on first handler invocation; readable by the stats endpoint to
 /// compute "events per minute since boot".
 pub static HANDLER_BOOT_TS: OnceLock<AtomicI64> = OnceLock::new();
@@ -64,6 +71,16 @@ fn bump_stored(service: &str) {
         "telegram" => &HANDLER_STORED_TG,
         "whatsapp" => &HANDLER_STORED_WA,
         "signal" => &HANDLER_STORED_SIGNAL,
+        _ => return,
+    };
+    counter.fetch_add(1, Ordering::Relaxed);
+}
+
+fn bump_skipped_duplicate(service: &str) {
+    let counter = match service {
+        "telegram" => &HANDLER_SKIPPED_DUPLICATE_TG,
+        "whatsapp" => &HANDLER_SKIPPED_DUPLICATE_WA,
+        "signal" => &HANDLER_SKIPPED_DUPLICATE_SIGNAL,
         _ => return,
     };
     counter.fetch_add(1, Ordering::Relaxed);
@@ -1839,12 +1856,17 @@ pub async fn handle_bridge_message(
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs() as i32,
+            matrix_event_id: Some(event.event_id.to_string()),
         };
         let state_clone = state.clone();
         let stored_service = service.clone();
         tokio::spawn(async move {
             match state_clone.ontology_repository.insert_message(&msg) {
-                Ok(created) => {
+                Ok((created, is_new)) => {
+                    if !is_new {
+                        bump_skipped_duplicate(&stored_service);
+                        return;
+                    }
                     bump_stored(&stored_service);
                     let snapshot = serde_json::json!({
                         "message_id": created.id,
@@ -2067,12 +2089,17 @@ pub async fn handle_bridge_message(
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i32,
+        matrix_event_id: Some(event.event_id.to_string()),
     };
     let state_clone = state.clone();
     let stored_service = service.clone();
     tokio::spawn(async move {
         match state_clone.ontology_repository.insert_message(&msg) {
-            Ok(created) => {
+            Ok((created, is_new)) => {
+                if !is_new {
+                    bump_skipped_duplicate(&stored_service);
+                    return;
+                }
                 bump_stored(&stored_service);
                 let mut snapshot = serde_json::json!({
                     "message_id": created.id,
