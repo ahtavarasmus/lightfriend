@@ -715,7 +715,7 @@ async fn enrich_commit_info(client: &Client, builds: &mut [HistoricalBuild]) {
         .map(|b| fetch_commit_info(client, &b.commit_hash))
         .collect::<Vec<_>>();
     let infos = join_all(fetches).await;
-    for (build, info) in builds.iter_mut().zip(infos.into_iter()) {
+    for (build, info) in builds.iter_mut().zip(infos) {
         build.commit_message = info.message;
         build.pr_number = info.pr_number;
     }
