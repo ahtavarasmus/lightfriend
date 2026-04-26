@@ -329,7 +329,7 @@ fn test_mark_room_digest_delivered() {
             content: "hey".to_string(),
             person_id: None,
             created_at: now,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
     state
@@ -348,7 +348,7 @@ fn test_mark_room_digest_delivered() {
             content: "are you there?".to_string(),
             person_id: None,
             created_at: now + 10,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
     state
@@ -368,7 +368,7 @@ fn test_mark_room_digest_delivered() {
             content: "hello".to_string(),
             person_id: None,
             created_at: now,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
     state
@@ -388,7 +388,7 @@ fn test_mark_room_digest_delivered() {
             content: "urgent!".to_string(),
             person_id: None,
             created_at: now + 20,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
     state
@@ -433,7 +433,7 @@ fn test_mark_messages_seen_in_room() {
             content: "emergency!".to_string(),
             person_id: None,
             created_at: now,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
     state
@@ -453,7 +453,7 @@ fn test_mark_messages_seen_in_room() {
             content: "need help".to_string(),
             person_id: None,
             created_at: now + 10,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
     state
@@ -473,7 +473,7 @@ fn test_mark_messages_seen_in_room() {
             content: "btw".to_string(),
             person_id: None,
             created_at: now + 20,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
     state
@@ -493,7 +493,7 @@ fn test_mark_messages_seen_in_room() {
             content: "urgent too".to_string(),
             person_id: None,
             created_at: now,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
     state

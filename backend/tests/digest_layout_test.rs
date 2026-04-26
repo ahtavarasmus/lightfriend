@@ -144,7 +144,7 @@ fn pending_messages_by_urgency_filters_by_level() {
             content: "emergency".to_string(),
             person_id: None,
             created_at: now,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
     state
@@ -163,7 +163,7 @@ fn pending_messages_by_urgency_filters_by_level() {
             content: "urgent".to_string(),
             person_id: None,
             created_at: now,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
     state
@@ -182,7 +182,7 @@ fn pending_messages_by_urgency_filters_by_level() {
             content: "fyi".to_string(),
             person_id: None,
             created_at: now,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
     state
@@ -240,7 +240,7 @@ fn pending_messages_by_urgency_excludes_already_delivered() {
             content: "hey".to_string(),
             person_id: None,
             created_at: now,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
     state
@@ -280,7 +280,7 @@ fn pending_messages_by_urgency_excludes_resolved() {
             content: "urgent".to_string(),
             person_id: None,
             created_at: now,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
     state
@@ -320,7 +320,7 @@ fn pending_messages_by_urgency_respects_since_window() {
             content: "stale".to_string(),
             person_id: None,
             created_at: now - 3 * 86400,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
     state
@@ -340,7 +340,7 @@ fn pending_messages_by_urgency_respects_since_window() {
             content: "recent".to_string(),
             person_id: None,
             created_at: now - 3600,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
     state
@@ -523,7 +523,7 @@ fn insert_classified_message_ext(
             content: content.to_string(),
             person_id,
             created_at,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
     state

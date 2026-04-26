@@ -29,16 +29,6 @@ struct SuggestionCandidate {
     msg_count: i64,
 }
 
-pub struct RecentHighSenderMessagesQuery<'a> {
-    pub user_id: i32,
-    pub platform: &'a str,
-    pub sender_name: &'a str,
-    pub sender_key: Option<&'a str>,
-    pub since_ts: i32,
-    pub exclude_message_id: Option<i64>,
-    pub limit: i64,
-}
-
 fn format_hour(h: usize) -> String {
     match h {
         0 => "12am".to_string(),
@@ -109,10 +99,16 @@ fn active_hour_range(hour_buckets: &[u32; 24], total: u32) -> Option<(usize, usi
     Some((active[0], active[active.len() - 1]))
 }
 
-/// Compute response time deltas from a set of messages.
-/// For each non-"You" message, finds the earliest "You" reply in the same room
-/// within 24h (86400s). Returns the deltas in seconds as f64.
-fn compute_response_deltas(messages: &[OntMessage]) -> Vec<f64> {
+/// Compute response time deltas from a set of messages, grouped by room.
+/// Walks each room chronologically and emits one delta per response cycle:
+/// the gap from the EARLIEST unanswered trigger message to the user's reply.
+/// Bursts (multiple sender messages before a reply) collapse to a single delta,
+/// preventing heavy texters from being penalized vs single-message contacts.
+///
+/// `sender_filter`: if Some(name), only that sender's messages count as triggers
+/// (other senders' messages in a group room are ignored). If None, any non-"You"
+/// message is a valid trigger.
+fn compute_response_deltas(messages: &[OntMessage], sender_filter: Option<&str>) -> Vec<f64> {
     use std::collections::HashMap;
 
     // Group messages by room_id
@@ -123,24 +119,28 @@ fn compute_response_deltas(messages: &[OntMessage]) -> Vec<f64> {
 
     let mut deltas = Vec::new();
 
-    for room_msgs in by_room.values() {
-        let received: Vec<&&OntMessage> = room_msgs
-            .iter()
-            .filter(|m| m.sender_name != "You")
-            .collect();
-        let sent: Vec<&&OntMessage> = room_msgs
-            .iter()
-            .filter(|m| m.sender_name == "You")
-            .collect();
+    for room_msgs in by_room.values_mut() {
+        // Caller's order is not guaranteed; sort chronologically.
+        room_msgs.sort_by_key(|m| m.created_at);
 
-        for recv_msg in &received {
-            // Find earliest "You" message after this received message within 24h
-            if let Some(reply) = sent.iter().find(|u| {
-                u.created_at > recv_msg.created_at && u.created_at <= recv_msg.created_at + 86400
-            }) {
-                let delta = (reply.created_at - recv_msg.created_at) as f64;
-                if delta > 0.0 {
-                    deltas.push(delta);
+        let mut pending_trigger_ts: Option<i32> = None;
+
+        for msg in room_msgs.iter() {
+            if msg.sender_name == "You" {
+                if let Some(trigger_ts) = pending_trigger_ts {
+                    let delta = (msg.created_at - trigger_ts) as f64;
+                    if delta > 0.0 && delta <= 86400.0 {
+                        deltas.push(delta);
+                    }
+                    pending_trigger_ts = None;
+                }
+            } else {
+                let counts_as_trigger = match sender_filter {
+                    Some(name) => msg.sender_name == name,
+                    None => true,
+                };
+                if counts_as_trigger && pending_trigger_ts.is_none() {
+                    pending_trigger_ts = Some(msg.created_at);
                 }
             }
         }
@@ -1147,40 +1147,6 @@ impl OntologyRepository {
             .ok()
     }
 
-    /// Get recently "now"-classified messages from the same sender/platform.
-    ///
-    /// This gives urgency classification durable context about alerts the user
-    /// probably already received, even when similar emails/messages arrive in
-    /// separate rooms or after a process restart.
-    pub fn get_recent_high_messages_by_sender(
-        &self,
-        params: RecentHighSenderMessagesQuery<'_>,
-    ) -> Result<Vec<OntMessage>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let mut query = ont_messages::table
-            .filter(ont_messages::user_id.eq(params.user_id))
-            .filter(ont_messages::platform.eq(params.platform))
-            .filter(ont_messages::sender_name.ne("You"))
-            .filter(ont_messages::urgency.eq("now"))
-            .filter(ont_messages::created_at.ge(params.since_ts))
-            .into_boxed();
-
-        if let Some(sender_key) = params.sender_key {
-            query = query.filter(ont_messages::sender_key.eq(sender_key));
-        } else {
-            query = query.filter(ont_messages::sender_name.eq(params.sender_name));
-        }
-
-        if let Some(message_id) = params.exclude_message_id {
-            query = query.filter(ont_messages::id.ne(message_id));
-        }
-
-        query
-            .order(ont_messages::created_at.desc())
-            .limit(params.limit)
-            .load::<OntMessage>(&mut conn)
-    }
-
     /// Get all messages linked to an event, ordered by message timestamp ASC.
     pub fn get_messages_for_event(
         &self,
@@ -1437,7 +1403,7 @@ impl OntologyRepository {
             return neutral;
         }
 
-        let deltas = compute_response_deltas(&all_messages);
+        let deltas = compute_response_deltas(&all_messages, None);
 
         if deltas.len() < 10 {
             return neutral;
@@ -1484,7 +1450,6 @@ impl OntologyRepository {
             .iter()
             .filter(|m| m.sender_name == sender_name)
             .collect();
-        let user_msgs: Vec<_> = recent.iter().filter(|m| m.sender_name == "You").collect();
 
         let message_count_30d = sender_msgs.len() as i64;
         if message_count_30d == 0 {
@@ -1494,17 +1459,11 @@ impl OntologyRepository {
         // Last contact: second-most-recent sender message (newest is current)
         let last_contact_ago_secs = sender_msgs.get(1).map(|m| (now - m.created_at) as i64);
 
-        // Response time: find user replies within 24h, compute geometric mean,
-        // then blend with user baseline via Bayesian log-mean (K=10)
-        let mut response_deltas: Vec<f64> = Vec::new();
-        for sender_msg in &sender_msgs {
-            if let Some(reply) = user_msgs.iter().find(|u| {
-                u.created_at > sender_msg.created_at
-                    && u.created_at <= sender_msg.created_at + 86400
-            }) {
-                response_deltas.push((reply.created_at - sender_msg.created_at) as f64);
-            }
-        }
+        // Response time via the shared burst-aware helper. One delta per response
+        // cycle, measured from the earliest unanswered sender message — same logic
+        // as the baseline so the ratio is meaningful.
+        let recent_owned: Vec<OntMessage> = recent.iter().map(|m| (*m).clone()).collect();
+        let response_deltas = compute_response_deltas(&recent_owned, Some(sender_name));
 
         let n_replies = response_deltas.len() as i64;
         let response_time = if n_replies > 0 && baseline.response_time_secs > 0.0 {

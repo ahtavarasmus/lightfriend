@@ -182,7 +182,7 @@ async fn test_query_message_generic_dedups_per_room_and_excludes_outgoing() {
                 content: format!("chatty msg {}", i),
                 person_id: None,
                 created_at: now - (60 * (10 - i)), // older → newer
-                            matrix_event_id: None,
+                matrix_event_id: None,
             })
             .unwrap();
     }
@@ -199,7 +199,7 @@ async fn test_query_message_generic_dedups_per_room_and_excludes_outgoing() {
             content: "quiet hello".to_string(),
             person_id: None,
             created_at: now - 30,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
 
@@ -215,7 +215,7 @@ async fn test_query_message_generic_dedups_per_room_and_excludes_outgoing() {
             content: "my own outgoing".to_string(),
             person_id: None,
             created_at: now - 10,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
 
@@ -272,7 +272,7 @@ async fn test_query_message_sender_filter_returns_all_matching() {
                 content: format!("chatty msg {}", i),
                 person_id: None,
                 created_at: now - (60 * (10 - i)),
-                            matrix_event_id: None,
+                matrix_event_id: None,
             })
             .unwrap();
     }

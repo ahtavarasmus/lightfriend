@@ -118,7 +118,7 @@ async fn test_insert_email_dedup_against_preexisting_row() {
             content: "cron inserted".to_string(),
             person_id: None,
             created_at: Utc::now().timestamp() as i32,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
 

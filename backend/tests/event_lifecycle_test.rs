@@ -74,7 +74,7 @@ async fn get_messages_for_event_returns_oldest_to_newest_linked_messages() {
             content: "Original package confirmation".to_string(),
             person_id: None,
             created_at: now - 200,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
     let (second_message, _is_new) = state
@@ -88,7 +88,7 @@ async fn get_messages_for_event_returns_oldest_to_newest_linked_messages() {
             content: "Latest delivery update".to_string(),
             person_id: None,
             created_at: now - 50,
-                    matrix_event_id: None,
+            matrix_event_id: None,
         })
         .unwrap();
 
