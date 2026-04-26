@@ -757,6 +757,10 @@ async fn main() {
             "/api/admin/dedupe-ont-messages",
             post(admin_handlers::dedupe_ont_messages),
         )
+        .route(
+            "/api/admin/telegram-bridge-schema-introspect",
+            get(admin_handlers::telegram_bridge_schema_introspect),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             handlers::auth_middleware::require_admin,

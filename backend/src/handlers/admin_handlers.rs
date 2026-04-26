@@ -3080,3 +3080,149 @@ pub async fn dedupe_ont_messages(
         "note": if dry_run { "dry_run=1: no rows were deleted. POST with ?dry_run=0 to actually delete." } else { "no duplicates found" },
     })))
 }
+
+/// Read-only schema introspection of mautrix-telegram's bridge database.
+///
+/// One-shot connection — does NOT require a configured pool yet (Phase 1
+/// precursor before wiring TelegramBridgeRepository). Reads
+/// `TELEGRAM_BRIDGE_DATABASE_URL` from env, opens a single connection,
+/// queries `information_schema.columns` + `pg_indexes` for the tables we
+/// plan to query (`puppet`, `portal`, `"user"`, `contact`, `user_portal`),
+/// returns the column lists + index defs.
+///
+/// Lets us verify post-deploy that the live mautrix-telegram v0.15.3
+/// schema matches what's documented in the bridge source we read from
+/// GitHub before committing to the column names in our Rust queries. If
+/// any mismatch turns up we adjust the query SQL before shipping the
+/// repository.
+///
+/// GET /api/admin/telegram-bridge-schema-introspect
+pub async fn telegram_bridge_schema_introspect(
+    State(_state): State<Arc<AppState>>,
+    _auth_user: crate::handlers::auth_middleware::AuthUser,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    use diesel::sql_query;
+    use diesel::Connection;
+
+    let url = std::env::var("TELEGRAM_BRIDGE_DATABASE_URL").map_err(|_| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
+                "error": "TELEGRAM_BRIDGE_DATABASE_URL not set",
+                "hint": "Set it in entrypoint.sh; default is postgres://telegram_user:telegram_password@localhost:5432/telegram_db?sslmode=disable",
+            })),
+        )
+    })?;
+
+    let mut conn = diesel::PgConnection::establish(&url).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("connect to telegram_db failed: {}", e)})),
+        )
+    })?;
+
+    // Columns of interest. We query information_schema.columns once and
+    // group by table name in Rust to avoid running 5 separate queries.
+    #[derive(diesel::QueryableByName, Debug)]
+    struct ColRow {
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        table_name: String,
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        column_name: String,
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        data_type: String,
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        is_nullable: String,
+        #[diesel(sql_type = diesel::sql_types::Integer)]
+        ordinal_position: i32,
+    }
+
+    let cols: Vec<ColRow> = sql_query(
+        "SELECT table_name::text, column_name::text, data_type::text, \
+         is_nullable::text, ordinal_position::int4 \
+         FROM information_schema.columns \
+         WHERE table_schema = 'public' \
+           AND table_name IN ('user', 'puppet', 'portal', 'contact', 'user_portal') \
+         ORDER BY table_name, ordinal_position",
+    )
+    .load(&mut conn)
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("columns query failed: {}", e)})),
+        )
+    })?;
+
+    let mut tables: std::collections::BTreeMap<String, Vec<serde_json::Value>> =
+        std::collections::BTreeMap::new();
+    for row in &cols {
+        tables
+            .entry(row.table_name.clone())
+            .or_default()
+            .push(json!({
+                "name": row.column_name,
+                "type": row.data_type,
+                "nullable": row.is_nullable == "YES",
+                "ord": row.ordinal_position,
+            }));
+    }
+
+    #[derive(diesel::QueryableByName, Debug)]
+    struct IdxRow {
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        tablename: String,
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        indexname: String,
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        indexdef: String,
+    }
+
+    let idxs: Vec<IdxRow> = sql_query(
+        "SELECT tablename::text, indexname::text, indexdef::text \
+         FROM pg_indexes \
+         WHERE schemaname = 'public' \
+           AND tablename IN ('user', 'puppet', 'portal', 'contact', 'user_portal') \
+         ORDER BY tablename, indexname",
+    )
+    .load(&mut conn)
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("indexes query failed: {}", e)})),
+        )
+    })?;
+
+    let mut indexes: std::collections::BTreeMap<String, Vec<serde_json::Value>> =
+        std::collections::BTreeMap::new();
+    for row in &idxs {
+        indexes
+            .entry(row.tablename.clone())
+            .or_default()
+            .push(json!({
+                "name": row.indexname,
+                "def": row.indexdef,
+            }));
+    }
+
+    // Try to read the mautrix bridge's own schema version. mautrix-python's
+    // util.async_db tracks migrations in a `version` table with a single
+    // integer row. If absent, just report missing — not a failure.
+    #[derive(diesel::QueryableByName, Debug)]
+    struct VersionRow {
+        #[diesel(sql_type = diesel::sql_types::Integer)]
+        version: i32,
+    }
+    let bridge_schema_version = sql_query("SELECT version::int4 FROM version LIMIT 1")
+        .load::<VersionRow>(&mut conn)
+        .ok()
+        .and_then(|rows| rows.first().map(|r| r.version));
+
+    Ok(Json(json!({
+        "database": "telegram_db",
+        "tables_found": tables.keys().collect::<Vec<_>>(),
+        "tables": tables,
+        "indexes": indexes,
+        "bridge_schema_version": bridge_schema_version,
+        "verified_against": "mautrix-telegram v0.15.3 source (puppet.py, portal.py, user.py + migrations v01..v18)",
+    })))
+}
