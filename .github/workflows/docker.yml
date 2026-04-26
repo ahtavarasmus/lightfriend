@@ -728,13 +728,56 @@ jobs:
               if [ "$STATUS" != "HEALTHY" ]; then
                 echo "FATAL: Enclave not healthy: $STATUS"
                 echo "Details: $(echo "$VERIFY" | jq -r '.details // .failed_checks // "none"')"
-                # Dump host logs for diagnosis
-                echo "=== Host debug logs ==="
-                aws ssm send-command --instance-ids "$NEW_INSTANCE" \
+
+                # ── Comprehensive failure dump ────────────────────────────
+                # The failed instance gets terminated by Rollback shortly,
+                # so this is our single shot. Strategy:
+                #   1. Upload the full boot-trace + key host logs to S3
+                #      (durable past termination, can be analyzed any time).
+                #   2. Print a focused tail-set inline so the workflow log
+                #      itself is useful without S3 access.
+                # If a future deploy fails the same way, run:
+                #   aws s3 cp s3://$S3_BUCKET/deploy/diag-<instance>.tar.gz - | tar xz
+                echo "=== Uploading full diagnostics bundle to S3 ==="
+                UPLOAD_CMD=$(aws ssm send-command --instance-ids "$NEW_INSTANCE" \
                   --document-name "AWS-RunShellScript" \
-                  --parameters '{"commands":["tail -100 /tmp/launch.log 2>/dev/null; echo === RESTORE ===; tail -100 /tmp/restore-enclave-debug.log 2>/dev/null"]}' \
-                  --timeout-seconds 30 --query 'Command.CommandId' --output text 2>/dev/null || true
-                sleep 10
+                  --parameters "{\"commands\":[\"set +e; D=/tmp/diag-$NEW_INSTANCE; mkdir -p \$D; cp -f /opt/lightfriend/logs/boot-trace-latest.log \$D/boot-trace.log 2>/dev/null; cp -f /tmp/launch.log \$D/launch.log 2>/dev/null; cp -f /tmp/restore-enclave-debug.log \$D/restore-enclave-debug.log 2>/dev/null; cp -f /var/log/cloud-init-output.log \$D/cloud-init-output.log 2>/dev/null; ls -la /opt/lightfriend/backups/ > \$D/backups-dir.txt 2>&1; ls -la /opt/lightfriend/seed/ > \$D/seed-dir.txt 2>&1; ls -la /opt/lightfriend/logs/ > \$D/logs-dir.txt 2>&1; df -h > \$D/disk.txt 2>&1; free -h > \$D/mem.txt 2>&1; systemctl status backup-upload-server.service vsock-bridge-9081.service vsock-boot-trace.service docker.service nitro-enclaves-allocator.service > \$D/systemd-status.txt 2>&1; systemctl list-units --failed > \$D/systemd-failed.txt 2>&1; nitro-cli describe-enclaves > \$D/nitro-enclaves.txt 2>&1; cat /etc/nitro_enclaves/allocator.yaml > \$D/allocator-config.yaml 2>&1; ss -tlnp > \$D/listening-ports.txt 2>&1; dmesg | tail -200 > \$D/dmesg-tail.txt 2>&1; journalctl -u backup-upload-server.service --no-pager -n 200 > \$D/backup-upload-journal.txt 2>&1; journalctl -u vsock-bridge-9081.service --no-pager -n 200 > \$D/vsock-9081-journal.txt 2>&1; journalctl -u vsock-boot-trace.service --no-pager -n 200 > \$D/vsock-boot-trace-journal.txt 2>&1; journalctl --since '30 minutes ago' --no-pager | tail -500 > \$D/journalctl-recent.txt 2>&1; aws s3 ls s3://$S3_BUCKET/deploy/ > \$D/s3-deploy-listing.txt 2>&1; tar czf /tmp/diag-$NEW_INSTANCE.tar.gz -C /tmp diag-$NEW_INSTANCE 2>&1; aws s3 cp /tmp/diag-$NEW_INSTANCE.tar.gz s3://$S3_BUCKET/deploy/diag-$NEW_INSTANCE.tar.gz && echo 'DIAG_BUNDLE_UPLOADED' || echo 'DIAG_BUNDLE_UPLOAD_FAILED'; ls -la /tmp/diag-$NEW_INSTANCE.tar.gz 2>&1\"]}" \
+                  --timeout-seconds 120 --query 'Command.CommandId' --output text 2>/dev/null || echo "")
+                if [ -n "$UPLOAD_CMD" ]; then
+                  echo "Waiting up to 90s for diagnostics bundle (cmd $UPLOAD_CMD)..."
+                  for j in $(seq 1 18); do
+                    sleep 5
+                    UPLOAD_STATE=$(aws ssm get-command-invocation --command-id "$UPLOAD_CMD" \
+                      --instance-id "$NEW_INSTANCE" --query 'Status' --output text 2>/dev/null || echo "Pending")
+                    [ "$UPLOAD_STATE" = "Success" ] || [ "$UPLOAD_STATE" = "Failed" ] && break
+                  done
+                  echo "Diagnostics bundle SSM status: $UPLOAD_STATE"
+                  aws ssm get-command-invocation --command-id "$UPLOAD_CMD" \
+                    --instance-id "$NEW_INSTANCE" --query 'StandardOutputContent' \
+                    --output text 2>/dev/null | tail -20 || true
+                  echo ""
+                  echo "Diagnostics bundle S3 path: s3://$S3_BUCKET/deploy/diag-$NEW_INSTANCE.tar.gz"
+                  echo "Fetch with: aws s3 cp s3://$S3_BUCKET/deploy/diag-$NEW_INSTANCE.tar.gz - | tar xz -C /tmp"
+                fi
+
+                # ── Inline tail for in-workflow visibility ────────────────
+                echo ""
+                echo "=== Inline log tails ==="
+                INLINE_CMD=$(aws ssm send-command --instance-ids "$NEW_INSTANCE" \
+                  --document-name "AWS-RunShellScript" \
+                  --parameters '{"commands":["echo === BOOT_TRACE_TAIL_300 ===; tail -300 /opt/lightfriend/logs/boot-trace-latest.log 2>/dev/null; echo; echo === BOOT_TRACE_GREP_HOT ===; grep -nE \"FATAL|FAIL|fail|error|ERROR|panic|abort|RESTORE|verify|step |STEP|backend|telegram|hung|timeout\" /opt/lightfriend/logs/boot-trace-latest.log 2>/dev/null | tail -200; echo; echo === LAUNCH_TAIL ===; tail -100 /tmp/launch.log 2>/dev/null; echo; echo === RESTORE_DEBUG_TAIL ===; tail -100 /tmp/restore-enclave-debug.log 2>/dev/null; echo; echo === SYSTEMD_FAILED ===; systemctl --failed --no-pager 2>&1; echo; echo === BACKUP_UPLOAD_JOURNAL_TAIL ===; journalctl -u backup-upload-server.service --no-pager -n 80 2>&1; echo; echo === DMESG_TAIL ===; dmesg | tail -50 2>&1"]}' \
+                  --timeout-seconds 60 --query 'Command.CommandId' --output text 2>/dev/null || echo "")
+                if [ -n "$INLINE_CMD" ]; then
+                  for j in $(seq 1 12); do
+                    sleep 5
+                    INLINE_STATE=$(aws ssm get-command-invocation --command-id "$INLINE_CMD" \
+                      --instance-id "$NEW_INSTANCE" --query 'Status' --output text 2>/dev/null || echo "Pending")
+                    [ "$INLINE_STATE" = "Success" ] || [ "$INLINE_STATE" = "Failed" ] && break
+                  done
+                  aws ssm get-command-invocation --command-id "$INLINE_CMD" \
+                    --instance-id "$NEW_INSTANCE" --query 'StandardOutputContent' \
+                    --output text 2>/dev/null || echo "(inline SSM fetch failed)"
+                fi
                 exit 1
               fi
               if [ -n "$OLD_INSTANCE" ]; then
