@@ -475,12 +475,20 @@ pub async fn handle_send_chat_message(
                 capitalized_platform,
                 args.chat_name.as_str()
             );
-            if let Err(e) = state
-                .twilio_message_service
-                .send_sms(&error_msg, None, user)
-                .await
-            {
-                eprintln!("Failed to send error message: {}", e);
+            // Skip the SMS when this tool was invoked from the dashboard.
+            // The dashboard already shows the error inline via the JSON
+            // response below; an SMS would be a duplicate the user sees on
+            // their phone for an action they did from a desktop. Mirrors
+            // the guards on the other three send_sms sites in this file
+            // (lines 362, 517, 620).
+            if !skip_sms {
+                if let Err(e) = state
+                    .twilio_message_service
+                    .send_sms(&error_msg, None, user)
+                    .await
+                {
+                    eprintln!("Failed to send error message: {}", e);
+                }
             }
             return Ok((
                 StatusCode::OK,
