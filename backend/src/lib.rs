@@ -110,7 +110,6 @@ pub mod repositories {
     pub mod ontology_repository;
     pub mod signup_repository;
     pub mod signup_repository_impl;
-    pub mod telegram_bridge_repository;
     pub mod totp_repository;
     pub mod twilio_status_repository;
     pub mod twilio_status_repository_impl;
@@ -161,7 +160,6 @@ pub use repositories::bandwidth_repository::BandwidthRepository;
 pub use repositories::llm_usage_repository::LlmUsageRepository;
 pub use repositories::metrics_repository::MetricsRepository;
 pub use repositories::ontology_repository::OntologyRepository;
-pub use repositories::telegram_bridge_repository::{TelegramBridgeRepository, TelegramContact};
 pub use repositories::totp_repository::TotpRepository;
 pub use repositories::user_core::{UserCore, UserCoreOps};
 pub use repositories::user_repository::UserRepository;
@@ -278,9 +276,6 @@ pub struct AppState {
     /// Optional: read-only access to mautrix-whatsapp's PostgreSQL database.
     /// None when WHATSAPP_BRIDGE_DATABASE_URL is unset (e.g. dev environments).
     pub whatsapp_bridge_repository: Option<Arc<WhatsAppBridgeRepository>>,
-    /// Optional: read-only access to mautrix-telegram's PostgreSQL database.
-    /// None when TELEGRAM_BRIDGE_DATABASE_URL is unset (e.g. dev environments).
-    pub telegram_bridge_repository: Option<Arc<TelegramBridgeRepository>>,
     pub ontology_registry: ontology::registry::OntologyRegistry,
     pub tool_registry: tools::registry::ToolRegistry,
     pub pending_rule_tests: Arc<DashMap<String, handlers::rule_handlers::PendingRuleTest>>,

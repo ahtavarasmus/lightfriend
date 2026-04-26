@@ -313,139 +313,6 @@ async fn search_whatsapp_chat_candidate(
     })
 }
 
-/// Fuzzy-match a user's query against the full Telegram chat list from the
-/// bridge database. Covers DMs (saved contacts, with portal mxid when
-/// materialized), groups/channels, and Saved Messages (self-chat). Returns
-/// the single best candidate above threshold, or None.
-///
-/// Mirrors the WhatsApp version. Telegram's bridge (mautrix-telegram v0.15.3)
-/// has a different schema, so we use TelegramBridgeRepository directly. Like
-/// WhatsApp, name fuzzy-matching happens in Rust to share thresholds with
-/// find_person_room.
-async fn search_telegram_chat_candidate(
-    state: &Arc<AppState>,
-    user_id: i32,
-    search_term: &str,
-) -> Option<ResolvedChat> {
-    let repo = state.telegram_bridge_repository.as_ref()?;
-
-    // Need the user's Matrix ID to translate to bridge-side tgid.
-    let matrix_user_id = {
-        let cell = state
-            .matrix_users
-            .get(&user_id)
-            .map(|e| e.value().clone())?;
-        let slot = cell.lock().await;
-        let us = slot.as_ref()?;
-        us.client.user_id()?.to_string()
-    };
-
-    let repo_login = Arc::clone(repo);
-    let mx_for_login = matrix_user_id.clone();
-    let user_tgid =
-        match tokio::task::spawn_blocking(move || repo_login.get_user_tgid(&mx_for_login)).await {
-            Ok(Ok(Some(tgid))) => tgid,
-            Ok(Ok(None)) => {
-                tracing::info!(
-                    "SEND_FLOW search_telegram_chat_candidate: user {} not logged into TG bridge",
-                    user_id
-                );
-                return None;
-            }
-            Ok(Err(e)) => {
-                tracing::warn!(
-                    "SEND_FLOW search_telegram_chat_candidate: get_user_tgid failed: {}",
-                    e
-                );
-                return None;
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "SEND_FLOW search_telegram_chat_candidate: get_user_tgid task panicked: {}",
-                    e
-                );
-                return None;
-            }
-        };
-
-    let repo_search = Arc::clone(repo);
-    let candidates =
-        match tokio::task::spawn_blocking(move || repo_search.search_chats_for_user(user_tgid))
-            .await
-        {
-            Ok(Ok(c)) => c,
-            Ok(Err(e)) => {
-                tracing::warn!(
-                    "SEND_FLOW search_telegram_chat_candidate: search_chats failed: {}",
-                    e
-                );
-                return None;
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "SEND_FLOW search_telegram_chat_candidate: search_chats task panicked: {}",
-                    e
-                );
-                return None;
-            }
-        };
-
-    tracing::info!(
-        "SEND_FLOW search_telegram_chat_candidate: {} candidates from bridge DB",
-        candidates.len()
-    );
-
-    let search_lower = search_term.trim().to_lowercase();
-    // Match Saved Messages aliases ("self", "saved", "me", "saved messages")
-    // explicitly so users don't have to remember the exact label.
-    let self_chat_alias = matches!(
-        search_lower.as_str(),
-        "self" | "me" | "saved" | "saved messages" | "savedmessages"
-    );
-
-    let mut best: Option<(
-        f64,
-        &crate::repositories::telegram_bridge_repository::ChatCandidate,
-    )> = None;
-    for cand in &candidates {
-        if self_chat_alias && cand.is_self_chat {
-            best = Some((1.0, cand));
-            break;
-        }
-        let name_lower = cand.display_name.to_lowercase();
-        let score = if name_lower == search_lower {
-            1.0
-        } else if name_lower.contains(&search_lower) {
-            0.95
-        } else {
-            strsim::jaro_winkler(&search_lower, &name_lower)
-        };
-        if score < 0.7 {
-            continue;
-        }
-        match &best {
-            Some((cur_score, _)) if *cur_score >= score => {}
-            _ => best = Some((score, cand)),
-        }
-    }
-
-    let (score, cand) = best?;
-    tracing::info!(
-        "SEND_FLOW search_telegram_chat_candidate: best match '{}' (score={}), tgid={}, mxid={:?}, is_group={}, is_self_chat={}",
-        cand.display_name,
-        score,
-        cand.tgid,
-        cand.mxid,
-        cand.is_group,
-        cand.is_self_chat
-    );
-    Some(ResolvedChat {
-        display_name: cand.display_name.clone(),
-        chat_id: Some(cand.tgid.to_string()),
-        room_id: cand.mxid.clone(),
-    })
-}
-
 pub async fn handle_send_chat_message(
     state: &Arc<AppState>,
     user_id: i32,
@@ -522,16 +389,13 @@ pub async fn handle_send_chat_message(
     // Step 2: If no Person match, fall back to service-specific search.
     //   - WhatsApp: search the bridge DB (covers contacts + groups, returns
     //     portal mxid when known, handles cold DMs via start-chat on send).
-    //   - Telegram: search the bridge DB (covers DMs incl. cold contacts,
-    //     groups/channels, and Saved Messages self-chat).
-    //   - Signal: search joined Matrix rooms by display name (legacy path;
-    //     bridgev2 SignalBridgeRepository TBD).
+    //   - Telegram / Signal: search joined Matrix rooms by display name
+    //     (legacy path; bridge DB schemas for those aren't wired yet).
     //
-    // Additionally for WhatsApp / Telegram: even if Step 1 found a Person,
-    // backfill a missing chat_id (handle) by searching the bridge DB. This
-    // covers ontology rows written before we started persisting handles:
-    // without it, a stale saved room_id has no fallback when the bridge
-    // reconnects.
+    // Additionally for WhatsApp: even if Step 1 found a Person, backfill a
+    // missing chat_id (handle) by searching the bridge DB. This covers
+    // ontology rows written before we started persisting handles: without it,
+    // a stale saved room_id has no fallback when the bridge reconnects.
     let best_match = if let Some(mut resolved) = best_match {
         if args.platform == "whatsapp" && resolved.chat_id.is_none() {
             tracing::info!(
@@ -558,30 +422,6 @@ pub async fn handle_send_chat_message(
                     resolved.display_name
                 );
             }
-        } else if args.platform == "telegram" && resolved.chat_id.is_none() {
-            tracing::info!(
-                "SEND_FLOW Step 1.5: Ontology match '{}' has no chat_id; backfilling from TG bridge DB",
-                resolved.display_name
-            );
-            if let Some(candidate) =
-                search_telegram_chat_candidate(state, user_id, &resolved.display_name).await
-            {
-                tracing::info!(
-                    "SEND_FLOW Backfilled tg chat_id={:?} (bridge_mxid={:?}) for '{}'",
-                    candidate.chat_id,
-                    candidate.room_id,
-                    resolved.display_name
-                );
-                resolved.chat_id = candidate.chat_id;
-                if candidate.room_id.is_some() {
-                    resolved.room_id = candidate.room_id;
-                }
-            } else {
-                tracing::warn!(
-                    "SEND_FLOW TG backfill: no bridge DB match for '{}'",
-                    resolved.display_name
-                );
-            }
         }
         Some(resolved)
     } else if args.platform == "whatsapp" {
@@ -589,41 +429,6 @@ pub async fn handle_send_chat_message(
             "SEND_FLOW Step 2: No Person match, falling back to WhatsApp bridge DB search"
         );
         search_whatsapp_chat_candidate(state, user_id, &args.chat_name).await
-    } else if args.platform == "telegram" {
-        tracing::info!(
-            "SEND_FLOW Step 2: No Person match, falling back to Telegram bridge DB search"
-        );
-        // When the bridge repo is configured, use it. Fall through to the
-        // joined-rooms search if it isn't (dev / non-enclave) or returns
-        // nothing.
-        let from_bridge = search_telegram_chat_candidate(state, user_id, &args.chat_name).await;
-        if from_bridge.is_some() {
-            from_bridge
-        } else {
-            tracing::info!(
-                "SEND_FLOW Telegram bridge DB returned no match; falling back to joined-rooms search"
-            );
-            let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
-            match crate::utils::bridge::get_service_rooms(&client, &args.platform).await {
-                Ok(rooms) => {
-                    crate::utils::bridge::search_best_match(&rooms, &args.chat_name).map(|r| {
-                        ResolvedChat {
-                            display_name: r.display_name,
-                            chat_id: None,
-                            room_id: if r.room_id.is_empty() {
-                                None
-                            } else {
-                                Some(r.room_id)
-                            },
-                        }
-                    })
-                }
-                Err(e) => {
-                    tracing::error!("SEND_FLOW Failed to fetch rooms: {}", e);
-                    None
-                }
-            }
-        }
     } else {
         tracing::info!(
             "SEND_FLOW Step 2: No Person match, falling back to Matrix room search ({})",

@@ -354,39 +354,6 @@ async fn main() {
                 None
             }
         };
-
-    // Optional read-only pool for the mautrix-telegram bridge database.
-    // Only configured when TELEGRAM_BRIDGE_DATABASE_URL is set (typically
-    // inside the enclave). Used by the send/lookup path to enumerate
-    // Telegram contacts and resolve portal mxids without depending on
-    // Matrix room sync state. mautrix-telegram (Python v0.15.3) creates
-    // portals lazily so the Matrix room list alone is incomplete.
-    let telegram_bridge_repository: Option<Arc<backend::TelegramBridgeRepository>> =
-        match std::env::var("TELEGRAM_BRIDGE_DATABASE_URL") {
-            Ok(url) => {
-                let manager = diesel::r2d2::ConnectionManager::<diesel::PgConnection>::new(url);
-                match diesel::r2d2::Pool::builder()
-                    .max_size(20)
-                    .connection_timeout(std::time::Duration::from_secs(3))
-                    .build(manager)
-                {
-                    Ok(pool) => {
-                        tracing::info!("Telegram bridge repository configured");
-                        Some(Arc::new(backend::TelegramBridgeRepository::new(pool)))
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to build telegram bridge pool: {}", e);
-                        None
-                    }
-                }
-            }
-            Err(_) => {
-                tracing::info!(
-                    "TELEGRAM_BRIDGE_DATABASE_URL not set; Telegram bridge repository disabled"
-                );
-                None
-            }
-        };
     let server_url_oauth =
         std::env::var("SERVER_URL_OAUTH").unwrap_or_else(|_| "http://localhost:3000".to_string());
     let server_url =
@@ -485,7 +452,6 @@ async fn main() {
         bandwidth_repository,
         ontology_repository,
         whatsapp_bridge_repository,
-        telegram_bridge_repository,
         ontology_registry: backend::ontology::registry::OntologyRegistry::build(),
         tool_registry: backend::build_tool_registry(),
         pending_rule_tests: Arc::new(DashMap::new()),
