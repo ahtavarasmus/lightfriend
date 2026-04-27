@@ -283,8 +283,18 @@ async fn main() {
     // hold a connection while waiting on slow Diesel queries. The default of 10 was
     // getting starved by the message-monitor scheduler, blocking /api/health and
     // tripping the service-watchdog 2-second health check.
+    // min_idle(Some(0)): create connections lazily on first .get() rather than
+    // eagerly opening max_size connections at startup. r2d2's `build()` blocks
+    // main() until `min_idle.unwrap_or(max_size)` connections are established;
+    // with the previous default that meant 50 + 20 (whatsapp) + 20 (telegram)
+    // = 90 simultaneous postgres connections at backend boot, on top of bridge
+    // process connections. With postgres' default `max_connections = 100`
+    // (not tuned in our config), a fresh-deploy enclave hit the cap and
+    // `pg_pool.build()` panicked via `.expect()` -> backend crash-loop -> verify
+    // chain never completed -> RESTORE_FAILED. Lazy init removes the spike.
     let pg_pool = r2d2::Pool::builder()
         .max_size(50)
+        .min_idle(Some(0))
         .connection_timeout(std::time::Duration::from_secs(10))
         .build(pg_manager)
         .expect("Failed to create PG pool");
@@ -334,6 +344,7 @@ async fn main() {
                 // ~200MB worst case, well within the enclave's 8GB budget.
                 match diesel::r2d2::Pool::builder()
                     .max_size(20)
+                    .min_idle(Some(0))
                     .connection_timeout(std::time::Duration::from_secs(3))
                     .build(manager)
                 {
@@ -350,6 +361,40 @@ async fn main() {
             Err(_) => {
                 tracing::info!(
                     "WHATSAPP_BRIDGE_DATABASE_URL not set; WhatsApp bridge repository disabled"
+                );
+                None
+            }
+        };
+
+    // Optional read-only pool for the mautrix-telegram bridge database.
+    // Only configured when TELEGRAM_BRIDGE_DATABASE_URL is set (typically
+    // inside the enclave). Used by the send/lookup path to enumerate
+    // Telegram contacts and resolve portal mxids without depending on
+    // Matrix room sync state. mautrix-telegram (Python v0.15.3) creates
+    // portals lazily so the Matrix room list alone is incomplete.
+    let telegram_bridge_repository: Option<Arc<backend::TelegramBridgeRepository>> =
+        match std::env::var("TELEGRAM_BRIDGE_DATABASE_URL") {
+            Ok(url) => {
+                let manager = diesel::r2d2::ConnectionManager::<diesel::PgConnection>::new(url);
+                match diesel::r2d2::Pool::builder()
+                    .max_size(20)
+                    .min_idle(Some(0))
+                    .connection_timeout(std::time::Duration::from_secs(3))
+                    .build(manager)
+                {
+                    Ok(pool) => {
+                        tracing::info!("Telegram bridge repository configured");
+                        Some(Arc::new(backend::TelegramBridgeRepository::new(pool)))
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to build telegram bridge pool: {}", e);
+                        None
+                    }
+                }
+            }
+            Err(_) => {
+                tracing::info!(
+                    "TELEGRAM_BRIDGE_DATABASE_URL not set; Telegram bridge repository disabled"
                 );
                 None
             }
@@ -452,6 +497,7 @@ async fn main() {
         bandwidth_repository,
         ontology_repository,
         whatsapp_bridge_repository,
+        telegram_bridge_repository,
         ontology_registry: backend::ontology::registry::OntologyRegistry::build(),
         tool_registry: backend::build_tool_registry(),
         pending_rule_tests: Arc::new(DashMap::new()),

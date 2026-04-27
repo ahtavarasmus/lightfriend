@@ -1440,6 +1440,156 @@ pub async fn get_contacts(
         }
     }
 
+    // 2.5 Direct bridge-DB enumeration (Telegram + WhatsApp).
+    //
+    // Source 2 only sees rooms the user is *joined* to via Matrix sync —
+    // that misses every contact whose portal hasn't been materialized yet
+    // (cold DMs) and any portal where the doublepuppet didn't auto-join.
+    // Querying the bridge's own Postgres covers the full surface:
+    //   - Telegram: contact list + portals (DM/group/Saved Messages)
+    //     via TelegramBridgeRepository.search_chats_for_user.
+    //   - WhatsApp: contacts + groups via
+    //     WhatsAppBridgeRepository.search_chats_for_login.
+    //
+    // is_group / mxid come from the bridge DB authoritatively; when set,
+    // we register them in covered_chat_keys to dedup against source 3
+    // (ont_messages senders) for the same name.
+    //
+    // Resolving the bridge user identity requires the Matrix user ID,
+    // which lives in state.matrix_users. Skip silently if there's no
+    // live Matrix client for this user (e.g. dev environment, or the
+    // session is rebuilding).
+    let matrix_user_id_opt: Option<String> = {
+        let cell = state.matrix_users.get(&user_id).map(|e| e.value().clone());
+        if let Some(cell) = cell {
+            let slot = cell.lock().await;
+            slot.as_ref()
+                .and_then(|us| us.client.user_id().map(|u| u.to_string()))
+        } else {
+            None
+        }
+    };
+
+    if let Some(matrix_user_id) = matrix_user_id_opt.as_deref() {
+        // Telegram via bridge DB.
+        if let Some(repo) = state.telegram_bridge_repository.as_ref() {
+            let repo_login = repo.clone();
+            let mxid = matrix_user_id.to_string();
+            let user_tgid_opt =
+                tokio::task::spawn_blocking(move || repo_login.get_user_tgid(&mxid))
+                    .await
+                    .ok()
+                    .and_then(|r| r.ok())
+                    .flatten();
+            if let Some(user_tgid) = user_tgid_opt {
+                let repo_search = repo.clone();
+                if let Ok(Ok(candidates)) = tokio::task::spawn_blocking(move || {
+                    repo_search.search_chats_for_user(user_tgid)
+                })
+                .await
+                {
+                    tracing::info!(
+                        "get_contacts: user {} telegram bridge DB returned {} candidates",
+                        user_id,
+                        candidates.len()
+                    );
+                    for c in candidates {
+                        let key = ("telegram".to_string(), c.display_name.trim().to_lowercase());
+                        if !c.is_group && covered_chat_keys.contains(&key) {
+                            continue;
+                        }
+                        covered_chat_keys.insert(key);
+                        let subtitle = Some(if c.is_self_chat {
+                            "Saved Messages · telegram".to_string()
+                        } else if c.is_group {
+                            "Group · telegram".to_string()
+                        } else {
+                            "DM · telegram".to_string()
+                        });
+                        let id = format!("tg_bridge:{}:{}", c.peer_type, c.tgid);
+                        push(
+                            &mut contacts,
+                            &mut seen,
+                            Contact {
+                                id,
+                                display_name: c.display_name,
+                                subtitle,
+                                platform: Some("telegram".to_string()),
+                                room_id: c.mxid,
+                                person_id: None,
+                                is_group: c.is_group,
+                                source: if c.is_group {
+                                    "bridge_group".to_string()
+                                } else {
+                                    "bridge_room".to_string()
+                                },
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
+        // WhatsApp via bridge DB.
+        if let Some(repo) = state.whatsapp_bridge_repository.as_ref() {
+            let repo_login = repo.clone();
+            let mxid = matrix_user_id.to_string();
+            let phone_opt = tokio::task::spawn_blocking(move || {
+                repo_login.get_login_phone_for_matrix_user(&mxid)
+            })
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .flatten();
+            if let Some(phone) = phone_opt {
+                let repo_search = repo.clone();
+                let phone_for_search = phone.clone();
+                if let Ok(Ok(candidates)) = tokio::task::spawn_blocking(move || {
+                    repo_search.search_chats_for_login(&phone_for_search)
+                })
+                .await
+                {
+                    tracing::info!(
+                        "get_contacts: user {} whatsapp bridge DB returned {} candidates",
+                        user_id,
+                        candidates.len()
+                    );
+                    for c in candidates {
+                        let key = ("whatsapp".to_string(), c.display_name.trim().to_lowercase());
+                        if !c.is_group && covered_chat_keys.contains(&key) {
+                            continue;
+                        }
+                        covered_chat_keys.insert(key);
+                        let subtitle = Some(if c.is_group {
+                            "Group · whatsapp".to_string()
+                        } else {
+                            "DM · whatsapp".to_string()
+                        });
+                        let id = format!("wa_bridge:{}", c.chat_id);
+                        push(
+                            &mut contacts,
+                            &mut seen,
+                            Contact {
+                                id,
+                                display_name: c.display_name,
+                                subtitle,
+                                platform: Some("whatsapp".to_string()),
+                                room_id: c.mxid,
+                                person_id: None,
+                                is_group: c.is_group,
+                                source: if c.is_group {
+                                    "bridge_group".to_string()
+                                } else {
+                                    "bridge_room".to_string()
+                                },
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     // 3. Distinct senders from ont_messages. Catch-all for chats that
     //    aren't in a live Matrix session right now — e.g. bridge offline,
     //    or a historical DM whose Matrix room the client dropped.
