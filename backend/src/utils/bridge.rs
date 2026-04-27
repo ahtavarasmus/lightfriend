@@ -1217,6 +1217,261 @@ async fn resolve_whatsapp_room(
     Ok(room)
 }
 
+/// Resolve a Telegram chat_id (numeric tgid as string) to a joined Matrix
+/// Room, materializing the portal via `!tg pm <id>` when the bridge DB has
+/// no portal yet.
+///
+/// Mirrors `resolve_whatsapp_room` but uses TelegramBridgeRepository for
+/// portal lookup and the mautrix-telegram bot's `pm` command for cold-DM
+/// materialization. Only the DM case is handled — group/channel chat_ids
+/// must already have a portal mxid (covered by `search_telegram_chat_candidate`
+/// on the read side).
+///
+/// Post-conditions on Ok: returned Room is joined and reachable via
+/// `client.get_room`. On Err: caller surfaces the message verbatim.
+async fn resolve_telegram_room(
+    state: &Arc<AppState>,
+    user_id: i32,
+    chat_id: &str,
+    client: &MatrixClient,
+) -> Result<Room> {
+    tracing::info!(
+        "SEND_FLOW_BRIDGE resolve_telegram_room: chat_id={}",
+        chat_id
+    );
+    let repo = state
+        .telegram_bridge_repository
+        .as_ref()
+        .ok_or_else(|| anyhow!("Telegram bridge repository not configured"))?;
+
+    let contact_tgid: i64 = chat_id.parse().map_err(|_| {
+        anyhow!(
+            "resolve_telegram_room: chat_id '{}' is not a valid tgid",
+            chat_id
+        )
+    })?;
+
+    // Resolve user_tgid for portal-row lookup (portal is keyed by
+    // tg_receiver = user_tgid).
+    let matrix_user_id = client
+        .user_id()
+        .ok_or_else(|| anyhow!("Matrix client has no user_id"))?
+        .to_string();
+    let repo_for_user = Arc::clone(repo);
+    let mxid_for_user = matrix_user_id.clone();
+    let user_tgid =
+        tokio::task::spawn_blocking(move || repo_for_user.get_user_tgid(&mxid_for_user))
+            .await
+            .map_err(|e| anyhow!("user_tgid lookup task panicked: {}", e))?
+            .map_err(|e| anyhow!("user_tgid lookup failed: {}", e))?
+            .ok_or_else(|| anyhow!("user not logged into Telegram bridge"))?;
+
+    // Try existing portal first.
+    let repo_for_portal = Arc::clone(repo);
+    let portal_mxid = tokio::task::spawn_blocking(move || {
+        repo_for_portal.get_dm_portal_mxid(user_tgid, contact_tgid)
+    })
+    .await
+    .map_err(|e| anyhow!("portal lookup task panicked: {}", e))?
+    .map_err(|e| anyhow!("portal lookup failed: {}", e))?;
+
+    let mxid = match portal_mxid {
+        Some(mxid) => {
+            tracing::info!(
+                "SEND_FLOW_BRIDGE TG portal hit: chat_id={} mxid={}",
+                chat_id,
+                mxid
+            );
+            mxid
+        }
+        None => {
+            tracing::info!(
+                "SEND_FLOW_BRIDGE TG portal miss for chat_id={}, sending !tg pm",
+                chat_id
+            );
+            let owned = start_chat_telegram(state, user_id, contact_tgid).await?;
+            owned.to_string()
+        }
+    };
+
+    let owned_mxid = matrix_sdk::ruma::OwnedRoomId::try_from(mxid.as_str())
+        .map_err(|e| anyhow!("invalid mxid from resolve_telegram_room: {}", e))?;
+    if client.get_room(&owned_mxid).is_none() {
+        tracing::info!(
+            "SEND_FLOW_BRIDGE resolve_telegram: room {} not in client cache, sync_once",
+            mxid
+        );
+        let _ = client
+            .sync_once(matrix_sdk::config::SyncSettings::new())
+            .await;
+    }
+    let room = client.get_room(&owned_mxid).ok_or_else(|| {
+        anyhow!(
+            "resolved Telegram room {} still not reachable after sync",
+            mxid
+        )
+    })?;
+    tracing::info!(
+        "SEND_FLOW_BRIDGE resolve_telegram_room ok: chat_id={} mxid={}",
+        chat_id,
+        mxid
+    );
+    Ok(room)
+}
+
+/// Send `!tg pm <tgid>` to the Telegram bridge management room, then poll
+/// the bridge DB for the newly materialized portal mxid.
+///
+/// mautrix-telegram v0.15.3 `pm` command (mautrix_telegram/commands/telegram/
+/// misc.py): accepts username, phone, or numeric tgid and creates a
+/// private-chat portal. The bot replies "Created private chat room with X"
+/// on success. Rather than parse the bot reply (format may shift across
+/// versions), we poll the portal table for `tgid=contact AND tg_receiver=
+/// user AND peer_type='user'`. Polling is more robust because the portal
+/// row is what we actually need anyway.
+async fn start_chat_telegram(
+    state: &Arc<AppState>,
+    user_id: i32,
+    contact_tgid: i64,
+) -> Result<matrix_sdk::ruma::OwnedRoomId> {
+    let repo = state
+        .telegram_bridge_repository
+        .as_ref()
+        .ok_or_else(|| anyhow!("Telegram bridge repository not configured"))?;
+
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
+
+    // Resolve user_tgid for portal-row poll target.
+    let matrix_user_id = client
+        .user_id()
+        .ok_or_else(|| anyhow!("Matrix client has no user_id"))?
+        .to_string();
+    let repo_for_user = Arc::clone(repo);
+    let mxid_for_user = matrix_user_id.clone();
+    let user_tgid =
+        tokio::task::spawn_blocking(move || repo_for_user.get_user_tgid(&mxid_for_user))
+            .await
+            .map_err(|e| anyhow!("user_tgid lookup task panicked: {}", e))?
+            .map_err(|e| anyhow!("user_tgid lookup failed: {}", e))?
+            .ok_or_else(|| anyhow!("user not logged into Telegram bridge"))?;
+
+    // Resolve management room for this user + bridge.
+    let bridge = state
+        .user_repository
+        .get_bridge(user_id, "telegram")?
+        .ok_or_else(|| anyhow!("no Telegram bridge record for user {}", user_id))?;
+    let mgmt_room_id_str = bridge.room_id.ok_or_else(|| {
+        anyhow!(
+            "Telegram bridge has no management room_id for user {}",
+            user_id
+        )
+    })?;
+    let mgmt_room_id =
+        matrix_sdk::ruma::OwnedRoomId::try_from(mgmt_room_id_str.as_str()).map_err(|e| {
+            anyhow!(
+                "invalid TG management room id '{}': {}",
+                mgmt_room_id_str,
+                e
+            )
+        })?;
+    let room = client.get_room(&mgmt_room_id).ok_or_else(|| {
+        anyhow!(
+            "TG management room {} not found in client",
+            mgmt_room_id_str
+        )
+    })?;
+
+    // Resolve the bridge bot user id for reply capture.
+    let bridge_bot =
+        std::env::var("TELEGRAM_BRIDGE_BOT").map_err(|_| anyhow!("TELEGRAM_BRIDGE_BOT not set"))?;
+    let bot_user_id = matrix_sdk::ruma::OwnedUserId::try_from(bridge_bot.as_str())
+        .map_err(|e| anyhow!("invalid TELEGRAM_BRIDGE_BOT user id: {}", e))?;
+
+    // Send the `!tg pm` command via probe_bridge_room so we capture the bot's
+    // reply text. On failure (wrong syntax, user not found, bot offline) the
+    // reply contains the verbatim error which is what we need to iterate.
+    let cmd = format!("!tg pm {}", contact_tgid);
+    tracing::info!(
+        "SEND_FLOW_BRIDGE start_chat_telegram user={} sending {:?}",
+        user_id,
+        cmd
+    );
+    let bot_replies = match probe_bridge_room(
+        &client,
+        &room,
+        &bot_user_id,
+        &cmd,
+        Duration::from_secs(8),
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(
+                "SEND_FLOW_BRIDGE start_chat_telegram probe failed (will still poll portal): {}",
+                e
+            );
+            Vec::new()
+        }
+    };
+    if bot_replies.is_empty() {
+        tracing::warn!(
+            "SEND_FLOW_BRIDGE start_chat_telegram: bot did not reply within 8s for tgid={}",
+            contact_tgid
+        );
+    } else {
+        for (i, body) in bot_replies.iter().enumerate() {
+            tracing::info!(
+                "SEND_FLOW_BRIDGE start_chat_telegram bot reply [{}]: {:?}",
+                i,
+                body.chars().take(400).collect::<String>()
+            );
+        }
+    }
+
+    // Poll the bridge DB for the portal row to appear (up to ~12s additional).
+    // Bot may have replied "Created private chat room with X" but the portal
+    // row is what we actually need to send the message.
+    for attempt in 1..=24 {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let repo_for_poll = Arc::clone(repo);
+        let mxid_opt = tokio::task::spawn_blocking(move || {
+            repo_for_poll.get_dm_portal_mxid(user_tgid, contact_tgid)
+        })
+        .await
+        .map_err(|e| anyhow!("portal poll task panicked: {}", e))?
+        .map_err(|e| anyhow!("portal poll failed: {}", e))?;
+
+        if let Some(mxid) = mxid_opt {
+            tracing::info!(
+                "SEND_FLOW_BRIDGE start_chat_telegram ok after {}ms: tgid={} mxid={}",
+                attempt * 500,
+                contact_tgid,
+                mxid
+            );
+            return matrix_sdk::ruma::OwnedRoomId::try_from(mxid.as_str())
+                .map_err(|e| anyhow!("invalid mxid from TG portal: {}", e));
+        }
+    }
+
+    // Portal never materialized. Surface the bot's reply text in the error
+    // so the caller (and us looking at logs) sees exactly what went wrong.
+    let reply_summary = if bot_replies.is_empty() {
+        "(no bot reply)".to_string()
+    } else {
+        bot_replies
+            .iter()
+            .map(|b| b.chars().take(200).collect::<String>())
+            .collect::<Vec<_>>()
+            .join(" | ")
+    };
+    Err(anyhow!(
+        "Telegram portal for tgid={} not materialized within 12s after `!tg pm`. Bot reply: {}",
+        contact_tgid,
+        reply_summary
+    ))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn send_bridge_message(
     service: &str,
@@ -1304,6 +1559,9 @@ pub async fn send_bridge_message(
                     (Some(chat_id), "whatsapp") => {
                         resolve_whatsapp_room(state, user_id, chat_id, &client).await?
                     }
+                    (Some(chat_id), "telegram") => {
+                        resolve_telegram_room(state, user_id, chat_id, &client).await?
+                    }
                     _ => {
                         return Err(anyhow!(
                             "Room '{}' not in client and no chat_id fallback available for service '{}'",
@@ -1317,6 +1575,9 @@ pub async fn send_bridge_message(
     } else if let (Some(chat_id), "whatsapp") = (target_chat_id, service) {
         // Cold path: resolve via portal table (+start-chat for DMs).
         resolve_whatsapp_room(state, user_id, chat_id, &client).await?
+    } else if let (Some(chat_id), "telegram") = (target_chat_id, service) {
+        // Cold path: resolve via bridge DB portal table (+ !tg pm to materialize).
+        resolve_telegram_room(state, user_id, chat_id, &client).await?
     } else {
         tracing::info!(
             "SEND_FLOW_BRIDGE No target_room_id, searching by name '{}'",
