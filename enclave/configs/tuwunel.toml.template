@@ -13,6 +13,18 @@ port = 8008
 # Nitro enclave filesystem doesn't support Direct I/O
 rocksdb_direct_io = false
 
+# Allow legacy unauthenticated media endpoints (/media/r0/* and /media/v3/*).
+# Required by mautrix-telegram v0.15.3 (and any pre-bridgev2 mautrix bridge):
+# the bridge uploads contact avatars and thumbnails via the legacy
+# `/_matrix/media/v3/upload` endpoint when creating portals. Without this,
+# tuwunel rejects with `M_FORBIDDEN: Unauthenticated media is disabled`,
+# `Portal.create_matrix_room` raises, and the portal never materializes -
+# so cold-DM telegram sends silently fail to deliver.
+# `freeze_legacy_media = false` is the writable counterpart; the default
+# allows reads but blocks uploads.
+allow_legacy_media = true
+freeze_legacy_media = false
+
 # Registration via token (replaces Synapse's shared secret)
 allow_registration = true
 registration_token = "${MATRIX_REGISTRATION_TOKEN}"

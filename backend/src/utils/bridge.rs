@@ -1396,24 +1396,17 @@ async fn start_chat_telegram(
         user_id,
         cmd
     );
-    let bot_replies = match probe_bridge_room(
-        &client,
-        &room,
-        &bot_user_id,
-        &cmd,
-        Duration::from_secs(8),
-    )
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(
+    let bot_replies =
+        match probe_bridge_room(&client, &room, &bot_user_id, &cmd, Duration::from_secs(8)).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
                 "SEND_FLOW_BRIDGE start_chat_telegram probe failed (will still poll portal): {}",
                 e
             );
-            Vec::new()
-        }
-    };
+                Vec::new()
+            }
+        };
     if bot_replies.is_empty() {
         tracing::warn!(
             "SEND_FLOW_BRIDGE start_chat_telegram: bot did not reply within 8s for tgid={}",
