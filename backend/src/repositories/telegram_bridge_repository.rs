@@ -336,6 +336,50 @@ impl TelegramBridgeRepository {
         Ok(rows.into_iter().next().and_then(|r| r.mxid))
     }
 
+    /// Resolve the most reliable handle to use with `!tg pm` for a contact.
+    ///
+    /// Telethon's `client.get_entity(numeric_id)` requires having the user's
+    /// access_hash cached, which only happens for users who have appeared in
+    /// recent dialogs/messages. For cold contacts (saved but never messaged),
+    /// the bare tgid produces "Invalid user identifier or user not found."
+    ///
+    /// Username and phone resolve through Telegram's directory and the local
+    /// contact list respectively, so they work for cold contacts too. mautrix-
+    /// telegram's pm command strips `+()- ` before passing to telethon, so we
+    /// pre-format accordingly:
+    ///   - `@<username>` (telethon detects @ prefix and resolves as username)
+    ///   - phone with `+` prefix (will be stripped to digits, telethon's
+    ///     contacts lookup handles digit-only as phone in this code path)
+    ///   - bare numeric tgid as last resort
+    ///
+    /// Returns the chosen handle plus a tag for logging which form was used.
+    pub fn get_pm_handle(&self, contact_tgid: i64) -> Result<(String, &'static str), DieselError> {
+        let mut conn = self
+            .pool
+            .get()
+            .expect("Failed to get telegram_db connection");
+        let rows: Vec<ContactRow> = diesel::sql_query(
+            r#"SELECT id, displayname, username, phone FROM puppet WHERE id = $1 LIMIT 1"#,
+        )
+        .bind::<BigInt, _>(contact_tgid)
+        .load(&mut conn)?;
+        let row = rows.into_iter().next();
+        if let Some(r) = row {
+            if let Some(u) = r.username.as_deref().filter(|s| !s.is_empty()) {
+                return Ok((format!("@{}", u), "username"));
+            }
+            if let Some(p) = r.phone.as_deref().filter(|s| !s.is_empty()) {
+                let plus = if p.starts_with('+') {
+                    p.to_string()
+                } else {
+                    format!("+{}", p)
+                };
+                return Ok((plus, "phone"));
+            }
+        }
+        Ok((contact_tgid.to_string(), "tgid"))
+    }
+
     /// Test whether a Matrix room is the user's Saved Messages.
     /// Used by handle_bridge_message to tag inbound events as self-chat
     /// without re-running heuristics on the room name.

@@ -1387,14 +1387,29 @@ async fn start_chat_telegram(
     let bot_user_id = matrix_sdk::ruma::OwnedUserId::try_from(bridge_bot.as_str())
         .map_err(|e| anyhow!("invalid TELEGRAM_BRIDGE_BOT user id: {}", e))?;
 
+    // Resolve the most reliable handle for `!tg pm`. Telethon's
+    // `get_entity(<numeric_id>)` requires a cached access_hash which cold
+    // contacts (saved but never messaged) don't have, producing the bot
+    // reply "Invalid user identifier or user not found." Using @username
+    // (or phone with `+`) resolves through Telegram's directory or the
+    // local contacts list and works for cold DMs too.
+    let repo_for_handle = Arc::clone(repo);
+    let (pm_handle, handle_kind) =
+        tokio::task::spawn_blocking(move || repo_for_handle.get_pm_handle(contact_tgid))
+            .await
+            .map_err(|e| anyhow!("get_pm_handle task panicked: {}", e))?
+            .map_err(|e| anyhow!("get_pm_handle failed: {}", e))?;
+
     // Send the `!tg pm` command via probe_bridge_room so we capture the bot's
     // reply text. On failure (wrong syntax, user not found, bot offline) the
     // reply contains the verbatim error which is what we need to iterate.
-    let cmd = format!("!tg pm {}", contact_tgid);
+    let cmd = format!("!tg pm {}", pm_handle);
     tracing::info!(
-        "SEND_FLOW_BRIDGE start_chat_telegram user={} sending {:?}",
+        "SEND_FLOW_BRIDGE start_chat_telegram user={} sending {:?} (handle_kind={}, tgid={})",
         user_id,
-        cmd
+        cmd,
+        handle_kind,
+        contact_tgid
     );
     let bot_replies =
         match probe_bridge_room(&client, &room, &bot_user_id, &cmd, Duration::from_secs(8)).await {
