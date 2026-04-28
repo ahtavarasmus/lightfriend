@@ -39,6 +39,9 @@ pub enum TwilioMessageError {
     #[error("Failed to determine sending number for user")]
     NoSendingNumber,
 
+    #[error("Refused to send empty message (no body and no media)")]
+    EmptyMessage,
+
     #[error("Other error: {0}")]
     Other(String),
 }
@@ -277,11 +280,26 @@ impl<T: TwilioClient> TwilioMessageService<T> {
         media_sid: Option<&String>,
         user: &User,
     ) -> Result<String, TwilioMessageError> {
+        // Sanitize URLs to keep A2P 10DLC carrier filters happy. Trusted domains
+        // (lightfriend.ai etc.) are preserved; everything else is replaced with a
+        // bracketed placeholder so we don't ship phishing-shaped strings to carriers.
+        let body = crate::utils::sms_sanitizer::apply_sms_url_filter(body);
+
+        // Refuse to call Twilio with both an empty body and no media — Twilio
+        // returns 21619 and the request pattern feeds into anti-abuse heuristics.
+        if body.trim().is_empty() && media_sid.is_none() {
+            tracing::error!(
+                "Refused to send empty SMS to user {} (no body and no media)",
+                user.id
+            );
+            return Err(TwilioMessageError::EmptyMessage);
+        }
+
         // Log to message history using repository
         let history_entry = crate::pg_models::NewPgMessageHistory {
             user_id: user.id,
             role: "assistant".to_string(),
-            encrypted_content: body.to_string(),
+            encrypted_content: body.clone(),
             tool_name: None,
             tool_call_id: None,
             tool_calls_json: None,

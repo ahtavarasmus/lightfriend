@@ -432,6 +432,18 @@ pub async fn make_notification_call(
     user: &crate::models::user_models::User,
     notification_message: &str,
 ) -> Result<String, String> {
+    make_notification_call_with_from(state, user, notification_message, None).await
+}
+
+/// Same as `make_notification_call`, but optionally uses an explicit FROM
+/// number instead of the user's preferred number. Used by the US voice
+/// fallback path when the primary outbound number is blocked by carriers.
+pub async fn make_notification_call_with_from(
+    state: &Arc<AppState>,
+    user: &crate::models::user_models::User,
+    notification_message: &str,
+    from_override: Option<&str>,
+) -> Result<String, String> {
     let server_url =
         std::env::var("SERVER_URL").unwrap_or_else(|_| "https://localhost:3000".to_string());
     let ws_url = server_url
@@ -461,10 +473,13 @@ pub async fn make_notification_call(
         .resolve_credentials(user)
         .map_err(|e| format!("Failed to resolve Twilio credentials: {}", e))?;
 
-    let from_number = user
-        .preferred_number
-        .clone()
-        .ok_or_else(|| "No from number available for voice call".to_string())?;
+    let from_number = match from_override {
+        Some(f) => f.to_string(),
+        None => user
+            .preferred_number
+            .clone()
+            .ok_or_else(|| "No from number available for voice call".to_string())?,
+    };
 
     // Initiate the call
     use crate::api::twilio_client::TwilioClient;
@@ -474,9 +489,59 @@ pub async fn make_notification_call(
         .await
         .map_err(|e| format!("Twilio call failed: {}", e))?;
 
-    tracing::info!("Outbound notification call initiated for user {}", user.id);
+    tracing::info!(
+        "Outbound notification call initiated for user {} from {}",
+        user.id,
+        from_number
+    );
 
     Ok(call_sid)
+}
+
+/// Place a fallback voice call when SMS delivery is unavailable.
+///
+/// Uses the same AI voice pipeline as a normal notification call, just with a
+/// dedicated voice-only FROM number (env `TWILIO_US_FALLBACK_VOICE_NUMBER`)
+/// instead of the user's preferred number. This is the last-ditch channel
+/// when the primary outbound number/messaging service is blocked by carriers
+/// (US A2P 10DLC enforcement) and SMS sending fails.
+///
+/// Returns `Ok(None)` if no fallback is configured (env unset) or the user is
+/// not US. Returns `Ok(Some(sid))` on successful call placement, and `Err`
+/// if the fallback was attempted but Twilio rejected it.
+pub async fn place_us_fallback_voice_call(
+    state: &Arc<AppState>,
+    user: &crate::models::user_models::User,
+    notification_message: &str,
+) -> Result<Option<String>, String> {
+    let detected_country = crate::utils::country::get_country_code_from_phone(&user.phone_number);
+    if detected_country.as_deref() != Some("US") {
+        return Ok(None);
+    }
+
+    let from_number = match std::env::var("TWILIO_US_FALLBACK_VOICE_NUMBER") {
+        Ok(n) if !n.is_empty() => n,
+        _ => {
+            tracing::debug!(
+                "TWILIO_US_FALLBACK_VOICE_NUMBER not configured; skipping voice fallback for user {}",
+                user.id
+            );
+            return Ok(None);
+        }
+    };
+
+    let call_sid =
+        make_notification_call_with_from(state, user, notification_message, Some(&from_number))
+            .await?;
+
+    tracing::info!(
+        "US voice fallback call placed for user {} from {} (SID: {})",
+        user.id,
+        from_number,
+        call_sid
+    );
+
+    Ok(Some(call_sid))
 }
 
 // ---------------------------------------------------------------------------

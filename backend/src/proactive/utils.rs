@@ -209,6 +209,7 @@ pub async fn send_notification_with_context(
                     }
                     Err(e) => {
                         tracing::error!("Failed to initiate call for user {}: {}", user_id, e);
+                        attempt_us_voice_fallback(state, &user, &greeting).await;
                     }
                 }
             }
@@ -321,4 +322,34 @@ pub async fn send_notification_with_context(
     // Notify activity feed SSE subscribers after any notification attempt
     state.notify_activity_feed(user_id);
     sms_delivered
+}
+
+/// Try a voice fallback when an SMS notification failed for a US recipient.
+///
+/// Best-effort: errors are logged and swallowed so a fallback failure does
+/// not propagate. No-op when the user is not US or the env var is unset.
+async fn attempt_us_voice_fallback(
+    state: &Arc<AppState>,
+    user: &crate::models::user_models::User,
+    notification_message: &str,
+) {
+    match crate::api::voice_pipeline::place_us_fallback_voice_call(
+        state,
+        user,
+        notification_message,
+    )
+    .await
+    {
+        Ok(Some(sid)) => {
+            tracing::info!(
+                "Placed US voice fallback for user {} (SID: {})",
+                user.id,
+                sid
+            );
+        }
+        Ok(None) => {}
+        Err(e) => {
+            tracing::error!("US voice fallback failed for user {}: {}", user.id, e);
+        }
+    }
 }

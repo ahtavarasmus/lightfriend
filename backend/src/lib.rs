@@ -48,6 +48,7 @@ pub mod utils {
     pub mod notification_utils;
     pub mod plan_features;
     pub mod resend_contacts;
+    pub mod sms_sanitizer;
     pub mod tesla_keys;
     pub mod tool_exec;
     pub mod usage;
