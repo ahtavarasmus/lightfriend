@@ -358,7 +358,14 @@ pub async fn run_urgency_classification(
                 "Summary starting with sender name, e.g. 'Mom: ...'. No URLs. \
                  Length depends on urgency: \
                  - now: up to 160 chars. This goes directly as an SMS to a user who muted all other notifications — include enough context to act (who, what, when, what's the ask). \
-                 - later: 30-60 chars max. This becomes a teaser in a bundled digest alongside many others — just a slight hint of what's happened. The user can reply to ask for full context."
+                 - later: 30-60 chars max. This becomes a teaser in a bundled digest alongside many others — just a slight hint of what's happened. The user can reply to ask for full context. \
+                 \n\nUS A2P CARRIER COMPLIANCE — STRICT RULES TO AVOID PHISHING-FILTER BANS:\n\
+                 1. NEVER start with a brand name that looks like impersonation. Bad: 'Google Security: new sign-in...'. 'PayPal: account access...'. 'Apple ID: ...'. Good: 'Your Gmail flagged a sign-in...'. 'PayPal alert in your inbox: ...'. The message is FROM Lightfriend ABOUT what a third party reported — never echo their alert headline.\n\
+                 2. NEVER defang emails or URLs ('user[.]name', 'user(at)domain', 'domain[.]com'). Use real text or truncate ('user...@gmail.com'). Defanging is itself a phishing/evasion signal that filters score on.\n\
+                 3. AVOID action-prompt language: 'verify now', 'click here', 'check activity', 'confirm immediately', 'act now', 'secure your account'. State facts only — let the user decide what to do. Bad: 'Check activity if this wasn't you'. Good: 'Sign-in was from an iPhone in California'.\n\
+                 4. AVOID urgency keywords clustered together: 'verify' + 'suspended' + 'urgent' in the same SMS reads as spam to filters.\n\
+                 5. Reframe security/financial alerts in your own conversational voice. Bad: 'PayPal Security: unauthorized charge of $500'. Good: 'PayPal flagged a $500 charge as unfamiliar — happened 10 min ago at a gas station.'\n\
+                 6. For sender name prefix when it's a brand, prefer descriptors over brand-as-impersonator. Bad: 'Chase: balance low'. Good: 'Your Chase account balance dropped below $100'."
                     .to_string(),
             ),
             ..Default::default()

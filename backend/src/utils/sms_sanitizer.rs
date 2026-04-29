@@ -47,10 +47,58 @@ const SHORTENER_DOMAINS: &[&str] = &[
 
 /// Sanitize a message body for A2P 10DLC delivery.
 ///
-/// Returns the input with non-trusted URLs replaced by safe placeholders.
-/// Trailing punctuation (`.,;!?`) on a URL is excluded from the match so
-/// it stays attached to the surrounding sentence.
+/// Two passes:
+/// 1. Re-fang defanged emails and domains (e.g. `user[.]name(at)example[.]com`
+///    → `user.name@example.com`). Defanging is a phishing-evasion signal that
+///    carrier filters score against, even when the underlying content is
+///    legitimate.
+/// 2. URL filter: trusted domains preserved, shorteners replaced with
+///    `[link]`, others replaced with `[link: domain]`. Trailing punctuation
+///    (`.,;!?`) on a URL is excluded from the match so it stays attached to
+///    the surrounding sentence.
 pub fn apply_sms_url_filter(body: &str) -> String {
+    let body = unfang_text(body);
+    apply_url_filter_only(&body)
+}
+
+/// Re-fang defanged emails and domains. Patterns handled:
+/// - `[.]` / `(.)` / `[dot]` / `(dot)` between word chars → `.`
+/// - `(at)` / `[at]` / `[@]` between word chars → `@`
+///
+/// Only replaces when surrounded by identifier-like characters, so plain
+/// prose like "meet (at) 5pm" is left alone.
+pub fn unfang_text(body: &str) -> String {
+    let mut out = body.to_string();
+
+    // Require word chars touching the bracket on both sides AND no
+    // whitespace inside the bracket. This catches real defanged identifiers
+    // like `user[.]name(at)gmail[.]com` while leaving prose like
+    // `meet me (at) noon` or `press [Enter]` alone.
+    let patterns: &[(&str, &str)] = &[
+        // (.)  [.]
+        (r"(\w)[\[\(]\.[\]\)](\w)", "$1.$2"),
+        // (dot) [dot] (case-insensitive)
+        (r"(?i)(\w)[\[\(]dot[\]\)](\w)", "$1.$2"),
+        // (at) [at] [@] (case-insensitive)
+        (r"(?i)(\w)[\[\(](?:at|@)[\]\)](\w)", "$1@$2"),
+    ];
+
+    for (pat, replacement) in patterns {
+        let re = regex::Regex::new(pat).expect("valid defang regex");
+        // Loop because a single pass leaves overlapping matches like
+        // `a[.]b[.]c` → `a.b[.]c` after one pass; rerun until stable.
+        loop {
+            let next = re.replace_all(&out, *replacement).into_owned();
+            if next == out {
+                break;
+            }
+            out = next;
+        }
+    }
+    out
+}
+
+fn apply_url_filter_only(body: &str) -> String {
     url_re()
         .replace_all(body, |caps: &regex::Captures| {
             let raw = &caps[0];
