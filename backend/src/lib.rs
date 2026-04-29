@@ -35,6 +35,12 @@ pub mod handlers {
     pub mod youtube;
     pub mod youtube_auth;
 }
+pub mod channels {
+    pub mod router;
+    pub mod telnyx_channel;
+    pub mod traits;
+    pub mod twilio_channel;
+}
 pub mod utils {
     pub mod bridge;
     pub mod bridge_contacts;
