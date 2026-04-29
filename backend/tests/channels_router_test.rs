@@ -76,6 +76,7 @@ fn user_with_phone(phone: &str) -> User {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn us_user_routes_to_telnyx_when_registered() {
     let twilio = Arc::new(RecordingChannel::new("twilio"));
     let telnyx = Arc::new(RecordingChannel::new("telnyx"));
@@ -92,6 +93,7 @@ async fn us_user_routes_to_telnyx_when_registered() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn us_user_falls_back_to_sinch_when_no_telnyx() {
     let twilio = Arc::new(RecordingChannel::new("twilio"));
     let sinch = Arc::new(RecordingChannel::new("sinch"));
@@ -108,6 +110,7 @@ async fn us_user_falls_back_to_sinch_when_no_telnyx() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn us_user_uses_twilio_when_only_twilio_registered() {
     let twilio = Arc::new(RecordingChannel::new("twilio"));
     let mut router = ChannelRouter::new();
@@ -121,6 +124,7 @@ async fn us_user_uses_twilio_when_only_twilio_registered() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn non_us_user_always_uses_twilio_even_with_telnyx_registered() {
     let twilio = Arc::new(RecordingChannel::new("twilio"));
     let telnyx = Arc::new(RecordingChannel::new("telnyx"));
@@ -138,6 +142,7 @@ async fn non_us_user_always_uses_twilio_even_with_telnyx_registered() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn telnyx_preferred_over_sinch_for_us() {
     let twilio = Arc::new(RecordingChannel::new("twilio"));
     let telnyx = Arc::new(RecordingChannel::new("telnyx"));
@@ -156,11 +161,102 @@ async fn telnyx_preferred_over_sinch_for_us() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn missing_channel_returns_not_configured() {
     let router = ChannelRouter::new();
     let user = user_with_phone("+12025551234");
     let err = router.send_to_user(&user, "hello", None).await.unwrap_err();
     matches!(err, ChannelError::NotConfigured(_));
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn empty_body_with_no_media_is_refused_before_dispatch() {
+    let twilio = Arc::new(RecordingChannel::new("twilio"));
+    let mut router = ChannelRouter::new();
+    router.register(twilio.clone());
+
+    let user = user_with_phone("+12025551234");
+    let err = router.send_to_user(&user, "   ", None).await.unwrap_err();
+    matches!(err, ChannelError::SendFailed(_));
+    // Channel must NOT be invoked when body is empty
+    assert_eq!(twilio.send_count(), 0);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn dev_mode_skips_dispatch_and_returns_stub_id() {
+    let twilio = Arc::new(RecordingChannel::new("twilio"));
+    let mut router = ChannelRouter::new();
+    router.register(twilio.clone());
+
+    let original_env = std::env::var("ENVIRONMENT").ok();
+    std::env::set_var("ENVIRONMENT", "development");
+
+    let user = user_with_phone("+12025551234");
+    let result = router.send_to_user(&user, "hello in dev", None).await;
+
+    // Restore env before asserting so a panic doesn't leak state into other tests
+    match original_env {
+        Some(val) => std::env::set_var("ENVIRONMENT", val),
+        None => std::env::remove_var("ENVIRONMENT"),
+    }
+
+    let id = result.expect("dev mode should still return Ok with a stub id");
+    assert_eq!(id.as_str(), "dev_not_sending");
+    assert_eq!(
+        twilio.send_count(),
+        0,
+        "channel must not be dispatched in dev mode"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn url_filter_runs_before_channel_dispatch() {
+    use std::sync::Mutex;
+
+    /// Channel that captures the body it receives so we can assert the
+    /// router's preprocessing actually ran.
+    struct CapturingChannel {
+        last_body: Mutex<String>,
+    }
+    #[async_trait]
+    impl MessageChannel for CapturingChannel {
+        fn id(&self) -> &'static str {
+            "twilio"
+        }
+        async fn send(
+            &self,
+            _user: &User,
+            _address: &str,
+            body: &str,
+            _media: Option<MediaRef>,
+        ) -> Result<ChannelMessageId, ChannelError> {
+            *self.last_body.lock().unwrap() = body.to_string();
+            Ok(ChannelMessageId("captured".to_string()))
+        }
+    }
+
+    let chan = Arc::new(CapturingChannel {
+        last_body: Mutex::new(String::new()),
+    });
+    let mut router = ChannelRouter::new();
+    router.register(chan.clone());
+
+    let user = user_with_phone("+12025551234");
+    router
+        .send_to_user(
+            &user,
+            "Email user(at)gmail.com about https://bit.ly/abc",
+            None,
+        )
+        .await
+        .unwrap();
+
+    let received = chan.last_body.lock().unwrap().clone();
+    // Defang re-fanged + shortener replaced
+    assert_eq!(received, "Email user@gmail.com about [link]");
 }
 
 #[test]

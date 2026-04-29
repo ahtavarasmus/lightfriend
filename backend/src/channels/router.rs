@@ -18,15 +18,31 @@ use crate::channels::traits::{
     ChannelError, ChannelMessageId, IncomingMessage, MediaRef, MessageChannel,
 };
 use crate::models::user_models::User;
+use crate::repositories::user_repository::UserRepository;
 
 pub struct ChannelRouter {
     channels: HashMap<&'static str, Arc<dyn MessageChannel>>,
+    /// Used by the provider-agnostic preprocessing layer to log every
+    /// outbound message to the user's chat history. Optional so unit tests
+    /// can construct a minimal router without the full DB stack.
+    user_repository: Option<Arc<UserRepository>>,
 }
 
 impl ChannelRouter {
     pub fn new() -> Self {
         Self {
             channels: HashMap::new(),
+            user_repository: None,
+        }
+    }
+
+    /// Construct a router with an attached repository so provider-agnostic
+    /// message-history logging works. Used in production wiring; tests
+    /// generally use `new()` and skip history logging.
+    pub fn with_user_repository(repo: Arc<UserRepository>) -> Self {
+        Self {
+            channels: HashMap::new(),
+            user_repository: Some(repo),
         }
     }
 
@@ -76,6 +92,11 @@ impl ChannelRouter {
     /// phone number's country and which channels are registered. Address
     /// is `user.phone_number` (until `user_channels` lands in a future PR).
     ///
+    /// Provider-agnostic preprocessing happens here — every outbound SMS
+    /// goes through the same URL/defang sanitizer, the same empty-body
+    /// guard, the same dev-mode skip, and the same message-history write,
+    /// regardless of which provider ultimately delivers it.
+    ///
     /// Routing policy (presence-based, no env reads here — channels register
     /// only if their env config is complete):
     /// - US users: prefer `telnyx`, then `sinch`, then `twilio`
@@ -89,12 +110,53 @@ impl ChannelRouter {
         body: &str,
         media: Option<MediaRef>,
     ) -> Result<ChannelMessageId, ChannelError> {
+        // 1. Sanitize URLs + re-fang defanged emails/domains so phishing-
+        //    pattern false positives don't trip carrier filters.
+        let body = crate::utils::sms_sanitizer::apply_sms_url_filter(body);
+
+        // 2. Refuse empty messages. Sending a body-less request to a provider
+        //    is malformed (Twilio errors with 21619) and contributes to
+        //    abnormal-traffic patterns in anti-abuse heuristics.
+        if body.trim().is_empty() && media.is_none() {
+            tracing::error!(
+                "Refused to send empty SMS to user {} (no body and no media)",
+                user.id
+            );
+            return Err(ChannelError::SendFailed("empty body".into()));
+        }
+
+        // 3. Log to message history regardless of provider. This is the
+        //    user's chat-history record — not a per-provider concern.
+        if let Some(repo) = &self.user_repository {
+            let entry = crate::pg_models::NewPgMessageHistory {
+                user_id: user.id,
+                role: "assistant".to_string(),
+                encrypted_content: body.clone(),
+                tool_name: None,
+                tool_call_id: None,
+                tool_calls_json: None,
+                created_at: chrono::Utc::now().timestamp() as i32,
+                conversation_id: "".to_string(),
+            };
+            if let Err(e) = repo.create_message_history(&entry) {
+                tracing::error!("Failed to store message in history: {}", e);
+            }
+        }
+
+        // 4. Skip the actual provider call in development. Returns a stub
+        //    id so callers see a Successful result.
+        if std::env::var("ENVIRONMENT").unwrap_or_default() == "development" {
+            tracing::info!("NOT SENDING MESSAGE SINCE ENVIRONMENT IS DEVELOPMENT");
+            return Ok(ChannelMessageId("dev_not_sending".to_string()));
+        }
+
+        // 5. Dispatch to the chosen channel.
         let channel_id = self.pick_channel_for(user);
         let chan = self
             .channels
             .get(channel_id)
             .ok_or_else(|| ChannelError::NotConfigured(channel_id.to_string()))?;
-        chan.send(user, &user.phone_number, body, media).await
+        chan.send(user, &user.phone_number, &body, media).await
     }
 
     /// Decide which channel id handles outbound for this user. Public so

@@ -299,7 +299,7 @@ async fn test_send_sms_us_user_full_flow() {
 
     let (service, mock_client) = create_test_service(&state);
 
-    let result = service.send_sms("Hello from test", None, &user).await;
+    let result = service.dispatch_sms("Hello from test", None, &user).await;
     assert!(result.is_ok(), "send_sms should succeed for US user");
 
     // Verify the mock was called with correct parameters
@@ -327,7 +327,7 @@ async fn test_send_sms_ca_user_full_flow() {
 
     let (service, mock_client) = create_test_service(&state);
 
-    let result = service.send_sms("Hello Canada", None, &user).await;
+    let result = service.dispatch_sms("Hello Canada", None, &user).await;
     assert!(result.is_ok());
 
     let calls = mock_client.get_calls();
@@ -356,7 +356,7 @@ async fn test_send_sms_fi_user_full_flow() {
 
     let (service, mock_client) = create_test_service(&state);
 
-    let result = service.send_sms("Moi!", None, &user).await;
+    let result = service.dispatch_sms("Moi!", None, &user).await;
     assert!(result.is_ok());
 
     let calls = mock_client.get_calls();
@@ -376,7 +376,7 @@ async fn test_send_sms_notification_only_default_flow() {
 
     let (service, mock_client) = create_test_service(&state);
 
-    let result = service.send_sms("Hallo!", None, &user).await;
+    let result = service.dispatch_sms("Hallo!", None, &user).await;
     assert!(result.is_ok());
 
     let calls = mock_client.get_calls();
@@ -390,39 +390,11 @@ async fn test_send_sms_notification_only_default_flow() {
     assert!(call.from.is_none());
 }
 
-#[tokio::test]
-#[serial]
-async fn test_send_sms_skips_in_development() {
-    // Save original environment value
-    let original_env = std::env::var("ENVIRONMENT").ok();
-
-    // Set to development environment
-    std::env::set_var("ENVIRONMENT", "development");
-
-    let state = create_test_state();
-    let params = TestUserParams::us_user(10.0, 5.0);
-    let user = create_test_user(&state, &params);
-
-    let (service, mock_client) = create_test_service(&state);
-
-    let result = service.send_sms("Dev test", None, &user).await;
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), "dev_not_sending");
-
-    // Mock should NOT have been called
-    let calls = mock_client.get_calls();
-    assert_eq!(
-        calls.send_message_calls.len(),
-        0,
-        "Should not call Twilio in development"
-    );
-
-    // Restore original environment
-    match original_env {
-        Some(val) => std::env::set_var("ENVIRONMENT", val),
-        None => std::env::remove_var("ENVIRONMENT"),
-    }
-}
+// `test_send_sms_skips_in_development` was removed in the channel-router
+// refactor. Dev-mode skip is now a provider-agnostic concern handled in
+// `ChannelRouter::send_to_user` before any channel is dispatched, so
+// `dispatch_sms` is correctly expected to call Twilio regardless of the
+// `ENVIRONMENT` value. Coverage for the dev skip lives at the router layer.
 
 // =========================================================================
 // Delete Message Tests
@@ -501,7 +473,9 @@ async fn test_send_sms_includes_status_callback() {
 
     let (service, mock_client) = create_test_service(&state);
 
-    let result = service.send_sms("Test with callback", None, &user).await;
+    let result = service
+        .dispatch_sms("Test with callback", None, &user)
+        .await;
     assert!(result.is_ok());
 
     let calls = mock_client.get_calls();

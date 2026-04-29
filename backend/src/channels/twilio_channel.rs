@@ -51,7 +51,7 @@ where
         };
         let media_ref = media_sid.as_ref();
 
-        match self.inner.send_sms(body, media_ref, user).await {
+        match self.inner.dispatch_sms(body, media_ref, user).await {
             Ok(sid) => Ok(ChannelMessageId(sid)),
             Err(TwilioMessageError::EmptyMessage) => {
                 Err(ChannelError::SendFailed("empty body".into()))
