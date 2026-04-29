@@ -15,8 +15,11 @@ pub struct TelnyxChannel {
     api_key: String,
     profile_id: String,
     from_number: String,
+    base_url: String,
     http: reqwest::Client,
 }
+
+const TELNYX_DEFAULT_BASE: &str = "https://api.telnyx.com";
 
 impl TelnyxChannel {
     /// Build from env. Returns `None` if any required var is absent or empty,
@@ -35,8 +38,25 @@ impl TelnyxChannel {
             api_key,
             profile_id,
             from_number,
+            base_url: TELNYX_DEFAULT_BASE.to_string(),
             http: reqwest::Client::new(),
         })
+    }
+
+    /// Construct with an explicit base URL. Used by tests to point at wiremock.
+    pub fn with_base_url(
+        api_key: impl Into<String>,
+        profile_id: impl Into<String>,
+        from_number: impl Into<String>,
+        base_url: impl Into<String>,
+    ) -> Self {
+        Self {
+            api_key: api_key.into(),
+            profile_id: profile_id.into(),
+            from_number: from_number.into(),
+            base_url: base_url.into(),
+            http: reqwest::Client::new(),
+        }
     }
 }
 
@@ -71,7 +91,7 @@ impl MessageChannel for TelnyxChannel {
 
         let res = self
             .http
-            .post("https://api.telnyx.com/v2/messages")
+            .post(format!("{}/v2/messages", self.base_url))
             .bearer_auth(&self.api_key)
             .json(&payload)
             .send()

@@ -71,6 +71,46 @@ impl ChannelRouter {
             .ok_or_else(|| ChannelError::NotConfigured(channel_id.to_string()))?;
         chan.send(user, address, body, None).await
     }
+
+    /// Send a message to a user, picking the right channel based on their
+    /// phone number's country and which channels are registered. Address
+    /// is `user.phone_number` (until `user_channels` lands in a future PR).
+    ///
+    /// Routing policy (presence-based, no env reads here — channels register
+    /// only if their env config is complete):
+    /// - US users: prefer `telnyx`, then `sinch`, then `twilio`
+    /// - All other users: `twilio`
+    ///
+    /// Set `TELNYX_API_KEY` / `SINCH_API_TOKEN` (and friends) to flip US
+    /// routing without code changes. Unset to revert.
+    pub async fn send_to_user(
+        &self,
+        user: &User,
+        body: &str,
+        media: Option<MediaRef>,
+    ) -> Result<ChannelMessageId, ChannelError> {
+        let channel_id = self.pick_channel_for(user);
+        let chan = self
+            .channels
+            .get(channel_id)
+            .ok_or_else(|| ChannelError::NotConfigured(channel_id.to_string()))?;
+        chan.send(user, &user.phone_number, body, media).await
+    }
+
+    /// Decide which channel id handles outbound for this user. Public so
+    /// callers (e.g. tests, admin diagnostics) can introspect the choice.
+    pub fn pick_channel_for(&self, user: &User) -> &'static str {
+        let country = crate::utils::country::get_country_code_from_phone(&user.phone_number);
+        if country.as_deref() == Some("US") {
+            if self.channels.contains_key("telnyx") {
+                return "telnyx";
+            }
+            if self.channels.contains_key("sinch") {
+                return "sinch";
+            }
+        }
+        "twilio"
+    }
 }
 
 impl Default for ChannelRouter {

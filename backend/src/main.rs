@@ -459,12 +459,32 @@ async fn main() {
         user_core.clone(),
         user_repository.clone(),
     ));
+
+    // Build the multi-provider message router. TwilioChannel always registers
+    // (wraps the existing TwilioMessageService); Telnyx and Sinch only register
+    // if their env vars are set, so behavior reverts to Twilio-only when those
+    // vars are absent — no code change required to flip providers.
+    let mut router = backend::channels::router::ChannelRouter::new();
+    router.register(Arc::new(
+        backend::channels::twilio_channel::TwilioChannel::new(twilio_message_service.clone()),
+    ));
+    if let Some(telnyx) = backend::channels::telnyx_channel::TelnyxChannel::from_env() {
+        tracing::info!("Registered Telnyx channel for outbound SMS");
+        router.register(Arc::new(telnyx));
+    }
+    if let Some(sinch) = backend::channels::sinch_channel::SinchChannel::from_env() {
+        tracing::info!("Registered Sinch channel for outbound SMS");
+        router.register(Arc::new(sinch));
+    }
+    let channel_router = Arc::new(router);
+
     let state = Arc::new(AppState {
         pg_pool,
         user_core: user_core.clone(),
         user_repository: user_repository.clone(),
         twilio_client,
         twilio_message_service,
+        channel_router,
         ai_config: AiConfig::from_env(),
         tesla_oauth_client,
         youtube_oauth_client,

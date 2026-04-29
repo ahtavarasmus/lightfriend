@@ -49,6 +49,28 @@ pub enum MediaRef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChannelMessageId(pub String);
 
+impl ChannelMessageId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl From<ChannelMessageId> for String {
+    fn from(id: ChannelMessageId) -> Self {
+        id.0
+    }
+}
+
+impl std::fmt::Display for ChannelMessageId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// Inbound message normalised across channels. Each channel's webhook adapter
 /// produces this and hands it to `process_inbound`.
 #[derive(Debug, Clone)]

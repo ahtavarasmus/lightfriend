@@ -120,12 +120,19 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         user_repository.clone(),
     ));
 
+    let mut router = crate::channels::router::ChannelRouter::new();
+    router.register(Arc::new(
+        crate::channels::twilio_channel::TwilioChannel::new(twilio_message_service.clone()),
+    ));
+    let channel_router = Arc::new(router);
+
     Arc::new(crate::AppState {
         pg_pool,
         user_core,
         user_repository,
         twilio_client,
         twilio_message_service,
+        channel_router,
         ai_config: crate::AiConfig::default_for_tests(),
         youtube_oauth_client: google_oauth.clone(),
         tesla_oauth_client: tesla_oauth,

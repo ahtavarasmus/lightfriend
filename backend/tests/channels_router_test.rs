@@ -1,0 +1,186 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use backend::channels::router::ChannelRouter;
+use backend::channels::traits::{ChannelError, ChannelMessageId, MediaRef, MessageChannel};
+use backend::models::user_models::User;
+
+/// Minimal test channel that records every send call and returns a stub id.
+struct RecordingChannel {
+    id: &'static str,
+    sends: AtomicUsize,
+}
+
+impl RecordingChannel {
+    fn new(id: &'static str) -> Self {
+        Self {
+            id,
+            sends: AtomicUsize::new(0),
+        }
+    }
+
+    fn send_count(&self) -> usize {
+        self.sends.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl MessageChannel for RecordingChannel {
+    fn id(&self) -> &'static str {
+        self.id
+    }
+
+    async fn send(
+        &self,
+        _user: &User,
+        _address: &str,
+        _body: &str,
+        _media: Option<MediaRef>,
+    ) -> Result<ChannelMessageId, ChannelError> {
+        self.sends.fetch_add(1, Ordering::SeqCst);
+        Ok(ChannelMessageId(format!(
+            "{}-{}",
+            self.id,
+            self.send_count()
+        )))
+    }
+}
+
+fn user_with_phone(phone: &str) -> User {
+    User {
+        id: 1,
+        email: "test@example.com".to_string(),
+        password_hash: String::new(),
+        phone_number: phone.to_string(),
+        nickname: None,
+        time_to_live: None,
+        credits: 0.0,
+        preferred_number: None,
+        charge_when_under: false,
+        charge_back_to: None,
+        stripe_customer_id: None,
+        stripe_payment_method_id: None,
+        stripe_checkout_session_id: None,
+        sub_tier: None,
+        credits_left: 0.0,
+        last_credits_notification: None,
+        next_billing_date_timestamp: None,
+        magic_token: None,
+        refresh_token_hash: None,
+        refresh_token_compromised: false,
+        magic_token_expires_at: None,
+        plan_type: None,
+        matrix_e2ee_enabled: false,
+    }
+}
+
+#[tokio::test]
+async fn us_user_routes_to_telnyx_when_registered() {
+    let twilio = Arc::new(RecordingChannel::new("twilio"));
+    let telnyx = Arc::new(RecordingChannel::new("telnyx"));
+    let mut router = ChannelRouter::new();
+    router.register(twilio.clone());
+    router.register(telnyx.clone());
+
+    let user = user_with_phone("+12025551234");
+    let result = router.send_to_user(&user, "hello", None).await.unwrap();
+
+    assert_eq!(result.as_str(), "telnyx-1");
+    assert_eq!(telnyx.send_count(), 1);
+    assert_eq!(twilio.send_count(), 0);
+}
+
+#[tokio::test]
+async fn us_user_falls_back_to_sinch_when_no_telnyx() {
+    let twilio = Arc::new(RecordingChannel::new("twilio"));
+    let sinch = Arc::new(RecordingChannel::new("sinch"));
+    let mut router = ChannelRouter::new();
+    router.register(twilio.clone());
+    router.register(sinch.clone());
+
+    let user = user_with_phone("+12025551234");
+    let result = router.send_to_user(&user, "hello", None).await.unwrap();
+
+    assert_eq!(result.as_str(), "sinch-1");
+    assert_eq!(sinch.send_count(), 1);
+    assert_eq!(twilio.send_count(), 0);
+}
+
+#[tokio::test]
+async fn us_user_uses_twilio_when_only_twilio_registered() {
+    let twilio = Arc::new(RecordingChannel::new("twilio"));
+    let mut router = ChannelRouter::new();
+    router.register(twilio.clone());
+
+    let user = user_with_phone("+12025551234");
+    let result = router.send_to_user(&user, "hello", None).await.unwrap();
+
+    assert_eq!(result.as_str(), "twilio-1");
+    assert_eq!(twilio.send_count(), 1);
+}
+
+#[tokio::test]
+async fn non_us_user_always_uses_twilio_even_with_telnyx_registered() {
+    let twilio = Arc::new(RecordingChannel::new("twilio"));
+    let telnyx = Arc::new(RecordingChannel::new("telnyx"));
+    let mut router = ChannelRouter::new();
+    router.register(twilio.clone());
+    router.register(telnyx.clone());
+
+    // Finnish number
+    let user = user_with_phone("+358401234567");
+    let result = router.send_to_user(&user, "hello", None).await.unwrap();
+
+    assert_eq!(result.as_str(), "twilio-1");
+    assert_eq!(twilio.send_count(), 1);
+    assert_eq!(telnyx.send_count(), 0);
+}
+
+#[tokio::test]
+async fn telnyx_preferred_over_sinch_for_us() {
+    let twilio = Arc::new(RecordingChannel::new("twilio"));
+    let telnyx = Arc::new(RecordingChannel::new("telnyx"));
+    let sinch = Arc::new(RecordingChannel::new("sinch"));
+    let mut router = ChannelRouter::new();
+    router.register(twilio.clone());
+    router.register(telnyx.clone());
+    router.register(sinch.clone());
+
+    let user = user_with_phone("+12025551234");
+    router.send_to_user(&user, "hello", None).await.unwrap();
+
+    assert_eq!(telnyx.send_count(), 1);
+    assert_eq!(sinch.send_count(), 0);
+    assert_eq!(twilio.send_count(), 0);
+}
+
+#[tokio::test]
+async fn missing_channel_returns_not_configured() {
+    let router = ChannelRouter::new();
+    let user = user_with_phone("+12025551234");
+    let err = router.send_to_user(&user, "hello", None).await.unwrap_err();
+    matches!(err, ChannelError::NotConfigured(_));
+}
+
+#[test]
+fn pick_channel_returns_correct_id() {
+    let twilio = Arc::new(RecordingChannel::new("twilio"));
+    let telnyx = Arc::new(RecordingChannel::new("telnyx"));
+    let mut router = ChannelRouter::new();
+    router.register(twilio);
+    router.register(telnyx);
+
+    assert_eq!(
+        router.pick_channel_for(&user_with_phone("+12025551234")),
+        "telnyx"
+    );
+    assert_eq!(
+        router.pick_channel_for(&user_with_phone("+358401234567")),
+        "twilio"
+    );
+    assert_eq!(
+        router.pick_channel_for(&user_with_phone("+447911123456")),
+        "twilio"
+    );
+}

@@ -247,8 +247,8 @@ pub async fn handle_send_email(
     // Send the queued confirmation via SMS (skip when from web dashboard)
     if !skip_sms {
         match state
-            .twilio_message_service
-            .send_sms(&queued_msg, None, user)
+            .channel_router
+            .send_to_user(user, &queued_msg, None)
             .await
         {
             Ok(_) => {
@@ -314,8 +314,8 @@ pub async fn handle_send_email(
                     );
                     if !cloned_skip_sms {
                         if let Err(e) = cloned_state
-                            .twilio_message_service
-                            .send_sms(&error_msg, None, &cloned_user)
+                            .channel_router
+                            .send_to_user(&cloned_user, &error_msg, None)
                             .await
                         {
                             eprintln!("Failed to send error message: {}", e);
@@ -407,8 +407,8 @@ pub async fn handle_respond_to_email(
             );
             if !skip_sms {
                 if let Err(e) = state
-                    .twilio_message_service
-                    .send_sms(&error_msg, None, user)
+                    .channel_router
+                    .send_to_user(user, &error_msg, None)
                     .await
                 {
                     eprintln!("Failed to send error message: {}", e);
@@ -439,8 +439,8 @@ pub async fn handle_respond_to_email(
     // Send the queued confirmation via SMS (skip when from web dashboard)
     if !skip_sms {
         match state
-            .twilio_message_service
-            .send_sms(&queued_msg, None, user)
+            .channel_router
+            .send_to_user(user, &queued_msg, None)
             .await
         {
             Ok(_) => {
@@ -504,8 +504,8 @@ pub async fn handle_respond_to_email(
                     );
                     if !cloned_skip_sms {
                         if let Err(e) = cloned_state
-                            .twilio_message_service
-                            .send_sms(&error_msg, None, &cloned_user)
+                            .channel_router
+                            .send_to_user(&cloned_user, &error_msg, None)
                             .await
                         {
                             eprintln!("Failed to send error message: {}", e);
