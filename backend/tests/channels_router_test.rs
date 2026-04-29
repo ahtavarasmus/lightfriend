@@ -166,7 +166,7 @@ async fn missing_channel_returns_not_configured() {
     let router = ChannelRouter::new();
     let user = user_with_phone("+12025551234");
     let err = router.send_to_user(&user, "hello", None).await.unwrap_err();
-    matches!(err, ChannelError::NotConfigured(_));
+    assert!(matches!(err, ChannelError::NotConfigured(_)));
 }
 
 #[tokio::test]
@@ -178,7 +178,7 @@ async fn empty_body_with_no_media_is_refused_before_dispatch() {
 
     let user = user_with_phone("+12025551234");
     let err = router.send_to_user(&user, "   ", None).await.unwrap_err();
-    matches!(err, ChannelError::SendFailed(_));
+    assert!(matches!(err, ChannelError::SendFailed(_)));
     // Channel must NOT be invoked when body is empty
     assert_eq!(twilio.send_count(), 0);
 }

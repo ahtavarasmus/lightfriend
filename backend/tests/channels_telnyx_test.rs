@@ -133,8 +133,8 @@ async fn telnyx_rejects_inline_bytes_media() {
         )
         .await
         .unwrap_err();
-    matches!(
+    assert!(matches!(
         err,
         backend::channels::traits::ChannelError::MediaNotSupported
-    );
+    ));
 }

@@ -99,5 +99,5 @@ async fn sinch_rejects_media() {
         )
         .await
         .unwrap_err();
-    matches!(err, ChannelError::MediaNotSupported);
+    assert!(matches!(err, ChannelError::MediaNotSupported));
 }

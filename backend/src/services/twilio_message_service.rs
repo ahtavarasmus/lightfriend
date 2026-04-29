@@ -363,7 +363,10 @@ impl<T: TwilioClient> TwilioMessageService<T> {
     /// Send a conversation message to a user using SendConfig.
     ///
     /// This method provides more control over message parameters.
-    /// For most cases, use `send_sms` instead.
+    /// For most outbound paths, prefer `ChannelRouter::send_to_user` so
+    /// preprocessing (URL filter, empty-body guard, dev-skip) and provider
+    /// routing run consistently. Use this only when you need direct
+    /// `SendConfig` control over Twilio-specific options.
     pub async fn send_conversation_message(
         &self,
         user: &User,

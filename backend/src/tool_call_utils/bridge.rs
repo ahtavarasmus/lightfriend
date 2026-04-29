@@ -674,8 +674,8 @@ pub async fn handle_send_chat_message(
             // The dashboard already shows the error inline via the JSON
             // response below; an SMS would be a duplicate the user sees on
             // their phone for an action they did from a desktop. Mirrors
-            // the guards on the other three send_sms sites in this file
-            // (lines 362, 517, 620).
+            // the guards on the other channel_router.send_to_user sites in
+            // this file.
             if !skip_sms {
                 if let Err(e) = state
                     .channel_router

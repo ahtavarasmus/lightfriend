@@ -128,10 +128,8 @@ fn split_trailing_punctuation(url: &str) -> (&str, &str) {
 
 fn extract_domain(url: &str) -> Option<&str> {
     let after_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
-    let host = after_scheme
-        .split(|c: char| c == '/' || c == '?' || c == '#')
-        .next()?;
-    let host = host.split('@').last()?;
+    let host = after_scheme.split(['/', '?', '#']).next()?;
+    let host = host.split('@').next_back()?;
     let host = host.split(':').next()?;
     if host.is_empty() {
         None

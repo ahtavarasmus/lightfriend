@@ -464,8 +464,7 @@ async fn main() {
     // (wraps the existing TwilioMessageService); Telnyx and Sinch only register
     // if their env vars are set, so behavior reverts to Twilio-only when those
     // vars are absent — no code change required to flip providers.
-    let mut router =
-        backend::channels::router::ChannelRouter::with_user_repository(user_repository.clone());
+    let mut router = backend::channels::router::ChannelRouter::new();
     router.register(Arc::new(
         backend::channels::twilio_channel::TwilioChannel::new(twilio_message_service.clone()),
     ));
