@@ -609,9 +609,18 @@ pub fn guest_checkout_button(props: &GuestCheckoutButtonProps) -> Html {
     let loading = use_state(|| false);
     let error = use_state(|| None::<String>);
     let terms_accepted = use_state(|| false);
+    let phone_number = use_state(|| String::new());
     let subscription_type = props.subscription_type.clone();
     let selected_country = props.selected_country.clone();
     let plan_type = props.plan_type.clone();
+
+    let on_phone_change = {
+        let phone_number = phone_number.clone();
+        Callback::from(move |e: InputEvent| {
+            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+            phone_number.set(input.value());
+        })
+    };
 
     let onclick = {
         let loading = loading.clone();
@@ -763,11 +772,52 @@ pub fn guest_checkout_button(props: &GuestCheckoutButtonProps) -> Html {
         color: rgba(255, 255, 255, 0.7);
         text-decoration: underline;
     }
+    .phone-field {
+        margin: 0.75rem 0 0.25rem;
+        padding: 0 0.5rem;
+        text-align: left;
+    }
+    .phone-field label {
+        display: block;
+        font-size: 0.8rem;
+        color: rgba(255, 255, 255, 0.7);
+        margin-bottom: 0.35rem;
+    }
+    .phone-field input[type="tel"] {
+        width: 100%;
+        padding: 0.65rem 0.85rem;
+        font-size: 0.95rem;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(15, 15, 15, 0.9);
+        color: #fff;
+        box-sizing: border-box;
+        transition: border-color 0.2s ease;
+    }
+    .phone-field input[type="tel"]:focus {
+        outline: none;
+        border-color: rgba(255, 255, 255, 0.5);
+    }
     "#;
 
     html! {
         <>
             <style>{checkbox_css}</style>
+            <div class="phone-field">
+                <label for="lf-phone-number">{"Mobile phone number"}</label>
+                <input
+                    id="lf-phone-number"
+                    type="tel"
+                    name="phone"
+                    autocomplete="tel"
+                    inputmode="tel"
+                    placeholder="(555) 555-1234"
+                    pattern="[0-9+\\-\\(\\)\\s]{7,20}"
+                    maxlength="20"
+                    value={(*phone_number).clone()}
+                    oninput={on_phone_change}
+                />
+            </div>
             <div class="terms-checkbox-container">
                 <label>
                     <input
@@ -780,7 +830,7 @@ pub fn guest_checkout_button(props: &GuestCheckoutButtonProps) -> Html {
                         <a href="/terms" target="_blank">{"terms of service"}</a>
                         {" and "}
                         <a href="/privacy" target="_blank">{"privacy policy"}</a>
-                        {" and consent to receive automated SMS messages from Lightfriend. Message and data rates may apply. Message frequency varies. Reply STOP to opt out."}
+                        {" and consent to receive recurring automated SMS messages from Lightfriend at the number above (account, assistant replies, alerts, reminders, digests). Message and data rates may apply. Message frequency varies. Reply HELP for help. Reply STOP to opt out."}
                     </span>
                 </label>
             </div>
