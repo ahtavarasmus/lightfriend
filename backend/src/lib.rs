@@ -35,6 +35,13 @@ pub mod handlers {
     pub mod youtube;
     pub mod youtube_auth;
 }
+pub mod channels {
+    pub mod router;
+    pub mod sinch_channel;
+    pub mod telnyx_channel;
+    pub mod traits;
+    pub mod twilio_channel;
+}
 pub mod utils {
     pub mod bridge;
     pub mod bridge_contacts;
@@ -223,6 +230,7 @@ pub struct AppState {
     pub user_repository: Arc<UserRepository>,
     pub twilio_client: Arc<RealTwilioClient>,
     pub twilio_message_service: Arc<TwilioMessageService<RealTwilioClient>>,
+    pub channel_router: Arc<crate::channels::router::ChannelRouter>,
     pub ai_config: AiConfig,
     pub youtube_oauth_client: GoogleOAuthClient,
     pub tesla_oauth_client: TeslaOAuthClient,

@@ -215,11 +215,12 @@ pub async fn send_notification_with_context(
             }
 
             match state
-                .twilio_message_service
-                .send_sms(notification, None, &user)
+                .channel_router
+                .send_to_user(&user, notification, None)
                 .await
             {
                 Ok(response_sid) => {
+                    let response_sid = response_sid.into_inner();
                     sms_delivered = true;
                     tracing::info!("SMS sent for call notification user {}", user_id);
                     let entry = crate::pg_models::NewPgMessageHistory {
@@ -263,11 +264,12 @@ pub async fn send_notification_with_context(
                 return false;
             }
             match state
-                .twilio_message_service
-                .send_sms(notification, None, &user)
+                .channel_router
+                .send_to_user(&user, notification, None)
                 .await
             {
                 Ok(response_sid) => {
+                    let response_sid = response_sid.into_inner();
                     sms_delivered = true;
                     tracing::info!("Sent notification to user {}", user_id);
                     let entry = crate::pg_models::NewPgMessageHistory {

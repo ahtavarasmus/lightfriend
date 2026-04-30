@@ -71,11 +71,11 @@ pub async fn check_user_credits(
 
             tokio::spawn(async move {
                 let _ = state_clone
-                    .twilio_message_service
-                    .send_sms(
+                    .channel_router
+                    .send_to_user(
+                        &user_clone,
                         "Your credits and monthly quota have been depleted. Please recharge your credits to continue using the service.",
                         None,
-                        &user_clone,
                     )
                     .await;
             });

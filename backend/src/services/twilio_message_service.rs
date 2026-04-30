@@ -263,61 +263,18 @@ impl<T: TwilioClient> TwilioMessageService<T> {
         Ok((from_number, use_messaging_service, update_preferred))
     }
 
-    /// Send an SMS message to a user - convenience method matching the legacy twilio_utils interface.
-    ///
-    /// This is the primary method call sites should use. It handles:
-    /// - Credential resolution (BYOT vs global)
-    /// - Country detection and setting if missing
-    /// - From number selection
-    /// - Media SID to URL conversion
-    /// - Message history logging
-    /// - Status tracking
-    ///
-    /// Returns the message SID on success.
-    pub async fn send_sms(
+    /// Twilio-specific SMS dispatch. Assumes preprocessing (URL filter,
+    /// empty-body guard, message-history logging, dev-mode skip) has already
+    /// run at the provider-agnostic layer (`ChannelRouter::send_to_user`).
+    /// This is the inner half of what used to be `send_sms`: credentials,
+    /// media-URL construction, sending strategy, the actual Twilio API call,
+    /// and Twilio-side status logging.
+    pub async fn dispatch_sms(
         &self,
         body: &str,
         media_sid: Option<&String>,
         user: &User,
     ) -> Result<String, TwilioMessageError> {
-        // Sanitize URLs to keep A2P 10DLC carrier filters happy. Trusted domains
-        // (lightfriend.ai etc.) are preserved; everything else is replaced with a
-        // bracketed placeholder so we don't ship phishing-shaped strings to carriers.
-        let body = crate::utils::sms_sanitizer::apply_sms_url_filter(body);
-
-        // Refuse to call Twilio with both an empty body and no media — Twilio
-        // returns 21619 and the request pattern feeds into anti-abuse heuristics.
-        if body.trim().is_empty() && media_sid.is_none() {
-            tracing::error!(
-                "Refused to send empty SMS to user {} (no body and no media)",
-                user.id
-            );
-            return Err(TwilioMessageError::EmptyMessage);
-        }
-
-        // Log to message history using repository
-        let history_entry = crate::pg_models::NewPgMessageHistory {
-            user_id: user.id,
-            role: "assistant".to_string(),
-            encrypted_content: body.clone(),
-            tool_name: None,
-            tool_call_id: None,
-            tool_calls_json: None,
-            created_at: chrono::Utc::now().timestamp() as i32,
-            conversation_id: "".to_string(),
-        };
-
-        if let Err(e) = self.user_repository.create_message_history(&history_entry) {
-            tracing::error!("Failed to store message in history: {}", e);
-        }
-
-        // Skip sending in development environment
-        let running_environment = env::var("ENVIRONMENT").unwrap_or_default();
-        if running_environment == "development" {
-            tracing::info!("NOT SENDING MESSAGE SINCE ENVIRONMENT IS DEVELOPMENT");
-            return Ok("dev_not_sending".to_string());
-        }
-
         // Resolve credentials first (needed for media URL construction)
         let credentials = self.resolve_credentials(user)?;
 
@@ -406,7 +363,10 @@ impl<T: TwilioClient> TwilioMessageService<T> {
     /// Send a conversation message to a user using SendConfig.
     ///
     /// This method provides more control over message parameters.
-    /// For most cases, use `send_sms` instead.
+    /// For most outbound paths, prefer `ChannelRouter::send_to_user` so
+    /// preprocessing (URL filter, empty-body guard, dev-skip) and provider
+    /// routing run consistently. Use this only when you need direct
+    /// `SendConfig` control over Twilio-specific options.
     pub async fn send_conversation_message(
         &self,
         user: &User,

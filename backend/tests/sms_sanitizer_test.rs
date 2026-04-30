@@ -1,4 +1,4 @@
-use backend::utils::sms_sanitizer::apply_sms_url_filter;
+use backend::utils::sms_sanitizer::{apply_sms_url_filter, unfang_text};
 
 #[test]
 fn preserves_text_without_urls() {
@@ -84,4 +84,52 @@ fn url_at_end_of_sentence_keeps_punctuation() {
         apply_sms_url_filter(input),
         "More info on [link: example.com]!"
     );
+}
+
+#[test]
+fn unfang_dots_in_brackets() {
+    assert_eq!(unfang_text("example[.]com"), "example.com");
+    assert_eq!(unfang_text("foo[.]bar[.]baz"), "foo.bar.baz");
+}
+
+#[test]
+fn unfang_at_in_brackets() {
+    assert_eq!(unfang_text("user(at)example.com"), "user@example.com");
+    assert_eq!(unfang_text("user[at]example.com"), "user@example.com");
+    assert_eq!(unfang_text("user[@]example.com"), "user@example.com");
+}
+
+#[test]
+fn unfang_dot_word_in_brackets() {
+    assert_eq!(unfang_text("example(dot)com"), "example.com");
+    assert_eq!(unfang_text("example[DOT]com"), "example.com");
+}
+
+#[test]
+fn unfang_real_phishing_shaped_message() {
+    // The actual message that got our number banned
+    let input = "Google Security: New sign-in detected on an Apple iPhone for moon[.]gentile(at)gmail[.]com. Check activity if this wasn't you";
+    let output = unfang_text(input);
+    assert_eq!(output, "Google Security: New sign-in detected on an Apple iPhone for moon.gentile@gmail.com. Check activity if this wasn't you");
+}
+
+#[test]
+fn unfang_does_not_touch_innocent_prose() {
+    assert_eq!(
+        unfang_text("Meet me (at) the cafe by 5pm."),
+        "Meet me (at) the cafe by 5pm."
+    );
+    assert_eq!(
+        unfang_text("Press [Enter] to continue."),
+        "Press [Enter] to continue."
+    );
+    assert_eq!(unfang_text(""), "");
+}
+
+#[test]
+fn full_sanitizer_unfangs_then_filters_urls() {
+    let input = "See https://example[.]com/login and email user(at)gmail.com";
+    let output = apply_sms_url_filter(input);
+    // The URL gets unfanged, then domain-replaced. Email is left in place.
+    assert_eq!(output, "See [link: example.com] and email user@gmail.com");
 }

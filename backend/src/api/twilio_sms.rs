@@ -707,11 +707,12 @@ pub async fn process_sms(
 
                     tokio::spawn(async move {
                         match state_clone
-                            .twilio_message_service
-                            .send_sms(&response_msg_clone, None, &user_clone)
+                            .channel_router
+                            .send_to_user(&user_clone, &response_msg_clone, None)
                             .await
                         {
                             Ok(message_sid) => {
+                                let message_sid = message_sid.into_inner();
                                 // Log usage (similar to regular message)
                                 let processing_time_secs = start_time_clone.elapsed().as_secs();
                                 if let Err(e) =
@@ -1622,12 +1623,14 @@ pub async fn process_sms(
     });
 
     // Send the actual message if not in test mode
+    let media_ref = media_sid.map(|s| crate::channels::traits::MediaRef::Url(s.clone()));
     match state
-        .twilio_message_service
-        .send_sms(&clean_response, media_sid, &user)
+        .channel_router
+        .send_to_user(&user, &clean_response, media_ref)
         .await
     {
         Ok(message_sid) => {
+            let message_sid = message_sid.into_inner();
             // Log the SMS usage metadata and store message history
 
             // Log usage

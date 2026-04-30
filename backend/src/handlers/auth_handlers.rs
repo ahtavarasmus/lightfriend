@@ -276,8 +276,8 @@ pub async fn request_phone_verify(
         otp
     );
     if state
-        .twilio_message_service
-        .send_sms(&message, None, &user)
+        .channel_router
+        .send_to_user(&user, &message, None)
         .await
         .is_err()
     {

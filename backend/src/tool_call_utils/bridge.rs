@@ -494,8 +494,8 @@ pub async fn handle_send_chat_message(
         );
         if !skip_sms {
             if let Err(e) = state
-                .twilio_message_service
-                .send_sms(error_msg.as_str(), None, user)
+                .channel_router
+                .send_to_user(user, error_msg.as_str(), None)
                 .await
             {
                 eprintln!("Failed to send error message: {}", e);
@@ -674,12 +674,12 @@ pub async fn handle_send_chat_message(
             // The dashboard already shows the error inline via the JSON
             // response below; an SMS would be a duplicate the user sees on
             // their phone for an action they did from a desktop. Mirrors
-            // the guards on the other three send_sms sites in this file
-            // (lines 362, 517, 620).
+            // the guards on the other channel_router.send_to_user sites in
+            // this file.
             if !skip_sms {
                 if let Err(e) = state
-                    .twilio_message_service
-                    .send_sms(&error_msg, None, user)
+                    .channel_router
+                    .send_to_user(user, &error_msg, None)
                     .await
                 {
                     eprintln!("Failed to send error message: {}", e);
@@ -720,8 +720,8 @@ pub async fn handle_send_chat_message(
     if !skip_sms {
         tracing::info!("SEND_FLOW Sending confirmation SMS (best-effort)...");
         match state
-            .twilio_message_service
-            .send_sms(&queued_msg, None, user)
+            .channel_router
+            .send_to_user(user, &queued_msg, None)
             .await
         {
             Ok(_) => tracing::info!("SEND_FLOW Confirmation SMS sent successfully"),
@@ -822,8 +822,8 @@ pub async fn handle_send_chat_message(
                     );
                     if !cloned_skip_sms {
                         if let Err(e) = cloned_state
-                            .twilio_message_service
-                            .send_sms(&error_msg, None, &cloned_user)
+                            .channel_router
+                            .send_to_user(&cloned_user, &error_msg, None)
                             .await
                         {
                             tracing::error!("SEND_FLOW_TASK Also failed to send error SMS: {}", e);
