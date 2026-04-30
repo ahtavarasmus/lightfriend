@@ -14,7 +14,7 @@ pub fn privacy_policy() -> Html {
     html! {
         <div class="legal-content privacy-policy">
             <h1>{"Privacy Policy"}</h1>
-            <p class="last-updated">{"Last updated: April 12, 2026"}</p>
+            <p class="last-updated">{"Last updated: May 1, 2026"}</p>
 
             <section>
                 <h2>{"1. Overview"}</h2>
@@ -74,12 +74,13 @@ pub fn privacy_policy() -> Html {
 
             <section>
                 <h2>{"7. Third-Party Services and Sub-processors"}</h2>
-                <p>{"The system depends on third-party infrastructure. Where required by GDPR Article 28, we maintain Data Processing Agreements with our sub-processors or rely on the processor's standard data protection terms. We do not control these services and are not responsible for their behavior."}</p>
+                <p><strong>{"No mobile information will be shared with third parties or affiliates for marketing or promotional purposes. All categories of personal information described in this policy exclude text messaging originator opt-in data and consent; this information will not be shared with any third parties or affiliates."}</strong></p>
+                <p>{"The system depends on third-party infrastructure. Where required by GDPR Article 28, we maintain Data Processing Agreements with our sub-processors or rely on the processor's standard data protection terms. Sub-processors receive only the minimum data necessary to deliver the Service on our behalf and are not permitted to use that data for their own purposes. We do not control these services and are not responsible for their behavior."}</p>
                 <ul>
                     <li><strong>{"AWS (Amazon Web Services, Inc. - US): "}</strong>{"Provides the Nitro Enclave sealed environment and hosting infrastructure. Isolation depends on Amazon's hardware and software."}</li>
                     <li><strong>{"Marlin (Marlin Protocol - decentralized): "}</strong>{"Key custody. Runs inside its own enclave. Open source."}</li>
                     <li><strong>{"Tinfoil (Tinfoil, Inc. - US): "}</strong>{"AI inference inside sealed environments with cryptographic attestation."}</li>
-                    <li><strong>{"Twilio (Twilio, Inc. - US): "}</strong>{"SMS and voice delivery. Message content is designed to be deleted from Twilio after delivery."}</li>
+                    <li><strong>{"Twilio (Twilio, Inc. - US) and Sinch (Sinch AB - Sweden): "}</strong>{"SMS and voice delivery to your registered phone number. Message content is designed to be deleted from these providers after delivery. These providers act solely as carriers to transmit messages between you and the Service."}</li>
                     <li><strong>{"Stripe (Stripe, Inc. - US): "}</strong>{"Payment processing. We do not store credit card numbers. All payment data is handled by Stripe in accordance with PCI DSS standards."}</li>
                 </ul>
                 <p>{"A current list of sub-processors is available upon request at rasmus@lightfriend.ai."}</p>
