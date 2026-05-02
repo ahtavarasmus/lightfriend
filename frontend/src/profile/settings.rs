@@ -34,7 +34,6 @@ struct UpdateProfileRequest {
     timezone_auto: bool,
     agent_language: String,
     notification_type: Option<String>,
-    save_context: Option<i32>,
     location: String,
     nearby_places: String,
     preferred_number: Option<String>,
@@ -115,7 +114,6 @@ async fn perform_profile_update_email(
         timezone_auto: profile.timezone_auto.unwrap_or(true),
         agent_language: profile.agent_language.clone(),
         notification_type: profile.notification_type.clone(),
-        save_context: profile.save_context,
         location: profile.location.clone().unwrap_or_default(),
         nearby_places: profile.nearby_places.clone().unwrap_or_default(),
         preferred_number: profile.preferred_number.clone(),
@@ -186,7 +184,6 @@ async fn perform_profile_update_phone(
         timezone_auto: profile.timezone_auto.unwrap_or(true),
         agent_language: profile.agent_language.clone(),
         notification_type: profile.notification_type.clone(),
-        save_context: profile.save_context,
         location: profile.location.clone().unwrap_or_default(),
         nearby_places: profile.nearby_places.clone().unwrap_or_default(),
         preferred_number: profile.preferred_number.clone(),
@@ -257,7 +254,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             .clone()
             .or(Some("sms".to_string()))
     });
-    let save_context = use_state(|| (*user_profile).save_context.unwrap_or(0));
     let feature_updates = use_state(|| (*user_profile).notify);
     let auto_create_items = use_state(|| (*user_profile).auto_create_items.unwrap_or(false));
     let system_important_notify =
@@ -289,7 +285,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let phone_service_active_save_state = use_state(|| FieldSaveState::Idle);
     let agent_language_save_state = use_state(|| FieldSaveState::Idle);
     let notification_type_save_state = use_state(|| FieldSaveState::Idle);
-    let save_context_save_state = use_state(|| FieldSaveState::Idle);
     let feature_updates_save_state = use_state(|| FieldSaveState::Idle);
     let auto_create_items_save_state = use_state(|| FieldSaveState::Idle);
     let system_important_notify_save_state = use_state(|| FieldSaveState::Idle);
@@ -331,7 +326,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let user_profile_state = user_profile.clone();
         let agent_language = agent_language.clone();
         let notification_type = notification_type.clone();
-        let save_context = save_context.clone();
         let location = location.clone();
         let location_original = location_original.clone();
         let nearby_places = nearby_places.clone();
@@ -364,7 +358,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 location_original.set(props_profile.location.clone().unwrap_or_default());
                 nearby_places.set(props_profile.nearby_places.clone().unwrap_or_default());
                 nearby_places_original.set(props_profile.nearby_places.clone().unwrap_or_default());
-                save_context.set(props_profile.save_context.unwrap_or(0));
                 user_profile_state.set(props_profile.clone());
                 || ()
             },
@@ -1005,54 +998,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     }
                 }
             });
-        })
-    };
-
-    // Save context change handler
-    let on_save_context_change = {
-        let save_context = save_context.clone();
-        let save_state = save_context_save_state.clone();
-        let user_profile = user_profile.clone();
-        let on_profile_update = props.on_profile_update.clone();
-        Callback::from(move |e: Event| {
-            let select: HtmlInputElement = e.target_unchecked_into();
-            if let Ok(new_val) = select.value().parse::<i32>() {
-                save_context.set(new_val);
-                let save_state = save_state.clone();
-                let user_profile = user_profile.clone();
-                let on_profile_update = on_profile_update.clone();
-                save_state.set(FieldSaveState::Saving);
-                spawn_local(async move {
-                    let request = PatchFieldRequest {
-                        field: "save_context".to_string(),
-                        value: serde_json::Value::Number(new_val.into()),
-                    };
-                    match Api::patch("/api/profile/field")
-                        .json(&request)
-                        .unwrap()
-                        .send()
-                        .await
-                    {
-                        Ok(response) if response.ok() => {
-                            let mut profile = (*user_profile).clone();
-                            profile.save_context = Some(new_val);
-                            on_profile_update.emit(profile);
-                            save_state.set(FieldSaveState::Success);
-                            let save_state_clone = save_state.clone();
-                            spawn_local(async move {
-                                gloo_timers::future::TimeoutFuture::new(3_000).await;
-                                save_state_clone.set(FieldSaveState::Idle);
-                            });
-                        }
-                        Ok(_) => {
-                            save_state.set(FieldSaveState::Error("Failed to save".to_string()));
-                        }
-                        Err(_) => {
-                            save_state.set(FieldSaveState::Error("Network error".to_string()));
-                        }
-                    }
-                });
-            }
         })
     };
 
@@ -2410,38 +2355,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     html! {}
                 }
             }
-
-            // Conversation History field
-            <div class="profile-field">
-                <div class="field-label-group">
-                    <span class="field-label">{"Conversation History"}</span>
-                    <div class="tooltip">
-                        <span class="tooltip-icon">{"?"}</span>
-                        <span class="tooltip-text">
-                            {"Choose how many messages Lightfriend remembers in SMS conversations."}
-                        </span>
-                    </div>
-                </div>
-                <div class="field-input-container">
-                    <select
-                        class="profile-input"
-                        value={(*save_context).to_string()}
-                        onchange={on_save_context_change.clone()}
-                    >
-                        {
-                            (1..=10).map(|i| {
-                                html! {
-                                    <option value={i.to_string()} selected={*save_context == i}>
-                                        {format!("{} {}", i, if i == 1 { "message" } else { "messages" })}
-                                    </option>
-                                }
-                            }).collect::<Html>()
-                        }
-                        <option value="0" selected={*save_context == 0}>{"No history"}</option>
-                    </select>
-                    {render_save_indicator(&*save_context_save_state)}
-                </div>
-            </div>
 
             // Important message alerts field
             <div class="profile-field">

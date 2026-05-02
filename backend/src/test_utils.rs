@@ -927,10 +927,6 @@ pub mod mock_user_core {
             Ok(())
         }
 
-        fn update_save_context(&self, _user_id: i32, _ctx: i32) -> Result<(), DieselError> {
-            Ok(())
-        }
-
         fn update_notification_type(
             &self,
             _user_id: i32,

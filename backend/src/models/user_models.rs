@@ -45,7 +45,6 @@ pub struct UserSettings {
     pub timezone_auto: Option<bool>,
     pub agent_language: String,
     pub sub_country: Option<String>,
-    pub save_context: Option<i32>,
     pub critical_enabled: Option<String>,
     pub elevenlabs_phone_number_id: Option<String>,
     pub notify_about_calls: bool,
@@ -75,7 +74,6 @@ pub struct NewUserSettings {
     pub timezone_auto: Option<bool>,
     pub agent_language: String,
     pub sub_country: Option<String>,
-    pub save_context: Option<i32>,
     pub critical_enabled: Option<String>,
     pub notify_about_calls: bool,
 }

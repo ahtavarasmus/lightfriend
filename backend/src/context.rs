@@ -130,7 +130,6 @@ pub struct ContextBuilder {
     want_tools: bool,
     want_mcp_tools: bool,
     want_history: bool,
-    history_depth_override: Option<i32>,
     model_purpose: ModelPurpose,
 }
 
@@ -145,7 +144,6 @@ impl ContextBuilder {
             want_tools: false,
             want_mcp_tools: false,
             want_history: false,
-            history_depth_override: None,
             model_purpose: ModelPurpose::Default,
         }
     }
@@ -160,7 +158,6 @@ impl ContextBuilder {
             want_tools: false,
             want_mcp_tools: false,
             want_history: false,
-            history_depth_override: None,
             model_purpose: ModelPurpose::Default,
         }
     }
@@ -176,7 +173,6 @@ impl ContextBuilder {
             want_tools: false,
             want_mcp_tools: false,
             want_history: false,
-            history_depth_override: None,
             model_purpose: ModelPurpose::Default,
         }
     }
@@ -202,16 +198,11 @@ impl ContextBuilder {
         self
     }
 
-    /// Load conversation history. Implies `with_user_context()` (needs save_context).
+    /// Load conversation history (last 48h, capped at 200 messages).
+    /// Implies `with_user_context()` since it pulls user_settings for tz.
     pub fn with_history(mut self) -> Self {
         self.want_history = true;
         self.want_user_context = true;
-        self
-    }
-
-    pub fn with_history_depth(mut self, depth: i32) -> Self {
-        self.want_history = true;
-        self.history_depth_override = Some(depth);
         self
     }
 
@@ -365,28 +356,18 @@ impl ContextBuilder {
             None
         };
 
-        // 5. History (opt-in, requires user_settings for save_context)
+        // 5. History (opt-in, last 48h capped at 200 messages)
         let conversation_history = if self.want_history {
-            let depth = self.history_depth_override.unwrap_or_else(|| {
-                user_settings
-                    .as_ref()
-                    .and_then(|s| s.save_context)
-                    .unwrap_or(0)
-            });
-            if depth > 0 {
-                let raw = self
-                    .state
-                    .user_repository
-                    .get_conversation_history(user_id, depth as i64, true)
-                    .unwrap_or_default();
-                let tz_offset = timezone
-                    .as_ref()
-                    .map(|tz| tz.fixed_offset)
-                    .unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
-                Some(convert_history(raw, &tz_offset))
-            } else {
-                Some(Vec::new())
-            }
+            let raw = self
+                .state
+                .user_repository
+                .get_conversation_history(user_id)
+                .unwrap_or_default();
+            let tz_offset = timezone
+                .as_ref()
+                .map(|tz| tz.fixed_offset)
+                .unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+            Some(convert_history(raw, &tz_offset))
         } else {
             None
         };

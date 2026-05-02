@@ -53,7 +53,6 @@ pub struct UpdateProfileParams<'a> {
     pub timezone: &'a str,
     pub timezone_auto: &'a bool,
     pub notification_type: Option<&'a str>,
-    pub save_context: Option<i32>,
     pub location: &'a str,
     pub nearby_places: &'a str,
     pub preferred_number: Option<&'a str>,
@@ -103,7 +102,6 @@ pub trait UserCoreOps: Send + Sync {
     fn get_user_settings(&self, user_id: i32) -> Result<UserSettings, DieselError>;
     fn update_notify(&self, user_id: i32, notify: bool) -> Result<(), DieselError>;
     fn update_agent_language(&self, user_id: i32, lang: &str) -> Result<(), DieselError>;
-    fn update_save_context(&self, user_id: i32, ctx: i32) -> Result<(), DieselError>;
     fn update_notification_type(
         &self,
         user_id: i32,
@@ -488,7 +486,6 @@ impl UserCoreOps for UserCore {
                     timezone_auto: None,
                     agent_language: "en".to_string(),
                     sub_country: None,
-                    save_context: Some(5),
                     critical_enabled: Some("sms".to_string()),
                     notify_about_calls: true,
                 };
@@ -632,7 +629,6 @@ impl UserCoreOps for UserCore {
                 timezone_auto: None,
                 agent_language: "en".to_string(),
                 sub_country: None,
-                save_context: Some(5),
                 critical_enabled: Some("sms".to_string()),
                 notify_about_calls: true,
             };
@@ -897,15 +893,6 @@ impl UserCoreOps for UserCore {
         Ok(())
     }
 
-    fn update_save_context(&self, user_id: i32, save_context: i32) -> Result<(), DieselError> {
-        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
-        self.ensure_user_settings_exist(user_id)?;
-        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
-            .set(user_settings::save_context.eq(save_context))
-            .execute(&mut pg_conn)?;
-        Ok(())
-    }
-
     fn set_preferred_number_to_us_default(
         &self,
         user_id: i32,
@@ -999,7 +986,6 @@ impl UserCoreOps for UserCore {
                     timezone_auto: None,
                     agent_language: "en".to_string(),
                     sub_country: None,
-                    save_context: Some(5),
                     critical_enabled: Some("sms".to_string()),
                     notify_about_calls: true,
                 };
@@ -1013,7 +999,6 @@ impl UserCoreOps for UserCore {
                     user_settings::timezone_auto.eq(params.timezone_auto),
                     user_settings::notification_type
                         .eq(params.notification_type.map(|s| s.to_string())),
-                    user_settings::save_context.eq(params.save_context),
                 ))
                 .execute(pg_conn)?;
             // Update user_info within the same PG transaction

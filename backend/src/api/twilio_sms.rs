@@ -1514,16 +1514,7 @@ pub async fn process_sms(
 
     let processing_time_secs = start_time.elapsed().as_secs(); // Calculate processing time
 
-    // Clean up old message history based on save_context setting
-    let save_context = ctx
-        .user_settings
-        .as_ref()
-        .and_then(|s| s.save_context)
-        .unwrap_or(0);
-    if let Err(e) = state
-        .user_repository
-        .delete_old_message_history(user.id, save_context as i64)
-    {
+    if let Err(e) = state.user_repository.delete_old_message_history(user.id) {
         tracing::error!("Failed to clean up old message history: {}", e);
     }
 

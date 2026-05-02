@@ -250,7 +250,6 @@ diesel::table! {
         timezone_auto -> Nullable<Bool>,
         agent_language -> Text,
         sub_country -> Nullable<Text>,
-        save_context -> Nullable<Int4>,
         critical_enabled -> Nullable<Text>,
         elevenlabs_phone_number_id -> Nullable<Text>,
         notify_about_calls -> Bool,

@@ -43,6 +43,15 @@ pub struct LogUsageParams {
     pub zero_credits_timestamp: Option<i32>,
 }
 
+/// Time window for conversation history reads/cleanup. Anything older than
+/// this is invisible to the LLM and gets purged after the next SMS reply.
+const HISTORY_WINDOW_SECS: i32 = 48 * 3600;
+
+/// Hard cap on messages returned per fetch, regardless of time window.
+/// Roughly ~100 turns assuming a turn = user msg + assistant msg + maybe
+/// a tool call or two. Bounds context size for very chatty users.
+const HISTORY_MAX_MESSAGES: i64 = 200;
+
 pub struct UserRepository {
     pub pool: PgDbPool,
 }
@@ -55,43 +64,25 @@ impl UserRepository {
     pub fn get_conversation_history(
         &self,
         user_id: i32,
-        limit: i64,
-        include_tools: bool,
     ) -> Result<Vec<crate::pg_models::PgMessageHistory>, diesel::result::Error> {
         use crate::pg_schema::message_history;
         use crate::utils::encryption;
         use diesel::prelude::*;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
-        // First, get the user messages to establish time boundaries
-        let user_messages = if include_tools {
-            message_history::table
-                .filter(message_history::user_id.eq(user_id))
-                .filter(message_history::role.eq("user"))
-                .order_by(message_history::created_at.desc())
-                .limit(limit)
-                .load::<crate::pg_models::PgMessageHistory>(&mut conn)?
-        } else {
-            message_history::table
-                .filter(message_history::user_id.eq(user_id))
-                .filter(message_history::role.ne("tool"))
-                .filter(message_history::role.eq("user"))
-                .order_by(message_history::created_at.desc())
-                .limit(limit)
-                .load::<crate::pg_models::PgMessageHistory>(&mut conn)?
-        };
-        if user_messages.is_empty() {
-            return Ok(Vec::new());
-        }
-        // Get the timestamp of the oldest user message
-        let oldest_timestamp = user_messages.last().map(|msg| msg.created_at).unwrap_or(0);
-        // Now get all messages from the oldest user message onwards
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+        let cutoff = now - HISTORY_WINDOW_SECS;
+
         let encrypted_messages = message_history::table
             .filter(message_history::user_id.eq(user_id))
-            .filter(message_history::created_at.ge(oldest_timestamp))
+            .filter(message_history::created_at.ge(cutoff))
             .order_by(message_history::created_at.desc())
+            .limit(HISTORY_MAX_MESSAGES)
             .load::<crate::pg_models::PgMessageHistory>(&mut conn)?;
-        // Decrypt the content of each message and filter out empty assistant messages
+
         let mut decrypted_messages = Vec::new();
         for mut msg in encrypted_messages {
             match encryption::decrypt(&msg.encrypted_content) {
@@ -100,7 +91,6 @@ impl UserRepository {
                         && decrypted_content.is_empty()
                         && msg.tool_calls_json.is_none()
                     {
-                        // Skip empty assistant messages
                         continue;
                     }
                     msg.encrypted_content = decrypted_content;
@@ -108,7 +98,6 @@ impl UserRepository {
                 }
                 Err(e) => {
                     tracing::error!("Failed to decrypt message content: {:?}", e);
-                    // Skip messages that fail to decrypt
                     continue;
                 }
             }
@@ -149,44 +138,21 @@ impl UserRepository {
         Ok(())
     }
 
-    pub fn delete_old_message_history(
-        &self,
-        user_id: i32,
-        save_context_limit: i64,
-    ) -> Result<usize, diesel::result::Error> {
+    pub fn delete_old_message_history(&self, user_id: i32) -> Result<usize, diesel::result::Error> {
         use crate::pg_schema::message_history;
         use diesel::prelude::*;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
-        // Start a transaction
-        conn.transaction(|conn| {
-            // Find the oldest timestamp to keep based on the most recent messages
-            let oldest_keep_timestamp: Option<i32> = {
-                let base_query = message_history::table
-                    .filter(message_history::user_id.eq(user_id))
-                    .filter(message_history::role.eq("user"));
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+        let cutoff = now - HISTORY_WINDOW_SECS;
 
-                base_query
-                    .order_by(message_history::created_at.desc())
-                    .limit(save_context_limit)
-                    .select(message_history::created_at)
-                    .load::<i32>(conn)?
-                    .last()
-                    .cloned()
-            };
-
-            match oldest_keep_timestamp {
-                Some(timestamp) => {
-                    // Build delete query
-                    let base_delete = diesel::delete(message_history::table)
-                        .filter(message_history::user_id.eq(user_id))
-                        .filter(message_history::created_at.lt(timestamp));
-
-                    base_delete.execute(conn)
-                }
-                None => Ok(0),
-            }
-        })
+        diesel::delete(message_history::table)
+            .filter(message_history::user_id.eq(user_id))
+            .filter(message_history::created_at.lt(cutoff))
+            .execute(&mut conn)
     }
 
     /// Insert or update IMAP credentials for a user and return the

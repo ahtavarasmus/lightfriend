@@ -40,7 +40,6 @@ pub struct UserProfile {
     pub agent_language: String,
     pub notification_type: Option<String>,
     pub sub_country: Option<String>,
-    pub save_context: Option<i32>,
     pub days_until_billing: Option<i32>,
     pub twilio_sid: Option<String>,
     pub twilio_token: Option<String>,

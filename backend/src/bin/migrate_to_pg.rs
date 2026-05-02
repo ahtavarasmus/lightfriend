@@ -947,8 +947,6 @@ fn migrate_user_settings(sqlite: &mut SqliteConnection, pg: &mut PgConnection) {
         agent_language: String,
         #[diesel(sql_type = Nullable<Text>)]
         sub_country: Option<String>,
-        #[diesel(sql_type = Nullable<Integer>)]
-        save_context: Option<i32>,
         #[diesel(sql_type = Nullable<Text>)]
         critical_enabled: Option<String>,
         #[diesel(sql_type = Nullable<Text>)]
@@ -979,7 +977,7 @@ fn migrate_user_settings(sqlite: &mut SqliteConnection, pg: &mut PgConnection) {
 
     let rows: Vec<Row> = sql_query(
         "SELECT id, user_id, notify AS notify_int, notification_type, \
-         timezone_auto AS timezone_auto_int, agent_language, sub_country, save_context, \
+         timezone_auto AS timezone_auto_int, agent_language, sub_country, \
          critical_enabled, elevenlabs_phone_number_id, \
          notify_about_calls AS notify_about_calls_int, action_on_critical_message, \
          phone_service_active AS phone_service_active_int, default_notification_mode, \
@@ -1000,12 +998,12 @@ fn migrate_user_settings(sqlite: &mut SqliteConnection, pg: &mut PgConnection) {
         let auto_create_items = r.auto_create_items_int != 0;
         let result = diesel::sql_query(
             "INSERT INTO user_settings (id, user_id, notify, notification_type, timezone_auto, \
-             agent_language, sub_country, save_context, critical_enabled, \
+             agent_language, sub_country, critical_enabled, \
              elevenlabs_phone_number_id, notify_about_calls, action_on_critical_message, \
              phone_service_active, default_notification_mode, default_notification_type, \
              default_notify_on_call, llm_provider, phone_contact_notification_mode, \
              phone_contact_notification_type, phone_contact_notify_on_call, auto_create_items) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) \
              ON CONFLICT (id) DO NOTHING",
         )
         .bind::<Integer, _>(r.id)
@@ -1015,7 +1013,6 @@ fn migrate_user_settings(sqlite: &mut SqliteConnection, pg: &mut PgConnection) {
         .bind::<Nullable<Bool>, _>(timezone_auto)
         .bind::<Text, _>(&r.agent_language)
         .bind::<Nullable<Text>, _>(&r.sub_country)
-        .bind::<Nullable<Integer>, _>(r.save_context)
         .bind::<Nullable<Text>, _>(&r.critical_enabled)
         .bind::<Nullable<Text>, _>(&r.elevenlabs_phone_number_id)
         .bind::<Bool, _>(notify_about_calls)

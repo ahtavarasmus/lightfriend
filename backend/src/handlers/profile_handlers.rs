@@ -51,7 +51,6 @@ pub struct UpdateProfileRequest {
     timezone_auto: bool,
     agent_language: String,
     notification_type: Option<String>,
-    save_context: Option<i32>,
     location: String,
     nearby_places: String,
     preferred_number: Option<String>,
@@ -88,7 +87,6 @@ pub struct ProfileResponse {
     agent_language: String,
     notification_type: Option<String>,
     sub_country: Option<String>,
-    save_context: Option<i32>,
     days_until_billing: Option<i32>,
     twilio_sid: Option<String>,
     twilio_token: Option<String>,
@@ -230,7 +228,6 @@ pub async fn get_profile(
                 agent_language: user_settings.agent_language,
                 notification_type: user_settings.notification_type,
                 sub_country: user_settings.sub_country,
-                save_context: user_settings.save_context,
                 days_until_billing,
                 twilio_sid,
                 twilio_token,
@@ -577,29 +574,6 @@ pub async fn patch_profile_field(
             state
                 .user_core
                 .update_notification_type(user_id, Some(value))
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": format!("Database error: {}", e)})),
-                    )
-                })?;
-        }
-        "save_context" => {
-            let value = request.value.as_i64().ok_or_else(|| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "save_context must be an integer"})),
-                )
-            })? as i32;
-            if !(0..=10).contains(&value) {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "save_context must be between 0 and 10"})),
-                ));
-            }
-            state
-                .user_core
-                .update_save_context(user_id, value)
                 .map_err(|e| {
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -1254,7 +1228,6 @@ pub async fn update_profile(
         timezone: &update_req.timezone,
         timezone_auto: &update_req.timezone_auto,
         notification_type: update_req.notification_type.as_deref(),
-        save_context: update_req.save_context,
         location: &update_req.location,
         nearby_places: &update_req.nearby_places,
         preferred_number: update_req.preferred_number.as_deref(),
