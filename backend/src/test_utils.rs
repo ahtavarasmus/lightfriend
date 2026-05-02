@@ -1119,6 +1119,14 @@ pub mod mock_user_core {
             Ok(())
         }
 
+        fn update_preferred_sms_provider(
+            &self,
+            _user_id: i32,
+            _provider: Option<String>,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
         fn get_critical_notification_info(
             &self,
             _user_id: i32,

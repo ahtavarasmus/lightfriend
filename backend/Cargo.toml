@@ -53,7 +53,7 @@ aes-gcm = "0.10.3" # for encryption
 urlencoding = "2.1.0"
 oauth2 = { version = "5.0", features = ["reqwest"] }
 tower-sessions = { version = "0.12.0", features = ["axum-core"] }
-tower = "0.4"
+tower = { version = "0.4", features = ["util"] }
 matrix-sdk = { version = "0.13.0", features = ["sqlite", "e2e-encryption"] }
 thiserror = "1.0"
 async-trait = "0.1"
@@ -64,6 +64,7 @@ resend-rs = "0.9"
 serde_urlencoded = "0.7.1"
 hickory-resolver = "0.25"
 phonenumber = "0.3"  # Google libphonenumber port for Rust - handles E.164 parsing and country detection
+ed25519-dalek = "2"  # Verify Ed25519 signatures on Telnyx webhooks
 rubato = "0.16"  # Audio resampling for voice pipeline (8kHz<->16kHz<->24kHz)
 rocksdb = { version = "0.24", optional = true }
 pulldown-cmark = "0.12"

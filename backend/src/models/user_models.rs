@@ -32,6 +32,13 @@ pub struct User {
     pub magic_token_expires_at: Option<i32>,    // expiry for magic link token
     pub plan_type: Option<String>,              // "assistant", "autopilot", or "byot"
     pub matrix_e2ee_enabled: bool,              // whether E2EE is enabled for Matrix messaging
+    /// Override for SMS provider routing. NULL = country-based routing
+    /// (US users prefer Sinch/Telnyx when registered, others use Twilio).
+    /// "sinch" / "twilio" / "telnyx" pin this user to that channel
+    /// regardless of country, and bypass the Sinch-inbound US gate when
+    /// set to "sinch". Primary use is admin verification of Sinch from
+    /// a non-US phone.
+    pub preferred_sms_provider: Option<String>,
 }
 
 #[derive(Queryable, Selectable, Insertable, Clone)]

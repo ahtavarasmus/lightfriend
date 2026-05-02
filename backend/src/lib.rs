@@ -21,10 +21,12 @@ pub mod handlers {
     pub mod self_host_handlers;
     pub mod signal_auth;
     pub mod signal_handlers;
+    pub mod sinch_handlers;
     pub mod stats_handlers;
     pub mod stripe_handlers;
     pub mod telegram_auth;
     pub mod telegram_handlers;
+    pub mod telnyx_handlers;
     pub mod tesla_auth;
     pub mod totp_handlers;
     pub mod trust_chain_handlers;
@@ -79,6 +81,8 @@ pub mod tool_call_utils {
 pub mod cli;
 pub mod api {
     pub mod matrix_client;
+    pub mod sinch_utils;
+    pub mod telnyx_utils;
     pub mod tesla;
     pub mod tesla_client;
     pub mod tinfoil_client;

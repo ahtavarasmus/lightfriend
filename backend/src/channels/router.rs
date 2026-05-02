@@ -133,7 +133,26 @@ impl ChannelRouter {
 
     /// Decide which channel id handles outbound for this user. Public so
     /// callers (e.g. tests, admin diagnostics) can introspect the choice.
+    ///
+    /// `user.preferred_sms_provider` is an explicit override and wins
+    /// over country-based routing — but only if the requested channel
+    /// is actually registered. If the operator pinned a user to "sinch"
+    /// then later tore down the Sinch credentials, we silently fall
+    /// back to country-based selection rather than failing the send.
     pub fn pick_channel_for(&self, user: &User) -> &'static str {
+        if let Some(pref) = user.preferred_sms_provider.as_deref() {
+            let pref_static: Option<&'static str> = match pref {
+                "twilio" => Some("twilio"),
+                "telnyx" => Some("telnyx"),
+                "sinch" => Some("sinch"),
+                _ => None,
+            };
+            if let Some(id) = pref_static {
+                if self.channels.contains_key(id) {
+                    return id;
+                }
+            }
+        }
         let country = crate::utils::country::get_country_code_from_phone(&user.phone_number);
         if country.as_deref() == Some("US") {
             if self.channels.contains_key("telnyx") {

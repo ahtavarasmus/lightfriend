@@ -50,6 +50,7 @@ impl MockUser {
             magic_token_expires_at: None,
             plan_type: None,
             matrix_e2ee_enabled: false,
+            preferred_sms_provider: None,
         }
     }
 }

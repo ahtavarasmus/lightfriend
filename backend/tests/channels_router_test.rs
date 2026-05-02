@@ -48,6 +48,10 @@ impl MessageChannel for RecordingChannel {
 }
 
 fn user_with_phone(phone: &str) -> User {
+    user_with(phone, None)
+}
+
+fn user_with(phone: &str, preferred: Option<&str>) -> User {
     User {
         id: 1,
         email: "test@example.com".to_string(),
@@ -72,6 +76,7 @@ fn user_with_phone(phone: &str) -> User {
         magic_token_expires_at: None,
         plan_type: None,
         matrix_e2ee_enabled: false,
+        preferred_sms_provider: preferred.map(|s| s.to_string()),
     }
 }
 
@@ -158,6 +163,73 @@ async fn telnyx_preferred_over_sinch_for_us() {
     assert_eq!(telnyx.send_count(), 1);
     assert_eq!(sinch.send_count(), 0);
     assert_eq!(twilio.send_count(), 0);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn preferred_provider_overrides_country_routing() {
+    // Finnish phone but pinned to sinch (admin verification path)
+    let twilio = Arc::new(RecordingChannel::new("twilio"));
+    let sinch = Arc::new(RecordingChannel::new("sinch"));
+    let mut router = ChannelRouter::new();
+    router.register(twilio.clone());
+    router.register(sinch.clone());
+
+    let user = user_with("+358401234567", Some("sinch"));
+    router.send_to_user(&user, "hello", None).await.unwrap();
+
+    assert_eq!(sinch.send_count(), 1);
+    assert_eq!(twilio.send_count(), 0);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn preferred_provider_falls_back_when_unregistered() {
+    // User pinned to sinch but Sinch isn't registered → falls back to
+    // country-based routing. Finnish user → twilio.
+    let twilio = Arc::new(RecordingChannel::new("twilio"));
+    let mut router = ChannelRouter::new();
+    router.register(twilio.clone());
+
+    let user = user_with("+358401234567", Some("sinch"));
+    router.send_to_user(&user, "hello", None).await.unwrap();
+
+    assert_eq!(twilio.send_count(), 1);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn preferred_provider_unknown_value_falls_back() {
+    // Garbage preference value (e.g. operator typo) → fall back to
+    // country-based routing rather than failing the send.
+    let twilio = Arc::new(RecordingChannel::new("twilio"));
+    let mut router = ChannelRouter::new();
+    router.register(twilio.clone());
+
+    let user = user_with("+358401234567", Some("nonsense"));
+    router.send_to_user(&user, "hello", None).await.unwrap();
+
+    assert_eq!(twilio.send_count(), 1);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn preferred_provider_can_pin_us_user_to_twilio() {
+    // US user with explicit twilio preference → twilio, not sinch/telnyx.
+    let twilio = Arc::new(RecordingChannel::new("twilio"));
+    let telnyx = Arc::new(RecordingChannel::new("telnyx"));
+    let sinch = Arc::new(RecordingChannel::new("sinch"));
+    let mut router = ChannelRouter::new();
+    router.register(twilio.clone());
+    router.register(telnyx.clone());
+    router.register(sinch.clone());
+
+    let user = user_with("+12025551234", Some("twilio"));
+    router.send_to_user(&user, "hello", None).await.unwrap();
+
+    assert_eq!(twilio.send_count(), 1);
+    assert_eq!(telnyx.send_count(), 0);
+    assert_eq!(sinch.send_count(), 0);
 }
 
 #[tokio::test]

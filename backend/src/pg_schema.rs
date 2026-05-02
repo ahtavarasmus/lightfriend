@@ -238,6 +238,7 @@ diesel::table! {
         magic_token_expires_at -> Nullable<Int4>,
         plan_type -> Nullable<Text>,
         matrix_e2ee_enabled -> Bool,
+        preferred_sms_provider -> Nullable<Text>,
     }
 }
 

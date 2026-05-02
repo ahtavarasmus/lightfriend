@@ -718,6 +718,56 @@ pub async fn set_user_twilio_credentials(
     Ok(Json(json!({"success": true})))
 }
 
+#[derive(Deserialize)]
+pub struct SetPreferredSmsProviderRequest {
+    pub user_id: i32,
+    /// "twilio" | "telnyx" | "sinch" | null. Null clears the override and
+    /// falls back to country-based routing.
+    #[serde(default)]
+    pub provider: Option<String>,
+}
+
+/// POST /api/admin/set-preferred-sms-provider
+///
+/// Pin a user to a specific SMS channel regardless of their phone country.
+/// Primary use: admins testing the Sinch path from a non-US phone.
+/// Setting `provider: null` reverts to default (country-based) routing.
+pub async fn set_user_preferred_sms_provider(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<SetPreferredSmsProviderRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let valid = matches!(
+        req.provider.as_deref(),
+        None | Some("sinch") | Some("twilio") | Some("telnyx")
+    );
+    if !valid {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "provider must be one of: \"sinch\", \"twilio\", \"telnyx\", or null"
+            })),
+        ));
+    }
+
+    state
+        .user_core
+        .update_preferred_sms_provider(req.user_id, req.provider.clone())
+        .map_err(|e| {
+            tracing::error!("Failed to set preferred SMS provider: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+
+    tracing::info!(
+        "Set preferred SMS provider for user {} to {:?}",
+        req.user_id,
+        req.provider
+    );
+    Ok(Json(json!({"success": true, "provider": req.provider})))
+}
+
 /// Response for message stats endpoint
 #[derive(Serialize)]
 pub struct MessageStatsResponse {

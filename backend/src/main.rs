@@ -476,6 +476,18 @@ async fn main() {
         tracing::info!("Registered Sinch channel for outbound SMS");
         router.register(Arc::new(sinch));
     }
+    if std::env::var("SINCH_CALLBACK_SECRET")
+        .ok()
+        .is_some_and(|s| !s.is_empty())
+    {
+        tracing::info!("Sinch inbound + status webhooks enabled (SINCH_CALLBACK_SECRET set)");
+    }
+    if std::env::var("TELNYX_PUBLIC_KEY")
+        .ok()
+        .is_some_and(|s| !s.is_empty())
+    {
+        tracing::info!("Telnyx inbound + status webhooks enabled (TELNYX_PUBLIC_KEY set)");
+    }
     let channel_router = Arc::new(router);
 
     let state = Arc::new(AppState {
@@ -555,6 +567,43 @@ async fn main() {
             api::twilio_utils::validate_twilio_status_callback_signature,
         ));
     let twilio_routes = twilio_sms_routes.merge(twilio_status_routes);
+
+    // Sinch inbound + status routes. Always mounted; the auth middleware
+    // requires `Authorization: Bearer $SINCH_CALLBACK_SECRET` and 401s if
+    // the env var is unset, so leaving the routes registered when Sinch is
+    // disabled is harmless. To enable Sinch end-to-end, set all five
+    // SINCH_* vars (SINCH_API_TOKEN/SERVICE_PLAN_ID/US_FROM_NUMBER for
+    // outbound, SINCH_CALLBACK_SECRET for inbound, optional SINCH_REGION).
+    let sinch_routes = Router::new()
+        .route(
+            "/api/sinch/inbound",
+            post(backend::handlers::sinch_handlers::sinch_inbound),
+        )
+        .route(
+            "/api/sinch/status",
+            post(backend::handlers::sinch_handlers::sinch_status),
+        )
+        .layer(middleware::from_fn(api::sinch_utils::validate_sinch_auth));
+
+    // Telnyx inbound + status routes. Always mounted; the Ed25519
+    // signature middleware fails closed (401) when TELNYX_PUBLIC_KEY is
+    // unset, so leaving the routes registered when Telnyx is disabled is
+    // harmless. To enable Telnyx end-to-end, set TELNYX_API_KEY +
+    // TELNYX_MESSAGING_PROFILE_ID + TELNYX_US_FROM_NUMBER (outbound) and
+    // TELNYX_PUBLIC_KEY (inbound signature verification).
+    let telnyx_routes = Router::new()
+        .route(
+            "/api/telnyx/inbound",
+            post(backend::handlers::telnyx_handlers::telnyx_inbound),
+        )
+        .route(
+            "/api/telnyx/status",
+            post(backend::handlers::telnyx_handlers::telnyx_status),
+        )
+        .layer(middleware::from_fn(
+            api::telnyx_utils::validate_telnyx_signature,
+        ));
+
     let textbee_routes = Router::new().route(
         "/api/sms/textbee-server",
         post(twilio_sms::handle_textbee_sms),
@@ -720,6 +769,10 @@ async fn main() {
         .route(
             "/api/admin/set-twilio-creds",
             post(admin_handlers::set_user_twilio_credentials),
+        )
+        .route(
+            "/api/admin/set-preferred-sms-provider",
+            post(admin_handlers::set_user_preferred_sms_provider),
         )
         .route(
             "/api/admin/users/{user_id}/message-stats",
@@ -1379,6 +1432,8 @@ async fn main() {
         )
         .merge(textbee_routes)
         .merge(twilio_routes)
+        .merge(sinch_routes)
+        .merge(telnyx_routes)
         .merge(voice_routes)
         .nest_service("/uploads", ServeDir::new("uploads"))
         .route("/blog/md/{slug}", get(blog::handlers::blog_post_md_handler))

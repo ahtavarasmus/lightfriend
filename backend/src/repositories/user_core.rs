@@ -176,6 +176,14 @@ pub trait UserCoreOps: Send + Sync {
         action: Option<String>,
     ) -> Result<(), DieselError>;
 
+    /// Set or clear the per-user SMS provider override. Pass `None` to
+    /// fall back to country-based routing.
+    fn update_preferred_sms_provider(
+        &self,
+        user_id: i32,
+        provider: Option<String>,
+    ) -> Result<(), DieselError>;
+
     // Complex notification info
     fn get_critical_notification_info(
         &self,
@@ -1133,6 +1141,18 @@ impl UserCoreOps for UserCore {
         // Update the action_on_critical_message setting
         diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
             .set(user_settings::action_on_critical_message.eq(action))
+            .execute(&mut pg_conn)?;
+        Ok(())
+    }
+
+    fn update_preferred_sms_provider(
+        &self,
+        user_id: i32,
+        provider: Option<String>,
+    ) -> Result<(), DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::preferred_sms_provider.eq(provider))
             .execute(&mut pg_conn)?;
         Ok(())
     }
