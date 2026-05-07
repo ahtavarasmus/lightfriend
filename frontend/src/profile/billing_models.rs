@@ -37,6 +37,7 @@ pub struct UserProfile {
     pub discount: bool,
     pub notify: bool,
     pub preferred_number: Option<String>,
+    pub sms_from_number: Option<String>,
     pub agent_language: String,
     pub notification_type: Option<String>,
     pub sub_country: Option<String>,

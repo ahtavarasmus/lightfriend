@@ -77,6 +77,12 @@ pub struct ProfileResponse {
     notify: bool,
     info: Option<String>,
     preferred_number: Option<String>,
+    // SMS FROM number the user should text to reach lightfriend. Computed
+    // from preferred_sms_provider so the dashboard reflects the actual
+    // active SMS channel. Telnyx/Sinch use env-configured numbers; Twilio
+    // (and unset) falls back to preferred_number, which is also the
+    // voice FROM.
+    sms_from_number: Option<String>,
     charge_when_under: bool,
     charge_back_to: Option<f32>,
     stripe_payment_method_id: Option<String>,
@@ -209,6 +215,11 @@ pub async fn get_profile(
                     .ok()
                     .flatten()
                     .is_some();
+            let sms_from_number = match user.preferred_sms_provider.as_deref() {
+                Some("telnyx") => std::env::var("TELNYX_US_FROM_NUMBER").ok(),
+                Some("sinch") => std::env::var("SINCH_US_FROM_NUMBER").ok(),
+                _ => user.preferred_number.clone(),
+            };
             Ok(Json(ProfileResponse {
                 id: user.id,
                 email: user.email,
@@ -218,6 +229,7 @@ pub async fn get_profile(
                 notify: user_settings.notify,
                 info: user_info.info,
                 preferred_number: user.preferred_number,
+                sms_from_number,
                 charge_when_under: user.charge_when_under,
                 charge_back_to: user.charge_back_to,
                 stripe_payment_method_id: user.stripe_payment_method_id,

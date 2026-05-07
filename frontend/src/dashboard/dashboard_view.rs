@@ -1788,7 +1788,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
 
                     // ChatBox
                     <div>
-                        if let Some(ref num) = props.user_profile.preferred_number {
+                        if let Some(ref num) = props.user_profile.sms_from_number {
                             <div class="lf-number-label">{"SMS: "}{num}</div>
                         }
                         <ChatBox
