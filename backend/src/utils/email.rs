@@ -82,11 +82,12 @@ pub async fn send_magic_link_email(
 /// # Arguments
 /// * `to_email` - Recipient email address
 /// * `magic_link` - The full URL with token for password setup
-/// * `phone_skipped_duplicate` - If true, includes a message that the phone number was already in use
+/// * `phone_skipped` - If true, includes a message that the phone from Stripe
+///   couldn't be used (already taken or not a valid E.164 phone number).
 pub async fn send_magic_link_email_with_options(
     to_email: &str,
     magic_link: &str,
-    phone_skipped_duplicate: bool,
+    phone_skipped: bool,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let (resend, from_email, reply_to) = match get_resend_config() {
         Some(config) => config,
@@ -100,10 +101,12 @@ pub async fn send_magic_link_email_with_options(
     };
     let _ = reply_to; // Used in other email functions
 
-    let phone_warning = if phone_skipped_duplicate {
+    let phone_warning = if phone_skipped {
         r#"<p style="margin: 20px 0; padding: 15px; background-color: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; color: #856404;">
-            <strong>Note:</strong> The phone number you entered is already associated with another account.
-            Please update your phone number in your account settings after logging in.
+            <strong>Note:</strong> We couldn't use the phone number from your Stripe account
+            (either it's already linked to another Lightfriend account, or it isn't in
+            international E.164 format like <code>+33686322159</code>).
+            Please add or update your phone number in your account settings after logging in.
             Your phone number is needed to use Lightfriend via SMS.
         </p>"#
     } else {

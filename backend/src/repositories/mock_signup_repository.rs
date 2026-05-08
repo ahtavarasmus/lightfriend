@@ -150,6 +150,16 @@ impl MockSignupRepository {
             .and_then(|u| u.preferred_number.clone())
     }
 
+    /// Get user's phone number (the number itself, not preferred_number).
+    pub fn get_phone_number(&self, user_id: i32) -> Option<String> {
+        self.users
+            .lock()
+            .unwrap()
+            .get(&user_id)
+            .map(|u| u.phone_number.clone())
+            .filter(|p| !p.is_empty())
+    }
+
     fn simulate_db_error() -> SignupRepositoryError {
         SignupRepositoryError::Database(diesel::result::Error::DatabaseError(
             diesel::result::DatabaseErrorKind::Unknown,

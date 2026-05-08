@@ -1094,12 +1094,12 @@ pub async fn stripe_webhook(
                                 user_id,
                                 magic_token,
                                 email,
-                                phone_skipped_duplicate,
+                                phone_skipped,
                             }) => {
                                 tracing::info!(
                                     "Created new user {} from guest checkout (phone_skipped: {})",
                                     user_id,
-                                    phone_skipped_duplicate
+                                    phone_skipped
                                 );
 
                                 let frontend_url =
@@ -1112,7 +1112,7 @@ pub async fn stripe_webhook(
                                         crate::utils::email::send_magic_link_email_with_options(
                                             &email,
                                             &magic_link,
-                                            phone_skipped_duplicate,
+                                            phone_skipped,
                                         )
                                         .await
                                     {

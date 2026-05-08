@@ -12,6 +12,25 @@ use crate::handlers::auth_dtos::NewUser;
 use crate::models::user_models::User;
 use crate::repositories::signup_repository::{SignupRepository, SignupRepositoryError};
 
+/// Parse `phone` and return canonical E.164 (e.g. "+14155551234") if it's a
+/// real phone number per libphonenumber. Returns None for invalid input.
+///
+/// Forgiving on input formatting (libphonenumber strips spaces, dashes,
+/// parens, etc. during parse) so e.g. "+1 415-555-1234" round-trips to
+/// "+14155551234". A leading `+` is still required since we don't know
+/// the country to default to when Stripe sends us national format like
+/// "06 86322159" — those get rejected.
+fn validate_and_normalize_e164(phone: &str) -> Option<String> {
+    if !phone.starts_with('+') {
+        return None;
+    }
+    let parsed = phonenumber::parse(None, phone).ok()?;
+    if !phonenumber::is_valid(&parsed) {
+        return None;
+    }
+    Some(parsed.format().mode(phonenumber::Mode::E164).to_string())
+}
+
 /// Errors that can occur during signup
 #[derive(Debug, Error)]
 pub enum SignupError {
@@ -44,9 +63,10 @@ pub enum SignupResult {
         magic_token: String,
         /// User's email for sending the magic link.
         email: String,
-        /// Whether the phone number was skipped because it's already in use by another account.
-        /// If true, the user should be prompted to enter a different phone number.
-        phone_skipped_duplicate: bool,
+        /// Whether the phone number from Stripe was skipped (already taken, or
+        /// not a valid E.164 phone). When true, the user is prompted via the
+        /// magic-link email to set a phone in their profile.
+        phone_skipped: bool,
     },
 }
 
@@ -111,11 +131,18 @@ impl<R: SignupRepository> SignupService<R> {
         self.repository
             .set_stripe_customer_id(user.id, stripe_customer_id)?;
 
-        // Update phone if provided and user doesn't have one
+        // Update phone if provided, parseable as a real phone number, and
+        // the user doesn't already have one. Store the canonical E.164 form
+        // so downstream lookups (find_by_phone_number) match consistently
+        // regardless of how the customer formatted it in Stripe Checkout.
         let phone_updated = if !phone.is_empty() && user.phone_number.is_empty() {
-            self.repository.update_phone_number(user.id, phone)?;
-            self.setup_phone_country(user.id, phone)?;
-            true
+            if let Some(normalized) = validate_and_normalize_e164(phone) {
+                self.repository.update_phone_number(user.id, &normalized)?;
+                self.setup_phone_country(user.id, &normalized)?;
+                true
+            } else {
+                false
+            }
         } else {
             false
         };
@@ -140,19 +167,30 @@ impl<R: SignupRepository> SignupService<R> {
         // Calculate joined_at timestamp
         let joined_at = chrono::Utc::now().timestamp() as i32;
 
-        // Check if phone number is already in use by another account
-        let phone_is_duplicate = if !phone.is_empty() {
-            self.repository.find_by_phone_number(phone)?.is_some()
+        // Skip the Stripe-supplied phone if it's empty, can't be parsed as a
+        // real phone number (Stripe Checkout doesn't enforce E.164, so we
+        // sometimes get strings like "06 86322159"), or already taken by
+        // another account. In all those cases the user lands with an empty
+        // phone and the magic-link email tells them to set it via their
+        // profile. Otherwise store the canonical E.164 form for consistent
+        // downstream lookups.
+        let normalized = if phone.is_empty() {
+            None
         } else {
+            validate_and_normalize_e164(phone)
+        };
+        let phone_skipped = if phone.is_empty() {
             false
+        } else if let Some(ref n) = normalized {
+            self.repository.find_by_phone_number(n)?.is_some()
+        } else {
+            true
         };
 
-        // If phone is duplicate, create user without phone number
-        // User will need to set their phone number later
-        let phone_to_use = if phone_is_duplicate {
+        let phone_to_use = if phone_skipped {
             String::new()
         } else {
-            phone.to_string()
+            normalized.unwrap_or_default()
         };
 
         // Create user with placeholder password
@@ -197,7 +235,7 @@ impl<R: SignupRepository> SignupService<R> {
             user_id: created_user.id,
             magic_token,
             email: email.to_string(),
-            phone_skipped_duplicate: phone_is_duplicate,
+            phone_skipped,
         })
     }
 
