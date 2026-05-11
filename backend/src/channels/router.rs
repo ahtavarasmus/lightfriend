@@ -89,11 +89,14 @@ impl ChannelRouter {
     ///
     /// Routing policy (presence-based, no env reads here — channels register
     /// only if their env config is complete):
-    /// - US users: prefer `telnyx`, then `sinch`, then `twilio`
+    /// - US users: prefer `twilio`, fall back to `telnyx` if twilio is not
+    ///   registered. Telnyx stays as the documented backup channel for the
+    ///   degraded-Twilio scenario (see migration 31/32 for history).
     /// - All other users: `twilio`
     ///
-    /// Set `TELNYX_API_KEY` / `SINCH_API_TOKEN` (and friends) to flip US
-    /// routing without code changes. Unset to revert.
+    /// Set `TELNYX_API_KEY` / `SINCH_API_TOKEN` (and friends) to register
+    /// those channels; individual users can be pinned via
+    /// `preferred_sms_provider` (admin endpoint).
     pub async fn send_to_user(
         &self,
         user: &User,
@@ -155,11 +158,11 @@ impl ChannelRouter {
         }
         let country = crate::utils::country::get_country_code_from_phone(&user.phone_number);
         if country.as_deref() == Some("US") {
+            if self.channels.contains_key("twilio") {
+                return "twilio";
+            }
             if self.channels.contains_key("telnyx") {
                 return "telnyx";
-            }
-            if self.channels.contains_key("sinch") {
-                return "sinch";
             }
         }
         "twilio"

@@ -82,7 +82,9 @@ fn user_with(phone: &str, preferred: Option<&str>) -> User {
 
 #[tokio::test]
 #[serial_test::serial]
-async fn us_user_routes_to_telnyx_when_registered() {
+async fn us_user_routes_to_twilio_when_registered() {
+    // Default policy: US users go to twilio. Telnyx is the documented
+    // backup channel but only used when twilio is not registered.
     let twilio = Arc::new(RecordingChannel::new("twilio"));
     let telnyx = Arc::new(RecordingChannel::new("telnyx"));
     let mut router = ChannelRouter::new();
@@ -92,26 +94,25 @@ async fn us_user_routes_to_telnyx_when_registered() {
     let user = user_with_phone("+12025551234");
     let result = router.send_to_user(&user, "hello", None).await.unwrap();
 
-    assert_eq!(result.as_str(), "telnyx-1");
-    assert_eq!(telnyx.send_count(), 1);
-    assert_eq!(twilio.send_count(), 0);
+    assert_eq!(result.as_str(), "twilio-1");
+    assert_eq!(twilio.send_count(), 1);
+    assert_eq!(telnyx.send_count(), 0);
 }
 
 #[tokio::test]
 #[serial_test::serial]
-async fn us_user_falls_back_to_sinch_when_no_telnyx() {
-    let twilio = Arc::new(RecordingChannel::new("twilio"));
-    let sinch = Arc::new(RecordingChannel::new("sinch"));
+async fn us_user_falls_back_to_telnyx_when_no_twilio() {
+    // Twilio creds not configured → US users fall back to telnyx
+    // (the documented backup channel).
+    let telnyx = Arc::new(RecordingChannel::new("telnyx"));
     let mut router = ChannelRouter::new();
-    router.register(twilio.clone());
-    router.register(sinch.clone());
+    router.register(telnyx.clone());
 
     let user = user_with_phone("+12025551234");
     let result = router.send_to_user(&user, "hello", None).await.unwrap();
 
-    assert_eq!(result.as_str(), "sinch-1");
-    assert_eq!(sinch.send_count(), 1);
-    assert_eq!(twilio.send_count(), 0);
+    assert_eq!(result.as_str(), "telnyx-1");
+    assert_eq!(telnyx.send_count(), 1);
 }
 
 #[tokio::test]
@@ -148,7 +149,9 @@ async fn non_us_user_always_uses_twilio_even_with_telnyx_registered() {
 
 #[tokio::test]
 #[serial_test::serial]
-async fn telnyx_preferred_over_sinch_for_us() {
+async fn twilio_preferred_over_telnyx_and_sinch_for_us() {
+    // All three channels registered → twilio wins for US users.
+    // Sinch and telnyx are reachable only via explicit per-user pin.
     let twilio = Arc::new(RecordingChannel::new("twilio"));
     let telnyx = Arc::new(RecordingChannel::new("telnyx"));
     let sinch = Arc::new(RecordingChannel::new("sinch"));
@@ -160,9 +163,9 @@ async fn telnyx_preferred_over_sinch_for_us() {
     let user = user_with_phone("+12025551234");
     router.send_to_user(&user, "hello", None).await.unwrap();
 
-    assert_eq!(telnyx.send_count(), 1);
+    assert_eq!(twilio.send_count(), 1);
+    assert_eq!(telnyx.send_count(), 0);
     assert_eq!(sinch.send_count(), 0);
-    assert_eq!(twilio.send_count(), 0);
 }
 
 #[tokio::test]
@@ -341,7 +344,7 @@ fn pick_channel_returns_correct_id() {
 
     assert_eq!(
         router.pick_channel_for(&user_with_phone("+12025551234")),
-        "telnyx"
+        "twilio"
     );
     assert_eq!(
         router.pick_channel_for(&user_with_phone("+358401234567")),
@@ -350,5 +353,19 @@ fn pick_channel_returns_correct_id() {
     assert_eq!(
         router.pick_channel_for(&user_with_phone("+447911123456")),
         "twilio"
+    );
+}
+
+#[test]
+fn pick_channel_us_falls_back_to_telnyx_when_twilio_missing() {
+    // If twilio isn't registered (env not set) but telnyx is, US users
+    // route to telnyx. Telnyx stays as the documented US backup.
+    let telnyx = Arc::new(RecordingChannel::new("telnyx"));
+    let mut router = ChannelRouter::new();
+    router.register(telnyx);
+
+    assert_eq!(
+        router.pick_channel_for(&user_with_phone("+12025551234")),
+        "telnyx"
     );
 }
