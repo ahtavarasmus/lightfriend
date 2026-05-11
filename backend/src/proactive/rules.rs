@@ -171,11 +171,12 @@ fn format_snapshot_message(snap: &serde_json::Value) -> String {
     if content.is_empty() {
         format!("{} sent a message on {}", sender, platform)
     } else {
-        // Truncate long messages to keep SMS short
-        let truncated = if content.len() > 200 {
-            format!("{}...", &content[..200])
-        } else {
-            content.to_string()
+        // Truncate long messages to keep SMS short. char_indices keeps the
+        // cut on a UTF-8 boundary so multi-byte chars (é, ö, soft hyphens
+        // in tracking pixels, etc.) don't panic.
+        let truncated = match content.char_indices().nth(200) {
+            Some((idx, _)) => format!("{}...", &content[..idx]),
+            None => content.to_string(),
         };
         format!("{} on {}: {}", sender, platform, truncated)
     }
@@ -1640,10 +1641,9 @@ pub async fn evaluate_flow_test(
             let prefetched = prefetch_sources(state, rule, fetch).await;
 
             let resolved_prompt = resolve_prompt_template(prompt, &rule.trigger_type);
-            let preview = if resolved_prompt.len() > 120 {
-                format!("{}...", &resolved_prompt[..120])
-            } else {
-                resolved_prompt.clone()
+            let preview = match resolved_prompt.char_indices().nth(120) {
+                Some((idx, _)) => format!("{}...", &resolved_prompt[..idx]),
+                None => resolved_prompt.clone(),
             };
             let _ = tx
                 .send(RuleTestStep::EvaluatingLlm {

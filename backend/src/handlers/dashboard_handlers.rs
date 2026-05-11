@@ -156,10 +156,9 @@ pub async fn get_dashboard_summary(
                 .map(|p| p.display_name().to_string())
                 .unwrap_or_else(|| msg.sender_name.clone());
 
-            let preview = if msg.content.len() > 100 {
-                format!("{}...", &msg.content[..100])
-            } else {
-                msg.content.clone()
+            let preview = match msg.content.char_indices().nth(100) {
+                Some((idx, _)) => format!("{}...", &msg.content[..idx]),
+                None => msg.content.clone(),
             };
 
             ActionItem {
@@ -365,6 +364,10 @@ pub struct ActivityFeedEntry {
     pub urgency: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commitment_prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commitment_result: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -526,6 +529,8 @@ pub async fn get_activity_feed(
             classification_result: None,
             urgency: None,
             category: None,
+            commitment_prompt: None,
+            commitment_result: None,
         });
     }
 
@@ -662,6 +667,8 @@ pub async fn get_activity_feed(
             classification_result: None,
             urgency: None,
             category: None,
+            commitment_prompt: None,
+            commitment_result: None,
         });
     }
 
@@ -673,10 +680,9 @@ pub async fn get_activity_feed(
             .cloned()
             .unwrap_or_else(|| msg.sender_name.clone());
 
-        let preview = if msg.content.len() > 120 {
-            format!("{}...", &msg.content[..120])
-        } else {
-            msg.content.clone()
+        let preview = match msg.content.char_indices().nth(120) {
+            Some((idx, _)) => format!("{}...", &msg.content[..idx]),
+            None => msg.content.clone(),
         };
 
         let platform_display = match msg.platform.as_str() {
@@ -707,6 +713,8 @@ pub async fn get_activity_feed(
             classification_result: msg.classification_result.clone(),
             urgency: msg.urgency.clone(),
             category: msg.category.clone(),
+            commitment_prompt: msg.commitment_prompt.clone(),
+            commitment_result: msg.commitment_result.clone(),
         });
     }
 
@@ -758,6 +766,8 @@ pub async fn get_activity_feed(
                 classification_result: None,
                 urgency: None,
                 category: None,
+                commitment_prompt: None,
+                commitment_result: None,
             });
         }
     }
