@@ -608,6 +608,139 @@ fn detect_user_waiting(
     }
 }
 
+/// Pass 1 of commitment detection. Cheap LLM filter that decides whether a
+/// message is worth running the full extraction pass on. Uses the Voice model
+/// (fast/cheap), tiny prompt, single boolean output. Multilingual by design -
+/// the prompt describes categories abstractly rather than listing English
+/// phrases, so it works on any-language conversations.
+///
+/// Bias: lean toward `true`. Pass 2 will reject false positives; false
+/// negatives are lost forever.
+///
+/// Returns (relevant, raw_args_json) where raw_args_json is the LLM tool-call
+/// arguments verbatim, suitable for persisting on the message for the activity
+/// feed.
+async fn commitment_gate(
+    state: &Arc<AppState>,
+    user_id: i32,
+    ctx: &crate::context::AgentContext,
+    content: &str,
+    sender_name: &str,
+    platform: &str,
+) -> Result<(bool, String), Box<dyn std::error::Error + Send + Sync>> {
+    let system_prompt = "You are a fast filter that decides whether a single chat message is worth analyzing for commitments, obligations, deadlines, or completion signals.\n\
+        \n\
+        A message is RELEVANT if it could contain any of (in any language):\n\
+        - a promise or commitment to do something (\"I'll do X\", \"I will\", \"I promise\")\n\
+        - a request that creates a future obligation (\"can you do X by Friday?\")\n\
+        - a deadline, due date, or time reference tied to an action\n\
+        - a completion signal (saying something is done, sent, paid, finished, completed)\n\
+        - a follow-up commitment (\"will get back\", \"let you know\", \"I'll check\")\n\
+        - a deadline change, postponement, or reschedule\n\
+        - a short positive reply that could be confirming or completing a prior request (\"yes\", \"done\", \"ok\", \"sure\", \"thanks\")\n\
+        \n\
+        NOT RELEVANT: pure greetings, reactions to news/links, opinions, statements of fact, emotional reactions, jokes.\n\
+        \n\
+        Lean toward RELEVANT when uncertain. A more thorough second pass will verify and reject false positives.\n\
+        Works in any language - never reject solely because the message is non-English.";
+
+    let user_msg = format!("Message from {} on {}:\n{}", sender_name, platform, content);
+
+    let mut properties = HashMap::new();
+    properties.insert(
+        "relevant".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some(
+                "True if the message is worth analyzing for commitments/obligations. Lean toward true when unsure.".to_string(),
+            ),
+            ..Default::default()
+        }),
+    );
+
+    let tool = chat_completion::Tool {
+        r#type: chat_completion::ToolType::Function,
+        function: types::Function {
+            name: "gate_result".to_string(),
+            description: Some(
+                "Return whether the message is relevant for commitment tracking".to_string(),
+            ),
+            parameters: types::FunctionParameters {
+                schema_type: types::JSONSchemaType::Object,
+                properties: Some(properties),
+                required: Some(vec!["relevant".to_string()]),
+            },
+        },
+    };
+
+    let gate_model = state
+        .ai_config
+        .model(ctx.provider, crate::ModelPurpose::Voice)
+        .to_string();
+
+    let messages = vec![
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::system,
+            content: chat_completion::Content::Text(system_prompt.to_string()),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::user,
+            content: chat_completion::Content::Text(user_msg),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+    ];
+
+    let request = chat_completion::ChatCompletionRequest::new(gate_model.clone(), messages)
+        .tools(vec![tool])
+        .tool_choice(chat_completion::ToolChoiceType::Required)
+        .temperature(0.0);
+
+    let result = state
+        .ai_config
+        .chat_completion(ctx.provider, &request)
+        .await
+        .map_err(|e| format!("Commitment gate LLM call failed: {}", e))?;
+
+    crate::ai_config::log_llm_usage(
+        &state.llm_usage_repository,
+        user_id,
+        match ctx.provider {
+            crate::AiProvider::Tinfoil => "tinfoil",
+            crate::AiProvider::OpenRouter => "openrouter",
+        },
+        &gate_model,
+        "commitment_gate",
+        &result,
+    );
+
+    let choice = result
+        .choices
+        .first()
+        .ok_or_else(|| "gate: no choices".to_string())?;
+    let tool_calls = choice
+        .message
+        .tool_calls
+        .as_ref()
+        .ok_or_else(|| "gate: no tool_calls".to_string())?;
+    let tc = tool_calls
+        .first()
+        .ok_or_else(|| "gate: empty tool_calls".to_string())?;
+    let args = tc.function.arguments.as_deref().unwrap_or("{}");
+    let parsed: serde_json::Value = serde_json::from_str(args)?;
+    // Bias toward true: if the LLM returns garbage, fail open.
+    let relevant = parsed
+        .get("relevant")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
+    Ok((relevant, args.to_string()))
+}
+
 /// Detect and extract commitments from an incoming message.
 /// Runs immediately on every message (no delay, no seen-check).
 /// Independent of urgency classification.
@@ -616,15 +749,6 @@ pub async fn run_commitment_detection(
     user_id: i32,
     entity_snapshot: &serde_json::Value,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let settings = state.user_core.get_user_settings(user_id)?;
-    if !settings.auto_track_items_system {
-        return Ok(());
-    }
-
-    if exceeds_daily_token_budget(state, user_id, "commitment_detection") {
-        return Ok(());
-    }
-
     let sender_name = entity_snapshot
         .get("sender_name")
         .and_then(|v| v.as_str())
@@ -638,6 +762,30 @@ pub async fn run_commitment_detection(
         .and_then(|v| v.as_str())
         .unwrap_or("");
     let message_id = entity_snapshot.get("message_id").and_then(|v| v.as_i64());
+    let content = entity_snapshot
+        .get("content")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let content_preview: String = content.chars().take(80).collect();
+
+    let settings = state.user_core.get_user_settings(user_id)?;
+    if !settings.auto_track_items_system {
+        info!(
+            "commitment_detection skip user={} reason=setting_off platform={} sender={}",
+            user_id, platform, sender_name
+        );
+        return Ok(());
+    }
+
+    info!(
+        "commitment_detection start user={} platform={} sender={} room={} msg_id={:?} preview={:?}",
+        user_id, platform, sender_name, room_id, message_id, content_preview
+    );
+
+    if exceeds_daily_token_budget(state, user_id, "commitment_detection") {
+        return Ok(());
+    }
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -645,6 +793,60 @@ pub async fn run_commitment_detection(
         .as_secs() as i32;
 
     let ctx = ContextBuilder::for_user(state, user_id).build().await?;
+
+    // ---------------------------------------------------------------------
+    // Pass 1: cheap LLM gate. Tight prompt, single bool output, Voice model.
+    // Multilingual by design. Biased toward "relevant" - the full extraction
+    // pass below will reject false positives. Skips empty content.
+    // ---------------------------------------------------------------------
+    if content.trim().is_empty() {
+        info!(
+            "commitment_detection user={} pass1=skip reason=empty_content",
+            user_id
+        );
+        return Ok(());
+    }
+    let (gate_relevant, gate_raw) =
+        match commitment_gate(state, user_id, &ctx, &content, sender_name, platform).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    "commitment_gate failed user={}: {} (failing open)",
+                    user_id,
+                    e
+                );
+                (true, format!("{{\"error\":{:?}}}", e.to_string()))
+            }
+        };
+
+    info!(
+        "commitment_detection user={} pass1={} platform={} sender={}",
+        user_id,
+        if gate_relevant { "relevant" } else { "skip" },
+        platform,
+        sender_name
+    );
+
+    // Persist gate decision on the message immediately, so the activity feed
+    // shows why a message was gated out even if Pass 2 never runs.
+    if let Some(mid) = message_id {
+        let envelope = serde_json::json!({
+            "gate": serde_json::from_str::<serde_json::Value>(&gate_raw)
+                .unwrap_or(serde_json::Value::String(gate_raw.clone())),
+            "extraction": serde_json::Value::Null,
+        });
+        if let Err(e) = state.ontology_repository.update_message_commitment(
+            mid,
+            Some("<Pass 1 gate>"),
+            Some(&envelope.to_string()),
+        ) {
+            tracing::warn!("Failed to persist gate result on message {}: {}", mid, e);
+        }
+    }
+
+    if !gate_relevant {
+        return Ok(());
+    }
 
     let tz_offset = ctx
         .timezone
@@ -850,7 +1052,7 @@ pub async fn run_commitment_detection(
     let messages = vec![
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
-            content: chat_completion::Content::Text(system_prompt),
+            content: chat_completion::Content::Text(system_prompt.clone()),
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -890,8 +1092,56 @@ pub async fn run_commitment_detection(
 
     let choice = match result.choices.first() {
         Some(c) => c,
-        None => return Ok(()),
+        None => {
+            info!(
+                "commitment_detection user={} llm returned no choices",
+                user_id
+            );
+            return Ok(());
+        }
     };
+
+    // Persist Pass 1 gate + Pass 2 extraction on the message for activity-feed
+    // transparency. We do this regardless of has_commitment so the feed shows
+    // every decision.
+    if let Some(mid) = message_id {
+        let extraction_raw = if let Some(ref tcs) = choice.message.tool_calls {
+            tcs.iter()
+                .find(|tc| tc.function.name.as_deref() == Some("commitment_result"))
+                .and_then(|tc| tc.function.arguments.clone())
+        } else {
+            choice.message.content.clone()
+        };
+        let extraction_json = extraction_raw
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .unwrap_or(serde_json::Value::Null);
+        let gate_json = serde_json::from_str::<serde_json::Value>(&gate_raw)
+            .unwrap_or(serde_json::Value::String(gate_raw.clone()));
+        let envelope = serde_json::json!({
+            "gate": gate_json,
+            "extraction": extraction_json,
+        });
+        let combined_prompt = format!("<Pass 2 extraction>\n{}", system_prompt);
+        if let Err(e) = state.ontology_repository.update_message_commitment(
+            mid,
+            Some(&combined_prompt),
+            Some(&envelope.to_string()),
+        ) {
+            tracing::warn!(
+                "Failed to persist commitment result on message {}: {}",
+                mid,
+                e
+            );
+        }
+    }
+
+    if choice.message.tool_calls.is_none() {
+        info!(
+            "commitment_detection user={} llm returned no tool_calls (text content present)",
+            user_id
+        );
+    }
 
     if let Some(ref tool_calls) = choice.message.tool_calls {
         for tc in tool_calls {
@@ -901,7 +1151,13 @@ pub async fn run_commitment_detection(
             let args = tc.function.arguments.as_deref().unwrap_or("{}");
             let parsed: serde_json::Value = match serde_json::from_str(args) {
                 Ok(v) => v,
-                Err(_) => continue,
+                Err(e) => {
+                    info!(
+                        "commitment_detection user={} failed to parse tool args: {} (raw={})",
+                        user_id, e, args
+                    );
+                    continue;
+                }
             };
 
             let has_commitment = parsed
@@ -910,6 +1166,10 @@ pub async fn run_commitment_detection(
                 .unwrap_or(false);
 
             if !has_commitment {
+                info!(
+                    "commitment_detection user={} llm said no commitment (platform={} sender={} preview={:?})",
+                    user_id, platform, sender_name, content_preview
+                );
                 return Ok(());
             }
 
@@ -929,8 +1189,17 @@ pub async fn run_commitment_detection(
                 .map(|v| v as i32);
 
             if description.is_empty() && commitment_type != "completion_signal" {
+                info!(
+                    "commitment_detection user={} llm has_commitment=true but empty description (type={})",
+                    user_id, commitment_type
+                );
                 continue;
             }
+
+            info!(
+                "commitment_detection user={} has_commitment=true type={} desc={:?} match_id={:?}",
+                user_id, commitment_type, description, existing_match_id
+            );
 
             let deadline_ts = deadline_str.and_then(|s| {
                 chrono::DateTime::parse_from_rfc3339(s)

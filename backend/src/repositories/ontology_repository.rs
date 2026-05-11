@@ -1708,6 +1708,24 @@ impl OntologyRepository {
         Ok(())
     }
 
+    /// Update a message's commitment-detection result (prompt + LLM output JSON).
+    /// Stored for activity-feed transparency / debugging.
+    pub fn update_message_commitment(
+        &self,
+        message_id: i64,
+        prompt: Option<&str>,
+        result: Option<&str>,
+    ) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(ont_messages::table.filter(ont_messages::id.eq(message_id)))
+            .set((
+                ont_messages::commitment_prompt.eq(prompt),
+                ont_messages::commitment_result.eq(result),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
     /// Get pending digest items: medium/low-urgency messages not yet delivered
     /// and not yet seen by the user on the native platform.
     pub fn get_pending_digest_messages(

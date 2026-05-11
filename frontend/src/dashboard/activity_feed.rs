@@ -185,6 +185,10 @@ struct ActivityFeedEntry {
     urgency: Option<String>,
     #[serde(default)]
     category: Option<String>,
+    #[serde(default)]
+    commitment_prompt: Option<String>,
+    #[serde(default)]
+    commitment_result: Option<String>,
 }
 
 #[derive(Properties, PartialEq)]
@@ -663,6 +667,19 @@ fn render_entry(
                         if let Some(ref result) = entry.classification_result {
                             <div class="feed-expanded-row" style="flex-direction: column; gap: 0.25rem;">
                                 <span class="feed-expanded-label">{"LLM Result"}</span>
+                                <pre style="font-size: 0.7rem; color: #888; white-space: pre-wrap; word-break: break-word; margin: 0; max-height: 150px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 0.4rem; border-radius: 4px;">{result}</pre>
+                            </div>
+                        }
+                        // Commitment-detection (tracking) prompt + result
+                        if let Some(ref prompt) = entry.commitment_prompt {
+                            <div class="feed-expanded-row" style="flex-direction: column; gap: 0.25rem;">
+                                <span class="feed-expanded-label">{"Tracking Prompt"}</span>
+                                <pre style="font-size: 0.7rem; color: #888; white-space: pre-wrap; word-break: break-word; margin: 0; max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 0.4rem; border-radius: 4px;">{prompt}</pre>
+                            </div>
+                        }
+                        if let Some(ref result) = entry.commitment_result {
+                            <div class="feed-expanded-row" style="flex-direction: column; gap: 0.25rem;">
+                                <span class="feed-expanded-label">{"Tracking Result"}</span>
                                 <pre style="font-size: 0.7rem; color: #888; white-space: pre-wrap; word-break: break-word; margin: 0; max-height: 150px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 0.4rem; border-radius: 4px;">{result}</pre>
                             </div>
                         }

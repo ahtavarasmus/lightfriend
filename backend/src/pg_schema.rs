@@ -440,6 +440,8 @@ diesel::table! {
         resolved_at -> Nullable<Int4>,
         seen_at -> Nullable<Int4>,
         matrix_event_id -> Nullable<Text>,
+        commitment_prompt -> Nullable<Text>,
+        commitment_result -> Nullable<Text>,
     }
 }
 

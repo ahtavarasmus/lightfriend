@@ -165,6 +165,8 @@ pub struct OntMessage {
     pub resolved_at: Option<i32>,
     pub seen_at: Option<i32>,
     pub matrix_event_id: Option<String>,
+    pub commitment_prompt: Option<String>,
+    pub commitment_result: Option<String>,
 }
 
 #[derive(Insertable, Debug)]
