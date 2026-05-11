@@ -13,6 +13,17 @@ struct EmailBroadcastMessage {
     audience: String,
 }
 
+#[derive(Deserialize, Clone, Debug, PartialEq)]
+struct UsSmsProviderStatus {
+    total_us: i64,
+    on_telnyx: i64,
+}
+
+#[derive(Serialize)]
+struct BulkSetUsSmsProviderRequest {
+    pin_to_telnyx: bool,
+}
+
 #[derive(Deserialize, Clone, Debug)]
 #[allow(dead_code)]
 struct MessageStatusLog {
@@ -451,6 +462,12 @@ pub fn admin_dashboard() -> Html {
     let show_stats_section = use_state(|| false);
     let show_broadcast_section = use_state(|| false);
     let show_password_section = use_state(|| false);
+    let show_sms_provider_section = use_state(|| false);
+
+    // US SMS provider toggle state
+    let us_sms_status: UseStateHandle<Option<UsSmsProviderStatus>> = use_state(|| None);
+    let sms_toggle_in_flight = use_state(|| false);
+    let sms_toggle_status_msg = use_state(|| None::<String>);
 
     let users_effect = users.clone();
     let error_effect = error.clone();
@@ -462,6 +479,7 @@ pub fn admin_dashboard() -> Html {
     let admin_alerts_effect = admin_alerts.clone();
     let disabled_types_effect = disabled_alert_types.clone();
     let alert_count_effect = alert_count.clone();
+    let us_sms_status_effect = us_sms_status.clone();
 
     use_effect_with_deps(
         move |_| {
@@ -475,6 +493,7 @@ pub fn admin_dashboard() -> Html {
             let admin_alerts = admin_alerts_effect;
             let disabled_types = disabled_types_effect;
             let alert_count = alert_count_effect;
+            let us_sms_status = us_sms_status_effect;
 
             wasm_bindgen_futures::spawn_local(async move {
                 // Fetch users
@@ -557,6 +576,15 @@ pub fn admin_dashboard() -> Html {
                     if response.ok() {
                         if let Ok(data) = response.json::<DisabledTypesResponse>().await {
                             disabled_types.set(data.disabled_types);
+                        }
+                    }
+                }
+
+                // Fetch US SMS provider toggle status
+                if let Ok(response) = Api::get("/api/admin/us-sms-provider-status").send().await {
+                    if response.ok() {
+                        if let Ok(data) = response.json::<UsSmsProviderStatus>().await {
+                            us_sms_status.set(Some(data));
                         }
                     }
                 }
@@ -691,6 +719,128 @@ pub fn admin_dashboard() -> Html {
                                         >
                                             {"Send Email Broadcast"}
                                         </button>
+                                    </div>
+                                }
+                            } else {
+                                html! {}
+                            }
+                        }
+                    </div>
+
+                    // US SMS Provider Toggle
+                    <div class="collapsible-section sms-provider-section">
+                        <div class="collapsible-header" onclick={{
+                            let show_sms_provider_section = show_sms_provider_section.clone();
+                            Callback::from(move |_| {
+                                show_sms_provider_section.set(!*show_sms_provider_section);
+                            })
+                        }}>
+                            <h2>{"US SMS Provider"}</h2>
+                            <span class="toggle-indicator">{if *show_sms_provider_section { "▼" } else { "▶" }}</span>
+                        </div>
+                        {
+                            if *show_sms_provider_section {
+                                let (state_label, is_telnyx, mixed) = match &*us_sms_status {
+                                    Some(s) if s.total_us == 0 => ("No US users", false, false),
+                                    Some(s) if s.on_telnyx == s.total_us => ("Telnyx (pinned)", true, false),
+                                    Some(s) if s.on_telnyx == 0 => ("Twilio (default)", false, false),
+                                    Some(_) => ("Mixed", false, true),
+                                    None => ("Loading...", false, false),
+                                };
+                                let counts_line = match &*us_sms_status {
+                                    Some(s) => format!("{} of {} US users pinned to Telnyx", s.on_telnyx, s.total_us),
+                                    None => String::new(),
+                                };
+                                let in_flight = *sms_toggle_in_flight;
+                                let next_pin_to_telnyx = !is_telnyx;
+                                let action_label = if next_pin_to_telnyx {
+                                    "Pin all US users to Telnyx"
+                                } else {
+                                    "Clear pins (use Twilio default)"
+                                };
+                                let onclick = {
+                                    let us_sms_status = us_sms_status.clone();
+                                    let sms_toggle_in_flight = sms_toggle_in_flight.clone();
+                                    let sms_toggle_status_msg = sms_toggle_status_msg.clone();
+                                    Callback::from(move |_| {
+                                        let confirm_msg = if next_pin_to_telnyx {
+                                            "Pin every +1 user to Telnyx? This clobbers any per-user pins on US numbers."
+                                        } else {
+                                            "Clear pins on every +1 user? US users will route via Twilio (the default)."
+                                        };
+                                        let window = web_sys::window().unwrap();
+                                        if !window
+                                            .confirm_with_message(confirm_msg)
+                                            .unwrap_or(false)
+                                        {
+                                            return;
+                                        }
+                                        let us_sms_status = us_sms_status.clone();
+                                        let sms_toggle_in_flight = sms_toggle_in_flight.clone();
+                                        let sms_toggle_status_msg = sms_toggle_status_msg.clone();
+                                        sms_toggle_in_flight.set(true);
+                                        sms_toggle_status_msg.set(None);
+                                        wasm_bindgen_futures::spawn_local(async move {
+                                            let body = BulkSetUsSmsProviderRequest {
+                                                pin_to_telnyx: next_pin_to_telnyx,
+                                            };
+                                            let result = Api::post("/api/admin/bulk-set-us-sms-provider")
+                                                .json(&body)
+                                                .unwrap()
+                                                .send()
+                                                .await;
+                                            match result {
+                                                Ok(response) if response.ok() => {
+                                                    if let Ok(refreshed) = Api::get("/api/admin/us-sms-provider-status")
+                                                        .send()
+                                                        .await
+                                                    {
+                                                        if let Ok(data) = refreshed.json::<UsSmsProviderStatus>().await {
+                                                            us_sms_status.set(Some(data));
+                                                        }
+                                                    }
+                                                    sms_toggle_status_msg.set(Some(
+                                                        if next_pin_to_telnyx {
+                                                            "Pinned US users to Telnyx".to_string()
+                                                        } else {
+                                                            "Cleared US pins; routing via Twilio default".to_string()
+                                                        },
+                                                    ));
+                                                }
+                                                Ok(_) => sms_toggle_status_msg
+                                                    .set(Some("Server rejected the request".to_string())),
+                                                Err(_) => sms_toggle_status_msg
+                                                    .set(Some("Network error".to_string())),
+                                            }
+                                            sms_toggle_in_flight.set(false);
+                                        });
+                                    })
+                                };
+                                html! {
+                                    <div class="collapsible-content">
+                                        <p>{"Current state: "}<strong>{state_label}</strong></p>
+                                        <p style="opacity: 0.7;">{counts_line}</p>
+                                        {
+                                            if mixed {
+                                                html! {
+                                                    <p style="color: #f5a623;">
+                                                        {"State is mixed (partial pin). The button below pins everyone to Telnyx; click twice to flip back."}
+                                                    </p>
+                                                }
+                                            } else { html! {} }
+                                        }
+                                        <button
+                                            class="broadcast-button email"
+                                            disabled={in_flight || us_sms_status.is_none()}
+                                            {onclick}
+                                        >
+                                            {if in_flight { "Working..." } else { action_label }}
+                                        </button>
+                                        {
+                                            if let Some(msg) = &*sms_toggle_status_msg {
+                                                html! { <p style="margin-top: 8px;">{msg}</p> }
+                                            } else { html! {} }
+                                        }
                                     </div>
                                 }
                             } else {

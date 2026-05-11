@@ -768,6 +768,79 @@ pub async fn set_user_preferred_sms_provider(
     Ok(Json(json!({"success": true, "provider": req.provider})))
 }
 
+/// GET /api/admin/us-sms-provider-status
+///
+/// Powers the admin toggle for flipping all US users between Twilio
+/// (default routing, NULL pin) and Telnyx (explicit pin). Returns:
+///   - `total_us`: every user with a +1 phone number
+///   - `on_telnyx`: subset currently pinned to telnyx
+///
+/// State the UI derives:
+///   - `on_telnyx == total_us` and total > 0: "Telnyx" (toggle on)
+///   - `on_telnyx == 0`:                       "Twilio default" (toggle off)
+///   - anything else:                          "Mixed"
+pub async fn get_us_sms_provider_status(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let (total_us, on_telnyx) = state.user_core.count_us_users_by_pin().map_err(|e| {
+        tracing::error!("Failed to count US users by pin: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+    Ok(Json(json!({
+        "total_us": total_us,
+        "on_telnyx": on_telnyx,
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct BulkSetUsSmsProviderRequest {
+    /// `true`  -> pin every +1 user to telnyx (emergency override)
+    /// `false` -> clear pins on +1 users (revert to default Twilio)
+    pub pin_to_telnyx: bool,
+}
+
+/// POST /api/admin/bulk-set-us-sms-provider
+///
+/// Flip every +1 user between "pinned to Telnyx" and "default routing".
+/// Use this when Twilio US degrades (pin Telnyx) and when it recovers
+/// (clear pins). Idempotent; safe to click twice. Non-US users and any
+/// manual non-telnyx pins on US users are clobbered when pinning, but
+/// that is the intended behavior of the panic button.
+pub async fn bulk_set_us_sms_provider(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<BulkSetUsSmsProviderRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let target: Option<String> = if req.pin_to_telnyx {
+        Some("telnyx".to_string())
+    } else {
+        None
+    };
+    let affected = state
+        .user_core
+        .bulk_set_us_sms_provider(target.clone())
+        .map_err(|e| {
+            tracing::error!("Failed to bulk-set US SMS provider: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+
+    tracing::info!(
+        "Bulk-set US SMS provider to {:?}; rows affected = {}",
+        target,
+        affected
+    );
+    Ok(Json(json!({
+        "success": true,
+        "pinned_to_telnyx": req.pin_to_telnyx,
+        "affected": affected,
+    })))
+}
+
 /// Response for message stats endpoint
 #[derive(Serialize)]
 pub struct MessageStatsResponse {

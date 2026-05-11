@@ -1127,6 +1127,17 @@ pub mod mock_user_core {
             Ok(())
         }
 
+        fn count_us_users_by_pin(&self) -> Result<(i64, i64), DieselError> {
+            Ok((0, 0))
+        }
+
+        fn bulk_set_us_sms_provider(
+            &self,
+            _provider: Option<String>,
+        ) -> Result<usize, DieselError> {
+            Ok(0)
+        }
+
         fn get_critical_notification_info(
             &self,
             _user_id: i32,

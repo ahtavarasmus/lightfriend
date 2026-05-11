@@ -775,6 +775,14 @@ async fn main() {
             post(admin_handlers::set_user_preferred_sms_provider),
         )
         .route(
+            "/api/admin/us-sms-provider-status",
+            get(admin_handlers::get_us_sms_provider_status),
+        )
+        .route(
+            "/api/admin/bulk-set-us-sms-provider",
+            post(admin_handlers::bulk_set_us_sms_provider),
+        )
+        .route(
             "/api/admin/users/{user_id}/message-stats",
             get(admin_handlers::get_user_message_stats),
         )

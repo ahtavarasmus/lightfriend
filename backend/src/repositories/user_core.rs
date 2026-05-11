@@ -184,6 +184,17 @@ pub trait UserCoreOps: Send + Sync {
         provider: Option<String>,
     ) -> Result<(), DieselError>;
 
+    /// Count US (+1) users by their `preferred_sms_provider` pin state.
+    /// Powers the admin toggle that flips all US users between Twilio
+    /// (default, NULL) and Telnyx (explicit pin).
+    fn count_us_users_by_pin(&self) -> Result<(i64, i64), DieselError>;
+
+    /// Bulk-set `preferred_sms_provider` for every US (+1) user. Pass
+    /// `None` to clear pins (fall back to country-based routing) or
+    /// `Some("telnyx")` to pin everyone to Telnyx. Returns the number
+    /// of rows updated.
+    fn bulk_set_us_sms_provider(&self, provider: Option<String>) -> Result<usize, DieselError>;
+
     // Complex notification info
     fn get_critical_notification_info(
         &self,
@@ -1155,6 +1166,28 @@ impl UserCoreOps for UserCore {
             .set(users::preferred_sms_provider.eq(provider))
             .execute(&mut pg_conn)?;
         Ok(())
+    }
+
+    fn count_us_users_by_pin(&self) -> Result<(i64, i64), DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        let total: i64 = users::table
+            .filter(users::phone_number.like("+1%"))
+            .count()
+            .get_result(&mut pg_conn)?;
+        let on_telnyx: i64 = users::table
+            .filter(users::phone_number.like("+1%"))
+            .filter(users::preferred_sms_provider.eq("telnyx"))
+            .count()
+            .get_result(&mut pg_conn)?;
+        Ok((total, on_telnyx))
+    }
+
+    fn bulk_set_us_sms_provider(&self, provider: Option<String>) -> Result<usize, DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        let affected = diesel::update(users::table.filter(users::phone_number.like("+1%")))
+            .set(users::preferred_sms_provider.eq(provider))
+            .execute(&mut pg_conn)?;
+        Ok(affected)
     }
 
     fn get_call_notify(&self, user_id: i32) -> Result<bool, DieselError> {
