@@ -216,7 +216,8 @@ pub fn Home() -> Html {
                             @media (max-width: 768px) {
                                 .dashboard-container {
                                     height: auto;
-                                    overflow: auto;
+                                    overflow-y: auto;
+                                    overflow-x: hidden;
                                 }
                             }
                             .panel-title {

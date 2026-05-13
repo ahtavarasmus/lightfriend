@@ -641,24 +641,26 @@ const DASHBOARD_STYLES: &str = r#"
 /* ---- Responsive: single column on mobile ---- */
 @media (max-width: 768px) {
     .palantir-dashboard {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
         grid-template-rows: auto;
         grid-template-areas:
             "left"
             "right"
             "footer";
         height: auto;
-        overflow: auto;
+        overflow: hidden;
     }
     .panel-left {
         border-right: none;
         height: auto;
         overflow-y: visible;
+        min-width: 0;
     }
     .panel-right {
         grid-row: auto;
         height: auto;
         overflow: visible;
+        min-width: 0;
     }
     .panel-right-rules {
         flex-direction: column;
@@ -667,6 +669,9 @@ const DASHBOARD_STYLES: &str = r#"
     }
     .panel-right-activity {
         max-height: 60vh;
+    }
+    .cards-row {
+        flex-direction: column;
     }
     .sidebar-footer {
         border-right: none;
