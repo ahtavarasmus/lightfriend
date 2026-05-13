@@ -670,17 +670,14 @@ fn render_entry(
                                 <pre style="font-size: 0.7rem; color: #888; white-space: pre-wrap; word-break: break-word; margin: 0; max-height: 150px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 0.4rem; border-radius: 4px;">{result}</pre>
                             </div>
                         }
-                        // Commitment-detection (tracking) prompt + result
+                        // Commitment-detection (tracking) - structured per-pass display
+                        if let Some(ref result) = entry.commitment_result {
+                            { render_tracking_envelope(result) }
+                        }
                         if let Some(ref prompt) = entry.commitment_prompt {
                             <div class="feed-expanded-row" style="flex-direction: column; gap: 0.25rem;">
-                                <span class="feed-expanded-label">{"Tracking Prompt"}</span>
+                                <span class="feed-expanded-label">{"Tracking Prompt (raw)"}</span>
                                 <pre style="font-size: 0.7rem; color: #888; white-space: pre-wrap; word-break: break-word; margin: 0; max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 0.4rem; border-radius: 4px;">{prompt}</pre>
-                            </div>
-                        }
-                        if let Some(ref result) = entry.commitment_result {
-                            <div class="feed-expanded-row" style="flex-direction: column; gap: 0.25rem;">
-                                <span class="feed-expanded-label">{"Tracking Result"}</span>
-                                <pre style="font-size: 0.7rem; color: #888; white-space: pre-wrap; word-break: break-word; margin: 0; max-height: 150px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 0.4rem; border-radius: 4px;">{result}</pre>
                             </div>
                         }
                         // Tracked item actions (dismiss / confirm)
@@ -737,6 +734,125 @@ fn render_entry(
             </div>
             <div class="feed-time">{time_str}</div>
         </div>
+    }
+}
+
+/// Renders the tracking-envelope JSON as three labeled per-pass cards
+/// (Gate / Extraction / Routing). Falls back to a raw <pre> dump if the
+/// payload isn't parseable as our expected envelope shape.
+fn render_tracking_envelope(raw: &str) -> Html {
+    let parsed: Option<serde_json::Value> = serde_json::from_str(raw).ok();
+
+    let Some(env) = parsed else {
+        return html! {
+            <div class="feed-expanded-row" style="flex-direction: column; gap: 0.25rem;">
+                <span class="feed-expanded-label">{"Tracking Result (unparseable)"}</span>
+                <pre style="font-size: 0.7rem; color: #888; white-space: pre-wrap; word-break: break-word; margin: 0; max-height: 150px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 0.4rem; border-radius: 4px;">{raw}</pre>
+            </div>
+        };
+    };
+
+    let gate = env.get("gate");
+    let extraction = env.get("extraction");
+    let routing = env.get("routing");
+
+    html! {
+        <>
+            { render_pass_card("Pass 1 - Gate", gate, "#7EB2FF") }
+            { render_pass_card("Pass 2 - Extraction", extraction, "#a78bfa") }
+            { render_pass_card("Pass 3 - Routing", routing, "#4ade80") }
+        </>
+    }
+}
+
+fn render_pass_card(
+    label: &str,
+    value: Option<&serde_json::Value>,
+    accent: &str,
+) -> Html {
+    let val = match value {
+        Some(v) if !v.is_null() => v,
+        _ => {
+            return html! {
+                <div class="feed-expanded-row" style="flex-direction: column; gap: 0.25rem;">
+                    <span class="feed-expanded-label" style={format!("color: {};", accent)}>{label}</span>
+                    <div style="font-size: 0.7rem; color: #666; padding: 0.3rem 0.4rem; background: rgba(0,0,0,0.15); border-radius: 4px; border-left: 2px solid #444;">
+                        {"(did not run)"}
+                    </div>
+                </div>
+            };
+        }
+    };
+
+    // Pull a one-line headline from common shapes so the user can scan fast.
+    let headline = pass_headline(label, val);
+
+    let rows: Vec<Html> = if let Some(obj) = val.as_object() {
+        obj.iter()
+            .map(|(k, v)| {
+                let v_str = match v {
+                    serde_json::Value::String(s) => s.clone(),
+                    serde_json::Value::Null => "null".to_string(),
+                    other => other.to_string(),
+                };
+                html! {
+                    <div style="display: flex; gap: 0.5rem; font-size: 0.7rem; line-height: 1.4;">
+                        <span style="color: #888; min-width: 130px;">{k.clone()}</span>
+                        <span style="color: #ddd; word-break: break-word; flex: 1;">{v_str}</span>
+                    </div>
+                }
+            })
+            .collect()
+    } else {
+        vec![html! {
+            <pre style="font-size: 0.7rem; color: #ddd; white-space: pre-wrap; word-break: break-word; margin: 0;">
+                {val.to_string()}
+            </pre>
+        }]
+    };
+
+    html! {
+        <div class="feed-expanded-row" style="flex-direction: column; gap: 0.25rem;">
+            <span class="feed-expanded-label" style={format!("color: {};", accent)}>
+                {label}
+                if !headline.is_empty() {
+                    <span style="color: #888; font-weight: normal; margin-left: 0.4rem;">{format!("- {}", headline)}</span>
+                }
+            </span>
+            <div style={format!("padding: 0.4rem 0.5rem; background: rgba(0,0,0,0.2); border-radius: 4px; border-left: 2px solid {};", accent)}>
+                { for rows }
+            </div>
+        </div>
+    }
+}
+
+fn pass_headline(label: &str, val: &serde_json::Value) -> String {
+    if label.starts_with("Pass 1") {
+        match val.get("relevant").and_then(|v| v.as_bool()) {
+            Some(true) => "relevant".to_string(),
+            Some(false) => "not relevant".to_string(),
+            None => String::new(),
+        }
+    } else if label.starts_with("Pass 2") {
+        let has = val.get("has_commitment").and_then(|v| v.as_bool()).unwrap_or(false);
+        if !has {
+            "no commitment".to_string()
+        } else {
+            let t = val.get("commitment_type").and_then(|v| v.as_str()).unwrap_or("?");
+            let c = val.get("confidence").and_then(|v| v.as_str()).unwrap_or("?");
+            format!("{} (confidence: {})", t, c)
+        }
+    } else if label.starts_with("Pass 3") {
+        let action = val.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+        if let Some(eid) = val.get("event_id").and_then(|v| v.as_i64()) {
+            format!("{} event #{}", action, eid)
+        } else if let Some(reason) = val.get("reason").and_then(|v| v.as_str()) {
+            format!("{} ({})", action, reason)
+        } else {
+            action.to_string()
+        }
+    } else {
+        String::new()
     }
 }
 

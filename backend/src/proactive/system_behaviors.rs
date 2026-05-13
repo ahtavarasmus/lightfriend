@@ -932,23 +932,41 @@ pub async fn run_commitment_detection(
         format!("Existing tracked items:\n{}", items.join("\n"))
     };
 
-    // Single LLM call: detect + extract in one shot
+    // Pass 2 prompt: extraction-framed (Palantir-style). Asks the model to
+    // produce a structured Obligation; if none is present, return
+    // has_commitment=false. All other fields are required - the model MUST
+    // fill them with valid values OR set has_commitment=false. This prevents
+    // the silent-skip path where has_commitment=true but description is empty.
+    let tz_label = ctx
+        .timezone
+        .as_ref()
+        .map(|t| format!("{} {}", t.tz_str, t.offset_string))
+        .unwrap_or_else(|| "UTC".to_string());
     let system_prompt = format!(
-        "You are analyzing a message for commitments or obligations.\n\
-        Current time: {}\n\
-        Sender: {}\n\
+        "You extract structured Obligation entities from a chat message.\n\
+        \n\
+        Current time: {} ({})\n\
+        Sender of the message under evaluation: {}\n\
+        \"You\" in the conversation refers to the user this assistant works for.\n\
         \n\
         {}\n\
         \n\
-        Detect if the latest message contains a concrete commitment, obligation, or completion signal.\n\
-        - Commitments TO the user: someone promised to do something (send invoice, call back, deliver)\n\
-        - Commitments BY the user: user promised to do something (pay, book, confirm, follow up)\n\
-        - Completion signals: past-tense indication that a tracked item is done\n\
-        - Deadline updates: changes to an existing tracked item's timeline\n\
+        An Obligation is a specific, actionable thing the user could forget about. Categories:\n\
+        - commitment_to_user: the sender (or another non-user party) promised to do something for the user (send invoice, deliver, call back).\n\
+        - commitment_by_user: the user promised to do something (pay, book, confirm, follow up, buy).\n\
+        - completion_signal: a past-tense indication that one of the existing tracked items is now done.\n\
+        - deadline_update: a change to an existing tracked item's timeline.\n\
         \n\
-        Only track specific, actionable obligations the user could forget. \
-        Not vague intentions or past-tense actions already completed.",
-        now_formatted, sender_name, events_context
+        Decision rules:\n\
+        1. If the latest message contains no concrete actionable obligation, return has_commitment=false and STOP. Leave description empty.\n\
+        2. If it DOES, you MUST fill ALL of: commitment_type, description, who, confidence. description must be a short imperative phrase (\"Buy hat from seller\", \"Pay invoice\", \"Send project files\") - never empty when has_commitment=true.\n\
+        3. who is strictly \"sender\" or \"user\". \"sender\" means the message sender. \"user\" means the user this assistant works for. Never free-form.\n\
+        4. deadline must be RFC 3339 in the timezone shown above, or null.\n\
+        5. existing_match_id is the integer id from the \"Existing tracked items\" list above, or null if this is a new obligation.\n\
+        6. Works in any language. Conditional commitments (\"if X then I'll buy Friday\") still count.\n\
+        \n\
+        Bias: when in doubt about description specificity, write a best-guess imperative phrase rather than leaving it empty.",
+        now_formatted, tz_label, sender_name, events_context
     );
 
     let mut properties = HashMap::new();
@@ -1039,14 +1057,29 @@ pub async fn run_commitment_detection(
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),
-                required: Some(vec!["has_commitment".to_string()]),
+                // All structural fields are required - the model MUST fill
+                // them with valid values OR set has_commitment=false. This
+                // prevents the silent-skip path where has_commitment=true
+                // but description is empty.
+                required: Some(vec![
+                    "has_commitment".to_string(),
+                    "commitment_type".to_string(),
+                    "description".to_string(),
+                    "who".to_string(),
+                    "confidence".to_string(),
+                ]),
             },
         },
     };
 
+    // Pass 2 uses the Default (stronger) model for structured extraction.
+    // The Voice model breaks the schema on this task - returning freeform
+    // text in enum fields, omitting required fields. Pass 1 already filtered
+    // out small talk, so we only pay the bigger model on signal-bearing
+    // messages.
     let classification_model = state
         .ai_config
-        .model(ctx.provider, crate::ModelPurpose::Voice)
+        .model(ctx.provider, crate::ModelPurpose::Default)
         .to_string();
 
     let messages = vec![
@@ -1090,6 +1123,35 @@ pub async fn run_commitment_detection(
         &result,
     );
 
+    // Build the gate JSON value once - reused across every envelope write.
+    let gate_json = serde_json::from_str::<serde_json::Value>(&gate_raw)
+        .unwrap_or(serde_json::Value::String(gate_raw.clone()));
+    let combined_prompt = format!("<Pass 2 extraction>\n{}", system_prompt);
+
+    // Helper: persist the full envelope at any decision point. Captures
+    // gate + extraction + Pass 3 routing decision so the activity feed shows
+    // the complete trace for every message, including ones we silently skipped.
+    let persist_envelope = |extraction: serde_json::Value, routing: serde_json::Value| {
+        if let Some(mid) = message_id {
+            let envelope = serde_json::json!({
+                "gate": gate_json.clone(),
+                "extraction": extraction,
+                "routing": routing,
+            });
+            if let Err(e) = state.ontology_repository.update_message_commitment(
+                mid,
+                Some(&combined_prompt),
+                Some(&envelope.to_string()),
+            ) {
+                tracing::warn!(
+                    "Failed to persist commitment result on message {}: {}",
+                    mid,
+                    e
+                );
+            }
+        }
+    };
+
     let choice = match result.choices.first() {
         Some(c) => c,
         None => {
@@ -1097,137 +1159,133 @@ pub async fn run_commitment_detection(
                 "commitment_detection user={} llm returned no choices",
                 user_id
             );
+            persist_envelope(
+                serde_json::Value::Null,
+                serde_json::json!({"action": "skipped", "reason": "no_llm_choices"}),
+            );
             return Ok(());
         }
     };
 
-    // Persist Pass 1 gate + Pass 2 extraction on the message for activity-feed
-    // transparency. We do this regardless of has_commitment so the feed shows
-    // every decision.
-    if let Some(mid) = message_id {
-        let extraction_raw = if let Some(ref tcs) = choice.message.tool_calls {
-            tcs.iter()
-                .find(|tc| tc.function.name.as_deref() == Some("commitment_result"))
-                .and_then(|tc| tc.function.arguments.clone())
-        } else {
-            choice.message.content.clone()
-        };
-        let extraction_json = extraction_raw
-            .as_deref()
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-            .unwrap_or(serde_json::Value::Null);
-        let gate_json = serde_json::from_str::<serde_json::Value>(&gate_raw)
-            .unwrap_or(serde_json::Value::String(gate_raw.clone()));
-        let envelope = serde_json::json!({
-            "gate": gate_json,
-            "extraction": extraction_json,
-        });
-        let combined_prompt = format!("<Pass 2 extraction>\n{}", system_prompt);
-        if let Err(e) = state.ontology_repository.update_message_commitment(
-            mid,
-            Some(&combined_prompt),
-            Some(&envelope.to_string()),
-        ) {
-            tracing::warn!(
-                "Failed to persist commitment result on message {}: {}",
-                mid,
-                e
-            );
-        }
-    }
+    let extraction_raw = if let Some(ref tcs) = choice.message.tool_calls {
+        tcs.iter()
+            .find(|tc| tc.function.name.as_deref() == Some("commitment_result"))
+            .and_then(|tc| tc.function.arguments.clone())
+    } else {
+        choice.message.content.clone()
+    };
+    let extraction_json = extraction_raw
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .unwrap_or(serde_json::Value::Null);
 
-    if choice.message.tool_calls.is_none() {
-        info!(
-            "commitment_detection user={} llm returned no tool_calls (text content present)",
-            user_id
-        );
-    }
-
-    if let Some(ref tool_calls) = choice.message.tool_calls {
-        for tc in tool_calls {
-            if tc.function.name.as_deref() != Some("commitment_result") {
-                continue;
-            }
-            let args = tc.function.arguments.as_deref().unwrap_or("{}");
-            let parsed: serde_json::Value = match serde_json::from_str(args) {
-                Ok(v) => v,
-                Err(e) => {
-                    info!(
-                        "commitment_detection user={} failed to parse tool args: {} (raw={})",
-                        user_id, e, args
-                    );
-                    continue;
-                }
-            };
-
-            let has_commitment = parsed
-                .get("has_commitment")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-
-            if !has_commitment {
-                info!(
-                    "commitment_detection user={} llm said no commitment (platform={} sender={} preview={:?})",
-                    user_id, platform, sender_name, content_preview
-                );
-                return Ok(());
-            }
-
-            let commitment_type = parsed
-                .get("commitment_type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("commitment_by_user");
-            let description = parsed
-                .get("description")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let deadline_str = parsed.get("deadline").and_then(|v| v.as_str());
-            let existing_match_id = parsed
-                .get("existing_match_id")
-                .and_then(|v| v.as_i64())
-                .map(|v| v as i32);
-
-            if description.is_empty() && commitment_type != "completion_signal" {
-                info!(
-                    "commitment_detection user={} llm has_commitment=true but empty description (type={})",
-                    user_id, commitment_type
-                );
-                continue;
-            }
-
+    let tool_calls = match choice.message.tool_calls.as_ref() {
+        Some(tcs) if !tcs.is_empty() => tcs,
+        _ => {
             info!(
-                "commitment_detection user={} has_commitment=true type={} desc={:?} match_id={:?}",
-                user_id, commitment_type, description, existing_match_id
+                "commitment_detection user={} llm returned no tool_calls (text content present)",
+                user_id
             );
+            persist_envelope(
+                extraction_json.clone(),
+                serde_json::json!({"action": "skipped", "reason": "no_tool_calls"}),
+            );
+            return Ok(());
+        }
+    };
 
-            let deadline_ts = deadline_str.and_then(|s| {
-                chrono::DateTime::parse_from_rfc3339(s)
-                    .ok()
-                    .map(|dt| dt.timestamp() as i32)
+    let mut routing: serde_json::Value =
+        serde_json::json!({"action": "skipped", "reason": "no_matching_tool_call"});
+
+    for tc in tool_calls {
+        if tc.function.name.as_deref() != Some("commitment_result") {
+            continue;
+        }
+        let args = tc.function.arguments.as_deref().unwrap_or("{}");
+        let parsed: serde_json::Value = match serde_json::from_str(args) {
+            Ok(v) => v,
+            Err(e) => {
+                info!(
+                    "commitment_detection user={} failed to parse tool args: {} (raw={})",
+                    user_id, e, args
+                );
+                routing = serde_json::json!({
+                    "action": "skipped",
+                    "reason": "tool_args_unparseable",
+                    "error": e.to_string(),
+                });
+                continue;
+            }
+        };
+
+        let has_commitment = parsed
+            .get("has_commitment")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        if !has_commitment {
+            info!(
+                "commitment_detection user={} llm said no commitment (platform={} sender={} preview={:?})",
+                user_id, platform, sender_name, content_preview
+            );
+            routing = serde_json::json!({"action": "skipped", "reason": "has_commitment_false"});
+            break;
+        }
+
+        let commitment_type = parsed
+            .get("commitment_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("commitment_by_user");
+        let description = parsed
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let deadline_str = parsed.get("deadline").and_then(|v| v.as_str());
+        let existing_match_id = parsed
+            .get("existing_match_id")
+            .and_then(|v| v.as_i64())
+            .map(|v| v as i32);
+
+        if description.is_empty() && commitment_type != "completion_signal" {
+            info!(
+                "commitment_detection user={} llm has_commitment=true but empty description (type={})",
+                user_id, commitment_type
+            );
+            routing = serde_json::json!({
+                "action": "skipped",
+                "reason": "empty_description",
+                "commitment_type": commitment_type,
             });
-            let due_at = deadline_ts;
-            let remind_at = deadline_ts.map(|d| (d - 86400).max(now));
+            continue;
+        }
 
-            let valid_ids: std::collections::HashSet<i32> =
-                active_events.iter().map(|e| e.id).collect();
+        info!(
+            "commitment_detection user={} has_commitment=true type={} desc={:?} match_id={:?}",
+            user_id, commitment_type, description, existing_match_id
+        );
 
-            match commitment_type {
-                "completion_signal" => {
-                    // Mark matching event as completed
-                    if let Some(event_id) = existing_match_id {
-                        if valid_ids.contains(&event_id) {
-                            if let Err(e) = state.ontology_repository.update_event_status(
-                                user_id,
-                                event_id,
-                                "completed",
-                            ) {
-                                tracing::warn!(
-                                    "Failed to mark event {} completed: {}",
-                                    event_id,
-                                    e
-                                );
-                            } else {
+        let deadline_ts = deadline_str.and_then(|s| {
+            chrono::DateTime::parse_from_rfc3339(s)
+                .ok()
+                .map(|dt| dt.timestamp() as i32)
+        });
+        let due_at = deadline_ts;
+        let remind_at = deadline_ts.map(|d| (d - 86400).max(now));
+
+        let valid_ids: std::collections::HashSet<i32> =
+            active_events.iter().map(|e| e.id).collect();
+
+        match commitment_type {
+            "completion_signal" => {
+                routing = match existing_match_id {
+                    Some(event_id) if valid_ids.contains(&event_id) => {
+                        match state.ontology_repository.update_event_status(
+                            user_id,
+                            event_id,
+                            "completed",
+                        ) {
+                            Ok(_) => {
                                 if let Some(mid) = message_id {
                                     let _ = state.ontology_repository.create_link(
                                         user_id,
@@ -1248,30 +1306,53 @@ pub async fn run_commitment_detection(
                                     "Auto-completed event {} for user {}: {}",
                                     event_id, user_id, desc
                                 );
+                                serde_json::json!({
+                                    "action": "completed",
+                                    "event_id": event_id,
+                                })
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Failed to mark event {} completed: {}",
+                                    event_id,
+                                    e
+                                );
+                                serde_json::json!({
+                                    "action": "error",
+                                    "reason": "update_event_status_failed",
+                                    "error": e.to_string(),
+                                })
                             }
                         }
                     }
-                }
-                "deadline_update" => {
-                    if let Some(event_id) = existing_match_id {
-                        if valid_ids.contains(&event_id) {
-                            let old_event =
-                                state.ontology_repository.get_event(user_id, event_id).ok();
-                            let update_desc = if description.is_empty() {
-                                None
-                            } else {
-                                Some(format!("Update: {}", description))
-                            };
-                            if let Err(e) = state.ontology_repository.update_event(
-                                user_id,
-                                event_id,
-                                update_desc.as_deref(),
-                                None,
-                                remind_at,
-                                due_at,
-                            ) {
-                                tracing::warn!("Failed to update event {}: {}", event_id, e);
-                            } else {
+                    Some(_) => serde_json::json!({
+                        "action": "skipped",
+                        "reason": "existing_match_id_not_in_active_set",
+                    }),
+                    None => serde_json::json!({
+                        "action": "skipped",
+                        "reason": "completion_signal_without_match_id",
+                    }),
+                };
+            }
+            "deadline_update" => {
+                routing = match existing_match_id {
+                    Some(event_id) if valid_ids.contains(&event_id) => {
+                        let old_event = state.ontology_repository.get_event(user_id, event_id).ok();
+                        let update_desc = if description.is_empty() {
+                            None
+                        } else {
+                            Some(format!("Update: {}", description))
+                        };
+                        match state.ontology_repository.update_event(
+                            user_id,
+                            event_id,
+                            update_desc.as_deref(),
+                            None,
+                            remind_at,
+                            due_at,
+                        ) {
+                            Ok(_) => {
                                 if let Some(mid) = message_id {
                                     let _ = state.ontology_repository.create_link(
                                         user_id,
@@ -1283,7 +1364,6 @@ pub async fn run_commitment_detection(
                                         None,
                                     );
                                 }
-                                // Notify if deadline changed
                                 if let Some(old) = old_event {
                                     let old_due = old.due_at.unwrap_or(0);
                                     if let Some(new_due) = due_at {
@@ -1303,79 +1383,126 @@ pub async fn run_commitment_detection(
                                         }
                                     }
                                 }
+                                serde_json::json!({
+                                    "action": "deadline_updated",
+                                    "event_id": event_id,
+                                    "new_due_at": due_at,
+                                })
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to update event {}: {}", event_id, e);
+                                serde_json::json!({
+                                    "action": "error",
+                                    "reason": "update_event_failed",
+                                    "error": e.to_string(),
+                                })
                             }
                         }
                     }
-                }
-                _ => {
-                    // commitment_to_user or commitment_by_user
-                    if let Some(event_id) = existing_match_id {
-                        // Update existing event
-                        if valid_ids.contains(&event_id) {
-                            if let Err(e) = state.ontology_repository.update_event(
-                                user_id,
-                                event_id,
-                                Some(&format!("Update: {}", description)),
-                                None,
-                                remind_at,
-                                due_at,
-                            ) {
-                                tracing::warn!("Failed to update event {}: {}", event_id, e);
-                            } else if let Some(mid) = message_id {
-                                let _ = state.ontology_repository.create_link(
-                                    user_id,
-                                    "Event",
-                                    event_id,
-                                    "Message",
-                                    mid as i32,
-                                    "update_message",
-                                    None,
-                                );
-                            }
-                        }
-                    } else {
-                        // Create new event (always auto-confirm)
-                        let new_event = crate::models::ontology_models::NewOntEvent {
+                    Some(_) => serde_json::json!({
+                        "action": "skipped",
+                        "reason": "existing_match_id_not_in_active_set",
+                    }),
+                    None => serde_json::json!({
+                        "action": "skipped",
+                        "reason": "deadline_update_without_match_id",
+                    }),
+                };
+            }
+            _ => {
+                // commitment_to_user or commitment_by_user
+                routing = if let Some(event_id) = existing_match_id {
+                    if valid_ids.contains(&event_id) {
+                        match state.ontology_repository.update_event(
                             user_id,
-                            description: description.clone(),
+                            event_id,
+                            Some(&format!("Update: {}", description)),
+                            None,
                             remind_at,
                             due_at,
-                            status: "active".to_string(),
-                            created_at: now,
-                            updated_at: now,
-                        };
-                        match state.ontology_repository.create_event(&new_event) {
-                            Ok(created) => {
+                        ) {
+                            Ok(_) => {
                                 if let Some(mid) = message_id {
                                     let _ = state.ontology_repository.create_link(
                                         user_id,
                                         "Event",
-                                        created.id,
+                                        event_id,
                                         "Message",
                                         mid as i32,
-                                        "source_message",
+                                        "update_message",
                                         None,
                                     );
                                 }
-                                info!(
-                                    "Auto-created event {} for user {}: {}",
-                                    created.id, user_id, created.description
-                                );
+                                serde_json::json!({
+                                    "action": "updated",
+                                    "event_id": event_id,
+                                })
                             }
                             Err(e) => {
-                                tracing::warn!(
-                                    "Failed to create event for user {}: {}",
-                                    user_id,
-                                    e
-                                );
+                                tracing::warn!("Failed to update event {}: {}", event_id, e);
+                                serde_json::json!({
+                                    "action": "error",
+                                    "reason": "update_event_failed",
+                                    "error": e.to_string(),
+                                })
                             }
                         }
+                    } else {
+                        serde_json::json!({
+                            "action": "skipped",
+                            "reason": "existing_match_id_not_in_active_set",
+                        })
                     }
-                }
+                } else {
+                    let new_event = crate::models::ontology_models::NewOntEvent {
+                        user_id,
+                        description: description.clone(),
+                        remind_at,
+                        due_at,
+                        status: "active".to_string(),
+                        created_at: now,
+                        updated_at: now,
+                    };
+                    match state.ontology_repository.create_event(&new_event) {
+                        Ok(created) => {
+                            if let Some(mid) = message_id {
+                                let _ = state.ontology_repository.create_link(
+                                    user_id,
+                                    "Event",
+                                    created.id,
+                                    "Message",
+                                    mid as i32,
+                                    "source_message",
+                                    None,
+                                );
+                            }
+                            info!(
+                                "Auto-created event {} for user {}: {}",
+                                created.id, user_id, created.description
+                            );
+                            serde_json::json!({
+                                "action": "created",
+                                "event_id": created.id,
+                                "status": "active",
+                                "due_at": due_at,
+                            })
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to create event for user {}: {}", user_id, e);
+                            serde_json::json!({
+                                "action": "error",
+                                "reason": "create_event_failed",
+                                "error": e.to_string(),
+                            })
+                        }
+                    }
+                };
             }
         }
+        break;
     }
 
+    persist_envelope(extraction_json, routing);
     Ok(())
 }
 
