@@ -378,9 +378,12 @@ pub async fn send_sms_failure_admin_email(
 
     let error_code_str = error_code.unwrap_or("N/A");
     let error_message_str = error_message.unwrap_or("No error message provided");
+    let decoded_html = crate::utils::twilio_error_codes::render_context_html(error_code);
 
     let content = format!(
         r#"<p>An SMS delivery failure occurred:</p>
+
+        {decoded_html}
 
         <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
             <tr style="border-bottom: 1px solid #ddd;">
@@ -412,6 +415,7 @@ pub async fn send_sms_failure_admin_email(
         <p style="font-size: 14px; color: #666;">
             <a href="https://www.twilio.com/docs/api/errors/{error_code}" style="color: {blue};">View Twilio Error Documentation</a>
         </p>"#,
+        decoded_html = decoded_html,
         user_id = user_id,
         masked_number = masked_number,
         from_number = from_number,

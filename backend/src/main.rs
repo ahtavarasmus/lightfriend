@@ -636,6 +636,10 @@ async fn main() {
     // Public routes that don't need authentication. there's ratelimiting though
     let public_routes = Router::new()
         .route("/api/health", get(health_check))
+        .route(
+            "/api/health/deep",
+            get(handlers::health_handlers::deep_health),
+        )
         .route("/api/geo/country", get(geo_country))
         .route(
             "/.well-known/lightfriend/attestation",
@@ -1426,6 +1430,10 @@ async fn main() {
         .route(
             "/api/internal/recover-users",
             post(admin_handlers::recover_users_from_external),
+        )
+        .route(
+            "/api/internal/admin-alerts/digest",
+            get(handlers::health_handlers::alerts_digest),
         );
 
     let app = Router::new()

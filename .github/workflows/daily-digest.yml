@@ -1,0 +1,100 @@
+name: Daily Alert Digest
+
+# Once a day, pulls a 24h rollup of admin_alerts and failed SMS from the
+# backend, formats it as a single email, and ships it to the notify-server's
+# /digest endpoint (which sends via Resend).
+#
+# Rationale: instead of N individual "Failed to send SMS" emails per day,
+# get one digest with "12x 30007 (Carrier filtered), 3x 30033 (10DLC cap)".
+
+on:
+  schedule:
+    - cron: '0 7 * * *'  # 07:00 UTC = 09:00 Helsinki (winter) / 10:00 (DST)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull digest and ship
+        env:
+          SITE_URL: ${{ secrets.LIGHTFRIEND_URL }}
+          MAINTENANCE_SECRET: ${{ secrets.MAINTENANCE_SECRET }}
+          NOTIFY_SERVER_URL: ${{ secrets.NOTIFY_SERVER_URL }}
+          NOTIFY_SERVER_TOKEN: ${{ secrets.NOTIFY_SERVER_TOKEN }}
+        run: |
+          set -uo pipefail
+
+          SITE_URL="${SITE_URL:-https://lightfriend.ai}"
+          if [ -z "$MAINTENANCE_SECRET" ] || [ -z "$NOTIFY_SERVER_URL" ] || [ -z "$NOTIFY_SERVER_TOKEN" ]; then
+            echo "Missing required secrets (MAINTENANCE_SECRET / NOTIFY_SERVER_URL / NOTIFY_SERVER_TOKEN)"
+            exit 1
+          fi
+
+          echo "Fetching digest from $SITE_URL ..."
+          HTTP_CODE=$(curl -s -o /tmp/digest.json -w "%{http_code}" --max-time 30 \
+            -H "X-Maintenance-Secret: $MAINTENANCE_SECRET" \
+            -H "X-Period-Hours: 24" \
+            "$SITE_URL/api/internal/admin-alerts/digest" || echo "000")
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Digest endpoint returned HTTP $HTTP_CODE"
+            cat /tmp/digest.json 2>/dev/null || true
+            exit 1
+          fi
+
+          # ── Format plain-text digest ──
+          DATE=$(date -u +"%Y-%m-%d")
+          TOTAL_ALERTS=$(jq -r '.admin_alerts_total' /tmp/digest.json)
+          TOTAL_SMS=$(jq -r '.failed_sms_total' /tmp/digest.json)
+
+          {
+            echo "Lightfriend daily digest — last 24h"
+            echo "Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+            echo ""
+            echo "=== Admin alerts: $TOTAL_ALERTS ==="
+            if [ "$TOTAL_ALERTS" = "0" ]; then
+              echo "(none)"
+            else
+              jq -r '.admin_alerts[] | "  \(.count)x [\(.severity)] \(.alert_type)"' /tmp/digest.json
+            fi
+            echo ""
+            echo "=== Failed SMS: $TOTAL_SMS ==="
+            if [ "$TOTAL_SMS" = "0" ]; then
+              echo "(none)"
+            else
+              jq -r '.failed_sms[] | "  \(.count)x \(.error_code): \(.decoded_title)"' /tmp/digest.json
+            fi
+            echo ""
+            echo "---"
+            echo "Source: $SITE_URL/api/internal/admin-alerts/digest"
+          } > /tmp/digest.txt
+
+          echo "--- Digest preview ---"
+          cat /tmp/digest.txt
+          echo "----------------------"
+
+          # ── Ship to notify-server ──
+          PLAIN_BODY=$(cat /tmp/digest.txt)
+          SUBJECT="Lightfriend daily digest — $DATE ($TOTAL_ALERTS alerts, $TOTAL_SMS failed SMS)"
+
+          PAYLOAD=$(jq -n \
+            --arg subject "$SUBJECT" \
+            --arg plain "$PLAIN_BODY" \
+            '{subject:$subject, plain_body:$plain}')
+
+          HTTP_CODE=$(curl -sS -o /tmp/notify.out -w "%{http_code}" --max-time 20 \
+            -X POST "${NOTIFY_SERVER_URL%/}/digest" \
+            -H "Authorization: Bearer $NOTIFY_SERVER_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data "$PAYLOAD" || echo "000")
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "notify-server /digest returned HTTP $HTTP_CODE"
+            cat /tmp/notify.out 2>/dev/null || true
+            exit 1
+          fi
+          echo "OK: digest delivered"

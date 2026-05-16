@@ -176,6 +176,23 @@ impl AdminAlertRepository {
         Ok(deleted)
     }
 
+    /// Count alerts of a given type since the given unix timestamp.
+    /// Used by rate-spike escalation to detect when the same alert is firing
+    /// abnormally often.
+    pub fn count_by_type_since(
+        &self,
+        alert_type: &str,
+        since_unix: i32,
+    ) -> Result<i64, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        admin_alerts::table
+            .filter(admin_alerts::alert_type.eq(alert_type))
+            .filter(admin_alerts::created_at.ge(since_unix))
+            .count()
+            .get_result(&mut conn)
+    }
+
     /// Get total count of alerts (optionally filtered by severity)
     pub fn get_total_count(&self, severity_filter: Option<&str>) -> Result<i64, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");

@@ -1,0 +1,121 @@
+name: External Watchdog
+
+# Hourly external probe of the live site. Hits the public homepage and the
+# deep health endpoint, parses the JSON, and pushes a Critical alert through
+# the Hetzner notify-server (SMS to admin) on any failure.
+#
+# This runs on GitHub's infrastructure so it keeps working even when the
+# enclave is fully down — the in-app admin_alert! path cannot reach you in
+# that case.
+
+on:
+  schedule:
+    - cron: '7 * * * *'  # Every hour at :07
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe lightfriend
+        env:
+          SITE_URL: ${{ secrets.LIGHTFRIEND_URL }}
+          MAINTENANCE_SECRET: ${{ secrets.MAINTENANCE_SECRET }}
+          NOTIFY_SERVER_URL: ${{ secrets.NOTIFY_SERVER_URL }}
+          NOTIFY_SERVER_TOKEN: ${{ secrets.NOTIFY_SERVER_TOKEN }}
+        run: |
+          set -uo pipefail
+
+          SITE_URL="${SITE_URL:-https://lightfriend.ai}"
+          FAILURES=""
+          DEGRADED=0
+
+          send_alert() {
+            local title="$1"
+            local body="$2"
+            local dedup="$3"
+            if [ -z "$NOTIFY_SERVER_URL" ] || [ -z "$NOTIFY_SERVER_TOKEN" ]; then
+              echo "WARN: NOTIFY_SERVER_URL/TOKEN unset; cannot push SMS alert"
+              echo "Title: $title"
+              echo "Body:  $body"
+              return
+            fi
+            curl -sS -X POST "${NOTIFY_SERVER_URL%/}/alert" \
+              -H "Authorization: Bearer $NOTIFY_SERVER_TOKEN" \
+              -H "Content-Type: application/json" \
+              --max-time 15 \
+              --data "$(jq -n \
+                --arg severity "critical" \
+                --arg title "$title" \
+                --arg body "$body" \
+                --arg dedup "$dedup" \
+                '{severity:$severity, title:$title, body:$body, dedup_key:$dedup}')" \
+              || echo "WARN: notify-server push failed"
+            echo ""
+          }
+
+          # ── Probe 1: homepage 200 ──
+          echo "Probing $SITE_URL/ ..."
+          HOMEPAGE_CODE=$(curl -s -o /tmp/homepage.html -w "%{http_code}" --max-time 15 "$SITE_URL/" || echo "000")
+          if [ "$HOMEPAGE_CODE" != "200" ]; then
+            FAILURES="${FAILURES}homepage: HTTP $HOMEPAGE_CODE\n"
+            DEGRADED=1
+          fi
+
+          # ── Probe 2: deep health ──
+          if [ -z "$MAINTENANCE_SECRET" ]; then
+            echo "WARN: MAINTENANCE_SECRET unset; cannot probe /api/health/deep"
+            FAILURES="${FAILURES}health: MAINTENANCE_SECRET missing in CI secrets\n"
+            DEGRADED=1
+          else
+            echo "Probing $SITE_URL/api/health/deep ..."
+            DEEP_CODE=$(curl -s -o /tmp/deep.json -w "%{http_code}" --max-time 20 \
+              -H "X-Maintenance-Secret: $MAINTENANCE_SECRET" \
+              "$SITE_URL/api/health/deep" || echo "000")
+
+            if [ "$DEEP_CODE" = "200" ] || [ "$DEEP_CODE" = "503" ]; then
+              # Parse component statuses
+              if ! jq empty /tmp/deep.json 2>/dev/null; then
+                FAILURES="${FAILURES}health: invalid JSON response (HTTP $DEEP_CODE)\n"
+                DEGRADED=1
+              else
+                OVERALL=$(jq -r '.overall // "unknown"' /tmp/deep.json)
+                echo "Overall: $OVERALL"
+                if [ "$OVERALL" != "ok" ]; then
+                  DEGRADED=1
+                  for comp in db matrix twilio telnyx resend; do
+                    VAL=$(jq -r ".$comp // \"missing\"" /tmp/deep.json)
+                    case "$VAL" in
+                      ok|not_configured) ;;
+                      *) FAILURES="${FAILURES}${comp}: $VAL\n" ;;
+                    esac
+                  done
+                fi
+              fi
+            else
+              FAILURES="${FAILURES}health: HTTP $DEEP_CODE from /api/health/deep\n"
+              DEGRADED=1
+            fi
+          fi
+
+          # ── Report ──
+          if [ "$DEGRADED" = "0" ]; then
+            echo "OK: lightfriend healthy"
+            exit 0
+          fi
+
+          echo -e "FAILURES:\n${FAILURES}"
+
+          # Dedup key includes the set of failing components so flapping a single
+          # component does not silence a new, different failure.
+          DEDUP_KEY="watchdog-$(echo -e "$FAILURES" | sort -u | sha256sum | awk '{print $1}' | cut -c1-12)"
+
+          BODY="External watchdog detected issues on $SITE_URL:\n\n$(echo -e "$FAILURES")\nProbed at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+          send_alert "Lightfriend external watchdog: degraded" "$BODY" "$DEDUP_KEY"
+
+          # Fail the workflow so it shows red in the Actions history
+          exit 1

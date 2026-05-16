@@ -9,6 +9,7 @@ pub mod handlers {
     pub mod billing_handlers;
     pub mod bridge_auth_common;
     pub mod dashboard_handlers;
+    pub mod health_handlers;
     pub mod imap_auth;
     pub mod imap_handlers;
     pub mod mcp_handlers;
@@ -60,6 +61,7 @@ pub mod utils {
     pub mod sms_sanitizer;
     pub mod tesla_keys;
     pub mod tool_exec;
+    pub mod twilio_error_codes;
     pub mod usage;
     pub mod webauthn_config;
 }

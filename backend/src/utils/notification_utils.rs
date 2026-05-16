@@ -226,6 +226,36 @@ async fn send_alert_with_context(
         cooldown_hours, severity
     ));
 
+    // Out-of-band SMS push for Critical alerts. Best-effort: if the notify-server
+    // is unreachable or unconfigured, fall through to email-only. The notify-server
+    // does its own dedup so a flapping alert source will not spam SMS.
+    if severity == AlertSeverity::Critical {
+        push_to_notify_server("critical", &subject, &body, &subject).await;
+    } else {
+        // Rate-spike escalation: if a non-Critical alert type has fired more than
+        // SPIKE_THRESHOLD times in the last hour, push one Critical SMS so the
+        // admin notices the volume even if individual alerts are only Warning/Error.
+        const SPIKE_THRESHOLD: i64 = 5;
+        let one_hour_ago = chrono::Utc::now().timestamp() as i32 - 3600;
+        if let Ok(count) = state
+            .admin_alert_repository
+            .count_by_type_since(&subject, one_hour_ago)
+        {
+            if count >= SPIKE_THRESHOLD {
+                let spike_title = format!("RATE SPIKE: {} ({} hits/hr)", subject, count);
+                let spike_body = format!(
+                    "Alert type '{}' fired {} times in the last hour (threshold {}). \
+                     Most recent alert body follows:\n\n{}",
+                    subject, count, SPIKE_THRESHOLD, body
+                );
+                // dedup_key namespaces spike alerts separately from the underlying
+                // alert; the notify-server's 1h Critical TTL prevents repeated SMS.
+                let spike_dedup = format!("rate-spike:{}", subject);
+                push_to_notify_server("critical", &spike_title, &spike_body, &spike_dedup).await;
+            }
+        }
+    }
+
     // Log the notification to prevent duplicate sends (for cooldown tracking)
     let _ = state.user_repository.log_usage(LogUsageParams {
         user_id: 1,
@@ -264,6 +294,68 @@ async fn send_alert_with_context(
         message
     );
     Ok(())
+}
+
+/// POST the alert to the out-of-band Hetzner notify-server. The server decides
+/// based on severity whether to SMS-push (Critical) or log only. Skipped
+/// silently if env vars are not configured. Errors are logged but do not abort
+/// the email path.
+async fn push_to_notify_server(severity: &str, title: &str, body: &str, dedup_key: &str) {
+    let url = match std::env::var("NOTIFY_SERVER_URL") {
+        Ok(u) if !u.is_empty() => u,
+        _ => {
+            tracing::debug!("NOTIFY_SERVER_URL not set; skipping notify-server push");
+            return;
+        }
+    };
+    let token = match std::env::var("NOTIFY_SERVER_TOKEN") {
+        Ok(t) if !t.is_empty() => t,
+        _ => {
+            tracing::warn!("NOTIFY_SERVER_URL set but NOTIFY_SERVER_TOKEN missing; skipping push");
+            return;
+        }
+    };
+
+    let endpoint = format!("{}/alert", url.trim_end_matches('/'));
+    let payload = serde_json::json!({
+        "severity": severity,
+        "title": title,
+        "body": body,
+        "dedup_key": dedup_key,
+    });
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("Failed to build http client for notify-server: {}", e);
+            return;
+        }
+    };
+
+    match client
+        .post(&endpoint)
+        .bearer_auth(&token)
+        .json(&payload)
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            tracing::info!("Pushed {} alert to notify-server: {}", severity, title);
+        }
+        Ok(resp) => {
+            tracing::warn!(
+                "notify-server returned {} for alert '{}'",
+                resp.status(),
+                title
+            );
+        }
+        Err(e) => {
+            tracing::warn!("Failed to POST to notify-server for '{}': {}", title, e);
+        }
+    }
 }
 
 // ============================================================================
