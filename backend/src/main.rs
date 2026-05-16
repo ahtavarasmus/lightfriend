@@ -1434,6 +1434,10 @@ async fn main() {
         .route(
             "/api/internal/admin-alerts/digest",
             get(handlers::health_handlers::alerts_digest),
+        )
+        .route(
+            "/api/internal/sms-failures/digest/send",
+            post(handlers::health_handlers::sms_failures_digest_send),
         );
 
     let app = Router::new()

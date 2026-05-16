@@ -300,7 +300,7 @@ async fn send_alert_with_context(
 /// based on severity whether to SMS-push (Critical) or log only. Skipped
 /// silently if env vars are not configured. Errors are logged but do not abort
 /// the email path.
-async fn push_to_notify_server(severity: &str, title: &str, body: &str, dedup_key: &str) {
+pub async fn push_to_notify_server(severity: &str, title: &str, body: &str, dedup_key: &str) {
     let url = match std::env::var("NOTIFY_SERVER_URL") {
         Ok(u) if !u.is_empty() => u,
         _ => {

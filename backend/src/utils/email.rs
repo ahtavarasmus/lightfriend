@@ -446,3 +446,170 @@ pub async fn send_sms_failure_admin_email(
 
     Ok(())
 }
+
+/// One row in the carrier-noise digest: a (error_code, to_number) pair and how
+/// many times it fired in the digest window.
+#[derive(Debug, Clone)]
+pub struct DigestRow {
+    pub error_code: Option<String>,
+    pub to_number: String,
+    pub count: i64,
+    pub last_at: i32,
+}
+
+/// Mask a phone number for display in the digest: keep the first 3 and last 4
+/// digits, replace the middle with stars. Mirrors the per-event email format.
+fn mask_phone(raw: &str) -> String {
+    let cleaned: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
+    if cleaned.len() <= 7 {
+        return "****".to_string();
+    }
+    let prefix = &cleaned[..3.min(cleaned.len())];
+    let suffix = &cleaned[cleaned.len().saturating_sub(4)..];
+    format!("{}****{}", prefix, suffix)
+}
+
+/// Send the 6h carrier-noise digest email. Subject line includes the affected
+/// (masked) numbers so the inbox preview already tells the story; body lists
+/// per-(code, number) counts with the decoded error title.
+///
+/// Skipped silently if there's nothing to report or Resend is not configured.
+pub async fn send_sms_failure_digest_email(
+    rows: &[DigestRow],
+    period_hours: i32,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if rows.is_empty() {
+        tracing::debug!(
+            "SMS failure digest: no rows in last {}h, skipping email",
+            period_hours
+        );
+        return Ok(());
+    }
+
+    let (resend, from_email, _reply_to) = match get_resend_config() {
+        Some(config) => config,
+        None => {
+            tracing::warn!("SMS failure digest NOT sent (RESEND_API_KEY not configured)");
+            return Ok(());
+        }
+    };
+
+    let admin_email =
+        std::env::var("ADMIN_EMAIL").unwrap_or_else(|_| "rasmus@lightfriend.ai".to_string());
+
+    // Aggregate counts per masked number for the subject line.
+    let mut per_number: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+    let mut total: i64 = 0;
+    for row in rows {
+        let masked = mask_phone(&row.to_number);
+        *per_number.entry(masked).or_insert(0) += row.count;
+        total += row.count;
+    }
+
+    // Order numbers by hit count, then alphabetically for stable subject lines.
+    let mut ordered_numbers: Vec<(String, i64)> = per_number.into_iter().collect();
+    ordered_numbers.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+
+    let max_in_subject = 4;
+    let shown: Vec<String> = ordered_numbers
+        .iter()
+        .take(max_in_subject)
+        .map(|(num, count)| {
+            if *count > 1 {
+                format!("{} x{}", num, count)
+            } else {
+                num.clone()
+            }
+        })
+        .collect();
+    let extra = ordered_numbers.len().saturating_sub(max_in_subject);
+    let numbers_blurb = if extra > 0 {
+        format!("{} +{} more", shown.join(", "), extra)
+    } else {
+        shown.join(", ")
+    };
+
+    let subject = format!(
+        "[{}h SMS digest] {} carrier-filtered ({})",
+        period_hours, total, numbers_blurb
+    );
+
+    // Body: one row per (error_code, to_number).
+    let mut body_rows = String::new();
+    for row in rows {
+        let code = row.error_code.as_deref().unwrap_or("unknown");
+        let decoded_title = crate::utils::twilio_error_codes::decode(code)
+            .map(|c| c.title.to_string())
+            .unwrap_or_else(|| "Unknown error code".to_string());
+        let masked = mask_phone(&row.to_number);
+        let last_at_human = chrono::DateTime::<chrono::Utc>::from_timestamp(row.last_at as i64, 0)
+            .map(|dt| dt.format("%Y-%m-%d %H:%M UTC").to_string())
+            .unwrap_or_else(|| row.last_at.to_string());
+        body_rows.push_str(&format!(
+            r#"<tr style="border-bottom: 1px solid #eee;">
+                <td style="padding: 8px 12px; font-family: monospace;">{code}</td>
+                <td style="padding: 8px 12px;">{title}</td>
+                <td style="padding: 8px 12px; font-family: monospace;">{number}</td>
+                <td style="padding: 8px 12px; text-align: right;">{count}</td>
+                <td style="padding: 8px 12px; color: #666; font-size: 12px;">{last_at}</td>
+            </tr>"#,
+            code = code,
+            title = decoded_title,
+            number = masked,
+            count = row.count,
+            last_at = last_at_human,
+        ));
+    }
+
+    let content = format!(
+        r#"<p>{total} carrier-filtered SMS deliveries in the last {period} hours. These are routine
+            failures driven by recipient carriers, not by anything Lightfriend can fix in real time
+            — they do NOT page the admin per-event. Actionable failures (account/config/code) bypass
+            this digest and SMS the admin immediately.</p>
+
+        <table style="width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 14px;">
+            <thead>
+                <tr style="background: #f5f5f5; text-align: left;">
+                    <th style="padding: 8px 12px;">Code</th>
+                    <th style="padding: 8px 12px;">Reason</th>
+                    <th style="padding: 8px 12px;">To (masked)</th>
+                    <th style="padding: 8px 12px; text-align: right;">Count</th>
+                    <th style="padding: 8px 12px;">Last seen</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows}
+            </tbody>
+        </table>
+
+        <p style="font-size: 12px; color: #888;">
+            Categorisation lives in <code>backend/src/utils/twilio_error_codes.rs</code>
+            (<code>ErrorCategory::CarrierNoise</code> vs <code>Actionable</code>). To flip a code's
+            routing, change its category there.
+        </p>"#,
+        total = total,
+        period = period_hours,
+        rows = body_rows,
+    );
+
+    let email_body = wrap_email_body(
+        &format!("{}h SMS carrier-filter digest", period_hours),
+        &content,
+        "Lightfriend System",
+    );
+
+    let from_with_name = format!("Lightfriend Alerts <{}>", from_email);
+    let email = CreateEmailBaseOptions::new(from_with_name, [admin_email.as_str()], &subject)
+        .with_html(&email_body);
+
+    resend.emails.send(email).await?;
+
+    tracing::info!(
+        "SMS failure digest email sent: {} rows, {} total failures over {}h",
+        rows.len(),
+        total,
+        period_hours
+    );
+
+    Ok(())
+}

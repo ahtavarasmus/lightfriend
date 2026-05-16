@@ -316,3 +316,131 @@ pub async fn alerts_digest(
             .into_response(),
     }
 }
+
+// ============================================================================
+// 6h SMS carrier-noise digest
+// ============================================================================
+
+#[derive(QueryableByName)]
+struct CarrierNoiseRow {
+    #[diesel(sql_type = Nullable<Text>)]
+    error_code: Option<String>,
+    #[diesel(sql_type = Text)]
+    to_number: String,
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    count: i64,
+    #[diesel(sql_type = Integer)]
+    last_at: i32,
+}
+
+/// Send the 6h carrier-noise digest email. Triggered by the cron GitHub Action.
+///
+/// Queries `message_status_log` for failed/undelivered rows in the last N hours
+/// (default 6, override via `X-Period-Hours`), filters to CarrierNoise codes,
+/// groups by (error_code, to_number), and ships a single email via Resend with
+/// the affected masked numbers in the subject line.
+pub async fn sms_failures_digest_send(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if !crate::handlers::maintenance_handlers::check_secret(&headers) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "forbidden"})),
+        )
+            .into_response();
+    }
+
+    let period_hours: i32 = headers
+        .get("X-Period-Hours")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(6);
+    let cutoff = chrono::Utc::now().timestamp() as i32 - period_hours * 3600;
+
+    // Pull all failed/undelivered rows in the window, grouped by (code, to).
+    let state_for_query = state.clone();
+    let rows_result =
+        tokio::task::spawn_blocking(move || -> Result<Vec<CarrierNoiseRow>, String> {
+            let mut conn = state_for_query
+                .pg_pool
+                .get()
+                .map_err(|e| format!("pool: {}", e))?;
+            let rows: Vec<CarrierNoiseRow> = diesel::sql_query(
+                "SELECT error_code, to_number, COUNT(*) AS count, MAX(created_at) AS last_at \
+             FROM message_status_log \
+             WHERE created_at >= $1 AND status IN ('failed', 'undelivered') \
+             GROUP BY error_code, to_number \
+             ORDER BY count DESC, last_at DESC",
+            )
+            .bind::<Integer, _>(cutoff)
+            .load(&mut conn)
+            .map_err(|e| format!("message_status_log query: {}", e))?;
+            Ok(rows)
+        })
+        .await;
+
+    let rows = match rows_result {
+        Ok(Ok(r)) => r,
+        Ok(Err(e)) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("join: {}", e)})),
+            )
+                .into_response();
+        }
+    };
+
+    // Filter to CarrierNoise codes only. Actionable codes are already SMS-pushed
+    // per-event; including them here would be double-reporting.
+    let digest_rows: Vec<crate::utils::email::DigestRow> = rows
+        .into_iter()
+        .filter(|r| !crate::utils::twilio_error_codes::is_actionable(r.error_code.as_deref()))
+        .map(|r| crate::utils::email::DigestRow {
+            error_code: r.error_code,
+            to_number: r.to_number,
+            count: r.count,
+            last_at: r.last_at,
+        })
+        .collect();
+
+    let row_count = digest_rows.len();
+    let total: i64 = digest_rows.iter().map(|r| r.count).sum();
+
+    if digest_rows.is_empty() {
+        return (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "sent": false,
+                "reason": "no carrier-noise failures in window",
+                "period_hours": period_hours,
+            })),
+        )
+            .into_response();
+    }
+
+    match crate::utils::email::send_sms_failure_digest_email(&digest_rows, period_hours).await {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "sent": true,
+                "period_hours": period_hours,
+                "rows": row_count,
+                "total_failures": total,
+            })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("send digest: {}", e)})),
+        )
+            .into_response(),
+    }
+}

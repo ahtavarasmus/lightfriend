@@ -1,0 +1,46 @@
+name: SMS carrier-noise digest (6h)
+
+# Every 6 hours, asks the backend to send a digest email of carrier-filtered
+# SMS failures (codes flagged as ErrorCategory::CarrierNoise in
+# backend/src/utils/twilio_error_codes.rs). Routine carrier blocks no longer
+# page the admin per-event; they bundle here. Actionable codes bypass this
+# digest and SMS the admin immediately at the time of failure.
+
+on:
+  schedule:
+    - cron: '13 */6 * * *'  # :13 past every 6th hour
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger digest send
+        env:
+          SITE_URL: ${{ secrets.LIGHTFRIEND_URL }}
+          MAINTENANCE_SECRET: ${{ secrets.MAINTENANCE_SECRET }}
+        run: |
+          set -uo pipefail
+
+          SITE_URL="${SITE_URL:-https://lightfriend.ai}"
+          if [ -z "$MAINTENANCE_SECRET" ]; then
+            echo "Missing MAINTENANCE_SECRET secret"
+            exit 1
+          fi
+
+          HTTP_CODE=$(curl -sS -o /tmp/out.json -w "%{http_code}" --max-time 30 \
+            -X POST \
+            -H "X-Maintenance-Secret: $MAINTENANCE_SECRET" \
+            -H "X-Period-Hours: 6" \
+            "$SITE_URL/api/internal/sms-failures/digest/send" || echo "000")
+
+          echo "HTTP $HTTP_CODE"
+          cat /tmp/out.json || true
+          echo
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            exit 1
+          fi

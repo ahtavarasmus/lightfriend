@@ -13,6 +13,8 @@ use crate::repositories::twilio_status_repository::{
 };
 use crate::utils::country::get_country_code_from_phone;
 use crate::utils::email::send_sms_failure_admin_email;
+use crate::utils::notification_utils::push_to_notify_server;
+use crate::utils::twilio_error_codes;
 
 /// Errors that can occur during status callback processing
 #[derive(Debug, Error)]
@@ -176,6 +178,13 @@ impl<R: TwilioStatusRepository + 'static, C: TwilioClient + 'static> TwilioStatu
     }
 
     /// Handle sending failure notification if message delivery failed.
+    ///
+    /// Routing:
+    /// - `CarrierNoise` codes (30007, 30008, 30033, etc.): completely silent.
+    ///   The row stays in `message_status_log` and surfaces in the 6h digest.
+    /// - `Actionable` codes (30001, 30002, 21211, etc.): per-event admin email
+    ///   AND a Critical push to notify-server (dedup-keyed by error_code so a
+    ///   burst across users doesn't spam SMS).
     async fn handle_failure_notification(&self, input: &StatusCallbackInput) -> bool {
         if !self.config.send_failure_notifications {
             return false;
@@ -183,6 +192,18 @@ impl<R: TwilioStatusRepository + 'static, C: TwilioClient + 'static> TwilioStatu
 
         let is_failure = input.message_status == "failed" || input.message_status == "undelivered";
         if !is_failure {
+            return false;
+        }
+
+        // Carrier-side filtering is routine noise. Skip the per-event admin
+        // email AND the SMS push — the 6h digest will report the aggregate.
+        if !twilio_error_codes::is_actionable(input.error_code.as_deref()) {
+            tracing::info!(
+                "SMS failure for sid={} error_code={:?} categorised as carrier noise; \
+                 deferred to digest",
+                input.message_sid,
+                input.error_code
+            );
             return false;
         }
 
@@ -217,8 +238,9 @@ impl<R: TwilioStatusRepository + 'static, C: TwilioClient + 'static> TwilioStatu
         let to_number = user_info.to_number.clone();
         let error_code = input.error_code.clone();
         let error_message = input.error_message.clone();
+        let message_sid = input.message_sid.clone();
 
-        // Spawn email sending to not block the webhook response
+        // Spawn email + SMS push so the webhook response is not blocked.
         tokio::spawn(async move {
             if let Err(e) = send_sms_failure_admin_email(
                 user_id,
@@ -232,6 +254,22 @@ impl<R: TwilioStatusRepository + 'static, C: TwilioClient + 'static> TwilioStatu
             {
                 tracing::error!("Failed to send SMS failure admin email: {}", e);
             }
+
+            // Page admin out-of-band. Dedup key is the error code only so all
+            // instances of e.g. 30001 across users collapse to one Critical SMS
+            // per hour (notify-server's 1h Critical TTL).
+            let code = error_code.as_deref().unwrap_or("unknown");
+            let title = format!("Actionable SMS failure (code {})", code);
+            let body = format!(
+                "SMS to user {} failed with code {}.\nCountry: {}\nMessageSid: {}\nError: {}",
+                user_id,
+                code,
+                country,
+                message_sid,
+                error_message.as_deref().unwrap_or("(none)"),
+            );
+            let dedup_key = format!("sms-actionable:{}", code);
+            push_to_notify_server("critical", &title, &body, &dedup_key).await;
         });
 
         true
