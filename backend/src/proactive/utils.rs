@@ -326,6 +326,84 @@ pub async fn send_notification_with_context(
     sms_delivered
 }
 
+/// Send SMS to an arbitrary phone (not necessarily a Lightfriend user).
+/// Credits are deducted from `from_user`. Used for the accountability-friend
+/// nudge, where the recipient has no account.
+pub async fn send_sms_to_external_phone(
+    state: &Arc<AppState>,
+    from_user: &crate::models::user_models::User,
+    phone: &str,
+    body: &str,
+) -> bool {
+    let body = crate::utils::sms_sanitizer::apply_sms_url_filter(body);
+    if body.trim().is_empty() {
+        tracing::error!(
+            "Refused to send empty accountability nudge from user {}",
+            from_user.id
+        );
+        return false;
+    }
+
+    if std::env::var("ENVIRONMENT").unwrap_or_default() == "development" {
+        tracing::info!(
+            "DEV: skipping accountability nudge from user {} to {}",
+            from_user.id,
+            phone
+        );
+        return true;
+    }
+
+    if let Err(e) =
+        crate::utils::usage::check_user_credits(state, from_user, "noti_msg", None).await
+    {
+        tracing::warn!(
+            "User {} has insufficient credits to nudge accountability friend: {}",
+            from_user.id,
+            e
+        );
+        return false;
+    }
+
+    let channel_id = state.channel_router.pick_channel_for(from_user);
+    match state
+        .channel_router
+        .notify(from_user, channel_id, phone, &body)
+        .await
+    {
+        Ok(sid) => {
+            let sid = sid.into_inner();
+            tracing::info!(
+                "Accountability nudge sent from user {} to friend phone (SID: {})",
+                from_user.id,
+                sid
+            );
+            if let Err(e) = state.user_repository.log_usage(LogUsageParams {
+                user_id: from_user.id,
+                sid: Some(sid),
+                activity_type: "accountability_friend_sms".to_string(),
+                credits: None,
+                time_consumed: None,
+                success: Some(true),
+                reason: None,
+                status: Some("delivered".to_string()),
+                recharge_threshold_timestamp: None,
+                zero_credits_timestamp: None,
+            }) {
+                tracing::error!("Failed to log accountability nudge usage: {}", e);
+            }
+            true
+        }
+        Err(e) => {
+            tracing::error!(
+                "Failed to send accountability nudge from user {}: {}",
+                from_user.id,
+                e
+            );
+            false
+        }
+    }
+}
+
 /// Try a voice fallback when an SMS notification failed for a US recipient.
 ///
 /// Best-effort: errors are logged and swallowed so a fallback failure does

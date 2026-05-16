@@ -197,6 +197,7 @@ pub struct OntEvent {
     pub status: String,
     pub created_at: i32,
     pub updated_at: i32,
+    pub friend_notified_at: Option<i32>,
 }
 
 #[derive(Insertable, Debug)]

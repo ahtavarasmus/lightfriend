@@ -2196,6 +2196,44 @@ impl OntologyRepository {
             .load(&mut conn)
     }
 
+    /// Events whose deadline is inside the accountability grace window
+    /// (now >= due_at - grace_secs, still before due_at) and which haven't
+    /// already triggered a friend nudge.
+    pub fn get_events_due_for_friend_notification(
+        &self,
+        now: i32,
+        grace_secs: i32,
+    ) -> Result<Vec<OntEvent>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_events::table
+            .filter(ont_events::status.eq_any(&["active", "notified"]))
+            .filter(ont_events::due_at.is_not_null())
+            .filter(ont_events::due_at.gt(now))
+            .filter(ont_events::due_at.le(now + grace_secs))
+            .filter(ont_events::friend_notified_at.is_null())
+            .load(&mut conn)
+    }
+
+    pub fn mark_friend_notified(
+        &self,
+        user_id: i32,
+        event_id: i32,
+        at: i32,
+    ) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(
+            ont_events::table
+                .filter(ont_events::id.eq(event_id))
+                .filter(ont_events::user_id.eq(user_id)),
+        )
+        .set((
+            ont_events::friend_notified_at.eq(at),
+            ont_events::updated_at.eq(at),
+        ))
+        .execute(&mut conn)?;
+        Ok(())
+    }
+
     /// Get the N most upcoming active events, ordered by closest deadline first.
     /// Events with a due_at come first (sorted ascending), then events without due_at
     /// sorted by most recently created.

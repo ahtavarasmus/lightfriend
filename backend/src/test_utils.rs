@@ -846,6 +846,30 @@ pub mod mock_user_core {
             Ok(())
         }
 
+        fn update_accountability_friend_phone(
+            &self,
+            _user_id: i32,
+            _value: Option<&str>,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_accountability_friend_name(
+            &self,
+            _user_id: i32,
+            _value: Option<&str>,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
+        fn update_accountability_enabled(
+            &self,
+            _user_id: i32,
+            _value: bool,
+        ) -> Result<(), DieselError> {
+            Ok(())
+        }
+
         fn set_refresh_token_hash(
             &self,
             _user_id: i32,

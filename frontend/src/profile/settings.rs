@@ -264,6 +264,32 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             .auto_confirm_tracked_items
             .unwrap_or(true)
     });
+    let accountability_enabled =
+        use_state(|| (*user_profile).accountability_enabled.unwrap_or(false));
+    let accountability_friend_phone = use_state(|| {
+        (*user_profile)
+            .accountability_friend_phone
+            .clone()
+            .unwrap_or_default()
+    });
+    let accountability_friend_phone_original = use_state(|| {
+        (*user_profile)
+            .accountability_friend_phone
+            .clone()
+            .unwrap_or_default()
+    });
+    let accountability_friend_name = use_state(|| {
+        (*user_profile)
+            .accountability_friend_name
+            .clone()
+            .unwrap_or_default()
+    });
+    let accountability_friend_name_original = use_state(|| {
+        (*user_profile)
+            .accountability_friend_name
+            .clone()
+            .unwrap_or_default()
+    });
     // Sending number selector state (for notification-only countries)
     let show_sending_number_selector = use_state(|| false);
     let available_sending_numbers = use_state(|| Vec::<serde_json::Value>::new());
@@ -290,6 +316,9 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let system_important_notify_save_state = use_state(|| FieldSaveState::Idle);
     let auto_track_system_save_state = use_state(|| FieldSaveState::Idle);
     let auto_confirm_save_state = use_state(|| FieldSaveState::Idle);
+    let accountability_enabled_save_state = use_state(|| FieldSaveState::Idle);
+    let accountability_friend_phone_save_state = use_state(|| FieldSaveState::Idle);
+    let accountability_friend_name_save_state = use_state(|| FieldSaveState::Idle);
     let sending_number_save_state = use_state(|| FieldSaveState::Idle);
 
     // Confirmation dialog states for sensitive fields
@@ -323,6 +352,11 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let system_important_notify = system_important_notify.clone();
         let auto_track_system = auto_track_system.clone();
         let auto_confirm_items = auto_confirm_items.clone();
+        let accountability_enabled_eff = accountability_enabled.clone();
+        let accountability_friend_phone_eff = accountability_friend_phone.clone();
+        let accountability_friend_phone_original_eff = accountability_friend_phone_original.clone();
+        let accountability_friend_name_eff = accountability_friend_name.clone();
+        let accountability_friend_name_original_eff = accountability_friend_name_original.clone();
         let user_profile_state = user_profile.clone();
         let agent_language = agent_language.clone();
         let notification_type = notification_type.clone();
@@ -352,6 +386,20 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 system_important_notify.set(props_profile.system_important_notify.unwrap_or(true));
                 auto_track_system.set(props_profile.auto_track_items_system.unwrap_or(false));
                 auto_confirm_items.set(props_profile.auto_confirm_tracked_items.unwrap_or(true));
+                accountability_enabled_eff
+                    .set(props_profile.accountability_enabled.unwrap_or(false));
+                let phone_val = props_profile
+                    .accountability_friend_phone
+                    .clone()
+                    .unwrap_or_default();
+                accountability_friend_phone_eff.set(phone_val.clone());
+                accountability_friend_phone_original_eff.set(phone_val);
+                let name_val = props_profile
+                    .accountability_friend_name
+                    .clone()
+                    .unwrap_or_default();
+                accountability_friend_name_eff.set(name_val.clone());
+                accountability_friend_name_original_eff.set(name_val);
                 agent_language.set(props_profile.agent_language.clone());
                 notification_type.set(props_profile.notification_type.clone());
                 location.set(props_profile.location.clone().unwrap_or_default());
@@ -1279,6 +1327,234 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     }
                 }
             });
+        })
+    };
+
+    // Accountability enabled toggle
+    let on_accountability_enabled_toggle = {
+        let accountability_enabled = accountability_enabled.clone();
+        let save_state = accountability_enabled_save_state.clone();
+        let user_profile = user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |e: Event| {
+            let input: HtmlInputElement = e.target_unchecked_into();
+            let new_val = input.checked();
+            accountability_enabled.set(new_val);
+            let save_state = save_state.clone();
+            let user_profile = user_profile.clone();
+            let on_profile_update = on_profile_update.clone();
+            save_state.set(FieldSaveState::Saving);
+            spawn_local(async move {
+                let request = PatchFieldRequest {
+                    field: "accountability_enabled".to_string(),
+                    value: serde_json::Value::Bool(new_val),
+                };
+                match Api::patch("/api/profile/field")
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    Ok(response) if response.ok() => {
+                        let mut profile = (*user_profile).clone();
+                        profile.accountability_enabled = Some(new_val);
+                        on_profile_update.emit(profile);
+                        save_state.set(FieldSaveState::Success);
+                        let s = save_state.clone();
+                        spawn_local(async move {
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
+                            s.set(FieldSaveState::Idle);
+                        });
+                    }
+                    Ok(_) => {
+                        save_state.set(FieldSaveState::Error("Failed to save".to_string()));
+                    }
+                    Err(_) => {
+                        save_state.set(FieldSaveState::Error("Network error".to_string()));
+                    }
+                }
+            });
+        })
+    };
+
+    // Helper: save accountability friend phone (called from blur and Enter handlers)
+    fn save_accountability_friend_phone(
+        value: UseStateHandle<String>,
+        original: UseStateHandle<String>,
+        save_state: UseStateHandle<FieldSaveState>,
+        user_profile: UseStateHandle<UserProfile>,
+        on_profile_update: Callback<UserProfile>,
+    ) {
+        if *value != *original {
+            let new_val = (*value).clone();
+            let save_state = save_state.clone();
+            let original = original.clone();
+            let user_profile = user_profile.clone();
+            let on_profile_update = on_profile_update.clone();
+            save_state.set(FieldSaveState::Saving);
+            spawn_local(async move {
+                let payload = if new_val.trim().is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::Value::String(new_val.clone())
+                };
+                let request = PatchFieldRequest {
+                    field: "accountability_friend_phone".to_string(),
+                    value: payload,
+                };
+                match Api::patch("/api/profile/field")
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    Ok(response) if response.ok() => {
+                        original.set(new_val.clone());
+                        let mut profile = (*user_profile).clone();
+                        profile.accountability_friend_phone = if new_val.trim().is_empty() {
+                            None
+                        } else {
+                            Some(new_val)
+                        };
+                        on_profile_update.emit(profile);
+                        save_state.set(FieldSaveState::Success);
+                        let s = save_state.clone();
+                        spawn_local(async move {
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
+                            s.set(FieldSaveState::Idle);
+                        });
+                    }
+                    Ok(_) => save_state.set(FieldSaveState::Error("Failed to save".to_string())),
+                    Err(_) => save_state.set(FieldSaveState::Error("Network error".to_string())),
+                }
+            });
+        }
+    }
+
+    fn save_accountability_friend_name(
+        value: UseStateHandle<String>,
+        original: UseStateHandle<String>,
+        save_state: UseStateHandle<FieldSaveState>,
+        user_profile: UseStateHandle<UserProfile>,
+        on_profile_update: Callback<UserProfile>,
+    ) {
+        if *value != *original {
+            let new_val = (*value).clone();
+            let save_state = save_state.clone();
+            let original = original.clone();
+            let user_profile = user_profile.clone();
+            let on_profile_update = on_profile_update.clone();
+            save_state.set(FieldSaveState::Saving);
+            spawn_local(async move {
+                let payload = if new_val.trim().is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::Value::String(new_val.clone())
+                };
+                let request = PatchFieldRequest {
+                    field: "accountability_friend_name".to_string(),
+                    value: payload,
+                };
+                match Api::patch("/api/profile/field")
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    Ok(response) if response.ok() => {
+                        original.set(new_val.clone());
+                        let mut profile = (*user_profile).clone();
+                        profile.accountability_friend_name = if new_val.trim().is_empty() {
+                            None
+                        } else {
+                            Some(new_val)
+                        };
+                        on_profile_update.emit(profile);
+                        save_state.set(FieldSaveState::Success);
+                        let s = save_state.clone();
+                        spawn_local(async move {
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
+                            s.set(FieldSaveState::Idle);
+                        });
+                    }
+                    Ok(_) => save_state.set(FieldSaveState::Error("Failed to save".to_string())),
+                    Err(_) => save_state.set(FieldSaveState::Error("Network error".to_string())),
+                }
+            });
+        }
+    }
+
+    let on_accountability_friend_phone_blur = {
+        let value = accountability_friend_phone.clone();
+        let original = accountability_friend_phone_original.clone();
+        let save_state = accountability_friend_phone_save_state.clone();
+        let user_profile = user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |_: FocusEvent| {
+            save_accountability_friend_phone(
+                value.clone(),
+                original.clone(),
+                save_state.clone(),
+                user_profile.clone(),
+                on_profile_update.clone(),
+            );
+        })
+    };
+
+    let on_accountability_friend_phone_keypress = {
+        let value = accountability_friend_phone.clone();
+        let original = accountability_friend_phone_original.clone();
+        let save_state = accountability_friend_phone_save_state.clone();
+        let user_profile = user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |e: KeyboardEvent| {
+            if e.key() == "Enter" {
+                e.prevent_default();
+                save_accountability_friend_phone(
+                    value.clone(),
+                    original.clone(),
+                    save_state.clone(),
+                    user_profile.clone(),
+                    on_profile_update.clone(),
+                );
+            }
+        })
+    };
+
+    let on_accountability_friend_name_blur = {
+        let value = accountability_friend_name.clone();
+        let original = accountability_friend_name_original.clone();
+        let save_state = accountability_friend_name_save_state.clone();
+        let user_profile = user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |_: FocusEvent| {
+            save_accountability_friend_name(
+                value.clone(),
+                original.clone(),
+                save_state.clone(),
+                user_profile.clone(),
+                on_profile_update.clone(),
+            );
+        })
+    };
+
+    let on_accountability_friend_name_keypress = {
+        let value = accountability_friend_name.clone();
+        let original = accountability_friend_name_original.clone();
+        let save_state = accountability_friend_name_save_state.clone();
+        let user_profile = user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |e: KeyboardEvent| {
+            if e.key() == "Enter" {
+                e.prevent_default();
+                save_accountability_friend_name(
+                    value.clone(),
+                    original.clone(),
+                    save_state.clone(),
+                    user_profile.clone(),
+                    on_profile_update.clone(),
+                );
+            }
         })
     };
 
@@ -2407,6 +2683,93 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             </div>
 
             // Auto-confirm tracked items (only shown when auto-track is enabled)
+
+            // Accountability friend: gentle social nudge when a commitment slips
+            <div class="profile-field">
+                <div class="field-label-group">
+                    <span class="field-label">{"Accountability Friend"}<span style="margin-left: 6px; font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; background: rgba(126, 178, 255, 0.15); color: #7EB2FF; vertical-align: middle;">{"beta"}</span></span>
+                    <div class="tooltip">
+                        <span class="tooltip-icon">{"?"}</span>
+                        <span class="tooltip-text">
+                            {"If a tracked commitment is about to slip past its deadline, Lightfriend sends a gentle SMS to your designated friend so they can check in on you. They don't need a Lightfriend account."}
+                        </span>
+                    </div>
+                </div>
+                <div class="field-input-container">
+                    <label class="custom-checkbox">
+                        <input
+                            type="checkbox"
+                            checked={*accountability_enabled}
+                            onchange={on_accountability_enabled_toggle.clone()}
+                        />
+                        <span class="checkmark"></span>
+                        {if *accountability_enabled { "Enabled" } else { "Disabled" }}
+                    </label>
+                    {render_save_indicator(&*accountability_enabled_save_state)}
+                </div>
+            </div>
+
+            {if *accountability_enabled {
+                html! {
+                    <>
+                        <div class="profile-field">
+                            <div class="field-label-group">
+                                <span class="field-label">{"Friend's Phone"}</span>
+                                <div class="tooltip">
+                                    <span class="tooltip-icon">{"?"}</span>
+                                    <span class="tooltip-text">
+                                        {"E.164 format, e.g. +358401234567. Plain SMS — works on any phone."}
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="field-input-container">
+                                <input
+                                    type="tel"
+                                    class="profile-input"
+                                    placeholder="+358401234567"
+                                    value={(*accountability_friend_phone).clone()}
+                                    oninput={let v = accountability_friend_phone.clone(); move |e: InputEvent| {
+                                        let input: HtmlInputElement = e.target_unchecked_into();
+                                        v.set(input.value());
+                                    }}
+                                    onblur={on_accountability_friend_phone_blur.clone()}
+                                    onkeypress={on_accountability_friend_phone_keypress.clone()}
+                                />
+                                {render_save_indicator(&*accountability_friend_phone_save_state)}
+                            </div>
+                        </div>
+
+                        <div class="profile-field">
+                            <div class="field-label-group">
+                                <span class="field-label">{"Friend's Name"}</span>
+                                <div class="tooltip">
+                                    <span class="tooltip-icon">{"?"}</span>
+                                    <span class="tooltip-text">
+                                        {"How Lightfriend addresses your friend in the nudge message."}
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="field-input-container">
+                                <input
+                                    type="text"
+                                    class="profile-input"
+                                    placeholder="Alex"
+                                    value={(*accountability_friend_name).clone()}
+                                    oninput={let v = accountability_friend_name.clone(); move |e: InputEvent| {
+                                        let input: HtmlInputElement = e.target_unchecked_into();
+                                        v.set(input.value());
+                                    }}
+                                    onblur={on_accountability_friend_name_blur.clone()}
+                                    onkeypress={on_accountability_friend_name_keypress.clone()}
+                                />
+                                {render_save_indicator(&*accountability_friend_name_save_state)}
+                            </div>
+                        </div>
+                    </>
+                }
+            } else {
+                html! {}
+            }}
 
             // Feature Updates field
             <div class="profile-field">

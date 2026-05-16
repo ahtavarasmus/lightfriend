@@ -51,6 +51,9 @@ impl MockUser {
             plan_type: None,
             matrix_e2ee_enabled: false,
             preferred_sms_provider: None,
+            accountability_friend_phone: None,
+            accountability_friend_name: None,
+            accountability_enabled: false,
         }
     }
 }

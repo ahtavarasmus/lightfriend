@@ -61,6 +61,9 @@ pub struct UserProfile {
     pub digest_time: Option<String>,
     pub auto_track_items_system: Option<bool>,
     pub auto_confirm_tracked_items: Option<bool>,
+    pub accountability_enabled: Option<bool>,
+    pub accountability_friend_phone: Option<String>,
+    pub accountability_friend_name: Option<String>,
 }
 
 pub const MIN_TOPUP_AMOUNT_CREDITS: f32 = 3.00;

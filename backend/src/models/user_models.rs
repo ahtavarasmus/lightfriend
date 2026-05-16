@@ -39,6 +39,9 @@ pub struct User {
     /// set to "sinch". Primary use is admin verification of Sinch from
     /// a non-US phone.
     pub preferred_sms_provider: Option<String>,
+    pub accountability_friend_phone: Option<String>,
+    pub accountability_friend_name: Option<String>,
+    pub accountability_enabled: bool,
 }
 
 #[derive(Queryable, Selectable, Insertable, Clone)]

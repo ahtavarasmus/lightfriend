@@ -239,6 +239,9 @@ diesel::table! {
         plan_type -> Nullable<Text>,
         matrix_e2ee_enabled -> Bool,
         preferred_sms_provider -> Nullable<Text>,
+        accountability_friend_phone -> Nullable<Text>,
+        accountability_friend_name -> Nullable<Text>,
+        accountability_enabled -> Bool,
     }
 }
 
@@ -455,6 +458,7 @@ diesel::table! {
         status -> Text,
         created_at -> Int4,
         updated_at -> Int4,
+        friend_notified_at -> Nullable<Int4>,
     }
 }
 

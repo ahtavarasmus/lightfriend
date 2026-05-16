@@ -917,6 +917,51 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 );
             }
 
+            // Accountability friend nudge: events whose due_at is within the
+            // grace window and that the user hasn't completed yet. Friend
+            // gets pinged BEFORE the final deadline so they can help.
+            const ACCOUNTABILITY_GRACE_SECS: i32 = 2 * 3600;
+            let friend_due_events = state
+                .ontology_repository
+                .get_events_due_for_friend_notification(now, ACCOUNTABILITY_GRACE_SECS)
+                .unwrap_or_default();
+            for event in &friend_due_events {
+                let user = match state.user_core.find_by_id(event.user_id) {
+                    Ok(Some(u)) => u,
+                    _ => continue,
+                };
+                if !user.accountability_enabled {
+                    continue;
+                }
+                let friend_phone = match user.accountability_friend_phone.as_deref() {
+                    Some(p) if !p.is_empty() => p,
+                    _ => continue,
+                };
+                let friend_name = user
+                    .accountability_friend_name
+                    .as_deref()
+                    .unwrap_or("friend");
+                let user_label = user.nickname.as_deref().unwrap_or("Your friend");
+                let body = format!(
+                    "Hey {}, {} said they'd {} soon. Could you check in with them? (sent by Lightfriend, their assistant)",
+                    friend_name, user_label, event.description
+                );
+                let sent = crate::proactive::utils::send_sms_to_external_phone(
+                    &state,
+                    &user,
+                    friend_phone,
+                    &body,
+                )
+                .await;
+                if sent {
+                    let _ = state.ontology_repository.mark_friend_notified(
+                        event.user_id,
+                        event.id,
+                        now,
+                    );
+                }
+            }
+
             // Expire events past their due date
             let expired_events = state
                 .ontology_repository

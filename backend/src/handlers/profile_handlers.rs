@@ -109,6 +109,9 @@ pub struct ProfileResponse {
     digest_time: Option<String>, // user-set digest times or null for auto
     auto_track_items_system: bool, // system-level auto commitment tracking
     auto_confirm_tracked_items: bool, // auto-create as active (true) or proposed (false)
+    accountability_enabled: bool,
+    accountability_friend_phone: Option<String>,
+    accountability_friend_name: Option<String>,
 }
 use crate::handlers::auth_middleware::AuthUser;
 
@@ -256,6 +259,9 @@ pub async fn get_profile(
                 digest_time: user_settings.digest_time,
                 auto_track_items_system: user_settings.auto_track_items_system,
                 auto_confirm_tracked_items: user_settings.auto_confirm_tracked_items,
+                accountability_enabled: user.accountability_enabled,
+                accountability_friend_phone: user.accountability_friend_phone,
+                accountability_friend_name: user.accountability_friend_name,
             }))
         }
         None => Err((
@@ -765,6 +771,79 @@ pub async fn patch_profile_field(
             state
                 .user_core
                 .update_auto_confirm_tracked_items(user_id, value)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
+        }
+        "accountability_enabled" => {
+            let value = request.value.as_bool().ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "accountability_enabled must be a boolean"})),
+                )
+            })?;
+            state
+                .user_core
+                .update_accountability_enabled(user_id, value)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
+        }
+        "accountability_friend_phone" => {
+            let value: Option<String> = if request.value.is_null() {
+                None
+            } else {
+                let raw = request.value.as_str().ok_or_else(|| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": "accountability_friend_phone must be a string or null"})),
+                    )
+                })?;
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            };
+            state
+                .user_core
+                .update_accountability_friend_phone(user_id, value.as_deref())
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
+        }
+        "accountability_friend_name" => {
+            let value: Option<String> = if request.value.is_null() {
+                None
+            } else {
+                let raw = request.value.as_str().ok_or_else(|| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(
+                            json!({"error": "accountability_friend_name must be a string or null"}),
+                        ),
+                    )
+                })?;
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            };
+            state
+                .user_core
+                .update_accountability_friend_name(user_id, value.as_deref())
                 .map_err(|e| {
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,

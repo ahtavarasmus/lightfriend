@@ -84,6 +84,17 @@ pub trait UserCoreOps: Send + Sync {
     fn update_phone_number(&self, user_id: i32, phone: &str) -> Result<(), DieselError>;
     fn update_nickname(&self, user_id: i32, nickname: &str) -> Result<(), DieselError>;
     fn update_preferred_number(&self, user_id: i32, number: &str) -> Result<(), DieselError>;
+    fn update_accountability_friend_phone(
+        &self,
+        user_id: i32,
+        value: Option<&str>,
+    ) -> Result<(), DieselError>;
+    fn update_accountability_friend_name(
+        &self,
+        user_id: i32,
+        value: Option<&str>,
+    ) -> Result<(), DieselError>;
+    fn update_accountability_enabled(&self, user_id: i32, value: bool) -> Result<(), DieselError>;
     fn set_refresh_token_hash(&self, user_id: i32, token_hash: &str) -> Result<(), DieselError>;
     fn mark_refresh_token_compromised(&self, user_id: i32) -> Result<(), DieselError>;
 
@@ -734,6 +745,38 @@ impl UserCoreOps for UserCore {
         let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
         diesel::update(users::table.find(user_id))
             .set(users::nickname.eq(nickname))
+            .execute(&mut pg_conn)?;
+        Ok(())
+    }
+
+    fn update_accountability_friend_phone(
+        &self,
+        user_id: i32,
+        value: Option<&str>,
+    ) -> Result<(), DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::accountability_friend_phone.eq(value))
+            .execute(&mut pg_conn)?;
+        Ok(())
+    }
+
+    fn update_accountability_friend_name(
+        &self,
+        user_id: i32,
+        value: Option<&str>,
+    ) -> Result<(), DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::accountability_friend_name.eq(value))
+            .execute(&mut pg_conn)?;
+        Ok(())
+    }
+
+    fn update_accountability_enabled(&self, user_id: i32, value: bool) -> Result<(), DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::accountability_enabled.eq(value))
             .execute(&mut pg_conn)?;
         Ok(())
     }
