@@ -1336,21 +1336,29 @@ pub async fn update_profile(
             // Detect new country from updated phone number
             let new_country = get_country_code_from_phone(&update_req.phone_number);
 
-            // Update preferred Lightfriend number if country changed
-            if old_country != new_country {
+            // Update preferred Lightfriend number when either:
+            //   - the country changed (need a different From), or
+            //   - the new country is a local-number country (idempotent
+            //     normalization — these have a single canonical From, so we
+            //     overwrite any stale value carried over from a prior signup
+            //     state). Notification-only countries are left alone so a
+            //     user's manual local-number pick survives a same-country
+            //     phone change.
+            let new_is_local =
+                crate::utils::country::is_local_number_country(&update_req.phone_number);
+            if (old_country != new_country || new_is_local)
+                && !state.user_core.is_byot_user(auth_user.user_id)
+            {
                 if let Some(ref country) = new_country {
-                    // Only update if user doesn't have BYOT (bring your own Twilio)
-                    if !state.user_core.is_byot_user(auth_user.user_id) {
-                        if let Err(e) = state
-                            .user_core
-                            .set_preferred_number_for_country(auth_user.user_id, country)
-                        {
-                            tracing::error!(
-                                "Failed to update preferred number for country {}: {}",
-                                country,
-                                e
-                            );
-                        }
+                    if let Err(e) = state
+                        .user_core
+                        .set_preferred_number_for_country(auth_user.user_id, country)
+                    {
+                        tracing::error!(
+                            "Failed to update preferred number for country {}: {}",
+                            country,
+                            e
+                        );
                     }
                 }
             }
