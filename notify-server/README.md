@@ -20,33 +20,59 @@ Each alert has an optional `dedup_key`. Within the TTL for that severity,
 subsequent alerts with the same key are silently dropped. TTLs default to
 1h / 6h / 24h for Critical / Error / Warning.
 
-## Deploy (Hetzner / any VPS)
+## Deploy
 
-1. Build:
-   ```
-   cd notify-server
-   cargo build --release
-   ```
-2. Copy `target/release/notify-server` to the host.
-3. Copy `.env.example` to `.env` on the host and fill in real values. Use a
-   **separate Twilio sub-account** for `TWILIO_*` so a ban on the prod
-   number does not break alerting.
-4. Run under systemd. Example unit:
-   ```
-   [Unit]
-   Description=Lightfriend notify-server
-   After=network.target
+Auto-deployed on push to master via `.github/workflows/notify-server-deploy.yml`.
+The workflow builds the binary on `ubuntu-latest` and ships it to the
+Hetzner box over SSH. Future changes to `notify-server/**` redeploy
+automatically.
 
-   [Service]
-   Type=simple
-   EnvironmentFile=/etc/notify-server.env
-   ExecStart=/usr/local/bin/notify-server
-   Restart=always
-   RestartSec=5
+### First-time host setup (one-time)
 
-   [Install]
-   WantedBy=multi-user.target
-   ```
+On the Hetzner box (run once):
+
+```
+bash notify-server/scripts/host-setup.sh
+sudo loginctl enable-linger $USER   # the one sudo step
+```
+
+This creates `~/notify-server/.env` with a fresh bearer token, installs a
+user-level systemd unit at `~/.config/systemd/user/notify-server.service`,
+and reloads systemd.
+
+Fill in the empty values in `~/notify-server/.env`. Critical:
+**use a separate Twilio sub-account** from prod so a ban on the prod
+number cannot also silence alerting.
+
+Trigger the first deploy from GitHub Actions (`workflow_dispatch` on
+`notify-server deploy`) to land the binary, then:
+
+```
+systemctl --user enable --now notify-server
+systemctl --user status notify-server
+curl -fsS http://127.0.0.1:8088/health   # expects "OK"
+```
+
+### GitHub secrets needed for auto-deploy
+
+| Secret | What |
+|---|---|
+| `RETARD_SSH_HOST` | hostname/IP of the box |
+| `RETARD_SSH_USER` | SSH user (e.g. `rasmus`) |
+| `RETARD_SSH_KEY` | private SSH key with access |
+| `RETARD_SSH_PORT` | optional, defaults to 22 |
+
+### Public exposure
+
+The server listens on `127.0.0.1:8088` by default. Expose via cloudflared
+tunnel (already running on the box):
+
+```
+status.lightfriend.ai  ->  http://localhost:8088
+```
+
+Bearer auth is the only network-exposed boundary so keep the tunnel route
+scoped to this single backend.
 
 ## Example requests
 
