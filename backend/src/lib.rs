@@ -8,6 +8,7 @@ pub mod handlers {
     pub mod auth_middleware;
     pub mod billing_handlers;
     pub mod bridge_auth_common;
+    pub mod commitment_handlers;
     pub mod dashboard_handlers;
     pub mod health_handlers;
     pub mod imap_auth;
@@ -51,6 +52,8 @@ pub mod utils {
     pub mod bridge_responses;
     pub mod country;
     pub mod email;
+    pub mod embedding_service;
+    pub mod embedding_similarity;
     pub mod encryption;
     pub mod id_verifier;
     pub mod imap_idle;
@@ -66,6 +69,7 @@ pub mod utils {
     pub mod webauthn_config;
 }
 pub mod proactive {
+    pub mod commitment_replies;
     pub mod rules;
     pub mod signal_extraction;
     pub mod system_behaviors;
@@ -109,6 +113,7 @@ pub mod tools {
     pub mod youtube;
 }
 pub mod models {
+    pub mod commitment_models;
     pub mod mcp_models;
     pub mod ontology_models;
     pub mod user_models;
@@ -116,12 +121,14 @@ pub mod models {
 pub mod repositories {
     pub mod admin_alert_repository;
     pub mod bandwidth_repository;
+    pub mod commitment_repository;
     pub mod llm_usage_repository;
     pub mod mcp_repository;
     pub mod metrics_repository;
     pub mod mock_signup_repository;
     pub mod mock_twilio_status_repository;
     pub mod ontology_repository;
+    pub mod provider_routes_repository;
     pub mod signup_repository;
     pub mod signup_repository_impl;
     pub mod telegram_bridge_repository;
@@ -172,9 +179,11 @@ pub use api::matrix_client::{
 pub use api::twilio_client::RealTwilioClient;
 pub use repositories::admin_alert_repository::AdminAlertRepository;
 pub use repositories::bandwidth_repository::BandwidthRepository;
+pub use repositories::commitment_repository::CommitmentRepository;
 pub use repositories::llm_usage_repository::LlmUsageRepository;
 pub use repositories::metrics_repository::MetricsRepository;
 pub use repositories::ontology_repository::OntologyRepository;
+pub use repositories::provider_routes_repository::ProviderRoutesRepository;
 pub use repositories::telegram_bridge_repository::{TelegramBridgeRepository, TelegramContact};
 pub use repositories::totp_repository::TotpRepository;
 pub use repositories::user_core::{UserCore, UserCoreOps};
@@ -280,6 +289,7 @@ pub struct AppState {
     pub webauthn_repository: Arc<WebauthnRepository>,
     pub admin_alert_repository: Arc<AdminAlertRepository>,
     pub metrics_repository: Arc<MetricsRepository>,
+    pub provider_routes_repository: Arc<ProviderRoutesRepository>,
     pub pending_totp_logins: DashMap<String, (i32, i64)>, // (totp_token, (user_id, expiry_timestamp))
     pub pending_password_resets: DashMap<String, (i32, i64)>, // (reset_token, (user_id, expiry_timestamp))
     pub session_to_token: DashMap<String, String>, // stripe_session_id -> magic_token (temporary, for redirect flow)
@@ -290,6 +300,7 @@ pub struct AppState {
     pub llm_usage_repository: Arc<LlmUsageRepository>,
     pub bandwidth_repository: Arc<BandwidthRepository>,
     pub ontology_repository: Arc<OntologyRepository>,
+    pub commitment_repository: Arc<CommitmentRepository>,
     /// Optional: read-only access to mautrix-whatsapp's PostgreSQL database.
     /// None when WHATSAPP_BRIDGE_DATABASE_URL is unset (e.g. dev environments).
     pub whatsapp_bridge_repository: Option<Arc<WhatsAppBridgeRepository>>,

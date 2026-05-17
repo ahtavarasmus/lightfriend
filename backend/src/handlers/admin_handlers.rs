@@ -3349,3 +3349,132 @@ pub async fn telegram_bridge_schema_introspect(
         "verified_against": "mautrix-telegram v0.15.3 source (puppet.py, portal.py, user.py + migrations v01..v18)",
     })))
 }
+
+// ===== Provider routes =====
+//
+// Per-country SMS provider order driving the router's outbound fallback.
+// Operators flip the primary at runtime here without redeploying; changes
+// hit both the DB and the in-memory cache on `state.channel_router`.
+
+#[derive(Serialize)]
+pub struct ProviderRouteResponse {
+    pub country_code: String,
+    pub provider_order: Vec<String>,
+    pub updated_at: i32,
+}
+
+#[derive(Deserialize)]
+pub struct UpsertProviderRouteRequest {
+    pub country_code: String,
+    pub provider_order: Vec<String>,
+}
+
+/// Channel ids the system knows about. Mirrors the canonical list in
+/// `ChannelRouter::canonical_channel_id`. Keep in sync.
+const KNOWN_PROVIDERS: &[&str] = &["twilio", "telnyx", "sinch"];
+
+pub async fn list_provider_routes(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<ProviderRouteResponse>>, (StatusCode, Json<serde_json::Value>)> {
+    let rows = state.provider_routes_repository.list_all().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)})),
+        )
+    })?;
+
+    let resp = rows
+        .into_iter()
+        .map(|r| {
+            let order = serde_json::from_str::<Vec<String>>(&r.provider_order).unwrap_or_default();
+            ProviderRouteResponse {
+                country_code: r.country_code,
+                provider_order: order,
+                updated_at: r.updated_at,
+            }
+        })
+        .collect();
+    Ok(Json(resp))
+}
+
+pub async fn upsert_provider_route(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<UpsertProviderRouteRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let country = req.country_code.trim().to_uppercase();
+    if country.len() != 2 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "country_code must be a 2-letter ISO code"})),
+        ));
+    }
+    if req.provider_order.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "provider_order must contain at least one channel id"})),
+        ));
+    }
+    for id in &req.provider_order {
+        if !KNOWN_PROVIDERS.contains(&id.as_str()) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": format!("unknown provider id '{}'; valid ids: {:?}", id, KNOWN_PROVIDERS)
+                })),
+            ));
+        }
+    }
+
+    let order_json = serde_json::to_string(&req.provider_order).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("serialize: {}", e)})),
+        )
+    })?;
+
+    state
+        .provider_routes_repository
+        .upsert(&country, &order_json)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
+
+    state
+        .channel_router
+        .set_route(&country, req.provider_order.clone());
+
+    tracing::info!(
+        "Provider route upserted: {} -> {:?}",
+        country,
+        req.provider_order
+    );
+
+    Ok(Json(json!({
+        "country_code": country,
+        "provider_order": req.provider_order,
+    })))
+}
+
+pub async fn delete_provider_route(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(country_code): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let country = country_code.trim().to_uppercase();
+    state
+        .provider_routes_repository
+        .delete(&country)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
+
+    state.channel_router.clear_route(&country);
+
+    tracing::info!("Provider route deleted: {}", country);
+    Ok(Json(json!({"deleted": country})))
+}
