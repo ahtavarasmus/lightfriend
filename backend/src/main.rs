@@ -323,6 +323,8 @@ async fn main() {
     let webauthn_repository = Arc::new(WebauthnRepository::new(pg_pool.clone()));
     let admin_alert_repository = Arc::new(AdminAlertRepository::new(pg_pool.clone()));
     let metrics_repository = Arc::new(backend::MetricsRepository::new(pg_pool.clone()));
+    let provider_routes_repository =
+        Arc::new(backend::ProviderRoutesRepository::new(pg_pool.clone()));
     let llm_usage_repository = Arc::new(LlmUsageRepository::new(pg_pool.clone()));
     let bandwidth_repository = Arc::new(backend::BandwidthRepository::new(pg_pool.clone()));
     let ontology_repository = Arc::new(backend::OntologyRepository::new(pg_pool.clone()));
@@ -488,6 +490,41 @@ async fn main() {
     {
         tracing::info!("Telnyx inbound + status webhooks enabled (TELNYX_PUBLIC_KEY set)");
     }
+
+    // Load per-country provider order into the router's in-memory cache.
+    // Rows without valid JSON are skipped with a warning rather than failing
+    // boot - operators get a fallback to the hardcoded default.
+    match provider_routes_repository.list_all() {
+        Ok(rows) => {
+            for row in rows {
+                match serde_json::from_str::<Vec<String>>(&row.provider_order) {
+                    Ok(order) => {
+                        tracing::info!(
+                            "Loaded provider route: {} -> {:?}",
+                            row.country_code,
+                            order
+                        );
+                        router.set_route(&row.country_code, order);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Skipping provider_routes row for {} (invalid JSON: {}): {}",
+                            row.country_code,
+                            e,
+                            row.provider_order
+                        );
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            tracing::error!(
+                "Failed to load provider_routes; falling back to router default: {}",
+                e
+            );
+        }
+    }
+
     let channel_router = Arc::new(router);
 
     let state = Arc::new(AppState {
@@ -520,6 +557,7 @@ async fn main() {
         webauthn_repository,
         admin_alert_repository,
         metrics_repository,
+        provider_routes_repository,
         pending_totp_logins: DashMap::new(),
         pending_password_resets: DashMap::new(),
         session_to_token: DashMap::new(),
@@ -891,6 +929,14 @@ async fn main() {
         .route(
             "/api/admin/telegram-bridge-schema-introspect",
             get(admin_handlers::telegram_bridge_schema_introspect),
+        )
+        .route(
+            "/api/admin/provider-routes",
+            get(admin_handlers::list_provider_routes).post(admin_handlers::upsert_provider_route),
+        )
+        .route(
+            "/api/admin/provider-routes/{country_code}",
+            delete(admin_handlers::delete_provider_route),
         )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),

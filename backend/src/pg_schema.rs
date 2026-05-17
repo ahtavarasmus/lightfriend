@@ -356,6 +356,14 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    provider_routes (country_code) {
+        country_code -> Text,
+        provider_order -> Text,
+        updated_at -> Int4,
+    }
+}
+
 // Ontology v1: Person + Channel tables
 
 diesel::table! {
@@ -551,4 +559,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     ont_rules,
     llm_usage_logs,
     bridge_bandwidth_logs,
+    provider_routes,
 );

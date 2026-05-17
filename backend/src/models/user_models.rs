@@ -1,9 +1,9 @@
 use crate::pg_schema::{
-    admin_alerts, country_availability, disabled_alert_types, message_status_log, site_metrics,
-    user_settings, users, waitlist,
+    admin_alerts, country_availability, disabled_alert_types, message_status_log, provider_routes,
+    site_metrics, user_settings, users, waitlist,
 };
 use diesel::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Queryable, Selectable, Insertable, Clone)]
 #[diesel(table_name = users)]
@@ -221,6 +221,19 @@ pub struct DisabledAlertType {
 pub struct NewDisabledAlertType {
     pub alert_type: String,
     pub disabled_at: i32,
+}
+
+// Provider Routes: per-country ordered list of SMS providers driving
+// outbound fallback. `provider_order` stores a JSON array of channel
+// ids (e.g. `["twilio","telnyx","sinch"]`). The router treats absent
+// rows as the default ("twilio" only).
+#[derive(Queryable, Selectable, Insertable, AsChangeset, Clone, Debug, Serialize, Deserialize)]
+#[diesel(table_name = provider_routes)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct ProviderRoute {
+    pub country_code: String,
+    pub provider_order: String,
+    pub updated_at: i32,
 }
 
 // Site Metrics models for tracking site-wide statistics

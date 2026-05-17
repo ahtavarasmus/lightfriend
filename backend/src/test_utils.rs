@@ -100,6 +100,11 @@ pub fn create_test_state() -> Arc<crate::AppState> {
     );
     let metrics_repository =
         Arc::new(crate::repositories::metrics_repository::MetricsRepository::new(pg_pool.clone()));
+    let provider_routes_repository = Arc::new(
+        crate::repositories::provider_routes_repository::ProviderRoutesRepository::new(
+            pg_pool.clone(),
+        ),
+    );
     let llm_usage_repository = Arc::new(
         crate::repositories::llm_usage_repository::LlmUsageRepository::new(pg_pool.clone()),
     );
@@ -156,6 +161,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         webauthn_repository,
         admin_alert_repository,
         metrics_repository,
+        provider_routes_repository,
         pending_totp_logins: DashMap::new(),
         pending_password_resets: DashMap::new(),
         session_to_token: DashMap::new(),

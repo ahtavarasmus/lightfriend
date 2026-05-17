@@ -122,6 +122,7 @@ pub mod repositories {
     pub mod mock_signup_repository;
     pub mod mock_twilio_status_repository;
     pub mod ontology_repository;
+    pub mod provider_routes_repository;
     pub mod signup_repository;
     pub mod signup_repository_impl;
     pub mod telegram_bridge_repository;
@@ -175,6 +176,7 @@ pub use repositories::bandwidth_repository::BandwidthRepository;
 pub use repositories::llm_usage_repository::LlmUsageRepository;
 pub use repositories::metrics_repository::MetricsRepository;
 pub use repositories::ontology_repository::OntologyRepository;
+pub use repositories::provider_routes_repository::ProviderRoutesRepository;
 pub use repositories::telegram_bridge_repository::{TelegramBridgeRepository, TelegramContact};
 pub use repositories::totp_repository::TotpRepository;
 pub use repositories::user_core::{UserCore, UserCoreOps};
@@ -280,6 +282,7 @@ pub struct AppState {
     pub webauthn_repository: Arc<WebauthnRepository>,
     pub admin_alert_repository: Arc<AdminAlertRepository>,
     pub metrics_repository: Arc<MetricsRepository>,
+    pub provider_routes_repository: Arc<ProviderRoutesRepository>,
     pub pending_totp_logins: DashMap<String, (i32, i64)>, // (totp_token, (user_id, expiry_timestamp))
     pub pending_password_resets: DashMap<String, (i32, i64)>, // (reset_token, (user_id, expiry_timestamp))
     pub session_to_token: DashMap<String, String>, // stripe_session_id -> magic_token (temporary, for redirect flow)
