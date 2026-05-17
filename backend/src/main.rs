@@ -28,10 +28,10 @@ use backend::{
 };
 use handlers::{
     admin_handlers, attestation_handlers, auth_handlers, billing_handlers, bridge_auth_common,
-    dashboard_handlers, imap_auth, imap_handlers, person_handlers, profile_handlers, rule_handlers,
-    self_host_handlers, signal_auth, signal_handlers, stripe_handlers, telegram_auth,
-    telegram_handlers, tesla_auth, trust_chain_handlers, twilio_handlers, whatsapp_auth,
-    whatsapp_handlers, youtube, youtube_auth,
+    commitment_handlers, dashboard_handlers, imap_auth, imap_handlers, person_handlers,
+    profile_handlers, rule_handlers, self_host_handlers, signal_auth, signal_handlers,
+    stripe_handlers, telegram_auth, telegram_handlers, tesla_auth, trust_chain_handlers,
+    twilio_handlers, whatsapp_auth, whatsapp_handlers, youtube, youtube_auth,
 };
 
 async fn health_check() -> &'static str {
@@ -328,6 +328,7 @@ async fn main() {
     let llm_usage_repository = Arc::new(LlmUsageRepository::new(pg_pool.clone()));
     let bandwidth_repository = Arc::new(backend::BandwidthRepository::new(pg_pool.clone()));
     let ontology_repository = Arc::new(backend::OntologyRepository::new(pg_pool.clone()));
+    let commitment_repository = Arc::new(backend::CommitmentRepository::new(pg_pool.clone()));
 
     // Optional read-only pool for the mautrix-whatsapp bridge database. Only
     // configured when WHATSAPP_BRIDGE_DATABASE_URL is set (typically inside
@@ -566,6 +567,7 @@ async fn main() {
         llm_usage_repository,
         bandwidth_repository,
         ontology_repository,
+        commitment_repository,
         whatsapp_bridge_repository,
         telegram_bridge_repository,
         ontology_registry: backend::ontology::registry::OntologyRegistry::build(),
@@ -1431,6 +1433,19 @@ async fn main() {
         .route(
             "/api/rules/{id}/status",
             patch(rule_handlers::update_rule_status),
+        )
+        // Commitment detection dashboard
+        .route(
+            "/api/commitment/sender-rules",
+            get(commitment_handlers::list_sender_rules),
+        )
+        .route(
+            "/api/commitment/sender-rules/{id}",
+            delete(commitment_handlers::deactivate_sender_rule),
+        )
+        .route(
+            "/api/commitment/recent-prompts",
+            get(commitment_handlers::list_recent_prompts),
         )
         // MCP Server routes (custom tool integrations)
         .route(

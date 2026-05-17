@@ -517,6 +517,53 @@ diesel::table! {
     }
 }
 
+// Commitment detection signal tables (migration 35)
+
+diesel::table! {
+    commitment_sender_rules (id) {
+        id -> Int4,
+        user_id -> Int4,
+        platform -> Text,
+        sender_key -> Text,
+        rule_type -> Text,
+        source -> Text,
+        active -> Bool,
+        created_at -> Int4,
+        deactivated_at -> Nullable<Int4>,
+    }
+}
+
+diesel::table! {
+    commitment_label_embeddings (id) {
+        id -> Int4,
+        user_id -> Int4,
+        label_type -> Text,
+        embedding -> Bytea,
+        source_message_id -> Nullable<Int8>,
+        created_at -> Int4,
+    }
+}
+
+diesel::table! {
+    commitment_prompts (id) {
+        id -> Int4,
+        user_id -> Int4,
+        ont_message_id -> Int8,
+        platform -> Text,
+        sender_key -> Text,
+        sender_display_name -> Text,
+        commitment_description -> Text,
+        due_at -> Nullable<Int4>,
+        remind_at -> Nullable<Int4>,
+        sent_at -> Int4,
+        sms_message_sid -> Nullable<Text>,
+        user_label -> Nullable<Text>,
+        labeled_at -> Nullable<Int4>,
+        resulting_event_id -> Nullable<Int4>,
+        resolved_at -> Nullable<Int4>,
+    }
+}
+
 diesel::joinable!(ont_person_edits -> ont_persons (person_id));
 diesel::joinable!(ont_channels -> ont_persons (person_id));
 
@@ -559,5 +606,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     ont_rules,
     llm_usage_logs,
     bridge_bandwidth_logs,
+    commitment_sender_rules,
+    commitment_label_embeddings,
+    commitment_prompts,
     provider_routes,
 );

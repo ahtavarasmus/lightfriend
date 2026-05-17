@@ -114,6 +114,9 @@ pub fn create_test_state() -> Arc<crate::AppState> {
     let ontology_repository = Arc::new(
         crate::repositories::ontology_repository::OntologyRepository::new(pg_pool.clone()),
     );
+    let commitment_repository = Arc::new(
+        crate::repositories::commitment_repository::CommitmentRepository::new(pg_pool.clone()),
+    );
 
     let google_oauth = create_dummy_google_oauth_client();
     let tesla_oauth = create_dummy_tesla_oauth_client();
@@ -170,6 +173,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         llm_usage_repository,
         bandwidth_repository,
         ontology_repository,
+        commitment_repository,
         whatsapp_bridge_repository: None,
         telegram_bridge_repository: None,
         ontology_registry: crate::ontology::registry::OntologyRegistry::build(),

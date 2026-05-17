@@ -2346,12 +2346,17 @@ pub async fn handle_bridge_message(
     let person_name: Option<String> = matching_person
         .as_ref()
         .map(|p| p.display_name().to_string());
+    // Use the bridged sender's matrix user id as the stable per-sender key.
+    // Bridge ghosts have a canonical form like @_telegram_<id>:homeserver, so
+    // the full mxid is unique per external sender and survives display-name
+    // changes. Falls back to None when localpart is unavailable.
+    let sender_key_value = Some(event.sender.to_string());
     let msg = crate::models::ontology_models::NewOntMessage {
         user_id,
         room_id: current_room_id.clone(),
         platform: service.clone(),
         sender_name: chat_name.clone(),
-        sender_key: None,
+        sender_key: sender_key_value,
         content: content.clone(),
         person_id,
         created_at: std::time::SystemTime::now()
@@ -2375,6 +2380,7 @@ pub async fn handle_bridge_message(
                     "platform": msg.platform,
                     "sender": msg.sender_name,
                     "sender_name": msg.sender_name,
+                    "sender_key": msg.sender_key,
                     "content": msg.content,
                     "room_id": msg.room_id,
                     "is_group": is_group,
