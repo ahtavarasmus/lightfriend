@@ -1522,6 +1522,7 @@ pub async fn run_commitment_detection(
 /// pending-prompt dedup skip → SMS prompt (no event yet) → fall back to
 /// auto-create on any failure or missing sender_key. Returns the routing
 /// JSON describing what happened, for the activity-feed envelope.
+#[allow(clippy::too_many_arguments)]
 async fn handle_new_commitment(
     state: &Arc<AppState>,
     user_id: i32,
@@ -1771,6 +1772,7 @@ enum PromptSendOutcome {
 ///
 /// If SMS dispatch fails after the row was inserted, the prompt is marked
 /// resolved-with-no-label so it doesn't haunt the user's pending list.
+#[allow(clippy::too_many_arguments)]
 async fn try_send_commitment_prompt(
     state: &Arc<AppState>,
     user_id: i32,

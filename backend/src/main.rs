@@ -658,10 +658,17 @@ async fn main() {
     // Public webhook endpoint: auth is the per-token bearer, not a JWT
     // cookie, so this route group lives outside `protected_routes`. The
     // handler does the bearer lookup, cap check, and credit gate itself.
-    let webhook_sms_routes = Router::new().route(
-        "/api/webhook/sms",
-        post(handlers::webhook_sms_handlers::webhook_sms),
-    );
+    //
+    // 4 KiB body limit: comfortable headroom for a max-length 1500-byte
+    // message + idempotency key + JSON framing, while rejecting junk
+    // traffic before serde does any work. The global 10 MiB limit would
+    // let an unauthenticated attacker burn a lot of CPU per request.
+    let webhook_sms_routes = Router::new()
+        .route(
+            "/api/webhook/sms",
+            post(handlers::webhook_sms_handlers::webhook_sms),
+        )
+        .layer(DefaultBodyLimit::max(4096));
     // Voice pipeline: TwiML endpoint validated by Twilio signature
     let voice_twiml_routes = Router::new()
         .route("/api/voice/incoming", post(voice_pipeline::voice_incoming))

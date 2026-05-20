@@ -20,7 +20,7 @@ pub fn pack_embedding(embedding: &[f32]) -> Vec<u8> {
 /// Unpack a BYTEA-stored embedding back into f32 values. Returns None when the
 /// byte length is not a multiple of 4.
 pub fn unpack_embedding(bytes: &[u8]) -> Option<Vec<f32>> {
-    if bytes.len() % 4 != 0 {
+    if !bytes.len().is_multiple_of(4) {
         return None;
     }
     let mut out = Vec::with_capacity(bytes.len() / 4);

@@ -20,7 +20,7 @@
 
 use crate::handlers::auth_middleware::AuthUser;
 use crate::models::user_models::NewWebhookToken;
-use crate::repositories::webhook_tokens_repository::ClaimResult;
+use crate::repositories::webhook_tokens_repository::{ClaimResult, IdempotencyResult};
 use crate::{AppState, UserCoreOps};
 use axum::{
     extract::{Path, State},
@@ -35,12 +35,24 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Twilio SMS bodies max out at 1600 chars (10 concatenated segments).
-/// Reject anything longer at the API boundary so we don't trigger a
-/// provider-side error after spending credit-check work.
-const MAX_BODY_LEN: usize = 1600;
+/// We reserve room for two prefixes the body picks up downstream:
+///
+/// - The `[label] ` provenance prefix added here (≤67 chars: label cap
+///   is 64 + brackets + space).
+/// - The `[Lightfriend backup] ` prefix prepended by the channel router
+///   on fallback (21 chars).
+///
+/// 1600 - 67 - 21 = 1512; cap at 1500 to leave a tiny slack and keep the
+/// boundary number easy to remember.
+const MAX_BODY_LEN: usize = 1500;
 const DEFAULT_DAILY_CAP: i32 = 50;
 const TOKEN_PREFIX: &str = "lf_";
 const TOKEN_BYTES: usize = 16; // 128 bits, rendered as 32 hex chars
+/// Header name used by the public webhook endpoint to dedupe retried
+/// requests. Stripe-style: client sends `Idempotency-Key: <opaque>`
+/// and we replay the cached response for any second hit within 24h.
+const IDEMPOTENCY_HEADER: &str = "Idempotency-Key";
+const MAX_IDEMPOTENCY_KEY_LEN: usize = 64;
 
 // ============================================================================
 // Management endpoints (JWT-authed, mounted under protected_routes)
@@ -198,11 +210,15 @@ pub struct WebhookSmsResponse {
 /// `POST /api/webhook/sms`
 ///
 /// Bearer-authenticated; sends one SMS to the owning user's phone.
+/// Supports `Idempotency-Key` header so retried requests don't duplicate
+/// the SMS.
+///
 /// Failure modes:
 /// - 401: missing/malformed/unknown/revoked bearer
-/// - 400: empty or oversized message body
+/// - 400: empty/oversized body, or malformed Idempotency-Key
 /// - 402: insufficient credits / inactive subscription / phone-service-off
-///        (collapsed into 402 so the client sees a single "fix billing" code)
+///   (collapsed into 402 so the client sees a single "fix billing" code)
+/// - 409: a prior request with this Idempotency-Key is still in flight
 /// - 429: daily cap exhausted
 /// - 502: provider failure
 pub async fn webhook_sms(
@@ -246,36 +262,77 @@ pub async fn webhook_sms(
     }
     let body = body.to_string();
 
-    // 4. Load user. The token row references a real user via FK, but the
+    // 4. Idempotency-Key handling (optional). Resolved here, BEFORE the
+    //    credit check and cap claim, so a replay short-circuits without
+    //    burning the daily quota or the credit-warning side effects in
+    //    `check_user_credits`.
+    let idempotency_key = extract_idempotency_key(&headers)?.unwrap_or_default();
+    let idempotency_row_id: Option<i32> = if !idempotency_key.is_empty() {
+        let res = state
+            .webhook_tokens_repository
+            .reserve_idempotency_key(token_row.id, &idempotency_key)
+            .map_err(db_err)?;
+        match res {
+            IdempotencyResult::Replayed { sid } => {
+                return Ok(Json(WebhookSmsResponse {
+                    status: "sent",
+                    sid,
+                }));
+            }
+            IdempotencyResult::InFlight => {
+                return Err((
+                    StatusCode::CONFLICT,
+                    Json(json!({"error": "idempotency key in flight"})),
+                ));
+            }
+            IdempotencyResult::Fresh { id } => Some(id),
+        }
+    } else {
+        None
+    };
+
+    // 5. Load user. The token row references a real user via FK, but the
     //    user could be soft-deleted between token mint and now.
-    let user = state
+    let user = match state
         .user_core
         .find_by_id(token_row.user_id)
         .map_err(db_err)?
-        .ok_or_else(unauthorized)?;
+    {
+        Some(u) => u,
+        None => {
+            release_idempotency(&state, idempotency_row_id);
+            return Err(unauthorized());
+        }
+    };
 
-    // 5. Credit / tier / phone-service-active gate. Same call all other
+    // 6. Credit / tier / phone-service-active gate. Same call all other
     //    outbound paths use — keeps abuse posture identical and reuses
     //    the existing "out of credits" SMS warning behavior.
     if let Err(msg) = crate::utils::usage::check_user_credits(&state, &user, "noti_msg", None).await
     {
+        release_idempotency(&state, idempotency_row_id);
         return Err((StatusCode::PAYMENT_REQUIRED, Json(json!({"error": msg}))));
     }
 
-    // 6. Atomic daily-cap claim. If this succeeds, we've reserved the
-    //    slot and must proceed to send (or absorb the cost on failure
-    //    via incrementing daily_sent — see below).
-    let claim = state
-        .webhook_tokens_repository
-        .claim_send_slot(&token_hash)
-        .map_err(db_err)?;
+    // 7. Atomic daily-cap claim.
+    let claim = match state.webhook_tokens_repository.claim_send_slot(&token_hash) {
+        Ok(c) => c,
+        Err(e) => {
+            release_idempotency(&state, idempotency_row_id);
+            return Err(db_err(e));
+        }
+    };
     let token = match claim {
         ClaimResult::Ok { token } => token,
-        ClaimResult::Revoked => return Err(unauthorized()),
+        ClaimResult::Revoked => {
+            release_idempotency(&state, idempotency_row_id);
+            return Err(unauthorized());
+        }
         ClaimResult::OverCap {
             daily_cap,
             daily_sent,
         } => {
+            release_idempotency(&state, idempotency_row_id);
             return Err((
                 StatusCode::TOO_MANY_REQUESTS,
                 Json(json!({
@@ -287,15 +344,33 @@ pub async fn webhook_sms(
         }
     };
 
-    // 7. Send. The slot is already consumed; we count attempts, not
+    // 8. Prepend provenance so a leaked token cannot impersonate the AI
+    //    assistant. The label is user-set and bounded to 64 chars at
+    //    creation; we additionally sanitize for control characters so a
+    //    malicious label can't fake a multi-message handoff.
+    let safe_label = sanitize_label(&token.label);
+    let outbound = format!("[{}] {}", safe_label, body);
+
+    // 9. Send. The slot is already consumed; we count attempts, not
     //    successes, so a provider failure still burns one of the daily
     //    quota. That keeps the cap from being a free retry loop on
-    //    provider outages.
-    match state.channel_router.send_to_user(&user, &body, None).await {
+    //    provider outages. Idempotency rows ARE released on failure so
+    //    the client can retry with the same key.
+    match state
+        .channel_router
+        .send_to_user(&user, &outbound, None)
+        .await
+    {
         Ok(sid) => {
             let sid = sid.into_inner();
-            // Best-effort usage log; SMS cost itself is deducted from
-            // credits later via the provider status callback.
+            if let Some(id) = idempotency_row_id {
+                if let Err(e) = state
+                    .webhook_tokens_repository
+                    .complete_idempotency(id, &sid)
+                {
+                    tracing::error!("Failed to complete idempotency row {}: {}", id, e);
+                }
+            }
             if let Err(e) = state.user_repository.log_usage(
                 crate::repositories::user_repository::LogUsageParams {
                     user_id: user.id,
@@ -324,6 +399,7 @@ pub async fn webhook_sms(
                 token.id,
                 e
             );
+            release_idempotency(&state, idempotency_row_id);
             Err((
                 StatusCode::BAD_GATEWAY,
                 Json(json!({"error": "send failed"})),
@@ -345,6 +421,67 @@ fn extract_bearer(headers: &HeaderMap) -> Option<&str> {
         .or_else(|| raw.strip_prefix("bearer "))
         .map(str::trim)
         .filter(|s| !s.is_empty())
+}
+
+/// Pull and validate an optional `Idempotency-Key` header.
+///
+/// - Missing header → Ok(None) (idempotency disabled for this request)
+/// - Present but malformed → Err 400
+///
+/// Accepts ASCII printable chars only, length 1..=64. That covers UUIDs,
+/// ULIDs, and human-typed keys without giving the client room to smuggle
+/// nulls or control characters into a downstream log line.
+fn extract_idempotency_key(
+    headers: &HeaderMap,
+) -> Result<Option<String>, (StatusCode, Json<serde_json::Value>)> {
+    let Some(raw) = headers.get(IDEMPOTENCY_HEADER) else {
+        return Ok(None);
+    };
+    let s = raw.to_str().map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Idempotency-Key contains non-ASCII bytes"})),
+        )
+    })?;
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        // Header explicitly set to empty/whitespace — treat as absent.
+        return Ok(None);
+    }
+    if trimmed.len() > MAX_IDEMPOTENCY_KEY_LEN {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": format!(
+                    "Idempotency-Key exceeds {} chars",
+                    MAX_IDEMPOTENCY_KEY_LEN
+                ),
+            })),
+        ));
+    }
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_graphic() || c == ' ' || c == '-' || c == '_')
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "Idempotency-Key contains invalid characters",
+            })),
+        ));
+    }
+    Ok(Some(trimmed.to_string()))
+}
+
+/// Best-effort cleanup of an in-flight idempotency row when the request
+/// fails before completing. Errors are logged but not propagated — the
+/// row will naturally expire after 24h and treat the next retry as fresh.
+fn release_idempotency(state: &Arc<AppState>, row_id: Option<i32>) {
+    if let Some(id) = row_id {
+        if let Err(e) = state.webhook_tokens_repository.clear_idempotency(id) {
+            tracing::error!("Failed to clear in-flight idempotency row {}: {}", id, e);
+        }
+    }
 }
 
 fn generate_token() -> String {
@@ -388,4 +525,20 @@ fn db_err(e: diesel::result::Error) -> (StatusCode, Json<serde_json::Value>) {
 
 fn not_found(msg: &str) -> (StatusCode, Json<serde_json::Value>) {
     (StatusCode::NOT_FOUND, Json(json!({"error": msg})))
+}
+
+/// Strip control characters from the label so it can't break out of the
+/// `[label]` prefix on display. Already length-bounded at creation; we
+/// only need to defuse newlines and other formatting tricks.
+fn sanitize_label(label: &str) -> String {
+    let cleaned: String = label
+        .chars()
+        .filter(|c| !c.is_control() && *c != '[' && *c != ']')
+        .collect();
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() {
+        "webhook".to_string()
+    } else {
+        cleaned.to_string()
+    }
 }

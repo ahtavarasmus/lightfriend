@@ -594,12 +594,23 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    webhook_idempotency_keys (id) {
+        id -> Int4,
+        token_id -> Int4,
+        idempotency_key -> Text,
+        response_sid -> Nullable<Text>,
+        created_at -> Int4,
+    }
+}
+
 diesel::joinable!(ont_person_edits -> ont_persons (person_id));
 diesel::joinable!(ont_channels -> ont_persons (person_id));
 
 diesel::joinable!(refund_info -> users (user_id));
 diesel::joinable!(user_settings -> users (user_id));
 diesel::joinable!(webhook_tokens -> users (user_id));
+diesel::joinable!(webhook_idempotency_keys -> webhook_tokens (token_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     user_secrets,
@@ -643,4 +654,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     provider_routes,
     pending_reply_watches,
     webhook_tokens,
+    webhook_idempotency_keys,
 );

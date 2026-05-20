@@ -1,7 +1,7 @@
 use crate::pg_schema::{
     admin_alerts, country_availability, disabled_alert_types, message_status_log,
     pending_reply_watches, provider_routes, site_metrics, user_settings, users, waitlist,
-    webhook_tokens,
+    webhook_idempotency_keys, webhook_tokens,
 };
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -281,6 +281,27 @@ pub struct NewWebhookToken {
     pub daily_cap: i32,
     pub daily_sent: i32,
     pub daily_reset_at: i32,
+    pub created_at: i32,
+}
+
+#[derive(Queryable, Selectable, Clone, Debug)]
+#[diesel(table_name = webhook_idempotency_keys)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct WebhookIdempotencyKey {
+    pub id: i32,
+    pub token_id: i32,
+    pub idempotency_key: String,
+    pub response_sid: Option<String>,
+    pub created_at: i32,
+}
+
+#[derive(Insertable, Clone, Debug)]
+#[diesel(table_name = webhook_idempotency_keys)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewWebhookIdempotencyKey {
+    pub token_id: i32,
+    pub idempotency_key: String,
+    pub response_sid: Option<String>,
     pub created_at: i32,
 }
 
