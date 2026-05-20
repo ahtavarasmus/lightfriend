@@ -2664,7 +2664,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     <div class="tooltip">
                         <span class="tooltip-icon">{"?"}</span>
                         <span class="tooltip-text">
-                            {"Automatically detect and track commitments from your messages (e.g. \"I'll pay the bill by Friday\"). You'll be notified when deadlines change."}
+                            {"When a commitment is detected in your messages, we send you an SMS asking what to do. Reply 1 to track it, 2 to always track this sender, 3 to mute the sender, 4 if it's not a commitment. The system learns from each reply."}
                         </span>
                     </div>
                 </div>
@@ -2681,6 +2681,12 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     {render_save_indicator(&*auto_track_system_save_state)}
                 </div>
             </div>
+
+            { if *auto_track_system {
+                html! { <crate::profile::commitment_dashboard::CommitmentDashboard /> }
+            } else {
+                html! {}
+            } }
 
             // Auto-confirm tracked items (only shown when auto-track is enabled)
 

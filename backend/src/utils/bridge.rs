@@ -2192,6 +2192,74 @@ pub async fn handle_bridge_message(
         return;
     }
 
+    // Pending reply watch: if the user armed one for this room, SMS them
+    // the first inbound message from the recipient and clear the watch.
+    // Runs before the tier-2/auto-features gates because the user has
+    // already paid for SMS and explicitly asked to be told.
+    {
+        let watch_content = match &event.content.msgtype {
+            MessageType::Text(t) => t.body.clone(),
+            MessageType::Notice(n) => n.body.clone(),
+            MessageType::Emote(t) => t.body.clone(),
+            MessageType::Image(_) => "[image]".to_string(),
+            MessageType::Video(_) => "[video]".to_string(),
+            MessageType::File(_) => "[file]".to_string(),
+            MessageType::Audio(_) => "[audio]".to_string(),
+            MessageType::Location(_) => "[location]".to_string(),
+            _ => String::new(),
+        };
+        let room_id_for_watch = room.room_id().to_string();
+        match state
+            .pending_reply_watches_repository
+            .find_active_bridge(user_id, &room_id_for_watch)
+        {
+            Ok(Some(watch)) => {
+                let body = if watch_content.is_empty() {
+                    format!("Reply from {}: (no text)", watch.contact_display_name)
+                } else {
+                    format!(
+                        "Reply from {}: {}",
+                        watch.contact_display_name, watch_content
+                    )
+                };
+                // Only clear the watch once we've successfully notified the
+                // user. If the SMS fails (e.g. transient Twilio outage), leave
+                // the watch armed so the next inbound message retries.
+                match state.channel_router.send_to_user(&user, &body, None).await {
+                    Ok(_) => {
+                        if let Err(e) = state.pending_reply_watches_repository.delete(watch.id) {
+                            tracing::warn!(
+                                "REPLY_WATCH failed to delete fired watch id={}: {}",
+                                watch.id,
+                                e
+                            );
+                        } else {
+                            tracing::info!(
+                                "REPLY_WATCH fired+cleared bridge watch id={} user={} room={}",
+                                watch.id,
+                                user_id,
+                                room_id_for_watch
+                            );
+                        }
+                    }
+                    Err(e) => tracing::warn!(
+                        "REPLY_WATCH SMS failed user={} watch={}, leaving armed for retry: {}",
+                        user_id,
+                        watch.id,
+                        e
+                    ),
+                }
+            }
+            Ok(None) => {}
+            Err(e) => tracing::warn!(
+                "REPLY_WATCH lookup failed user={} room={}: {}",
+                user_id,
+                room_id_for_watch,
+                e
+            ),
+        }
+    }
+
     // Check subscription
     let has_valid_sub = state
         .user_repository
@@ -2271,6 +2339,13 @@ pub async fn handle_bridge_message(
     let chat_name = remove_bridge_suffix(room_name.as_str());
     let current_room_id = room.room_id().to_string();
 
+    // Skip WhatsApp "Status Broadcast" (the disappearing-stories pseudo-chat
+    // mautrix-whatsapp creates for status@broadcast). Every status post from
+    // any contact lands here and is noise for digests/notifications.
+    if service == "whatsapp" && chat_name.to_lowercase().contains("status broadcast") {
+        return;
+    }
+
     // Skip bridge-generated error notices so they are logged but never treated
     // as user messages for notification/proactive rules.
     if is_error_message(&content) {
@@ -2346,12 +2421,17 @@ pub async fn handle_bridge_message(
     let person_name: Option<String> = matching_person
         .as_ref()
         .map(|p| p.display_name().to_string());
+    // Use the bridged sender's matrix user id as the stable per-sender key.
+    // Bridge ghosts have a canonical form like @_telegram_<id>:homeserver, so
+    // the full mxid is unique per external sender and survives display-name
+    // changes. Falls back to None when localpart is unavailable.
+    let sender_key_value = Some(event.sender.to_string());
     let msg = crate::models::ontology_models::NewOntMessage {
         user_id,
         room_id: current_room_id.clone(),
         platform: service.clone(),
         sender_name: chat_name.clone(),
-        sender_key: None,
+        sender_key: sender_key_value,
         content: content.clone(),
         person_id,
         created_at: std::time::SystemTime::now()
@@ -2375,6 +2455,7 @@ pub async fn handle_bridge_message(
                     "platform": msg.platform,
                     "sender": msg.sender_name,
                     "sender_name": msg.sender_name,
+                    "sender_key": msg.sender_key,
                     "content": msg.content,
                     "room_id": msg.room_id,
                     "is_group": is_group,

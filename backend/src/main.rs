@@ -28,10 +28,10 @@ use backend::{
 };
 use handlers::{
     admin_handlers, attestation_handlers, auth_handlers, billing_handlers, bridge_auth_common,
-    dashboard_handlers, imap_auth, imap_handlers, person_handlers, profile_handlers, rule_handlers,
-    self_host_handlers, signal_auth, signal_handlers, stripe_handlers, telegram_auth,
-    telegram_handlers, tesla_auth, trust_chain_handlers, twilio_handlers, whatsapp_auth,
-    whatsapp_handlers, youtube, youtube_auth,
+    commitment_handlers, dashboard_handlers, imap_auth, imap_handlers, person_handlers,
+    profile_handlers, rule_handlers, self_host_handlers, signal_auth, signal_handlers,
+    stripe_handlers, telegram_auth, telegram_handlers, tesla_auth, trust_chain_handlers,
+    twilio_handlers, whatsapp_auth, whatsapp_handlers, youtube, youtube_auth,
 };
 
 async fn health_check() -> &'static str {
@@ -323,9 +323,16 @@ async fn main() {
     let webauthn_repository = Arc::new(WebauthnRepository::new(pg_pool.clone()));
     let admin_alert_repository = Arc::new(AdminAlertRepository::new(pg_pool.clone()));
     let metrics_repository = Arc::new(backend::MetricsRepository::new(pg_pool.clone()));
+    let provider_routes_repository =
+        Arc::new(backend::ProviderRoutesRepository::new(pg_pool.clone()));
+    let pending_reply_watches_repository =
+        Arc::new(backend::PendingReplyWatchesRepository::new(pg_pool.clone()));
+    let webhook_tokens_repository =
+        Arc::new(backend::WebhookTokensRepository::new(pg_pool.clone()));
     let llm_usage_repository = Arc::new(LlmUsageRepository::new(pg_pool.clone()));
     let bandwidth_repository = Arc::new(backend::BandwidthRepository::new(pg_pool.clone()));
     let ontology_repository = Arc::new(backend::OntologyRepository::new(pg_pool.clone()));
+    let commitment_repository = Arc::new(backend::CommitmentRepository::new(pg_pool.clone()));
 
     // Optional read-only pool for the mautrix-whatsapp bridge database. Only
     // configured when WHATSAPP_BRIDGE_DATABASE_URL is set (typically inside
@@ -488,6 +495,41 @@ async fn main() {
     {
         tracing::info!("Telnyx inbound + status webhooks enabled (TELNYX_PUBLIC_KEY set)");
     }
+
+    // Load per-country provider order into the router's in-memory cache.
+    // Rows without valid JSON are skipped with a warning rather than failing
+    // boot - operators get a fallback to the hardcoded default.
+    match provider_routes_repository.list_all() {
+        Ok(rows) => {
+            for row in rows {
+                match serde_json::from_str::<Vec<String>>(&row.provider_order) {
+                    Ok(order) => {
+                        tracing::info!(
+                            "Loaded provider route: {} -> {:?}",
+                            row.country_code,
+                            order
+                        );
+                        router.set_route(&row.country_code, order);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Skipping provider_routes row for {} (invalid JSON: {}): {}",
+                            row.country_code,
+                            e,
+                            row.provider_order
+                        );
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            tracing::error!(
+                "Failed to load provider_routes; falling back to router default: {}",
+                e
+            );
+        }
+    }
+
     let channel_router = Arc::new(router);
 
     let state = Arc::new(AppState {
@@ -520,6 +562,9 @@ async fn main() {
         webauthn_repository,
         admin_alert_repository,
         metrics_repository,
+        provider_routes_repository,
+        pending_reply_watches_repository,
+        webhook_tokens_repository,
         pending_totp_logins: DashMap::new(),
         pending_password_resets: DashMap::new(),
         session_to_token: DashMap::new(),
@@ -528,6 +573,7 @@ async fn main() {
         llm_usage_repository,
         bandwidth_repository,
         ontology_repository,
+        commitment_repository,
         whatsapp_bridge_repository,
         telegram_bridge_repository,
         ontology_registry: backend::ontology::registry::OntologyRegistry::build(),
@@ -608,6 +654,21 @@ async fn main() {
         "/api/sms/textbee-server",
         post(twilio_sms::handle_textbee_sms),
     );
+
+    // Public webhook endpoint: auth is the per-token bearer, not a JWT
+    // cookie, so this route group lives outside `protected_routes`. The
+    // handler does the bearer lookup, cap check, and credit gate itself.
+    //
+    // 4 KiB body limit: comfortable headroom for a max-length 1500-byte
+    // message + idempotency key + JSON framing, while rejecting junk
+    // traffic before serde does any work. The global 10 MiB limit would
+    // let an unauthenticated attacker burn a lot of CPU per request.
+    let webhook_sms_routes = Router::new()
+        .route(
+            "/api/webhook/sms",
+            post(handlers::webhook_sms_handlers::webhook_sms),
+        )
+        .layer(DefaultBodyLimit::max(4096));
     // Voice pipeline: TwiML endpoint validated by Twilio signature
     let voice_twiml_routes = Router::new()
         .route("/api/voice/incoming", post(voice_pipeline::voice_incoming))
@@ -891,6 +952,14 @@ async fn main() {
         .route(
             "/api/admin/telegram-bridge-schema-introspect",
             get(admin_handlers::telegram_bridge_schema_introspect),
+        )
+        .route(
+            "/api/admin/provider-routes",
+            get(admin_handlers::list_provider_routes).post(admin_handlers::upsert_provider_route),
+        )
+        .route(
+            "/api/admin/provider-routes/{country_code}",
+            delete(admin_handlers::delete_provider_route),
         )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
@@ -1386,6 +1455,19 @@ async fn main() {
             "/api/rules/{id}/status",
             patch(rule_handlers::update_rule_status),
         )
+        // Commitment detection dashboard
+        .route(
+            "/api/commitment/sender-rules",
+            get(commitment_handlers::list_sender_rules),
+        )
+        .route(
+            "/api/commitment/sender-rules/{id}",
+            delete(commitment_handlers::deactivate_sender_rule),
+        )
+        .route(
+            "/api/commitment/recent-prompts",
+            get(commitment_handlers::list_recent_prompts),
+        )
         // MCP Server routes (custom tool integrations)
         .route(
             "/api/mcp/servers",
@@ -1411,6 +1493,15 @@ async fn main() {
         .route(
             "/api/mcp/test",
             post(handlers::mcp_handlers::test_url_connection),
+        )
+        .route(
+            "/api/me/webhook-tokens",
+            get(handlers::webhook_sms_handlers::list_tokens)
+                .post(handlers::webhook_sms_handlers::create_token),
+        )
+        .route(
+            "/api/me/webhook-tokens/{token_id}",
+            delete(handlers::webhook_sms_handlers::revoke_token),
         )
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
     // Internal endpoints (secret-authenticated, no JWT)
@@ -1455,6 +1546,7 @@ async fn main() {
         .merge(sinch_routes)
         .merge(telnyx_routes)
         .merge(voice_routes)
+        .merge(webhook_sms_routes)
         .nest_service("/uploads", ServeDir::new("uploads"))
         .route("/blog/md/{slug}", get(blog::handlers::blog_post_md_handler))
         .route("/blog/{slug}", get(blog::handlers::blog_post_handler))

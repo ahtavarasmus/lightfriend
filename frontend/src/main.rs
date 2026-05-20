@@ -22,6 +22,7 @@ mod utils {
 mod profile {
     pub mod billing_credits;
     pub mod billing_models;
+    pub mod commitment_dashboard;
     pub mod danger_zone;
     pub mod profile;
     pub mod security;
@@ -64,6 +65,7 @@ mod dashboard {
     pub mod tesla_quick_panel;
     pub mod timeline_view;
     pub mod triage_indicator;
+    pub mod webhooks_panel;
     pub mod youtube_quick_panel;
 }
 mod proactive {

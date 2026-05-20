@@ -1,0 +1,37 @@
+[package]
+name = "backend-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+ed25519-dalek = "2"
+
+[dependencies.backend]
+path = ".."
+
+# Keep the fuzz crate out of the main workspace so cargo-fuzz can manage it
+# independently (and so nightly-only deps don't leak into normal builds).
+[workspace]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "twilio_signature"
+path = "fuzz_targets/twilio_signature.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "telnyx_signature"
+path = "fuzz_targets/telnyx_signature.rs"
+test = false
+doc = false
+bench = false

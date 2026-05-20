@@ -76,8 +76,9 @@ pub fn tesla_connect(props: &TeslaConnectProps) -> Html {
                                         ));
                                     }
                                 } else if tesla_status == "success" {
-                                    command_result
-                                        .set(Some("Tesla connected successfully!".to_string()));
+                                    command_result.set(Some(
+                                        "Tesla account connected. To enable vehicle commands (lock, climate, etc.), click 'Setup Virtual Key' below and approve the pairing in your Tesla app.".to_string(),
+                                    ));
                                 }
                                 // Clear URL params after reading
                                 let _ = window.history().and_then(|h| {

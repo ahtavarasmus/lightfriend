@@ -100,6 +100,21 @@ pub fn create_test_state() -> Arc<crate::AppState> {
     );
     let metrics_repository =
         Arc::new(crate::repositories::metrics_repository::MetricsRepository::new(pg_pool.clone()));
+    let provider_routes_repository = Arc::new(
+        crate::repositories::provider_routes_repository::ProviderRoutesRepository::new(
+            pg_pool.clone(),
+        ),
+    );
+    let pending_reply_watches_repository = Arc::new(
+        crate::repositories::pending_reply_watches_repository::PendingReplyWatchesRepository::new(
+            pg_pool.clone(),
+        ),
+    );
+    let webhook_tokens_repository = Arc::new(
+        crate::repositories::webhook_tokens_repository::WebhookTokensRepository::new(
+            pg_pool.clone(),
+        ),
+    );
     let llm_usage_repository = Arc::new(
         crate::repositories::llm_usage_repository::LlmUsageRepository::new(pg_pool.clone()),
     );
@@ -108,6 +123,9 @@ pub fn create_test_state() -> Arc<crate::AppState> {
     );
     let ontology_repository = Arc::new(
         crate::repositories::ontology_repository::OntologyRepository::new(pg_pool.clone()),
+    );
+    let commitment_repository = Arc::new(
+        crate::repositories::commitment_repository::CommitmentRepository::new(pg_pool.clone()),
     );
 
     let google_oauth = create_dummy_google_oauth_client();
@@ -156,6 +174,9 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         webauthn_repository,
         admin_alert_repository,
         metrics_repository,
+        provider_routes_repository,
+        pending_reply_watches_repository,
+        webhook_tokens_repository,
         pending_totp_logins: DashMap::new(),
         pending_password_resets: DashMap::new(),
         session_to_token: DashMap::new(),
@@ -164,6 +185,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         llm_usage_repository,
         bandwidth_repository,
         ontology_repository,
+        commitment_repository,
         whatsapp_bridge_repository: None,
         telegram_bridge_repository: None,
         ontology_registry: crate::ontology::registry::OntologyRegistry::build(),

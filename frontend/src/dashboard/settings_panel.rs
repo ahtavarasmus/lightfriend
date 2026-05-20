@@ -1,4 +1,5 @@
 use super::people_list::PeopleList;
+use super::webhooks_panel::WebhooksPanel;
 use crate::auth::connect::Connect;
 use crate::profile::billing_credits::BillingPage;
 use crate::profile::billing_models::UserProfile;
@@ -100,6 +101,7 @@ pub enum SettingsTab {
     People,
     Account,
     Billing,
+    Webhooks,
 }
 
 #[derive(Properties, PartialEq, Clone)]
@@ -232,6 +234,14 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                 html! { <div class="settings-content"><div class="loading-spinner-inline"></div></div> }
             }
         }
+        SettingsTab::Webhooks => {
+            html! {
+                <div class="settings-content">
+                    <h3>{"Webhooks"}</h3>
+                    <WebhooksPanel />
+                </div>
+            }
+        }
     };
 
     let overlay_click = {
@@ -298,6 +308,15 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                         }}
                     >
                         {"Billing"}
+                    </button>
+                    <button
+                        class={classes!("settings-tab", (*active_tab == SettingsTab::Webhooks).then(|| "active"))}
+                        onclick={{
+                            let active_tab = active_tab.clone();
+                            Callback::from(move |_| active_tab.set(SettingsTab::Webhooks))
+                        }}
+                    >
+                        {"Webhooks"}
                     </button>
                 </div>
                 <div class="settings-body">

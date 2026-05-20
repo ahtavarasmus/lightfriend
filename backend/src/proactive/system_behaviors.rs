@@ -1494,48 +1494,19 @@ pub async fn run_commitment_detection(
                         })
                     }
                 } else {
-                    let new_event = crate::models::ontology_models::NewOntEvent {
+                    handle_new_commitment(
+                        state,
                         user_id,
-                        description: description.clone(),
-                        remind_at,
+                        entity_snapshot,
+                        sender_name,
+                        platform,
+                        message_id,
+                        &description,
                         due_at,
-                        status: "active".to_string(),
-                        created_at: now,
-                        updated_at: now,
-                    };
-                    match state.ontology_repository.create_event(&new_event) {
-                        Ok(created) => {
-                            if let Some(mid) = message_id {
-                                let _ = state.ontology_repository.create_link(
-                                    user_id,
-                                    "Event",
-                                    created.id,
-                                    "Message",
-                                    mid as i32,
-                                    "source_message",
-                                    None,
-                                );
-                            }
-                            info!(
-                                "Auto-created event {} for user {}: {}",
-                                created.id, user_id, created.description
-                            );
-                            serde_json::json!({
-                                "action": "created",
-                                "event_id": created.id,
-                                "status": "active",
-                                "due_at": due_at,
-                            })
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to create event for user {}: {}", user_id, e);
-                            serde_json::json!({
-                                "action": "error",
-                                "reason": "create_event_failed",
-                                "error": e.to_string(),
-                            })
-                        }
-                    }
+                        remind_at,
+                        now,
+                    )
+                    .await
                 };
             }
         }
@@ -1544,6 +1515,404 @@ pub async fn run_commitment_detection(
 
     persist_envelope(extraction_json, routing);
     Ok(())
+}
+
+/// Branch for a freshly-detected new commitment (no `existing_match_id`).
+/// Order of precedence: mute rule skip → always_track rule auto-create →
+/// pending-prompt dedup skip → SMS prompt (no event yet) → fall back to
+/// auto-create on any failure or missing sender_key. Returns the routing
+/// JSON describing what happened, for the activity-feed envelope.
+#[allow(clippy::too_many_arguments)]
+async fn handle_new_commitment(
+    state: &Arc<AppState>,
+    user_id: i32,
+    entity_snapshot: &serde_json::Value,
+    sender_name: &str,
+    platform: &str,
+    message_id: Option<i64>,
+    description: &str,
+    due_at: Option<i32>,
+    remind_at: Option<i32>,
+    now: i32,
+) -> serde_json::Value {
+    let sender_key_opt = entity_snapshot.get("sender_key").and_then(|v| v.as_str());
+
+    if let Some(sender_key) = sender_key_opt {
+        match state
+            .commitment_repository
+            .lookup_sender_rule(user_id, platform, sender_key)
+        {
+            Ok(Some(rule))
+                if rule.rule_type == crate::repositories::commitment_repository::RULE_MUTE =>
+            {
+                info!(
+                    "commitment_detection user={} skip sender_muted sender={} rule={}",
+                    user_id, sender_key, rule.id
+                );
+                return serde_json::json!({
+                    "action": "skipped",
+                    "reason": "sender_muted",
+                    "rule_id": rule.id,
+                });
+            }
+            Ok(Some(rule))
+                if rule.rule_type
+                    == crate::repositories::commitment_repository::RULE_ALWAYS_TRACK =>
+            {
+                info!(
+                    "commitment_detection user={} auto-tracking via always_track sender={} rule={}",
+                    user_id, sender_key, rule.id
+                );
+                // Fall through to auto-create below.
+            }
+            _ => {
+                // No rule. Dedupe vs an existing unresolved prompt from this
+                // same sender so a rapid-fire sender can't burst-spam the user.
+                match state
+                    .commitment_repository
+                    .find_unresolved_for_sender(user_id, platform, sender_key)
+                {
+                    Ok(Some(existing)) => {
+                        info!(
+                            "commitment_detection user={} skip duplicate_pending prompt_id={}",
+                            user_id, existing.id
+                        );
+                        return serde_json::json!({
+                            "action": "skipped",
+                            "reason": "duplicate_pending_prompt",
+                            "existing_prompt_id": existing.id,
+                        });
+                    }
+                    Ok(None) => {
+                        // Embedding similarity memory: opportunistically rescue
+                        // (auto-track if very similar to a past 1/2 reply) or
+                        // suppress (skip if very similar to a past 4 reply).
+                        // Track-similarity check runs FIRST so a message that
+                        // clears both thresholds gets rescued, not suppressed -
+                        // this matches the asymmetric-cost principle (false
+                        // negatives hurt more than an extra auto-create).
+                        // Best-effort - if embeddings are disabled or fail,
+                        // the SMS prompt path runs as normal.
+                        let mut skip_sms_prompt = false;
+                        if let Some(content) =
+                            entity_snapshot.get("content").and_then(|v| v.as_str())
+                        {
+                            if !content.trim().is_empty() {
+                                match crate::utils::embedding_service::generate_embedding(
+                                    &state.ai_config,
+                                    content,
+                                )
+                                .await
+                                {
+                                    Ok(Some(emb)) => {
+                                        let track_sim = max_user_label_similarity(
+                                            state,
+                                            user_id,
+                                            crate::repositories::commitment_repository::LABEL_TRACK,
+                                            &emb,
+                                        );
+                                        if track_sim >= TRACK_AUTOTRACK_THRESHOLD {
+                                            info!(
+                                                "commitment_detection user={} auto-track via track_similar sim={:.3}",
+                                                user_id, track_sim
+                                            );
+                                            skip_sms_prompt = true;
+                                        } else {
+                                            let wrong_sim = max_user_label_similarity(
+                                                state,
+                                                user_id,
+                                                crate::repositories::commitment_repository::LABEL_WRONG,
+                                                &emb,
+                                            );
+                                            if wrong_sim >= WRONG_SUPPRESS_THRESHOLD {
+                                                info!(
+                                                    "commitment_detection user={} skip similar_to_past_wrong sim={:.3}",
+                                                    user_id, wrong_sim
+                                                );
+                                                return serde_json::json!({
+                                                    "action": "skipped",
+                                                    "reason": "similar_to_past_wrong",
+                                                    "similarity": wrong_sim,
+                                                });
+                                            }
+                                        }
+                                    }
+                                    Ok(None) => {}
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            "commitment_detection user={} embedding_failed: {}",
+                                            user_id,
+                                            e
+                                        );
+                                    }
+                                }
+                            }
+                        }
+
+                        if !skip_sms_prompt {
+                            match try_send_commitment_prompt(
+                                state,
+                                user_id,
+                                message_id,
+                                platform,
+                                sender_key,
+                                sender_name,
+                                description,
+                                due_at,
+                                remind_at,
+                            )
+                            .await
+                            {
+                                Ok(PromptSendOutcome::Sent { prompt_id }) => {
+                                    info!(
+                                        "commitment_detection user={} sms_prompt_sent prompt_id={}",
+                                        user_id, prompt_id
+                                    );
+                                    return serde_json::json!({
+                                        "action": "sms_prompt_sent",
+                                        "prompt_id": prompt_id,
+                                    });
+                                }
+                                Ok(PromptSendOutcome::RaceLost) => {
+                                    info!(
+                                        "commitment_detection user={} skip prompt_race_lost - another worker already sent",
+                                        user_id
+                                    );
+                                    return serde_json::json!({
+                                        "action": "skipped",
+                                        "reason": "prompt_race_lost",
+                                    });
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "commitment_detection user={} sms_prompt_failed: {} - falling back to auto-create",
+                                        user_id, e
+                                    );
+                                    // Fall through to auto-create.
+                                }
+                            }
+                        }
+                        // If skip_sms_prompt set, fall through to outer
+                        // auto-create with `similar_to_past_track` rationale
+                        // (the log line above captures the similarity score).
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "commitment_detection user={} pending_lookup_failed: {} - falling back to auto-create",
+                            user_id, e
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Fall-through: auto-create the event. Reached when always_track rule
+    // matched, sender_key was unavailable, SMS dispatch failed, or rule
+    // lookups errored.
+    let new_event = crate::models::ontology_models::NewOntEvent {
+        user_id,
+        description: description.to_string(),
+        remind_at,
+        due_at,
+        status: "active".to_string(),
+        created_at: now,
+        updated_at: now,
+    };
+    match state.ontology_repository.create_event(&new_event) {
+        Ok(created) => {
+            if let Some(mid) = message_id {
+                let _ = state.ontology_repository.create_link(
+                    user_id,
+                    "Event",
+                    created.id,
+                    "Message",
+                    mid as i32,
+                    "source_message",
+                    None,
+                );
+            }
+            info!(
+                "Auto-created event {} for user {}: {}",
+                created.id, user_id, created.description
+            );
+            serde_json::json!({
+                "action": "created",
+                "event_id": created.id,
+                "status": "active",
+                "due_at": due_at,
+            })
+        }
+        Err(e) => {
+            tracing::warn!("Failed to create event for user {}: {}", user_id, e);
+            serde_json::json!({
+                "action": "error",
+                "reason": "create_event_failed",
+                "error": e.to_string(),
+            })
+        }
+    }
+}
+
+/// Outcome of attempting to send a commitment SMS prompt.
+enum PromptSendOutcome {
+    /// New prompt persisted and SMS dispatched. `prompt_id` is the new row id.
+    Sent { prompt_id: i32 },
+    /// Another concurrent worker already has an unresolved prompt for this
+    /// (user, platform, sender_key) - unique partial index rejected our
+    /// insert. We did NOT send a duplicate SMS.
+    RaceLost,
+}
+
+/// Insert the `commitment_prompts` row FIRST, then send the SMS, then
+/// backfill the channel SID. Inserting before sending is what makes the
+/// unique partial index actually prevent duplicate prompts under concurrent
+/// detection: if two workers see no existing prompt and race, exactly one
+/// wins the insert and only that one sends an SMS.
+///
+/// If SMS dispatch fails after the row was inserted, the prompt is marked
+/// resolved-with-no-label so it doesn't haunt the user's pending list.
+#[allow(clippy::too_many_arguments)]
+async fn try_send_commitment_prompt(
+    state: &Arc<AppState>,
+    user_id: i32,
+    message_id: Option<i64>,
+    platform: &str,
+    sender_key: &str,
+    sender_name: &str,
+    description: &str,
+    due_at: Option<i32>,
+    remind_at: Option<i32>,
+) -> Result<PromptSendOutcome, String> {
+    let mid = message_id.ok_or_else(|| "no message_id available".to_string())?;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i32;
+
+    let new_prompt = crate::models::commitment_models::NewCommitmentPrompt {
+        user_id,
+        ont_message_id: mid,
+        platform: platform.to_string(),
+        sender_key: sender_key.to_string(),
+        sender_display_name: sender_name.to_string(),
+        commitment_description: description.to_string(),
+        due_at,
+        remind_at,
+        sent_at: now,
+        sms_message_sid: None,
+    };
+
+    let prompt = match state
+        .commitment_repository
+        .create_prompt(&new_prompt)
+        .map_err(|e| format!("create_prompt: {}", e))?
+    {
+        Some(p) => p,
+        None => return Ok(PromptSendOutcome::RaceLost),
+    };
+
+    let body = format!(
+        "Commitment? \"{}\" (from {}). Reply: 1=track, 2=always, 3=mute, 4=not commitment",
+        truncate_chars(description, 100),
+        truncate_chars(sender_name, 40)
+    );
+
+    let user = state
+        .user_core
+        .find_by_id(user_id)
+        .map_err(|e| format!("find_by_id failed: {}", e))?
+        .ok_or_else(|| "user not found".to_string())?;
+
+    match state.channel_router.send_to_user(&user, &body, None).await {
+        Ok(channel_id) => {
+            if let Err(e) = state
+                .commitment_repository
+                .set_prompt_sms_sid(prompt.id, &channel_id.0)
+            {
+                tracing::warn!(
+                    "commitment_prompt user={} prompt={} set_sms_sid failed: {}",
+                    user_id,
+                    prompt.id,
+                    e
+                );
+            }
+            Ok(PromptSendOutcome::Sent {
+                prompt_id: prompt.id,
+            })
+        }
+        Err(e) => {
+            // SMS failed but a row exists. Mark resolved so the unique
+            // partial index releases the (user, platform, sender_key) slot
+            // and so the pending list doesn't show this orphan to the user.
+            if let Err(e2) = state.commitment_repository.expire_prompt(prompt.id) {
+                tracing::warn!(
+                    "commitment_prompt user={} prompt={} expire_after_send_fail failed: {}",
+                    user_id,
+                    prompt.id,
+                    e2
+                );
+            }
+            Err(format!("channel send failed: {}", e))
+        }
+    }
+}
+
+/// Char-bounded truncation that adds an ellipsis when content overflows.
+/// Operates on chars not bytes so we don't slice mid-codepoint.
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+/// Cosine similarity at or above this threshold against the user's "wrong"
+/// embedding store suppresses the SMS prompt entirely. Tuned to "very
+/// similar to a past 4-reply" - asymmetric vs the track threshold because
+/// false negatives (missing a real commitment) cost more than the noise of
+/// an extra SMS prompt.
+const WRONG_SUPPRESS_THRESHOLD: f32 = 0.90;
+
+/// Cosine similarity at or above this threshold against the user's "track"
+/// embedding store causes auto-create even without an explicit always_track
+/// sender rule. Lower bar than WRONG_SUPPRESS_THRESHOLD because the
+/// downside of an unwanted auto-create is recoverable (user resolves the
+/// event) while a missed commitment is not.
+const TRACK_AUTOTRACK_THRESHOLD: f32 = 0.85;
+
+/// Brute-force max cosine similarity between `query` and the user's stored
+/// embeddings of the given label type. Returns 0.0 on lookup failure or
+/// when there are no stored embeddings yet.
+fn max_user_label_similarity(
+    state: &Arc<AppState>,
+    user_id: i32,
+    label_type: &str,
+    query: &[f32],
+) -> f32 {
+    let rows = match state
+        .commitment_repository
+        .list_embeddings(user_id, label_type)
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::warn!(
+                "commitment_detection user={} list_embeddings({}) failed: {}",
+                user_id,
+                label_type,
+                e
+            );
+            return 0.0;
+        }
+    };
+    let candidates: Vec<Vec<f32>> = rows
+        .into_iter()
+        .filter_map(|r| crate::utils::embedding_similarity::unpack_embedding(&r.embedding))
+        .collect();
+    crate::utils::embedding_similarity::max_similarity(query, &candidates)
 }
 
 /// Check if the user's outgoing message indicates a tracked event is already done.

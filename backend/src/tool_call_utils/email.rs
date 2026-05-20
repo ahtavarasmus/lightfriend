@@ -48,6 +48,16 @@ pub fn get_send_email_tool_for_user(emails: &[String]) -> openai_api_rs::v1::cha
             }),
         );
     }
+    properties.insert(
+        "notify_on_reply".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some(
+                "Optional. Defaults to false. Set to true ONLY when the user explicitly asks to be told when the recipient replies (e.g. \"email Sara and let me know what she says\"). When true, the first email from that recipient to the same account in the next 24 hours is forwarded to the user via SMS. After that one reply, the watch ends automatically.".to_string()
+            ),
+            ..Default::default()
+        }),
+    );
     chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
@@ -109,6 +119,16 @@ pub fn get_respond_to_email_tool_for_user(
             }),
         );
     }
+    properties.insert(
+        "notify_on_reply".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some(
+                "Optional. Defaults to false. Set to true ONLY when the user explicitly asks to be told when the recipient replies back. When true, the first email from that recipient to the same account in the next 24 hours is forwarded to the user via SMS. After that one reply, the watch ends automatically.".to_string()
+            ),
+            ..Default::default()
+        }),
+    );
     chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
@@ -166,6 +186,8 @@ pub struct SendEmailArgs {
     pub subject: String,
     pub body: String,
     pub from: Option<String>,
+    #[serde(default)]
+    pub notify_on_reply: bool,
 }
 pub async fn handle_send_email(
     state: &Arc<AppState>,
@@ -278,6 +300,13 @@ pub async fn handle_send_email(
     let cloned_body = args.body.clone();
     let cloned_from = Some(from_email);
     let cloned_skip_sms = skip_sms;
+    let cloned_notify_on_reply = args.notify_on_reply;
+    let cloned_imap_connection_id = sender_account.id;
+    let cloned_recipient_display = if args.to.contains('@') {
+        recipient_email.clone()
+    } else {
+        args.to.clone()
+    };
     tokio::spawn(async move {
         let reason = tokio::select! {
             _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => "timeout",
@@ -285,7 +314,7 @@ pub async fn handle_send_email(
         };
         if reason == "timeout" {
             let email_request = crate::handlers::imap_handlers::SendEmailRequest {
-                to: cloned_to,
+                to: cloned_to.clone(),
                 subject: cloned_subject,
                 body: cloned_body,
                 from: cloned_from,
@@ -301,7 +330,35 @@ pub async fn handle_send_email(
             .await
             {
                 Ok(_) => {
-                    // No need to send success message
+                    if cloned_notify_on_reply {
+                        if let Some(key) =
+                            crate::handlers::imap_handlers::normalize_email_sender_key(&cloned_to)
+                        {
+                            match cloned_state.pending_reply_watches_repository.arm_email(
+                                cloned_user_id,
+                                cloned_imap_connection_id,
+                                &key,
+                                &cloned_recipient_display,
+                            ) {
+                                Ok(_) => {
+                                    tracing::info!(
+                                    "REPLY_WATCH armed email watch user={} account={} recipient={}",
+                                    cloned_user_id, cloned_imap_connection_id, key
+                                )
+                                }
+                                Err(e) => tracing::warn!(
+                                    "REPLY_WATCH failed to arm email watch user={}: {}",
+                                    cloned_user_id,
+                                    e
+                                ),
+                            }
+                        } else {
+                            tracing::warn!(
+                                "REPLY_WATCH skipping email watch user={}: recipient '{}' did not normalize",
+                                cloned_user_id, cloned_to
+                            );
+                        }
+                    }
                 }
                 Err((_, error_json)) => {
                     let error_msg = format!(
@@ -351,6 +408,8 @@ pub struct RespondToEmailArgs {
     pub email_id: String,
     pub response_text: String,
     pub from: Option<String>,
+    #[serde(default)]
+    pub notify_on_reply: bool,
 }
 pub async fn handle_respond_to_email(
     state: &Arc<AppState>,
@@ -431,6 +490,20 @@ pub async fn handle_respond_to_email(
         .and_then(|s| s.as_str())
         .unwrap_or("Unknown subject")
         .to_string();
+    let original_from_email = email_details
+        .0
+        .get("email")
+        .and_then(|e| e.get("from_email"))
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_string());
+    let original_from_display = email_details
+        .0
+        .get("email")
+        .and_then(|e| e.get("from"))
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| original_from_email.clone())
+        .unwrap_or_else(|| "Unknown sender".to_string());
     // Format the queued message using the subject
     let queued_msg = format!(
         "Will respond to email '{}' with '{}' in 60s. Reply 'C' to discard.",
@@ -469,6 +542,10 @@ pub async fn handle_respond_to_email(
     let cloned_response_text = args.response_text.clone();
     let cloned_from = Some(from_email);
     let cloned_skip_sms = skip_sms;
+    let cloned_notify_on_reply = args.notify_on_reply;
+    let cloned_imap_connection_id = sender_account.id;
+    let cloned_original_from_email = original_from_email;
+    let cloned_original_from_display = original_from_display;
     tokio::spawn(async move {
         let reason = tokio::select! {
             _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => "timeout",
@@ -491,7 +568,33 @@ pub async fn handle_respond_to_email(
             .await
             {
                 Ok(_) => {
-                    // No need to send success message
+                    if cloned_notify_on_reply {
+                        match cloned_original_from_email.as_deref().and_then(
+                            crate::handlers::imap_handlers::normalize_email_sender_key,
+                        ) {
+                            Some(key) => {
+                                match cloned_state.pending_reply_watches_repository.arm_email(
+                                    cloned_user_id,
+                                    cloned_imap_connection_id,
+                                    &key,
+                                    &cloned_original_from_display,
+                                ) {
+                                    Ok(_) => tracing::info!(
+                                        "REPLY_WATCH armed email watch user={} account={} recipient={}",
+                                        cloned_user_id, cloned_imap_connection_id, key
+                                    ),
+                                    Err(e) => tracing::warn!(
+                                        "REPLY_WATCH failed to arm email watch user={}: {}",
+                                        cloned_user_id, e
+                                    ),
+                                }
+                            }
+                            None => tracing::warn!(
+                                "REPLY_WATCH skipping email watch user={}: no sender email for replied email",
+                                cloned_user_id
+                            ),
+                        }
+                    }
                 }
                 Err((_, error_json)) => {
                     let error_msg = format!(

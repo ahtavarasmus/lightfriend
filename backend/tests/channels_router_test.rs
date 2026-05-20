@@ -372,3 +372,154 @@ fn pick_channel_us_falls_back_to_telnyx_when_twilio_missing() {
         "telnyx"
     );
 }
+
+// ===== Provider-routes fallback tests =====
+//
+// A channel that fails on demand so we can simulate "primary carrier
+// dropped this message" and assert that the router falls through to
+// the next provider with the [Lightfriend backup] prefix.
+struct FailingChannel {
+    id: &'static str,
+    fail_until_attempt: AtomicUsize,
+    attempts: AtomicUsize,
+    last_body: std::sync::Mutex<String>,
+}
+
+impl FailingChannel {
+    fn new(id: &'static str, fail_n_times: usize) -> Self {
+        Self {
+            id,
+            fail_until_attempt: AtomicUsize::new(fail_n_times),
+            attempts: AtomicUsize::new(0),
+            last_body: std::sync::Mutex::new(String::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl MessageChannel for FailingChannel {
+    fn id(&self) -> &'static str {
+        self.id
+    }
+    async fn send(
+        &self,
+        _user: &User,
+        _address: &str,
+        body: &str,
+        _media: Option<MediaRef>,
+    ) -> Result<ChannelMessageId, ChannelError> {
+        let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
+        *self.last_body.lock().unwrap() = body.to_string();
+        if attempt <= self.fail_until_attempt.load(Ordering::SeqCst) {
+            Err(ChannelError::SendFailed(format!(
+                "simulated fail {}",
+                attempt
+            )))
+        } else {
+            Ok(ChannelMessageId(format!("{}-{}", self.id, attempt)))
+        }
+    }
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn route_drives_provider_order() {
+    // Admin set US to telnyx-first, twilio-fallback. Router must honor it
+    // even though the hardcoded default would pick twilio.
+    let twilio = Arc::new(RecordingChannel::new("twilio"));
+    let telnyx = Arc::new(RecordingChannel::new("telnyx"));
+    let mut router = ChannelRouter::new();
+    router.register(twilio.clone());
+    router.register(telnyx.clone());
+    router.set_route("US", vec!["telnyx".to_string(), "twilio".to_string()]);
+
+    let user = user_with_phone("+12025551234");
+    let result = router.send_to_user(&user, "hello", None).await.unwrap();
+
+    assert_eq!(result.as_str(), "telnyx-1");
+    assert_eq!(telnyx.send_count(), 1);
+    assert_eq!(twilio.send_count(), 0);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn falls_through_to_next_provider_on_error() {
+    // Twilio fails the first attempt. Telnyx should be tried with the
+    // [Lightfriend backup] prefix and the message reaches the user.
+    let failing_twilio = Arc::new(FailingChannel::new("twilio", 1));
+    let telnyx = Arc::new(RecordingChannel::new("telnyx"));
+    let mut router = ChannelRouter::new();
+    router.register(failing_twilio.clone());
+    router.register(telnyx.clone());
+    router.set_route("US", vec!["twilio".to_string(), "telnyx".to_string()]);
+
+    let user = user_with_phone("+12025551234");
+    let result = router.send_to_user(&user, "hello", None).await.unwrap();
+
+    assert_eq!(result.as_str(), "telnyx-1");
+    assert_eq!(failing_twilio.attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(telnyx.send_count(), 1);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn fallback_body_has_lightfriend_backup_prefix() {
+    // Capture body each provider receives. First attempt unchanged, second
+    // attempt prefixed so the recipient knows it's still legit Lightfriend.
+    use backend::channels::router::FALLBACK_PREFIX;
+
+    let failing_twilio = Arc::new(FailingChannel::new("twilio", 1));
+    let telnyx = Arc::new(FailingChannel::new("telnyx", 0));
+    let mut router = ChannelRouter::new();
+    router.register(failing_twilio.clone());
+    router.register(telnyx.clone());
+    router.set_route("US", vec!["twilio".to_string(), "telnyx".to_string()]);
+
+    let user = user_with_phone("+12025551234");
+    router.send_to_user(&user, "hello", None).await.unwrap();
+
+    let twilio_body = failing_twilio.last_body.lock().unwrap().clone();
+    let telnyx_body = telnyx.last_body.lock().unwrap().clone();
+    assert_eq!(twilio_body, "hello");
+    assert_eq!(telnyx_body, format!("{}hello", FALLBACK_PREFIX));
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn all_providers_failing_returns_last_error() {
+    // Every provider in the chain errors. send_to_user surfaces the last
+    // error rather than silently succeeding.
+    let twilio = Arc::new(FailingChannel::new("twilio", 999));
+    let telnyx = Arc::new(FailingChannel::new("telnyx", 999));
+    let mut router = ChannelRouter::new();
+    router.register(twilio.clone());
+    router.register(telnyx.clone());
+    router.set_route("US", vec!["twilio".to_string(), "telnyx".to_string()]);
+
+    let user = user_with_phone("+12025551234");
+    let err = router.send_to_user(&user, "hello", None).await.unwrap_err();
+
+    assert!(matches!(err, ChannelError::SendFailed(_)));
+    assert_eq!(twilio.attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(telnyx.attempts.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn clear_route_reverts_to_default() {
+    let twilio = Arc::new(RecordingChannel::new("twilio"));
+    let telnyx = Arc::new(RecordingChannel::new("telnyx"));
+    let mut router = ChannelRouter::new();
+    router.register(twilio.clone());
+    router.register(telnyx.clone());
+
+    router.set_route("US", vec!["telnyx".to_string()]);
+    router.clear_route("US");
+
+    let user = user_with_phone("+12025551234");
+    router.send_to_user(&user, "hello", None).await.unwrap();
+
+    // Cleared → default picks twilio.
+    assert_eq!(twilio.send_count(), 1);
+    assert_eq!(telnyx.send_count(), 0);
+}

@@ -100,3 +100,27 @@ test-backend:
 # Development: Run tests for frontend
 test-frontend:
     cd frontend && cargo test
+
+# ── Fuzzing (security-critical pure functions) ──────────────────────────
+# Requires: rustup install nightly && cargo install cargo-fuzz
+# See backend/fuzz/README.md for what these check and how to triage findings.
+
+# Fuzz the Twilio webhook signature verifier for 60 seconds
+fuzz-twilio:
+    cd backend/fuzz && cargo +nightly fuzz run twilio_signature -- -max_total_time=60
+
+# Fuzz the Telnyx webhook signature verifier for 60 seconds
+fuzz-telnyx:
+    cd backend/fuzz && cargo +nightly fuzz run telnyx_signature -- -max_total_time=60
+
+# Fuzz all webhook signature verifiers (60 seconds each, sequential)
+fuzz-all: fuzz-twilio fuzz-telnyx
+
+# ── Formal verification (Kani bounded model checking) ───────────────────
+# Requires: cargo install --locked kani-verifier && cargo kani setup
+# Proves properties hold for ALL bounded inputs - not just samples.
+# See backend/fuzz/README.md (Kani section) for scope and rationale.
+
+# Run every #[kani::proof] in the backend crate
+kani:
+    cd backend && cargo kani --tests
