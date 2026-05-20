@@ -2271,6 +2271,13 @@ pub async fn handle_bridge_message(
     let chat_name = remove_bridge_suffix(room_name.as_str());
     let current_room_id = room.room_id().to_string();
 
+    // Skip WhatsApp "Status Broadcast" (the disappearing-stories pseudo-chat
+    // mautrix-whatsapp creates for status@broadcast). Every status post from
+    // any contact lands here and is noise for digests/notifications.
+    if service == "whatsapp" && chat_name.to_lowercase().contains("status broadcast") {
+        return;
+    }
+
     // Skip bridge-generated error notices so they are logged but never treated
     // as user messages for notification/proactive rules.
     if is_error_message(&content) {
