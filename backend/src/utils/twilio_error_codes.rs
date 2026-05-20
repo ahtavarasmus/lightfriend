@@ -1,11 +1,11 @@
-/// Twilio SMS error code decoder.
-///
-/// Maps Twilio error codes to a human-readable title, likely cause, and
-/// suggested action. Used to enrich the failed-SMS admin alerts so a code
-/// like "30007" turns into "Carrier filtering (10DLC compliance issue)"
-/// with an actionable next step.
-///
-/// Source: https://www.twilio.com/docs/api/errors
+//! Twilio SMS error code decoder.
+//!
+//! Maps Twilio error codes to a human-readable title, likely cause, and
+//! suggested action. Used to enrich the failed-SMS admin alerts so a code
+//! like "30007" turns into "Carrier filtering (10DLC compliance issue)"
+//! with an actionable next step.
+//!
+//! Source: https://www.twilio.com/docs/api/errors
 
 /// Whether the failure is something we can act on or routine carrier noise.
 ///
