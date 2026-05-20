@@ -1,6 +1,7 @@
 use crate::pg_schema::{
-    admin_alerts, country_availability, disabled_alert_types, message_status_log, provider_routes,
-    site_metrics, user_settings, users, waitlist,
+    admin_alerts, country_availability, disabled_alert_types, message_status_log,
+    pending_reply_watches, provider_routes, site_metrics, user_settings, users, waitlist,
+    webhook_tokens,
 };
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -234,6 +235,67 @@ pub struct ProviderRoute {
     pub country_code: String,
     pub provider_order: String,
     pub updated_at: i32,
+}
+
+#[derive(Queryable, Selectable, Clone, Debug)]
+#[diesel(table_name = pending_reply_watches)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct PendingReplyWatch {
+    pub id: i32,
+    pub user_id: i32,
+    pub platform: String,
+    pub room_id: Option<String>,
+    pub imap_connection_id: Option<i32>,
+    pub contact_identifier: String,
+    pub contact_display_name: String,
+    pub created_at: i32,
+    pub expires_at: i32,
+}
+
+#[derive(Queryable, Selectable, Clone, Debug, Serialize)]
+#[diesel(table_name = webhook_tokens)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct WebhookToken {
+    pub id: i32,
+    pub user_id: i32,
+    #[serde(skip_serializing)]
+    pub token_hash: String,
+    pub token_prefix: String,
+    pub label: String,
+    pub daily_cap: i32,
+    pub daily_sent: i32,
+    pub daily_reset_at: i32,
+    pub last_used_at: Option<i32>,
+    pub revoked_at: Option<i32>,
+    pub created_at: i32,
+}
+
+#[derive(Insertable, Clone, Debug)]
+#[diesel(table_name = webhook_tokens)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewWebhookToken {
+    pub user_id: i32,
+    pub token_hash: String,
+    pub token_prefix: String,
+    pub label: String,
+    pub daily_cap: i32,
+    pub daily_sent: i32,
+    pub daily_reset_at: i32,
+    pub created_at: i32,
+}
+
+#[derive(Insertable, Clone, Debug)]
+#[diesel(table_name = pending_reply_watches)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewPendingReplyWatch {
+    pub user_id: i32,
+    pub platform: String,
+    pub room_id: Option<String>,
+    pub imap_connection_id: Option<i32>,
+    pub contact_identifier: String,
+    pub contact_display_name: String,
+    pub created_at: i32,
+    pub expires_at: i32,
 }
 
 // Site Metrics models for tracking site-wide statistics

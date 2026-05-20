@@ -105,6 +105,16 @@ pub fn create_test_state() -> Arc<crate::AppState> {
             pg_pool.clone(),
         ),
     );
+    let pending_reply_watches_repository = Arc::new(
+        crate::repositories::pending_reply_watches_repository::PendingReplyWatchesRepository::new(
+            pg_pool.clone(),
+        ),
+    );
+    let webhook_tokens_repository = Arc::new(
+        crate::repositories::webhook_tokens_repository::WebhookTokensRepository::new(
+            pg_pool.clone(),
+        ),
+    );
     let llm_usage_repository = Arc::new(
         crate::repositories::llm_usage_repository::LlmUsageRepository::new(pg_pool.clone()),
     );
@@ -165,6 +175,8 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         admin_alert_repository,
         metrics_repository,
         provider_routes_repository,
+        pending_reply_watches_repository,
+        webhook_tokens_repository,
         pending_totp_logins: DashMap::new(),
         pending_password_resets: DashMap::new(),
         session_to_token: DashMap::new(),

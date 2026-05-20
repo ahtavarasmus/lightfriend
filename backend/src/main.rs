@@ -325,6 +325,10 @@ async fn main() {
     let metrics_repository = Arc::new(backend::MetricsRepository::new(pg_pool.clone()));
     let provider_routes_repository =
         Arc::new(backend::ProviderRoutesRepository::new(pg_pool.clone()));
+    let pending_reply_watches_repository =
+        Arc::new(backend::PendingReplyWatchesRepository::new(pg_pool.clone()));
+    let webhook_tokens_repository =
+        Arc::new(backend::WebhookTokensRepository::new(pg_pool.clone()));
     let llm_usage_repository = Arc::new(LlmUsageRepository::new(pg_pool.clone()));
     let bandwidth_repository = Arc::new(backend::BandwidthRepository::new(pg_pool.clone()));
     let ontology_repository = Arc::new(backend::OntologyRepository::new(pg_pool.clone()));
@@ -559,6 +563,8 @@ async fn main() {
         admin_alert_repository,
         metrics_repository,
         provider_routes_repository,
+        pending_reply_watches_repository,
+        webhook_tokens_repository,
         pending_totp_logins: DashMap::new(),
         pending_password_resets: DashMap::new(),
         session_to_token: DashMap::new(),
@@ -647,6 +653,14 @@ async fn main() {
     let textbee_routes = Router::new().route(
         "/api/sms/textbee-server",
         post(twilio_sms::handle_textbee_sms),
+    );
+
+    // Public webhook endpoint: auth is the per-token bearer, not a JWT
+    // cookie, so this route group lives outside `protected_routes`. The
+    // handler does the bearer lookup, cap check, and credit gate itself.
+    let webhook_sms_routes = Router::new().route(
+        "/api/webhook/sms",
+        post(handlers::webhook_sms_handlers::webhook_sms),
     );
     // Voice pipeline: TwiML endpoint validated by Twilio signature
     let voice_twiml_routes = Router::new()
@@ -1473,6 +1487,15 @@ async fn main() {
             "/api/mcp/test",
             post(handlers::mcp_handlers::test_url_connection),
         )
+        .route(
+            "/api/me/webhook-tokens",
+            get(handlers::webhook_sms_handlers::list_tokens)
+                .post(handlers::webhook_sms_handlers::create_token),
+        )
+        .route(
+            "/api/me/webhook-tokens/{token_id}",
+            delete(handlers::webhook_sms_handlers::revoke_token),
+        )
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
     // Internal endpoints (secret-authenticated, no JWT)
     let maintenance_routes = Router::new()
@@ -1516,6 +1539,7 @@ async fn main() {
         .merge(sinch_routes)
         .merge(telnyx_routes)
         .merge(voice_routes)
+        .merge(webhook_sms_routes)
         .nest_service("/uploads", ServeDir::new("uploads"))
         .route("/blog/md/{slug}", get(blog::handlers::blog_post_md_handler))
         .route("/blog/{slug}", get(blog::handlers::blog_post_handler))

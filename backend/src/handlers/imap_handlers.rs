@@ -377,6 +377,7 @@ pub async fn insert_email_into_ontology(
     user_id: i32,
     preview: &ImapEmailPreview,
     persons: &[crate::models::ontology_models::PersonWithChannels],
+    imap_connection_id: Option<i32>,
 ) -> Result<i64, String> {
     let email_uid = preview.id.clone();
     let room_id = format!("email_{}", email_uid);
@@ -424,6 +425,81 @@ pub async fn insert_email_into_ontology(
         .from_email
         .as_deref()
         .and_then(normalize_email_sender_key);
+
+    // Pending reply watch: SMS the user the first reply we see from a
+    // recipient they explicitly asked to be notified about, then clear
+    // the watch. Only runs when we know which IMAP account this email
+    // came in on (the IDLE path); the legacy cron path passes None and
+    // is intentionally a no-op for watches.
+    if let (Some(conn_id), Some(key)) = (imap_connection_id, sender_key.as_deref()) {
+        match state
+            .pending_reply_watches_repository
+            .find_active_email(user_id, conn_id, key)
+        {
+            Ok(Some(watch)) => {
+                let subject_line = preview.subject.as_deref().unwrap_or("");
+                let body = if subject_line.is_empty() {
+                    format!("Reply from {} (email)", watch.contact_display_name)
+                } else {
+                    format!(
+                        "Reply from {} (email): {}",
+                        watch.contact_display_name, subject_line
+                    )
+                };
+                // Only clear the watch once we've successfully notified the
+                // user. If the SMS fails (e.g. transient Twilio outage) or we
+                // can't load the user record, leave the watch armed so the
+                // next inbound email retries.
+                let mut notified = false;
+                match state.user_core.find_by_id(user_id) {
+                    Ok(Some(user)) => {
+                        match state.channel_router.send_to_user(&user, &body, None).await {
+                            Ok(_) => notified = true,
+                            Err(e) => tracing::warn!(
+                                "REPLY_WATCH SMS failed user={} watch={}, leaving armed for retry: {}",
+                                user_id,
+                                watch.id,
+                                e
+                            ),
+                        }
+                    }
+                    Ok(None) => tracing::warn!(
+                        "REPLY_WATCH user {} not found while firing email watch id={}",
+                        user_id,
+                        watch.id
+                    ),
+                    Err(e) => {
+                        tracing::warn!("REPLY_WATCH user lookup failed user={}: {}", user_id, e)
+                    }
+                }
+                if notified {
+                    if let Err(e) = state.pending_reply_watches_repository.delete(watch.id) {
+                        tracing::warn!(
+                            "REPLY_WATCH failed to delete fired email watch id={}: {}",
+                            watch.id,
+                            e
+                        );
+                    } else {
+                        tracing::info!(
+                            "REPLY_WATCH fired+cleared email watch id={} user={} account={} sender={}",
+                            watch.id,
+                            user_id,
+                            conn_id,
+                            key
+                        );
+                    }
+                }
+            }
+            Ok(None) => {}
+            Err(e) => tracing::warn!(
+                "REPLY_WATCH email lookup failed user={} account={} sender={}: {}",
+                user_id,
+                conn_id,
+                key,
+                e
+            ),
+        }
+    }
     let content = format!(
         "{}\n{}",
         preview.subject.as_deref().unwrap_or(""),
@@ -488,7 +564,7 @@ pub async fn insert_email_into_ontology(
     Ok(created.id)
 }
 
-fn normalize_email_sender_key(email: &str) -> Option<String> {
+pub fn normalize_email_sender_key(email: &str) -> Option<String> {
     let normalized = email.trim().to_lowercase();
     if normalized.is_empty() {
         None
@@ -586,7 +662,15 @@ pub async fn process_new_emails(
         }
 
         let uid_str = preview.id.clone();
-        match insert_email_into_ontology(state, user_id, &preview, &persons).await {
+        match insert_email_into_ontology(
+            state,
+            user_id,
+            &preview,
+            &persons,
+            Some(imap_connection_id),
+        )
+        .await
+        {
             Ok(_) => {
                 new_count += 1;
                 // Only mark as processed AFTER successful ontology insertion.

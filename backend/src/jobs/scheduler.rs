@@ -606,6 +606,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             user.id,
                                             email,
                                             &persons,
+                                            None,
                                         )
                                         .await
                                         {

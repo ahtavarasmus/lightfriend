@@ -33,6 +33,16 @@ pub fn get_send_chat_message_tool() -> openai_api_rs::v1::chat_completion::Tool 
             ..Default::default()
         }),
     );
+    properties.insert(
+        "notify_on_reply".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some(
+                "Optional. Defaults to false. Set to true ONLY when the user explicitly asks to be told when the recipient replies (e.g. \"text John and let me know what he says\"). When true, the first message from the recipient in the next 24 hours is forwarded to the user via SMS. After that one reply, the watch ends automatically.".to_string()
+            ),
+            ..Default::default()
+        }),
+    );
     chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
@@ -63,6 +73,8 @@ struct SendChatMessageArgs {
     platform: String,
     chat_name: String,
     message: String,
+    #[serde(default)]
+    notify_on_reply: bool,
 }
 /// Resolved chat target for the send path.
 ///
@@ -758,6 +770,7 @@ pub async fn handle_send_chat_message(
 
     let cloned_image_url = image_url.map(|s| s.to_string());
     let cloned_skip_sms = skip_sms;
+    let cloned_notify_on_reply = args.notify_on_reply;
     tracing::info!(
         "SEND_FLOW About to tokio::spawn delayed send task for user={}, room_id={:?}, chat_id={:?}",
         user_id,
@@ -809,6 +822,38 @@ pub async fn handle_send_chat_message(
                         cloned_user_id,
                         msg.room_id
                     );
+                    if cloned_notify_on_reply {
+                        let watch_room = msg.room_id.clone().or_else(|| cloned_room_id.clone());
+                        match watch_room {
+                            Some(room) => {
+                                let identifier = cloned_chat_id
+                                    .clone()
+                                    .unwrap_or_else(|| cloned_exact_name.clone());
+                                match cloned_state.pending_reply_watches_repository.arm_bridge(
+                                    cloned_user_id,
+                                    &room,
+                                    &identifier,
+                                    &cloned_exact_name,
+                                ) {
+                                    Ok(_) => {
+                                        tracing::info!(
+                                        "REPLY_WATCH armed bridge watch user={} room={} contact={}",
+                                        cloned_user_id, room, cloned_exact_name
+                                    )
+                                    }
+                                    Err(e) => tracing::warn!(
+                                        "REPLY_WATCH failed to arm bridge watch user={}: {}",
+                                        cloned_user_id,
+                                        e
+                                    ),
+                                }
+                            }
+                            None => tracing::warn!(
+                                "REPLY_WATCH cannot arm bridge watch user={}: no room_id available",
+                                cloned_user_id
+                            ),
+                        }
+                    }
                 }
                 Err(e) => {
                     tracing::error!(

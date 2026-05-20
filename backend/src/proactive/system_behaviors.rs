@@ -927,7 +927,13 @@ pub async fn run_commitment_detection(
     } else {
         let items: Vec<String> = scored
             .iter()
-            .map(|(_, e)| format!("[id={}] {}", e.id, e.description))
+            .map(|(_, e)| {
+                let deadline = e
+                    .due_at
+                    .map(|d| format!(" deadline={}", fmt_ts(d)))
+                    .unwrap_or_default();
+                format!("[id={}]{} {}", e.id, deadline, e.description)
+            })
             .collect();
         format!("Existing tracked items:\n{}", items.join("\n"))
     };
@@ -961,9 +967,10 @@ pub async fn run_commitment_detection(
         1. If the latest message contains no concrete actionable obligation, return has_commitment=false and STOP. Leave description empty.\n\
         2. If it DOES, you MUST fill ALL of: commitment_type, description, who, confidence. description must be a short imperative phrase (\"Buy hat from seller\", \"Pay invoice\", \"Send project files\") - never empty when has_commitment=true.\n\
         3. who is strictly \"sender\" or \"user\". \"sender\" means the message sender. \"user\" means the user this assistant works for. Never free-form.\n\
-        4. deadline must be RFC 3339 in the timezone shown above, or null.\n\
+        4. deadline must be RFC 3339 in the timezone shown above, or null. ONLY set a deadline when the message explicitly states or unambiguously implies one for THIS obligation. Bare time mentions (\"at 20:00\", \"in the evening\") without a date are NOT deadlines - leave deadline null. When updating an existing tracked item that already has a deadline shown above, leave deadline null UNLESS the message explicitly reschedules it.\n\
         5. existing_match_id is the integer id from the \"Existing tracked items\" list above, or null if this is a new obligation.\n\
-        6. Works in any language. Conditional commitments (\"if X then I'll buy Friday\") still count.\n\
+        6. commitment_type=deadline_update is ONLY for messages that explicitly reschedule an existing tracked item (\"moved to Friday\", \"pushed to next week\", \"actually let's do it tomorrow\"). Casual time references in conversation are NOT deadline updates.\n\
+        7. Works in any language. Conditional commitments (\"if X then I'll buy Friday\") still count.\n\
         \n\
         Bias: when in doubt about description specificity, write a best-guess imperative phrase rather than leaving it empty.",
         now_formatted, tz_label, sender_name, events_context
@@ -1344,13 +1351,34 @@ pub async fn run_commitment_detection(
                         } else {
                             Some(format!("Update: {}", description))
                         };
+                        // Safety: if the LLM's new deadline pulls a still-future
+                        // user-set deadline meaningfully forward, ignore the
+                        // timing change and just append context. Prevents an
+                        // ambient time mention ("at 20:00") from firing a
+                        // reminder days before the real event.
+                        const PULL_FORWARD_GUARD_SECS: i32 = 6 * 3600;
+                        let (safe_remind, safe_due) = match (old_event.as_ref(), due_at) {
+                            (Some(old), Some(new_due)) => {
+                                let old_due = old.due_at.unwrap_or(0);
+                                if old_due > now && new_due + PULL_FORWARD_GUARD_SECS < old_due {
+                                    tracing::info!(
+                                        "deadline_update guard: ignoring earlier inferred deadline event={} old_due={} new_due={}",
+                                        event_id, old_due, new_due
+                                    );
+                                    (None, None)
+                                } else {
+                                    (remind_at, due_at)
+                                }
+                            }
+                            _ => (remind_at, due_at),
+                        };
                         match state.ontology_repository.update_event(
                             user_id,
                             event_id,
                             update_desc.as_deref(),
                             None,
-                            remind_at,
-                            due_at,
+                            safe_remind,
+                            safe_due,
                         ) {
                             Ok(_) => {
                                 if let Some(mid) = message_id {
@@ -1366,7 +1394,7 @@ pub async fn run_commitment_detection(
                                 }
                                 if let Some(old) = old_event {
                                     let old_due = old.due_at.unwrap_or(0);
-                                    if let Some(new_due) = due_at {
+                                    if let Some(new_due) = safe_due {
                                         if old_due != new_due && old_due != 0 {
                                             let change_msg = format!(
                                                 "Tracked item updated: \"{}\"\nDeadline changed based on new message from {}.",
@@ -1383,11 +1411,19 @@ pub async fn run_commitment_detection(
                                         }
                                     }
                                 }
-                                serde_json::json!({
-                                    "action": "deadline_updated",
-                                    "event_id": event_id,
-                                    "new_due_at": due_at,
-                                })
+                                if safe_due.is_none() && due_at.is_some() {
+                                    serde_json::json!({
+                                        "action": "deadline_update_guarded",
+                                        "event_id": event_id,
+                                        "rejected_due_at": due_at,
+                                    })
+                                } else {
+                                    serde_json::json!({
+                                        "action": "deadline_updated",
+                                        "event_id": event_id,
+                                        "new_due_at": safe_due,
+                                    })
+                                }
                             }
                             Err(e) => {
                                 tracing::warn!("Failed to update event {}: {}", event_id, e);
@@ -1410,7 +1446,11 @@ pub async fn run_commitment_detection(
                 };
             }
             _ => {
-                // commitment_to_user or commitment_by_user
+                // commitment_to_user or commitment_by_user.
+                // For UPDATES to an existing event, never touch remind_at/due_at -
+                // the user's original deadline stands. Only deadline_update may
+                // reschedule. This prevents ambient time mentions ("at 20:00") in
+                // chatter from rewriting a far-future user-set deadline.
                 routing = if let Some(event_id) = existing_match_id {
                     if valid_ids.contains(&event_id) {
                         match state.ontology_repository.update_event(
@@ -1418,8 +1458,8 @@ pub async fn run_commitment_detection(
                             event_id,
                             Some(&format!("Update: {}", description)),
                             None,
-                            remind_at,
-                            due_at,
+                            None,
+                            None,
                         ) {
                             Ok(_) => {
                                 if let Some(mid) = message_id {

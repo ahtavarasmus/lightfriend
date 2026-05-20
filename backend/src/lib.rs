@@ -34,6 +34,7 @@ pub mod handlers {
     pub mod trust_chain_handlers;
     pub mod twilio_handlers;
     pub mod webauthn_handlers;
+    pub mod webhook_sms_handlers;
     pub mod whatsapp_auth;
     pub mod whatsapp_handlers;
     pub mod youtube;
@@ -128,6 +129,7 @@ pub mod repositories {
     pub mod mock_signup_repository;
     pub mod mock_twilio_status_repository;
     pub mod ontology_repository;
+    pub mod pending_reply_watches_repository;
     pub mod provider_routes_repository;
     pub mod signup_repository;
     pub mod signup_repository_impl;
@@ -139,6 +141,7 @@ pub mod repositories {
     pub mod user_repository;
     pub mod user_subscriptions;
     pub mod webauthn_repository;
+    pub mod webhook_tokens_repository;
     pub mod whatsapp_bridge_repository;
 }
 pub mod services {
@@ -183,12 +186,14 @@ pub use repositories::commitment_repository::CommitmentRepository;
 pub use repositories::llm_usage_repository::LlmUsageRepository;
 pub use repositories::metrics_repository::MetricsRepository;
 pub use repositories::ontology_repository::OntologyRepository;
+pub use repositories::pending_reply_watches_repository::PendingReplyWatchesRepository;
 pub use repositories::provider_routes_repository::ProviderRoutesRepository;
 pub use repositories::telegram_bridge_repository::{TelegramBridgeRepository, TelegramContact};
 pub use repositories::totp_repository::TotpRepository;
 pub use repositories::user_core::{UserCore, UserCoreOps};
 pub use repositories::user_repository::UserRepository;
 pub use repositories::webauthn_repository::WebauthnRepository;
+pub use repositories::webhook_tokens_repository::WebhookTokensRepository;
 pub use repositories::whatsapp_bridge_repository::{WhatsAppBridgeRepository, WhatsAppContact};
 pub use services::twilio_message_service::TwilioMessageService;
 
@@ -290,6 +295,8 @@ pub struct AppState {
     pub admin_alert_repository: Arc<AdminAlertRepository>,
     pub metrics_repository: Arc<MetricsRepository>,
     pub provider_routes_repository: Arc<ProviderRoutesRepository>,
+    pub pending_reply_watches_repository: Arc<PendingReplyWatchesRepository>,
+    pub webhook_tokens_repository: Arc<WebhookTokensRepository>,
     pub pending_totp_logins: DashMap<String, (i32, i64)>, // (totp_token, (user_id, expiry_timestamp))
     pub pending_password_resets: DashMap<String, (i32, i64)>, // (reset_token, (user_id, expiry_timestamp))
     pub session_to_token: DashMap<String, String>, // stripe_session_id -> magic_token (temporary, for redirect flow)

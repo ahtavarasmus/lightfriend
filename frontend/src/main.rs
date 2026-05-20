@@ -65,6 +65,7 @@ mod dashboard {
     pub mod tesla_quick_panel;
     pub mod timeline_view;
     pub mod triage_indicator;
+    pub mod webhooks_panel;
     pub mod youtube_quick_panel;
 }
 mod proactive {

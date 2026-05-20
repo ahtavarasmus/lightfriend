@@ -364,6 +364,20 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    pending_reply_watches (id) {
+        id -> Int4,
+        user_id -> Int4,
+        platform -> Text,
+        room_id -> Nullable<Text>,
+        imap_connection_id -> Nullable<Int4>,
+        contact_identifier -> Text,
+        contact_display_name -> Text,
+        created_at -> Int4,
+        expires_at -> Int4,
+    }
+}
+
 // Ontology v1: Person + Channel tables
 
 diesel::table! {
@@ -564,11 +578,28 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    webhook_tokens (id) {
+        id -> Int4,
+        user_id -> Int4,
+        token_hash -> Text,
+        token_prefix -> Text,
+        label -> Text,
+        daily_cap -> Int4,
+        daily_sent -> Int4,
+        daily_reset_at -> Int4,
+        last_used_at -> Nullable<Int4>,
+        revoked_at -> Nullable<Int4>,
+        created_at -> Int4,
+    }
+}
+
 diesel::joinable!(ont_person_edits -> ont_persons (person_id));
 diesel::joinable!(ont_channels -> ont_persons (person_id));
 
 diesel::joinable!(refund_info -> users (user_id));
 diesel::joinable!(user_settings -> users (user_id));
+diesel::joinable!(webhook_tokens -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     user_secrets,
@@ -610,4 +641,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     commitment_label_embeddings,
     commitment_prompts,
     provider_routes,
+    pending_reply_watches,
+    webhook_tokens,
 );

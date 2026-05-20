@@ -43,7 +43,7 @@ async fn test_insert_email_creates_ont_message() {
         .get_persons_with_channels(user.id, 500, 0)
         .unwrap_or_default();
 
-    let id = insert_email_into_ontology(&state, user.id, &preview, &persons)
+    let id = insert_email_into_ontology(&state, user.id, &preview, &persons, None)
         .await
         .expect("insertion should succeed");
 
@@ -74,10 +74,10 @@ async fn test_insert_email_is_idempotent() {
     let preview = make_preview("42", "bob@example.com", "subject");
     let persons = Vec::new();
 
-    let id1 = insert_email_into_ontology(&state, user.id, &preview, &persons)
+    let id1 = insert_email_into_ontology(&state, user.id, &preview, &persons, None)
         .await
         .unwrap();
-    let id2 = insert_email_into_ontology(&state, user.id, &preview, &persons)
+    let id2 = insert_email_into_ontology(&state, user.id, &preview, &persons, None)
         .await
         .unwrap();
 
@@ -126,7 +126,7 @@ async fn test_insert_email_dedup_against_preexisting_row() {
     let preview = make_preview("99", "carol@example.com", "idle subject");
     let persons = Vec::new();
 
-    let returned_id = insert_email_into_ontology(&state, user.id, &preview, &persons)
+    let returned_id = insert_email_into_ontology(&state, user.id, &preview, &persons, None)
         .await
         .unwrap();
 
@@ -161,10 +161,10 @@ async fn test_insert_email_isolates_users() {
     let preview = make_preview("7", "dave@example.com", "cross-user");
     let persons = Vec::new();
 
-    let id_a = insert_email_into_ontology(&state, user_a.id, &preview, &persons)
+    let id_a = insert_email_into_ontology(&state, user_a.id, &preview, &persons, None)
         .await
         .unwrap();
-    let id_b = insert_email_into_ontology(&state, user_b.id, &preview, &persons)
+    let id_b = insert_email_into_ontology(&state, user_b.id, &preview, &persons, None)
         .await
         .unwrap();
 
@@ -212,7 +212,7 @@ async fn test_insert_email_matches_person_by_email_channel() {
 
     let preview = make_preview("100", "Dave@Example.COM", "mixed case test");
 
-    let id = insert_email_into_ontology(&state, user.id, &preview, &persons)
+    let id = insert_email_into_ontology(&state, user.id, &preview, &persons, None)
         .await
         .unwrap();
 
