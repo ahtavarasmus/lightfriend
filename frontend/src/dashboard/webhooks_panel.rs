@@ -28,6 +28,23 @@ const WEBHOOKS_STYLES: &str = r#"
     white-space: pre;
     line-height: 1.45;
 }
+.webhook-tag-preview {
+    font-size: 0.72rem; color: #888;
+    padding: 0 0.1rem;
+}
+.webhook-tag-preview code {
+    background: rgba(255,255,255,0.06); padding: 0.05rem 0.3rem;
+    border-radius: 3px; font-size: 0.72rem; color: #cde;
+}
+.webhook-tag-badge {
+    font-family: monospace; font-size: 0.72rem;
+    background: rgba(100,180,255,0.08);
+    color: #9cf;
+    border: 1px solid rgba(100,180,255,0.18);
+    padding: 0.05rem 0.35rem;
+    border-radius: 3px;
+    margin-right: 0.35rem;
+}
 .webhooks-list { display: flex; flex-direction: column; gap: 0.4rem; }
 .webhook-row {
     display: flex; align-items: center; justify-content: space-between;
@@ -272,7 +289,11 @@ pub fn webhooks_panel() -> Html {
             <style>{WEBHOOKS_STYLES}</style>
             <div class="webhooks-section">
                 <div class="webhooks-help">
-                    {"Send a text to your own phone from anywhere — cron jobs, CI alerts, IFTTT, your own scripts:"}
+                    {"Send a text to your own phone from anywhere — cron jobs, CI alerts, IFTTT, your own scripts. The "}
+                    <strong>{"tag"}</strong>
+                    {" you give each token becomes the "}
+                    <code>{"[tag]"}</code>
+                    {" prefix on the SMS so you know which sender it came from."}
                     <pre>{format!(
 "curl -X POST {url} \\
   -H \"Authorization: Bearer <your-token>\" \\
@@ -325,13 +346,17 @@ pub fn webhooks_panel() -> Html {
                 <div class="webhook-create-form">
                     <input
                         type="text"
-                        placeholder="Label (e.g. \"deploy alerts\")"
+                        placeholder="Tag (e.g. \"fazm\", \"deploy\", \"github\")"
                         value={(*new_label).clone()}
                         oninput={on_label_input}
                     />
                     <button onclick={on_create} disabled={*creating || (*new_label).trim().is_empty()}>
                         { if *creating { "Creating..." } else { "Create" } }
                     </button>
+                </div>
+                <div class="webhook-tag-preview">
+                    { "Your SMS will read: " }
+                    <code>{ format!("[{}] your message", preview_tag(&(*new_label))) }</code>
                 </div>
 
                 {
@@ -362,10 +387,14 @@ pub fn webhooks_panel() -> Html {
                                     revoke_error.clone(),
                                 );
                                 let is_revoking = (*in_flight) == Some(t.id);
+                                let displayed_tag = preview_tag(&t.label);
                                 html! {
                                     <div class="webhook-row" key={t.id}>
                                         <div class="webhook-meta">
-                                            <div class="webhook-label">{ &t.label }</div>
+                                            <div class="webhook-label">
+                                                <span class="webhook-tag-badge">{ format!("[{}]", displayed_tag) }</span>
+                                                { &t.label }
+                                            </div>
                                             <div class="webhook-sub">
                                                 <code>{ format!("{}…", t.token_prefix) }</code>
                                                 { format!(" · {}/{} today", t.daily_sent, t.daily_cap) }
@@ -395,6 +424,23 @@ pub fn webhooks_panel() -> Html {
 
 async fn parse_error_body(resp: gloo_net::http::Response) -> Option<String> {
     resp.json::<ErrorBody>().await.ok().map(|b| b.error)
+}
+
+/// Mirror of backend `sanitize_label` (webhook_sms_handlers.rs) so the
+/// preview matches exactly what will arrive on the user's phone. Strips
+/// control chars and brackets, trims, falls back to "webhook" if empty.
+/// Keep these two in sync.
+fn preview_tag(raw: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .filter(|c| !c.is_control() && *c != '[' && *c != ']')
+        .collect();
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        "webhook".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 /// The absolute URL clients should POST to. We deliberately hardcode the
