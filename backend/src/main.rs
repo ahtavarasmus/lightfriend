@@ -1663,7 +1663,14 @@ async fn main() {
                 let client = api::tesla::TeslaClient::new_with_region(url);
                 match client.register_in_region().await {
                     Ok(_) => tracing::info!("✓ Registered in {} region", name),
-                    Err(e) => tracing::warn!("Failed to register in {} region: {} (this may be ok if already registered)", name, e),
+                    Err(e) => tracing::error!(
+                        "Failed to register Tesla partner in {} region: {}. \
+                         This means Tesla still has the previous public key cached \
+                         and virtual-key pairing will fail. Check that TESLA_REDIRECT_URL \
+                         matches the allowed origin in the Tesla developer dashboard.",
+                        name,
+                        e
+                    ),
                 }
             }
         }
