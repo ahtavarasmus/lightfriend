@@ -586,7 +586,12 @@ pub async fn refresh_token(
     let presented_hash = hash_token(&refresh_token);
     match user.refresh_token_hash.as_deref() {
         Some(stored_hash) if stored_hash == presented_hash && !user.refresh_token_compromised => {
-            generate_tokens_and_response(&state, user_id)
+            // Issue only a new access token. The refresh token (and its DB hash)
+            // is intentionally left untouched so the session survives a DB
+            // snapshot/restore during a deploy: rotating here would write a new
+            // hash to the live DB that doesn't exist in the snapshot the next
+            // instance restores from, forcing a re-login on every deploy.
+            issue_access_token_response(user_id)
         }
         _ => {
             let _ = state.user_core.mark_refresh_token_compromised(user_id);
@@ -596,6 +601,56 @@ pub async fn refresh_token(
             ))
         }
     }
+}
+
+fn issue_access_token_response(
+    user_id: i32,
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    let access_token = encode(
+        &Header::default(),
+        &json!({
+            "sub": user_id,
+            "exp": (Utc::now() + Duration::hours(1)).timestamp(),
+            "type": "access"
+        }),
+        &EncodingKey::from_secret(
+            std::env::var("JWT_SECRET_KEY")
+                .expect("JWT_SECRET_KEY must be set in environment")
+                .as_bytes(),
+        ),
+    )
+    .map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Token generation failed"})),
+        )
+    })?;
+
+    let mut response = Response::new(axum::body::Body::from(
+        Json(json!({"message": "Token refreshed", "token": access_token.clone()})).to_string(),
+    ));
+
+    let is_development =
+        std::env::var("ENVIRONMENT").unwrap_or_else(|_| "production".to_string()) == "development";
+    let cookie_options = if is_development {
+        "; HttpOnly; SameSite=Lax; Path=/"
+    } else {
+        "; HttpOnly; Secure; SameSite=Lax; Path=/"
+    };
+
+    response.headers_mut().insert(
+        "Set-Cookie",
+        format!(
+            "access_token={}{}; Max-Age=3600",
+            access_token, cookie_options
+        )
+        .parse()
+        .unwrap(),
+    );
+    response
+        .headers_mut()
+        .insert("Content-Type", "application/json".parse().unwrap());
+    Ok(response)
 }
 
 pub fn generate_tokens_and_response(
