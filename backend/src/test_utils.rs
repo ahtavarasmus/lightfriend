@@ -17,12 +17,36 @@ use tower_sessions::MemoryStore;
 /// Embedded PG migrations for test database
 pub const PG_MIGRATIONS: EmbeddedMigrations = embed_migrations!("./pg_migrations");
 
+/// Cross-process exclusion for the shared test PG database.
+///
+/// `cargo test` runs each `tests/*.rs` file as its own process and runs them
+/// in parallel. They all hit the same `lightfriend_test` database, so without
+/// cross-process serialization one binary's TRUNCATE / INSERT mid-flight can
+/// corrupt another binary's view of the world. `serial_test::serial` only
+/// orders tests within a single binary; it cannot see other processes.
+///
+/// We use a TCP bind on a fixed loopback port as a kernel-enforced mutex.
+/// The first test binary that touches the DB binds the port and holds it for
+/// the rest of its process lifetime; sibling binaries block in `bind()` until
+/// it exits, then take their turn. Result: DB-touching binaries serialize
+/// across the whole `cargo test` run, while non-DB binaries are unaffected.
+static TEST_DB_LOCK: std::sync::LazyLock<std::net::TcpListener> =
+    std::sync::LazyLock::new(|| loop {
+        match std::net::TcpListener::bind("127.0.0.1:47834") {
+            Ok(listener) => return listener,
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(50)),
+        }
+    });
+
 /// Create a test PG connection pool.
 ///
 /// Uses TEST_PG_DATABASE_URL env var. If PG is unavailable, creates a dummy
 /// pool that will error on first real use. Tests that only use SQLite repos
 /// will still pass since they never call pool.get() on the PG pool.
 pub fn create_test_pg_pool() -> crate::PgDbPool {
+    // Block until this process owns the shared-PG mutex. See TEST_DB_LOCK doc.
+    std::sync::LazyLock::force(&TEST_DB_LOCK);
+
     use diesel::r2d2::{self, ConnectionManager};
     use diesel::PgConnection;
 
