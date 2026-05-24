@@ -700,6 +700,7 @@ fn register_handlers(client: &MatrixClient, state: &Arc<AppState>, user_id: i32)
     use matrix_sdk::room::Room;
     use matrix_sdk::ruma::events::receipt::ReceiptEventContent;
     use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
+    use matrix_sdk::ruma::events::room::redaction::OriginalSyncRoomRedactionEvent;
     use matrix_sdk::ruma::events::SyncEphemeralRoomEvent;
 
     tracing::info!("Registering Matrix event handlers for user {}", user_id);
@@ -710,6 +711,14 @@ fn register_handlers(client: &MatrixClient, state: &Arc<AppState>, user_id: i32)
         async move {
             tracing::debug!("📨 Received message in room {}: {:?}", room.room_id(), ev);
             crate::utils::bridge::handle_bridge_message(ev, room, c, state).await;
+        }
+    });
+
+    let state_for_redaction = Arc::clone(state);
+    client.add_event_handler(move |ev: OriginalSyncRoomRedactionEvent, room: Room, c| {
+        let state = Arc::clone(&state_for_redaction);
+        async move {
+            crate::utils::bridge::handle_bridge_redaction(ev, room, c, state).await;
         }
     });
 

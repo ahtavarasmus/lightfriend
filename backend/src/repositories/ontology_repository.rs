@@ -1096,6 +1096,27 @@ impl OntologyRepository {
         }
     }
 
+    /// Delete the `ont_messages` row matching `(user_id, matrix_event_id)`.
+    /// Returns the number of rows deleted (0 = no matching row, 1 = matched).
+    ///
+    /// Called by the Matrix redaction handler when the source platform
+    /// propagates a delete (e.g. WhatsApp "delete for everyone" → mautrix
+    /// emits `m.room.redaction`). The redaction event carries the original
+    /// message's event_id in its `redacts` field; that is what callers pass.
+    pub fn delete_message_by_matrix_event_id(
+        &self,
+        user_id: i32,
+        matrix_event_id: &str,
+    ) -> Result<usize, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::delete(
+            ont_messages::table
+                .filter(ont_messages::user_id.eq(user_id))
+                .filter(ont_messages::matrix_event_id.eq(matrix_event_id)),
+        )
+        .execute(&mut conn)
+    }
+
     /// Look up an existing email-sourced message by its deterministic
     /// `email_<uid>` room_id. Used by the IDLE path (and cron) to avoid
     /// inserting the same email twice when both paths run concurrently.

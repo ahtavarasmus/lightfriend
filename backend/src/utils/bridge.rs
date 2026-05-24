@@ -1754,7 +1754,7 @@ pub async fn send_bridge_message(
     })
 }
 
-use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
+use matrix_sdk::ruma::events::room::message::{OriginalSyncRoomMessageEvent, Relation};
 use matrix_sdk::RoomMemberships;
 use strsim;
 
@@ -1814,6 +1814,78 @@ pub async fn handle_read_receipt(
     }
 }
 
+/// Handle a Matrix redaction event from a bridge.
+///
+/// When a user deletes a message on the source platform (e.g. WhatsApp's
+/// "delete for everyone"), the mautrix bridge propagates it as
+/// `m.room.redaction`. We mirror that delete in `ont_messages` so the row no
+/// longer surfaces in the dashboard, digests, or signal-history context.
+///
+/// The redacted event_id lives at one of two places depending on the room
+/// version: top-level `redacts` (pre-v11) or `content.redacts` (v11+). We
+/// check both rather than threading the room version through, since both are
+/// `Option<OwnedEventId>` and at most one is populated per event.
+pub async fn handle_bridge_redaction(
+    ev: matrix_sdk::ruma::events::room::redaction::OriginalSyncRoomRedactionEvent,
+    room: Room,
+    client: MatrixClient,
+    state: Arc<AppState>,
+) {
+    let redacted_event_id = match ev.redacts.as_ref().or(ev.content.redacts.as_ref()) {
+        Some(eid) => eid.to_string(),
+        None => {
+            tracing::debug!(
+                "Redaction event {} has no redacts target in room {}",
+                ev.event_id,
+                room.room_id()
+            );
+            return;
+        }
+    };
+
+    let matrix_user_id = match client.user_id() {
+        Some(id) => id.to_owned(),
+        None => return,
+    };
+    let local_user_id = matrix_user_id.localpart();
+    let user_id = match state
+        .user_repository
+        .get_user_by_matrix_user_id(local_user_id)
+    {
+        Ok(Some(user)) => user.id,
+        _ => return,
+    };
+
+    match state
+        .ontology_repository
+        .delete_message_by_matrix_event_id(user_id, &redacted_event_id)
+    {
+        Ok(0) => {
+            tracing::debug!(
+                "Redaction in room {} targets event {}: no matching ont_messages row",
+                room.room_id(),
+                redacted_event_id
+            );
+        }
+        Ok(n) => {
+            tracing::info!(
+                "Deleted {} ont_messages row(s) for redacted event {} (user {}, room {})",
+                n,
+                redacted_event_id,
+                user_id,
+                room.room_id()
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Failed to delete message for redacted event {}: {}",
+                redacted_event_id,
+                e
+            );
+        }
+    }
+}
+
 pub async fn handle_bridge_message(
     event: OriginalSyncRoomMessageEvent,
     room: Room,
@@ -1825,6 +1897,22 @@ pub async fn handle_bridge_message(
         room.room_id(),
         event.sender
     );
+
+    // Skip m.replace edits. mautrix-whatsapp (and other mautrix bridges) emit
+    // an OriginalSyncRoomMessageEvent with `relates_to = Replacement` when the
+    // source-platform user edits a message. Treating it as a new message
+    // produces a duplicate ont_messages row: same sender, same content (or
+    // close enough), minutes/hours apart. We don't propagate edits into
+    // summaries today; just drop the event.
+    if let Some(Relation::Replacement(replaces)) = event.content.relates_to.as_ref() {
+        tracing::info!(
+            "Skipping m.replace edit in room {} (replaces event {})",
+            room.room_id(),
+            replaces.event_id
+        );
+        return;
+    }
+
     if room.user_defined_notification_mode().await == Some(RoomNotificationMode::Mute) {
         tracing::info!("Skipping message from a muted room");
         return;
