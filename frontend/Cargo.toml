@@ -49,6 +49,7 @@ web-sys = { version = "0.3", features = [
 js-sys = "0.3"
 gloo-net = "0.2"
 gloo-timers = { version = "0.2", features = ["futures"] }
+futures = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 wasm-bindgen-futures = "0.4"

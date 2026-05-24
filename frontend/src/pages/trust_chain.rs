@@ -1,11 +1,15 @@
 use crate::config::get_backend_url;
 use crate::utils::seo::{use_seo, SeoMeta};
 use crate::Route;
+use futures::future::{select, Either};
 use gloo_net::http::Request;
+use gloo_timers::future::TimeoutFuture;
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 use yew::prelude::*;
 use yew_router::prelude::*;
+
+const FETCH_TIMEOUT_MS: u32 = 15_000;
 
 // -- Data types matching backend --
 
@@ -135,10 +139,13 @@ pub fn trust_chain_page() -> Html {
                     let core_loading = core_loading.clone();
                     wasm_bindgen_futures::spawn_local(async move {
                         let url = format!("{}/api/trust-chain", get_backend_url());
-                        if let Ok(resp) = Request::get(&url).send().await {
-                            if let Ok(d) = resp.json::<TrustChainData>().await {
-                                data.set(Some(d));
-                            }
+                        let fetch = Box::pin(async {
+                            let resp = Request::get(&url).send().await.ok()?;
+                            resp.json::<TrustChainData>().await.ok()
+                        });
+                        let timeout = TimeoutFuture::new(FETCH_TIMEOUT_MS);
+                        if let Either::Left((Some(d), _)) = select(fetch, timeout).await {
+                            data.set(Some(d));
                         }
                         core_loading.set(false);
                     });
@@ -155,15 +162,17 @@ pub fn trust_chain_page() -> Html {
                             get_backend_url(),
                             HISTORY_PAGE_SIZE
                         );
-                        match Request::get(&url).send().await {
-                            Ok(resp) => match resp.json::<TrustChainHistoryData>().await {
-                                Ok(h) => {
-                                    history_builds.set(h.builds);
-                                    history_has_more.set(h.has_more);
-                                }
-                                Err(_) => history_error.set(true),
-                            },
-                            Err(_) => history_error.set(true),
+                        let fetch = Box::pin(async {
+                            let resp = Request::get(&url).send().await.ok()?;
+                            resp.json::<TrustChainHistoryData>().await.ok()
+                        });
+                        let timeout = TimeoutFuture::new(FETCH_TIMEOUT_MS);
+                        match select(fetch, timeout).await {
+                            Either::Left((Some(h), _)) => {
+                                history_builds.set(h.builds);
+                                history_has_more.set(h.has_more);
+                            }
+                            _ => history_error.set(true),
                         }
                         history_loading.set(false);
                     });
@@ -194,13 +203,16 @@ pub fn trust_chain_page() -> Html {
                     HISTORY_PAGE_SIZE,
                     offset
                 );
-                if let Ok(resp) = Request::get(&url).send().await {
-                    if let Ok(h) = resp.json::<TrustChainHistoryData>().await {
-                        let mut combined = (*history_builds).clone();
-                        combined.extend(h.builds);
-                        history_builds.set(combined);
-                        history_has_more.set(h.has_more);
-                    }
+                let fetch = Box::pin(async {
+                    let resp = Request::get(&url).send().await.ok()?;
+                    resp.json::<TrustChainHistoryData>().await.ok()
+                });
+                let timeout = TimeoutFuture::new(FETCH_TIMEOUT_MS);
+                if let Either::Left((Some(h), _)) = select(fetch, timeout).await {
+                    let mut combined = (*history_builds).clone();
+                    combined.extend(h.builds);
+                    history_builds.set(combined);
+                    history_has_more.set(h.has_more);
                 }
                 history_loading_more.set(false);
             });
