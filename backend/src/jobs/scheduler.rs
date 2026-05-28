@@ -1303,24 +1303,80 @@ fn render_high_signal_section(
     Some(block)
 }
 
-/// How many FYI items to show individually before collapsing to counts.
+/// How many FYI lines (sender groups) to show before collapsing the rest
+/// into a "+N more" tail. With same-sender collapsing each line may cover
+/// multiple messages, so this caps visual rows, not message volume.
 const FYI_CAP: usize = 5;
 
+/// Collapse adjacent messages from the same (sender, room) into a single
+/// digest line. Within a group, summaries are joined chronologically with
+/// "; " so the line reads like the actual conversation flow.
+fn format_digest_group(group: &[&crate::models::ontology_models::OntMessage]) -> String {
+    if group.len() == 1 {
+        return format_digest_message(group[0]);
+    }
+
+    // Render summaries oldest-first within the group regardless of how the
+    // outer sort ordered them (FYI is sorted newest-first by created_at).
+    let mut sorted: Vec<&crate::models::ontology_models::OntMessage> = group.to_vec();
+    sorted.sort_by_key(|m| m.created_at);
+
+    let sender_name = &sorted[0].sender_name;
+    let teasers: Vec<String> = sorted
+        .iter()
+        .map(|m| {
+            let (raw_summary, cap) = match m.summary.as_deref() {
+                Some(s) => (s, DIGEST_TEASER_CAP),
+                None => (m.content.as_str(), DIGEST_UNCLASSIFIED_FALLBACK_CAP),
+            };
+            let cleaned = strip_sender_prefix(raw_summary, sender_name);
+            let short: String = cleaned.chars().take(cap).collect();
+            short.trim().to_string()
+        })
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if teasers.is_empty() {
+        format!("- {}", sender_name)
+    } else {
+        format!("- {}: {}", sender_name, teasers.join("; "))
+    }
+}
+
 /// Render FYI section with per-item summaries, similar to high-signal sections
-/// but with a higher cap since these are shorter teasers.
+/// but with a higher cap since these are shorter teasers. Adjacent messages
+/// from the same (sender, room) collapse into a single line.
 fn render_fyi_inline(messages: &[crate::models::ontology_models::OntMessage]) -> Option<String> {
     if messages.is_empty() {
         return None;
     }
-    let total = messages.len();
-    let shown: Vec<String> = messages
+
+    // Adjacent-only grouping: a sender change (or room change) breaks the
+    // run, so unrelated conversations stay separate even if the same name
+    // appears in two chats.
+    let mut groups: Vec<Vec<&crate::models::ontology_models::OntMessage>> = Vec::new();
+    for m in messages {
+        let extends_prev = groups
+            .last()
+            .and_then(|g| g.first())
+            .map(|prev| prev.sender_name == m.sender_name && prev.room_id == m.room_id)
+            .unwrap_or(false);
+        if extends_prev {
+            groups.last_mut().unwrap().push(m);
+        } else {
+            groups.push(vec![m]);
+        }
+    }
+
+    let total_groups = groups.len();
+    let shown: Vec<String> = groups
         .iter()
         .take(FYI_CAP)
-        .map(format_digest_message)
+        .map(|g| format_digest_group(g))
         .collect();
     let mut block = format!("FYI:\n{}", shown.join("\n"));
-    if total > FYI_CAP {
-        block.push_str(&format!("\n+ {} more", total - FYI_CAP));
+    if total_groups > FYI_CAP {
+        block.push_str(&format!("\n+ {} more", total_groups - FYI_CAP));
     }
     Some(block)
 }

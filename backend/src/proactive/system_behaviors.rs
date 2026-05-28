@@ -209,6 +209,16 @@ pub async fn run_urgency_classification(
         // Find the last "You" message index - everything at or before it is seen
         let last_you_idx = chronological.iter().rposition(|m| m.sender_name == "You");
 
+        // Identify the message we were asked to classify. During a burst,
+        // newer messages may already be stored in the same room by the time
+        // this 5-min-delayed job runs, so the evaluated message is not
+        // necessarily the chronologically-last one in `chronological`.
+        // Match by message_id; fall back to the last line only when the id
+        // is missing or outside the fetched window.
+        let eval_idx = message_id
+            .and_then(|mid| chronological.iter().position(|m| m.id == mid))
+            .unwrap_or(chronological.len() - 1);
+
         let lines: Vec<String> = chronological
             .iter()
             .enumerate()
@@ -227,13 +237,13 @@ pub async fn run_urgency_classification(
                 let seen_marker = if is_seen { "seen" } else { "unseen" };
                 let notified_marker = if m.sender_name != "You"
                     && m.urgency.as_deref() == Some("now")
-                    && i != chronological.len() - 1
+                    && i != eval_idx
                 {
                     " [notified]"
                 } else {
                     ""
                 };
-                let eval_marker = if i == chronological.len() - 1 {
+                let eval_marker = if i == eval_idx {
                     " <-- evaluate this"
                 } else {
                     ""
@@ -246,7 +256,7 @@ pub async fn run_urgency_classification(
             .collect();
 
         format!(
-            "Conversation on {} (latest message is being evaluated):\n{}",
+            "Conversation on {} (the message marked '<-- evaluate this' is being evaluated):\n{}",
             platform,
             lines.join("\n")
         )
@@ -281,8 +291,12 @@ pub async fn run_urgency_classification(
         \n\
         {}\n\
         \n\
-        The last message in the conversation is being evaluated. Each message is marked [seen] or \
-        [unseen]. Use the full conversation history, timestamps, and seen status to understand context.\n\
+        The message marked '<-- evaluate this' is the single message to classify (it is not \
+        necessarily the chronologically last one — during a burst, newer messages from the same \
+        room may appear after it). Each message is marked [seen] or [unseen]. Use the surrounding \
+        conversation, timestamps, and seen status to understand context — but when you write the \
+        summary field, describe ONLY the marked message itself, never fold neighboring messages' \
+        topics into it.\n\
         \n\
         Avoid notification spam. If the user was already alerted about the same sender and same \
         apparent incident/session recently, classify follow-up confirmations, receipts, and status \
@@ -356,7 +370,8 @@ pub async fn run_urgency_classification(
             schema_type: Some(types::JSONSchemaType::String),
             description: Some(
                 "Summary starting with sender name, e.g. 'Mom: ...'. No URLs. \
-                 Length depends on urgency: \
+                 SCOPE: summarize ONLY the single message marked '<-- evaluate this'. Use the surrounding conversation strictly to resolve references (pronouns, 'it', 'that one') — never fold earlier or later messages' topics into this summary. If the evaluated message is a standalone reaction, emoji, or pleasantry (a heart, 'ok', 'thanks', 'how are you?'), summarize just that even if neighboring messages in the thread are about something serious. A heart reaction in a thread about a shoulder injury is still just a heart reaction, not 'update on shoulder'. \
+                 \nLength depends on urgency: \
                  - now: up to 160 chars. This goes directly as an SMS to a user who muted all other notifications — include enough context to act (who, what, when, what's the ask). \
                  - later: 30-60 chars max. This becomes a teaser in a bundled digest alongside many others — just a slight hint of what's happened. The user can reply to ask for full context. \
                  \n\nUS A2P CARRIER COMPLIANCE — STRICT RULES TO AVOID PHISHING-FILTER BANS:\n\
