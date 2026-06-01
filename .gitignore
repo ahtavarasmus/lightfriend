@@ -48,3 +48,8 @@ contracts/out/
 .gstack/
 .env.local
 scripts/__pycache__/
+
+# Local/generic agent skills
+.agents/skills/senior-devops/
+.agents/skills/senior-security/
+.agents/skills/skill-creator/
