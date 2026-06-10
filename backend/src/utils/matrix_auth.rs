@@ -517,31 +517,27 @@ async fn build_matrix_client(user_id: i32, state: &Arc<AppState>) -> Result<Matr
     // Attempt to restore session
     let mut session_restored = false;
     if let Some(stored_session) = client.matrix_auth().session() {
-        tracing::debug!("🔄 Found session in store, attempting to restore");
-        if let Err(e) = client
-            .matrix_auth()
-            .restore_session(stored_session.clone(), RoomLoadSettings::default())
-            .await
-        {
-            tracing::debug!("⚠️ Failed to restore session from store: {}", e);
+        tracing::debug!("✅ Session loaded from store");
+        session_restored = true;
+        // Verify session validity. `session()` means the SDK has already
+        // restored auth data while opening the store; calling
+        // `restore_session()` again would panic inside matrix-sdk 0.13.
+        if let Ok(response) = client.whoami().await {
+            tracing::debug!("🔍 Server reports user_id: {}", response.user_id);
+            // Update database if credentials changed
+            state.user_repository.set_matrix_credentials(
+                user.id,
+                &username,
+                &stored_session.tokens.access_token,
+                response.device_id.expect("default").as_str(),
+                &password,
+            )?;
         } else {
-            tracing::debug!("✅ Session restored from store");
-            session_restored = true;
-            // Verify session validity
-            if let Ok(response) = client.whoami().await {
-                tracing::debug!("🔍 Server reports user_id: {}", response.user_id);
-                // Update database if credentials changed
-                state.user_repository.set_matrix_credentials(
-                    user.id,
-                    &username,
-                    &stored_session.tokens.access_token,
-                    response.device_id.expect("default").as_str(),
-                    &password,
-                )?;
-            } else {
-                tracing::debug!("❌ Restored session is invalid, will attempt re-authentication");
-                session_restored = false;
-            }
+            tracing::debug!("❌ Stored session is invalid, will attempt re-authentication");
+            return Err(anyhow!(
+                "Stored Matrix session for user {} is invalid; clear the Matrix store before re-authentication",
+                user_id
+            ));
         }
     }
 
@@ -561,11 +557,12 @@ async fn build_matrix_client(user_id: i32, state: &Arc<AppState>) -> Result<Matr
                     refresh_token: None,
                 },
             };
-            if client
-                .matrix_auth()
-                .restore_session(session.clone(), RoomLoadSettings::default())
-                .await
-                .is_ok()
+            if !client.matrix_auth().logged_in()
+                && client
+                    .matrix_auth()
+                    .restore_session(session.clone(), RoomLoadSettings::default())
+                    .await
+                    .is_ok()
             {
                 tracing::debug!("✅ Token-based session restored");
                 // Verify session
