@@ -412,10 +412,10 @@ jobs:
         id: backup
         env:
           AWS_DEFAULT_REGION: us-east-1
+          SCENARIO: ${{ github.event.inputs.scenario || inputs.scenario }}
+          SPECIFIC_KEY: ${{ github.event.inputs.backup_key || inputs.backup_key }}
         run: |
           S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
-          SCENARIO="${{ inputs.scenario }}"
-          SPECIFIC_KEY="${{ inputs.backup_key }}"
 
           echo "## Recovery: $SCENARIO" >> $GITHUB_STEP_SUMMARY
 
@@ -451,6 +451,7 @@ jobs:
           BACKUP_KEY=""
           if [ -n "$SPECIFIC_KEY" ]; then
             BACKUP_KEY="$SPECIFIC_KEY"
+            echo "Using explicit backup key: $BACKUP_KEY"
           elif echo "$SCENARIO" | grep -q "R2"; then
             ENV_FILE=$(aws s3 cp "s3://$S3_BUCKET/config/.env" - 2>/dev/null)
             R2_BUCKET=$(echo "$ENV_FILE" | grep R2_BACKUP_BUCKET | cut -d= -f2)
@@ -470,12 +471,11 @@ jobs:
             aws s3 cp "$TMP" "s3://$S3_BUCKET/$BACKUP_KEY"
             rm -f "$TMP"
           else
-            for PREFIX in "backups/deploy/" "backups/hourly/" "backups/daily/"; do
-              BACKUP_KEY=$(aws s3 ls "s3://$S3_BUCKET/$PREFIX" --recursive 2>/dev/null | \
-                grep '\.tar\.gz\.enc$' | sort -k1,2 | tail -1 | awk '{print $4}')
-              [ -n "$BACKUP_KEY" ] && break
-            done
+            echo "No explicit backup key; selecting newest S3 backup by LastModified"
+            BACKUP_KEY=$(aws s3 ls "s3://$S3_BUCKET/backups/" --recursive 2>/dev/null | \
+              grep '\.tar\.gz\.enc$' | sort -k1,2 | tail -1 | awk '{print $4}')
             [ -n "$BACKUP_KEY" ] || { echo "FATAL: No backups in S3"; exit 1; }
+            echo "Selected latest backup key: $BACKUP_KEY"
           fi
 
           # Validate backup
