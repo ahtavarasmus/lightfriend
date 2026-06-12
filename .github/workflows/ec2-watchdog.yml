@@ -119,6 +119,7 @@ jobs:
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           S3_BUCKET: lightfriend-prod-backups
+          ALERT_TO: rasmus@lightfriend.ai
         run: |
           set -euo pipefail
 
@@ -131,19 +132,32 @@ jobs:
             LAST_FAILURE=$(echo "$HEALTH" | jq -r '.last_failure // "none"')
             LAST_SUCCESS=$(echo "$HEALTH" | jq -r '.last_success // "none"')
             EXIT_CODE=$(echo "$HEALTH" | jq -r '.exit_code // "unknown"')
+            STORAGE=$(echo "$HEALTH" | jq -r '.storage // ""')
 
             if [ "$LAST_FAILURE" != "none" ] && [ "$LAST_FAILURE" != "null" ]; then
-              # Check if the failure is recent (within last 2 hours)
               FAIL_EPOCH=$(date -d "$LAST_FAILURE" +%s 2>/dev/null || echo "0")
-              FAIL_AGE_MIN=$(( (NOW - FAIL_EPOCH) / 60 ))
+              SUCCESS_EPOCH=$(date -d "$LAST_SUCCESS" +%s 2>/dev/null || echo "0")
+              FAIL_AGE_MIN="unknown"
+              if [ "$FAIL_EPOCH" -gt 0 ]; then
+                FAIL_AGE_MIN=$(( (NOW - FAIL_EPOCH) / 60 ))
+              fi
 
-              if [ "$FAIL_AGE_MIN" -lt 120 ]; then
+              # Alert as long as the latest recorded backup event is a failure.
+              # The previous 2-hour window let persistent broken backups go quiet.
+              if [ "$SUCCESS_EPOCH" -eq 0 ] || [ "$FAIL_EPOCH" -ge "$SUCCESS_EPOCH" ]; then
                 ALERT="BACKUP FAILURE DETECTED\n\n"
                 ALERT="${ALERT}The enclave reported a backup failure.\n\n"
-                ALERT="${ALERT}  Failure time: $LAST_FAILURE ($FAIL_AGE_MIN minutes ago)\n"
+                ALERT="${ALERT}  Failure time: $LAST_FAILURE (${FAIL_AGE_MIN} minutes ago)\n"
                 ALERT="${ALERT}  Exit code: $EXIT_CODE\n"
                 ALERT="${ALERT}  Last success: $LAST_SUCCESS\n"
               fi
+            fi
+
+            if [ -n "$STORAGE" ] && echo "$STORAGE" | grep -Eq '(^|[[:space:]])(9[0-9]|100)%[[:space:]]+/'; then
+              ALERT="${ALERT}DISK PRESSURE DETECTED\n\n"
+              ALERT="${ALERT}The latest backup-health storage report shows a filesystem at or above 90% usage.\n\n"
+              ALERT="${ALERT}Storage snapshot:\n"
+              ALERT="${ALERT}$(echo "$STORAGE" | fold -s -w 120 | head -80)\n\n"
             fi
           else
             echo "No backup health marker found"
@@ -188,7 +202,7 @@ jobs:
 
           cat > /tmp/email.txt <<EOF
           From: Lightfriend Watchdog <notifications@lightfriend.ai>
-          To: rasmus@lightfriend.ai
+          To: ${ALERT_TO}
           Subject: ${SUBJECT}
           Content-Type: text/plain; charset=utf-8
 
@@ -197,14 +211,14 @@ jobs:
 
           sed -i 's/^          //' /tmp/email.txt
 
-          curl -s --url "smtps://smtp.resend.com:465" \
+          curl --fail --show-error --silent --retry 2 --url "smtps://smtp.resend.com:465" \
             --mail-from "notifications@lightfriend.ai" \
-            --mail-rcpt "rasmus@lightfriend.ai" \
+            --mail-rcpt "${ALERT_TO}" \
             --upload-file /tmp/email.txt \
             --user "${SMTP_USERNAME}:${SMTP_PASSWORD}" \
             --ssl-reqd
 
-          echo "Backup alert email sent to rasmus@lightfriend.ai"
+          echo "Backup alert email sent to ${ALERT_TO}"
 
           # Fail the workflow so it shows red in GitHub Actions
           exit 1
