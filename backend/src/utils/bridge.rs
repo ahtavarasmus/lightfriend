@@ -2348,7 +2348,9 @@ pub async fn handle_bridge_message(
         }
     }
 
-    // Check subscription
+    // Check subscription. Tier 2 users should still get incoming bridge
+    // messages written to the readable message history even if their plan
+    // does not include proactive/background automation.
     let has_valid_sub = state
         .user_repository
         .has_valid_subscription_tier(user_id, "tier 2")
@@ -2361,13 +2363,13 @@ pub async fn handle_bridge_message(
         return;
     }
     let user_plan = state.user_repository.get_plan_type(user_id).unwrap_or(None);
-    if !crate::utils::plan_features::has_auto_features(user_plan.as_deref()) {
+    let has_auto_features = crate::utils::plan_features::has_auto_features(user_plan.as_deref());
+    if !has_auto_features {
         tracing::debug!(
-            "User {} on {:?} plan - no auto features",
+            "User {} on {:?} plan - storing bridge message without auto features",
             user_id,
             user_plan
         );
-        return;
     }
 
     // Extract message content and estimate message size for bandwidth tracking
@@ -2554,16 +2556,24 @@ pub async fn handle_bridge_message(
                 if let Some(pid) = person_id {
                     snapshot["person_id"] = serde_json::json!(pid);
                 }
-                let entity_type = if is_call_event { "Call" } else { "Message" };
-                crate::proactive::rules::emit_ontology_change(
-                    &state_clone,
-                    user_id,
-                    entity_type,
-                    created.id as i32,
-                    "created",
-                    snapshot,
-                )
-                .await;
+                if has_auto_features {
+                    let entity_type = if is_call_event { "Call" } else { "Message" };
+                    crate::proactive::rules::emit_ontology_change(
+                        &state_clone,
+                        user_id,
+                        entity_type,
+                        created.id as i32,
+                        "created",
+                        snapshot,
+                    )
+                    .await;
+                } else {
+                    tracing::debug!(
+                        "Stored bridge message {} for user {} without emitting auto-feature ontology change",
+                        created.id,
+                        user_id
+                    );
+                }
             }
             Err(e) => {
                 tracing::warn!("Failed to store bridge message: {}", e);
