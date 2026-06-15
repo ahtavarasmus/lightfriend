@@ -61,7 +61,10 @@ pub fn danger_zone() -> Html {
         use_effect_with_deps(
             move |_| {
                 spawn_local(async move {
-                    if let Ok(resp) = Api::get("/.well-known/lightfriend/attestation").send().await {
+                    if let Ok(resp) = Api::get("/.well-known/lightfriend/attestation")
+                        .send()
+                        .await
+                    {
                         if resp.ok() {
                             if let Ok(meta) = resp.json::<AttestationMetadata>().await {
                                 commit_sha.set(meta.commit_sha);
@@ -132,10 +135,7 @@ pub fn danger_zone() -> Html {
         let submitting = submitting.clone();
         Callback::from(move |_| {
             if (*confirm_text).trim() != CONFIRM_PHRASE {
-                submit_error.set(Some(format!(
-                    "Type exactly {} to confirm.",
-                    CONFIRM_PHRASE
-                )));
+                submit_error.set(Some(format!("Type exactly {} to confirm.", CONFIRM_PHRASE)));
                 return;
             }
             if (*password).is_empty() {

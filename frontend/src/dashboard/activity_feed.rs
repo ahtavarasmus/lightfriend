@@ -251,9 +251,7 @@ pub fn activity_feed(props: &ActivityFeedProps) -> Html {
                 );
                 let mut init = web_sys::EventSourceInit::new();
                 init.with_credentials(true);
-                if let Ok(es) =
-                    web_sys::EventSource::new_with_event_source_init_dict(&url, &init)
-                {
+                if let Ok(es) = web_sys::EventSource::new_with_event_source_init_dict(&url, &init) {
                     let cb = Closure::wrap(Box::new(move |_: web_sys::MessageEvent| {
                         rt.set(js_sys::Date::now() as u32);
                     })
@@ -269,8 +267,8 @@ pub fn activity_feed(props: &ActivityFeedProps) -> Html {
                         rt_err.set(js_sys::Date::now() as u32);
                     })
                         as Box<dyn Fn(web_sys::Event)>);
-                    let _ =
-                        es.add_event_listener_with_callback("error", err_cb.as_ref().unchecked_ref());
+                    let _ = es
+                        .add_event_listener_with_callback("error", err_cb.as_ref().unchecked_ref());
                     err_cb.forget();
 
                     es_handle_clone.set(Some(es));
@@ -434,7 +432,14 @@ fn render_grouped_entries(
             // Batch - render collapsed group
             let batch_id = format!("batch-{}", first.id);
             let is_batch_expanded = expanded_id.as_ref() == Some(&batch_id);
-            result.push(render_batch(batch, &batch_id, now_secs, is_batch_expanded, expanded_id, expanded_handle));
+            result.push(render_batch(
+                batch,
+                &batch_id,
+                now_secs,
+                is_batch_expanded,
+                expanded_id,
+                expanded_handle,
+            ));
         }
     }
 
@@ -456,7 +461,11 @@ fn render_batch(
     let icon_class = format!(
         "feed-icon type-{}{}",
         first.entry_type,
-        if first.success == Some(false) { " failed" } else { "" }
+        if first.success == Some(false) {
+            " failed"
+        } else {
+            ""
+        }
     );
 
     let time_str = relative_time(first.timestamp, now_secs);
@@ -765,11 +774,7 @@ fn render_tracking_envelope(raw: &str) -> Html {
     }
 }
 
-fn render_pass_card(
-    label: &str,
-    value: Option<&serde_json::Value>,
-    accent: &str,
-) -> Html {
+fn render_pass_card(label: &str, value: Option<&serde_json::Value>, accent: &str) -> Html {
     let val = match value {
         Some(v) if !v.is_null() => v,
         _ => {
@@ -834,12 +839,21 @@ fn pass_headline(label: &str, val: &serde_json::Value) -> String {
             None => String::new(),
         }
     } else if label.starts_with("Pass 2") {
-        let has = val.get("has_commitment").and_then(|v| v.as_bool()).unwrap_or(false);
+        let has = val
+            .get("has_commitment")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         if !has {
             "no commitment".to_string()
         } else {
-            let t = val.get("commitment_type").and_then(|v| v.as_str()).unwrap_or("?");
-            let c = val.get("confidence").and_then(|v| v.as_str()).unwrap_or("?");
+            let t = val
+                .get("commitment_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let c = val
+                .get("confidence")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
             format!("{} (confidence: {})", t, c)
         }
     } else if label.starts_with("Pass 3") {

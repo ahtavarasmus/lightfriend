@@ -9,12 +9,13 @@ use log::info;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen_futures::spawn_local;
 use web_sys::js_sys::encode_uri_component;
-use web_sys::{HtmlInputElement, KeyboardEvent};
+use web_sys::{HtmlInputElement, HtmlSelectElement, KeyboardEvent, MouseEvent};
 use yew::prelude::*;
 use yew_router::prelude::*;
 
 const MAX_NICKNAME_LENGTH: usize = 30;
 const MAX_INFO_LENGTH: usize = 500;
+const BYOT_NUMBER_OPTION: &str = "__byot";
 
 // Request for patching individual fields
 #[derive(Serialize)]
@@ -259,11 +260,8 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let system_important_notify =
         use_state(|| (*user_profile).system_important_notify.unwrap_or(true));
     let auto_track_system = use_state(|| (*user_profile).auto_track_items_system.unwrap_or(false));
-    let auto_confirm_items = use_state(|| {
-        (*user_profile)
-            .auto_confirm_tracked_items
-            .unwrap_or(true)
-    });
+    let auto_confirm_items =
+        use_state(|| (*user_profile).auto_confirm_tracked_items.unwrap_or(true));
     let accountability_enabled =
         use_state(|| (*user_profile).accountability_enabled.unwrap_or(false));
     let accountability_friend_phone = use_state(|| {
@@ -290,11 +288,22 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             .clone()
             .unwrap_or_default()
     });
-    // Sending number selector state (for notification-only countries)
+    // Lightfriend number selector state
     let show_sending_number_selector = use_state(|| false);
     let available_sending_numbers = use_state(|| Vec::<serde_json::Value>::new());
     let preferred_sending_number =
         use_state(|| (*user_profile).preferred_number.clone().unwrap_or_default());
+    let selected_lightfriend_number = use_state(|| {
+        if (*user_profile).own_twilio_enabled {
+            BYOT_NUMBER_OPTION.to_string()
+        } else {
+            (*user_profile).preferred_number.clone().unwrap_or_default()
+        }
+    });
+    let byot_phone_number =
+        use_state(|| (*user_profile).preferred_number.clone().unwrap_or_default());
+    let byot_account_sid = use_state(|| (*user_profile).twilio_sid.clone().unwrap_or_default());
+    let byot_auth_token = use_state(|| (*user_profile).twilio_token.clone().unwrap_or_default());
     let location = use_state(|| (*user_profile).location.clone().unwrap_or_default());
     let location_original = use_state(|| (*user_profile).location.clone().unwrap_or_default());
     let nearby_places = use_state(|| (*user_profile).nearby_places.clone().unwrap_or_default());
@@ -360,6 +369,11 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let user_profile_state = user_profile.clone();
         let agent_language = agent_language.clone();
         let notification_type = notification_type.clone();
+        let preferred_sending_number_eff = preferred_sending_number.clone();
+        let selected_lightfriend_number_eff = selected_lightfriend_number.clone();
+        let byot_phone_number_eff = byot_phone_number.clone();
+        let byot_account_sid_eff = byot_account_sid.clone();
+        let byot_auth_token_eff = byot_auth_token.clone();
         let location = location.clone();
         let location_original = location_original.clone();
         let nearby_places = nearby_places.clone();
@@ -402,6 +416,16 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 accountability_friend_name_original_eff.set(name_val);
                 agent_language.set(props_profile.agent_language.clone());
                 notification_type.set(props_profile.notification_type.clone());
+                let preferred = props_profile.preferred_number.clone().unwrap_or_default();
+                preferred_sending_number_eff.set(preferred.clone());
+                if props_profile.own_twilio_enabled {
+                    selected_lightfriend_number_eff.set(BYOT_NUMBER_OPTION.to_string());
+                } else {
+                    selected_lightfriend_number_eff.set(preferred.clone());
+                }
+                byot_phone_number_eff.set(preferred);
+                byot_account_sid_eff.set(props_profile.twilio_sid.clone().unwrap_or_default());
+                byot_auth_token_eff.set(props_profile.twilio_token.clone().unwrap_or_default());
                 location.set(props_profile.location.clone().unwrap_or_default());
                 location_original.set(props_profile.location.clone().unwrap_or_default());
                 nearby_places.set(props_profile.nearby_places.clone().unwrap_or_default());
@@ -418,6 +442,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let show_sending_number_selector = show_sending_number_selector.clone();
         let available_sending_numbers = available_sending_numbers.clone();
         let preferred_sending_number = preferred_sending_number.clone();
+        let selected_lightfriend_number = selected_lightfriend_number.clone();
         use_effect_with_deps(
             move |_| {
                 spawn_local(async move {
@@ -441,6 +466,16 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     data.get("current_preferred").and_then(|v| v.as_str())
                                 {
                                     preferred_sending_number.set(current.to_string());
+                                    if data
+                                        .get("own_twilio_enabled")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(false)
+                                    {
+                                        selected_lightfriend_number
+                                            .set(BYOT_NUMBER_OPTION.to_string());
+                                    } else {
+                                        selected_lightfriend_number.set(current.to_string());
+                                    }
                                 }
                             }
                         }
@@ -1049,15 +1084,21 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         })
     };
 
-    // Sending number change handler (for notification-only countries)
+    // Lightfriend number change handler
     let on_sending_number_change = {
+        let selected_lightfriend_number = selected_lightfriend_number.clone();
         let preferred_sending_number = preferred_sending_number.clone();
         let save_state = sending_number_save_state.clone();
         let user_profile = user_profile.clone();
         let on_profile_update = props.on_profile_update.clone();
         Callback::from(move |e: Event| {
-            let select: HtmlInputElement = e.target_unchecked_into();
+            let select: HtmlSelectElement = e.target_unchecked_into();
             let new_val = select.value();
+            selected_lightfriend_number.set(new_val.clone());
+            if new_val == BYOT_NUMBER_OPTION {
+                save_state.set(FieldSaveState::Idle);
+                return;
+            }
             preferred_sending_number.set(new_val.clone());
             let save_state = save_state.clone();
             let user_profile = user_profile.clone();
@@ -1077,6 +1118,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     Ok(response) if response.ok() => {
                         let mut profile = (*user_profile).clone();
                         profile.preferred_number = Some(new_val);
+                        profile.own_twilio_enabled = false;
                         on_profile_update.emit(profile);
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
@@ -1087,6 +1129,188 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     }
                     Ok(_) => {
                         save_state.set(FieldSaveState::Error("Failed to save".to_string()));
+                    }
+                    Err(_) => {
+                        save_state.set(FieldSaveState::Error("Network error".to_string()));
+                    }
+                }
+            });
+        })
+    };
+
+    let on_byot_phone_change = {
+        let byot_phone_number = byot_phone_number.clone();
+        Callback::from(move |e: InputEvent| {
+            let input: HtmlInputElement = e.target_unchecked_into();
+            byot_phone_number.set(input.value());
+        })
+    };
+
+    let on_byot_sid_change = {
+        let byot_account_sid = byot_account_sid.clone();
+        Callback::from(move |e: InputEvent| {
+            let input: HtmlInputElement = e.target_unchecked_into();
+            byot_account_sid.set(input.value());
+        })
+    };
+
+    let on_byot_token_change = {
+        let byot_auth_token = byot_auth_token.clone();
+        Callback::from(move |e: InputEvent| {
+            let input: HtmlInputElement = e.target_unchecked_into();
+            byot_auth_token.set(input.value());
+        })
+    };
+
+    let on_save_byot_number = {
+        let byot_phone_number = byot_phone_number.clone();
+        let byot_account_sid = byot_account_sid.clone();
+        let byot_auth_token = byot_auth_token.clone();
+        let selected_lightfriend_number = selected_lightfriend_number.clone();
+        let preferred_sending_number = preferred_sending_number.clone();
+        let save_state = sending_number_save_state.clone();
+        let user_profile = user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |_: MouseEvent| {
+            let phone = (*byot_phone_number).trim().to_string();
+            let sid = (*byot_account_sid).trim().to_string();
+            let token = (*byot_auth_token).trim().to_string();
+            let using_saved_creds = sid.starts_with("...") && token.starts_with("...");
+
+            if phone.is_empty()
+                || !phone.starts_with('+')
+                || phone.len() < 10
+                || !phone[1..].chars().all(|c| c.is_ascii_digit())
+                || phone.starts_with("...")
+            {
+                save_state.set(FieldSaveState::Error(
+                    "Enter the Twilio phone number in E.164 format".to_string(),
+                ));
+                return;
+            }
+
+            if !using_saved_creds
+                && (sid.len() != 34
+                    || !sid.starts_with("AC")
+                    || !sid[2..].chars().all(|c| c.is_ascii_hexdigit()))
+            {
+                save_state.set(FieldSaveState::Error(
+                    "Enter a valid Twilio Account SID".to_string(),
+                ));
+                return;
+            }
+
+            if !using_saved_creds
+                && (token.len() != 32 || !token.chars().all(|c| c.is_ascii_hexdigit()))
+            {
+                save_state.set(FieldSaveState::Error(
+                    "Enter a valid Twilio Auth Token".to_string(),
+                ));
+                return;
+            }
+
+            let selected_lightfriend_number = selected_lightfriend_number.clone();
+            let preferred_sending_number = preferred_sending_number.clone();
+            let save_state = save_state.clone();
+            let user_profile = user_profile.clone();
+            let on_profile_update = on_profile_update.clone();
+            save_state.set(FieldSaveState::Saving);
+            spawn_local(async move {
+                let phone_result = Api::post("/api/profile/twilio-phone")
+                    .header("Content-Type", "application/json")
+                    .body(
+                        serde_json::to_string(&serde_json::json!({
+                            "twilio_phone": phone
+                        }))
+                        .unwrap(),
+                    )
+                    .send()
+                    .await;
+
+                match phone_result {
+                    Ok(response) if response.ok() => {}
+                    Ok(_) => {
+                        save_state.set(FieldSaveState::Error(
+                            "Failed to save Twilio phone number".to_string(),
+                        ));
+                        return;
+                    }
+                    Err(_) => {
+                        save_state.set(FieldSaveState::Error("Network error".to_string()));
+                        return;
+                    }
+                }
+
+                if !using_saved_creds {
+                    let creds_result = Api::post("/api/profile/twilio-creds")
+                        .header("Content-Type", "application/json")
+                        .body(
+                            serde_json::to_string(&serde_json::json!({
+                                "account_sid": sid,
+                                "auth_token": token
+                            }))
+                            .unwrap(),
+                        )
+                        .send()
+                        .await;
+
+                    match creds_result {
+                        Ok(response) if response.ok() => {}
+                        Ok(_) => {
+                            save_state.set(FieldSaveState::Error(
+                                "Failed to save Twilio credentials".to_string(),
+                            ));
+                            return;
+                        }
+                        Err(_) => {
+                            save_state.set(FieldSaveState::Error("Network error".to_string()));
+                            return;
+                        }
+                    }
+                }
+
+                let enable_result = Api::post("/api/profile/own-twilio")
+                    .header("Content-Type", "application/json")
+                    .body(
+                        serde_json::to_string(&serde_json::json!({
+                            "enabled": true
+                        }))
+                        .unwrap(),
+                    )
+                    .send()
+                    .await;
+
+                match enable_result {
+                    Ok(response) if response.ok() => {
+                        selected_lightfriend_number.set(BYOT_NUMBER_OPTION.to_string());
+                        preferred_sending_number.set(phone.clone());
+                        let mut profile = (*user_profile).clone();
+                        profile.preferred_number = Some(phone);
+                        profile.own_twilio_enabled = true;
+                        if !using_saved_creds {
+                            profile.twilio_sid = Some("...".to_string());
+                            profile.twilio_token = Some("...".to_string());
+                        }
+                        on_profile_update.emit(profile);
+                        save_state.set(FieldSaveState::Success);
+                        let save_state_clone = save_state.clone();
+                        spawn_local(async move {
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
+                            save_state_clone.set(FieldSaveState::Idle);
+                        });
+                    }
+                    Ok(response) => {
+                        let msg = if let Ok(error_json) = response.json::<serde_json::Value>().await
+                        {
+                            error_json
+                                .get("error")
+                                .and_then(|e| e.as_str())
+                                .unwrap_or("Failed to enable Bring your own number")
+                                .to_string()
+                        } else {
+                            "Failed to enable Bring your own number".to_string()
+                        };
+                        save_state.set(FieldSaveState::Error(msg));
                     }
                     Err(_) => {
                         save_state.set(FieldSaveState::Error("Network error".to_string()));
@@ -2588,42 +2812,82 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 </div>
             </div>
 
-            // Sending Number field (only for notification-only countries)
+            // Lightfriend Number field
             {
                 if *show_sending_number_selector {
                     let numbers = (*available_sending_numbers).clone();
-                    let current = (*preferred_sending_number).clone();
+                    let current = (*selected_lightfriend_number).clone();
+                    let show_byot_fields = current == BYOT_NUMBER_OPTION;
                     html! {
                         <div class="profile-field">
                             <div class="field-label-group">
-                                <span class="field-label">{"Sending Number"}</span>
+                                <span class="field-label">{"Lightfriend Number"}</span>
                                 <div class="tooltip">
                                     <span class="tooltip-icon">{"?"}</span>
                                     <span class="tooltip-text">
-                                        {"Choose which country's number Lightfriend uses to send you SMS. If messages from the US aren't reaching you, try a European number."}
+                                        {"Choose the number Lightfriend uses for SMS and voice. Bring your own uses your Twilio account and phone number."}
                                     </span>
                                 </div>
                             </div>
-                            <div class="field-input-container">
-                                <select
-                                    class="profile-input"
-                                    value={current.clone()}
-                                    onchange={on_sending_number_change.clone()}
-                                >
-                                    {
-                                        numbers.iter().map(|num| {
-                                            let number = num.get("number").and_then(|v| v.as_str()).unwrap_or("");
-                                            let label = num.get("label").and_then(|v| v.as_str()).unwrap_or("Unknown");
-                                            let is_selected = current == number;
-                                            html! {
-                                                <option value={number.to_string()} selected={is_selected}>
-                                                    {label}
-                                                </option>
-                                            }
-                                        }).collect::<Html>()
+                            <div class="lightfriend-number-settings">
+                                <div class="field-input-container">
+                                    <select
+                                        class="profile-input"
+                                        value={current.clone()}
+                                        onchange={on_sending_number_change.clone()}
+                                    >
+                                        {
+                                            numbers.iter().map(|num| {
+                                                let number = num.get("number").and_then(|v| v.as_str()).unwrap_or("");
+                                                let label = num.get("label").and_then(|v| v.as_str()).unwrap_or("Unknown");
+                                                let is_selected = current == number;
+                                                html! {
+                                                    <option value={number.to_string()} selected={is_selected}>
+                                                        {label}
+                                                    </option>
+                                                }
+                                            }).collect::<Html>()
+                                        }
+                                        <option value={BYOT_NUMBER_OPTION} selected={show_byot_fields}>
+                                            {"Bring your own Twilio number"}
+                                        </option>
+                                    </select>
+                                    {render_save_indicator(&*sending_number_save_state)}
+                                </div>
+                                {
+                                    if show_byot_fields {
+                                        html! {
+                                            <div class="byot-settings-panel">
+                                                <input
+                                                    type="tel"
+                                                    class="profile-input"
+                                                    value={(*byot_phone_number).clone()}
+                                                    placeholder="+1234567890"
+                                                    oninput={on_byot_phone_change.clone()}
+                                                />
+                                                <input
+                                                    type="text"
+                                                    class="profile-input"
+                                                    value={(*byot_account_sid).clone()}
+                                                    placeholder="Twilio Account SID"
+                                                    oninput={on_byot_sid_change.clone()}
+                                                />
+                                                <input
+                                                    type="password"
+                                                    class="profile-input"
+                                                    value={(*byot_auth_token).clone()}
+                                                    placeholder="Twilio Auth Token"
+                                                    oninput={on_byot_token_change.clone()}
+                                                />
+                                                <button class="fill-button" onclick={on_save_byot_number.clone()}>
+                                                    {"Save Bring Your Own Number"}
+                                                </button>
+                                            </div>
+                                        }
+                                    } else {
+                                        html! {}
                                     }
-                                </select>
-                                {render_save_indicator(&*sending_number_save_state)}
+                                }
                             </div>
                         </div>
                     }
@@ -2838,6 +3102,23 @@ textarea.profile-input {
 }
 .field-input-container .input-with-limit {
     flex: 1;
+}
+.lightfriend-number-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+}
+.byot-settings-panel {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid rgba(30, 144, 255, 0.18);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.14);
+}
+.byot-settings-panel .fill-button {
+    justify-self: start;
 }
 .save-indicator {
     min-width: 24px;

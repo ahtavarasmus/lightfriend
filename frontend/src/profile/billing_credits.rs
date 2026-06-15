@@ -2,6 +2,7 @@ use crate::profile::billing_models::{
     ApiResponse, AutoTopupSettings, BuyCreditsRequest, UsageLogEntry, UserProfile,
     MIN_TOPUP_AMOUNT_CREDITS,
 };
+use crate::profile::stripe::StripePricingTable;
 use crate::utils::api::Api;
 use gloo_timers::future::TimeoutFuture;
 use serde_json::{json, Value};
@@ -164,15 +165,13 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                     saved_auto_topup_amount.set(amount);
                                 }
                                 // Refresh profile
-                                if let Ok(profile_response) =
-                                    Api::get("/api/profile").send().await
+                                if let Ok(profile_response) = Api::get("/api/profile").send().await
                                 {
                                     if profile_response.ok() {
                                         if let Ok(updated_profile) =
                                             profile_response.json::<UserProfile>().await
                                         {
-                                            if let Some(new_amount) =
-                                                updated_profile.charge_back_to
+                                            if let Some(new_amount) = updated_profile.charge_back_to
                                             {
                                                 saved_auto_topup_amount.set(new_amount);
                                             }
@@ -191,9 +190,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                 });
                             }
                         } else {
-                            error.set(Some(
-                                "Failed to update auto top-up settings".to_string(),
-                            ));
+                            error.set(Some("Failed to update auto top-up settings".to_string()));
                             let error_clone = error.clone();
                             spawn_local(async move {
                                 TimeoutFuture::new(3_000).await;
@@ -295,8 +292,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                     .unwrap_or(false)
                                 {
                                     error.set(Some("Credit top-ups are only available on the Digest plan. Upgrade to Digest for more credits and top-up ability.".to_string()));
-                                } else if let Some(msg) =
-                                    data.get("error").and_then(|v| v.as_str())
+                                } else if let Some(msg) = data.get("error").and_then(|v| v.as_str())
                                 {
                                     error.set(Some(msg.to_string()));
                                 } else {
@@ -465,8 +461,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                 ));
                             }
                         } else {
-                            error
-                                .set(Some("Failed to create Customer Portal session".to_string()));
+                            error.set(Some("Failed to create Customer Portal session".to_string()));
                         }
                         let error_clone = error.clone();
                         let success_clone = success.clone();
@@ -493,7 +488,6 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
     let plan_name = match user_profile.plan_type.as_deref() {
         Some("autopilot") => "Autopilot",
         Some("assistant") => "Assistant",
-        Some("byot") => "BYOT",
         _ => {
             if user_profile.sub_tier.is_some() {
                 "Active"
@@ -503,7 +497,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
         }
     };
     let has_plan = user_profile.sub_tier.is_some();
-    let is_byot = user_profile.plan_type.as_deref() == Some("byot");
+    let uses_own_twilio = user_profile.own_twilio_enabled;
 
     html! {
         <>
@@ -533,6 +527,15 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                     }
                 }
 
+                if !has_plan {
+                    <div class="usage-projection-card billing-pricing-table-card" style="margin-bottom: 16px;">
+                        <div class="usage-header">
+                            <h3>{"Choose a plan"}</h3>
+                        </div>
+                        <StripePricingTable user_id={Some(user_profile.id)} />
+                    </div>
+                }
+
                 // Section A: Plan + Credits Summary
                 <div class="usage-projection-card" style="margin-bottom: 16px;">
                     <div class="usage-header">
@@ -548,10 +551,10 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                     </div>
 
                     {
-                        if is_byot {
+                        if uses_own_twilio {
                             html! {
                                 <div style="color: #B3D1FF; font-size: 0.95rem;">
-                                    {"BYOT - you pay Twilio directly for usage"}
+                                    {"Own Twilio enabled - you pay Twilio directly for phone usage"}
                                 </div>
                             }
                         } else if has_plan {
@@ -673,7 +676,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                 </div>
 
                 // Overage Credits & Buy/Top-up section
-                <div class="usage-projection-card" style={format!("margin-bottom: 16px;{}", if is_byot { " opacity: 0.6;" } else { "" })}>
+                <div class="usage-projection-card" style={format!("margin-bottom: 16px;{}", if uses_own_twilio { " opacity: 0.6;" } else { "" })}>
                     <div class="usage-header">
                         <h3>{"Overage Credits"}</h3>
                         <span class="usage-percentage" style="font-size: 1.2rem;">{format!("${:.2}", one_time_credits)}</span>
@@ -684,13 +687,13 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
 
                     <div class="auto-topup-container" style="margin-top: 12px; padding: 0;">
                     {
-                        if is_byot {
+                        if uses_own_twilio {
                             html! {
                                 <>
                                     <div class="buy-credits-disabled">
                                         <button
                                             class="buy-credits-button disabled"
-                                            title="Not needed on BYOT plan"
+                                            title="Not needed with own Twilio enabled"
                                             disabled=true
                                             style="opacity: 0.5; cursor: not-allowed;"
                                         >
@@ -698,7 +701,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                         </button>
                                     </div>
                                     <div class="tooltip" style="color: #888; font-size: 0.85rem;">
-                                        {"On the BYOT plan, you pay Twilio directly for usage."}
+                                        {"With own Twilio enabled, you pay Twilio directly for phone usage."}
                                     </div>
                                 </>
                             }
@@ -999,12 +1002,12 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                 </div>
 
                 // Manage Payments button
-                if user_profile.stripe_payment_method_id.is_some() || user_profile.sub_tier.is_some() {
+                if has_plan {
                     <button
                         class="customer-portal-button"
                         onclick={open_customer_portal.clone()}
                     >
-                        {"Manage Payments"}
+                        {"Change Plan / Manage Payments"}
                     </button>
                 }
             </div>
@@ -1013,6 +1016,23 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
             {r#"
 .billing-section {
     padding: 1rem 0;
+}
+
+.billing-pricing-table-card .stripe-pricing-table-wrap {
+    margin-top: 0.5rem;
+}
+
+.stripe-pricing-loading,
+.stripe-pricing-error {
+    min-height: 120px;
+    display: grid;
+    place-items: center;
+    color: #aaa;
+    font-size: 0.95rem;
+}
+
+.stripe-pricing-error {
+    color: #ffb4a8;
 }
 
 /* Usage Projection Card (reused for all cards) */

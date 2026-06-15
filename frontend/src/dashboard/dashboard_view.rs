@@ -611,6 +611,19 @@ const DASHBOARD_STYLES: &str = r#"
 .assistant-plan-note a:hover {
     text-decoration: underline;
 }
+.assistant-plan-note .link-button,
+.sidebar-footer-links .link-button {
+    background: none;
+    border: 0;
+    padding: 0;
+    color: #7EB2FF;
+    font: inherit;
+    cursor: pointer;
+}
+.assistant-plan-note .link-button:hover,
+.sidebar-footer-links .link-button:hover {
+    text-decoration: underline;
+}
 .rules-compact-bar {
     display: flex;
     align-items: center;
@@ -859,18 +872,11 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let byot_verify_status = use_state(|| None::<Result<String, String>>);
     let byot_verify_loading = use_state(|| false);
     let activity_refresh_seq = use_state(|| 0u32);
-    let critical_notis_enabled = use_state(|| {
-        props
-            .user_profile
-            .system_important_notify
-            .unwrap_or(false)
-    });
-    let digest_enabled = use_state(|| {
-        props.user_profile.digest_enabled.unwrap_or(false)
-    });
-    let digest_time_display = use_state(|| {
-        props.user_profile.digest_time.clone().unwrap_or_default()
-    });
+    let critical_notis_enabled =
+        use_state(|| props.user_profile.system_important_notify.unwrap_or(false));
+    let digest_enabled = use_state(|| props.user_profile.digest_enabled.unwrap_or(false));
+    let digest_time_display =
+        use_state(|| props.user_profile.digest_time.clone().unwrap_or_default());
     let custom_rules_open = use_state(|| false);
     let critical_notif_details_open = use_state(|| false);
     let digest_details_open = use_state(|| false);
@@ -882,6 +888,35 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     });
     // Whether the digest picker is in edit mode (collapsed by default to save space)
     let digest_editing = use_state(|| false);
+
+    let open_billing_tab = {
+        let settings_open = settings_open.clone();
+        let settings_initial_tab = settings_initial_tab.clone();
+        Callback::from(move |_: MouseEvent| {
+            settings_initial_tab.set(SettingsTab::Billing);
+            settings_open.set(true);
+        })
+    };
+
+    let open_customer_portal = {
+        let user_id = props.user_profile.id;
+        Callback::from(move |_: MouseEvent| {
+            spawn_local(async move {
+                let endpoint = format!("/api/stripe/customer-portal/{}", user_id);
+                if let Ok(response) = Api::get(&endpoint).send().await {
+                    if response.ok() {
+                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                            if let Some(url) = data.get("url").and_then(|value| value.as_str()) {
+                                if let Some(window) = web_sys::window() {
+                                    let _ = window.location().set_href(url);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        })
+    };
 
     // Critical notifications toggle handler
     let on_critical_toggle = {
@@ -1418,13 +1453,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         props.user_profile.plan_type.as_deref(),
         Some("autopilot") | Some("byot")
     );
-    let is_setup_mode =
-        !*has_any_bridge && !*has_email && !props.user_profile.has_any_connection;
+    let is_setup_mode = !*has_any_bridge && !*has_email && !props.user_profile.has_any_connection;
 
     // BYOT plan setup detection
     let is_byot = props.user_profile.plan_type.as_deref() == Some("byot");
-    let byot_has_creds = props.user_profile.twilio_sid.is_some()
-        && props.user_profile.twilio_token.is_some();
+    let byot_has_creds =
+        props.user_profile.twilio_sid.is_some() && props.user_profile.twilio_token.is_some();
     let byot_number = props.user_profile.preferred_number.clone();
     let byot_setup_complete = byot_has_creds && byot_number.is_some();
     let byot_active_message = byot_number
@@ -1452,7 +1486,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
             critical_notif_details_open.set(!*critical_notif_details_open);
         })
     };
-
 
     let on_toggle_digest_details = {
         let digest_details_open = digest_details_open.clone();
@@ -1486,9 +1519,8 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                 // Build detailed message from sms_webhook / voice_webhook
                                 let mut problems = Vec::new();
                                 if !data["sms_webhook"]["ok"].as_bool().unwrap_or(true) {
-                                    let actual = data["sms_webhook"]["actual"]
-                                        .as_str()
-                                        .unwrap_or("(none)");
+                                    let actual =
+                                        data["sms_webhook"]["actual"].as_str().unwrap_or("(none)");
                                     problems.push(format!(
                                         "SMS webhook not pointing at lightfriend (currently: {})",
                                         if actual.is_empty() { "(empty)" } else { actual }
@@ -1510,10 +1542,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                 }
                             }
                         }
-                        Err(e) => status.set(Some(Err(format!(
-                            "Failed to parse response: {}",
-                            e
-                        )))),
+                        Err(e) => status.set(Some(Err(format!("Failed to parse response: {}", e)))),
                     },
                     Ok(resp) => status.set(Some(Err(format!(
                         "Verification endpoint returned {}",
@@ -1590,7 +1619,9 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                     if !has_auto {
                         <div class="assistant-plan-note">
                             {"Monitoring is not automatic on the Assistant plan. Ask your assistant when you want to check messages or send replies. "}
-                            <a href="/pricing">{"Upgrade to Autopilot"}</a>
+                            <button type="button" class="link-button" onclick={open_customer_portal.clone()}>
+                                {"Upgrade to Autopilot"}
+                            </button>
                         </div>
                     }
 
@@ -2137,7 +2168,9 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                         {" | "}
                         <a href="mailto:support@lightfriend.ai">{"Support"}</a>
                         {" | "}
-                        <a href="/pricing">{"Pricing"}</a>
+                        <button type="button" class="link-button" onclick={open_billing_tab}>
+                            {"Billing"}
+                        </button>
                         {" | "}
                         <a href="/terms">{"Terms"}</a>
                         {" | "}

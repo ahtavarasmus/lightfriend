@@ -5,14 +5,21 @@ use chrono::{TimeZone, Utc};
 use tracing::info;
 
 use crate::context::ContextBuilder;
+use crate::models::ontology_models::OntMessage;
+use crate::pg_models::PgMessageHistory;
 use crate::proactive::signal_extraction::MessageSignals;
-use crate::proactive::utils::send_notification;
+use crate::proactive::utils::{
+    compact_email_notification, notification_meta_from_snapshot, send_notification,
+    send_notification_with_context,
+};
+use crate::repositories::ontology_repository::RecentHighSenderMessagesQuery;
 use crate::repositories::user_core::UserCoreOps;
 use crate::repositories::user_repository::LogUsageParams;
 use crate::AppState;
 use openai_api_rs::v1::{chat_completion, types};
 
 const COOLDOWN_SECS: i32 = 3600; // 1 hour per room
+const NOTIFICATION_CONTEXT_WINDOW_SECS: i32 = 3 * 3600;
 
 /// Daily token budget per user for proactive AI processing (system_important, rules, etc.)
 /// 10M tokens/month target (~$15/user/month at $1.50/M input tokens).
@@ -80,6 +87,7 @@ pub async fn run_urgency_classification(
         .get("sender_name")
         .and_then(|v| v.as_str())
         .unwrap_or("Unknown");
+    let sender_key = entity_snapshot.get("sender_key").and_then(|v| v.as_str());
     let platform = entity_snapshot
         .get("platform")
         .and_then(|v| v.as_str())
@@ -201,6 +209,29 @@ pub async fn run_urgency_classification(
     // Detect if user has an unanswered question in this thread
     let user_waiting = detect_user_waiting(&recent_messages, sender_name);
 
+    let recent_high_alerts = state
+        .ontology_repository
+        .get_recent_high_messages_by_sender(RecentHighSenderMessagesQuery {
+            user_id,
+            platform,
+            sender_name,
+            sender_key,
+            since_ts: now - NOTIFICATION_CONTEXT_WINDOW_SECS,
+            exclude_message_id: message_id,
+            limit: 5,
+        })
+        .unwrap_or_default();
+    let recent_lightfriend_replies = state
+        .user_repository
+        .get_conversation_history(user_id)
+        .unwrap_or_default();
+    let recent_notification_context = build_recent_notification_context(
+        &recent_high_alerts,
+        &recent_lightfriend_replies,
+        now,
+        tz_offset,
+    );
+
     let conversation = if recent_messages.len() > 1 {
         // Messages come DESC, reverse for chronological order
         let mut chronological: Vec<_> = recent_messages.iter().collect();
@@ -279,6 +310,7 @@ pub async fn run_urgency_classification(
         content_signals: &content_signals_ctx,
         user_waiting: &user_waiting,
         conversation_thread: &conversation,
+        recent_notification_context: &recent_notification_context,
     });
 
     // Urgency classification prompt - provides rich context, lets the AI decide
@@ -482,7 +514,9 @@ pub async fn run_urgency_classification(
 
             if should_notify {
                 let cleaned = strip_urls(summary);
-                let notification_message = cleaned.trim();
+                let notification_message =
+                    compact_email_notification(cleaned.trim(), entity_snapshot);
+                let notification_meta = notification_meta_from_snapshot(entity_snapshot);
 
                 if !notification_message.is_empty() {
                     state
@@ -496,9 +530,15 @@ pub async fn run_urgency_classification(
                         "system_important".to_string()
                     };
 
-                    let _ =
-                        send_notification(state, user_id, notification_message, content_type, None)
-                            .await;
+                    let _ = send_notification_with_context(
+                        state,
+                        user_id,
+                        &notification_message,
+                        content_type,
+                        None,
+                        notification_meta,
+                    )
+                    .await;
                 }
             } else if sender_name != "You" {
                 let _ = state.user_repository.log_usage(LogUsageParams {
@@ -556,6 +596,7 @@ struct SignalReportInput<'a> {
     content_signals: &'a str,
     user_waiting: &'a str,
     conversation_thread: &'a str,
+    recent_notification_context: &'a str,
 }
 
 /// Build a structured signal report combining all intelligence sources.
@@ -583,7 +624,109 @@ fn build_signal_report(input: &SignalReportInput) -> String {
         sections.push(input.conversation_thread.to_string());
     }
 
+    if !input.recent_notification_context.is_empty() {
+        sections.push(input.recent_notification_context.to_string());
+    }
+
     sections.join("\n")
+}
+
+fn build_recent_notification_context(
+    recent_high_alerts: &[OntMessage],
+    recent_lightfriend_replies: &[PgMessageHistory],
+    now: i32,
+    tz_offset: chrono::FixedOffset,
+) -> String {
+    let mut sections = Vec::new();
+
+    if !recent_high_alerts.is_empty() {
+        let lines: Vec<String> = recent_high_alerts
+            .iter()
+            .map(|m| {
+                let ago = format_age(now - m.created_at);
+                let summary = m
+                    .summary
+                    .as_deref()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or(&m.content);
+                format!(
+                    "- {} ago: urgency={}, category={}, summary={}",
+                    ago,
+                    m.urgency.as_deref().unwrap_or("high"),
+                    m.category.as_deref().unwrap_or("unknown"),
+                    concise_for_prompt(summary, 180)
+                )
+            })
+            .collect();
+        sections.push(format!(
+            "Recent same-sender alerts likely already sent to the user:\n{}",
+            lines.join("\n")
+        ));
+    }
+
+    let cutoff = now - NOTIFICATION_CONTEXT_WINDOW_SECS;
+    let reply_lines: Vec<String> = recent_lightfriend_replies
+        .iter()
+        .filter(|m| m.created_at >= cutoff)
+        .filter(|m| m.role == "user" || m.role == "assistant")
+        .take(8)
+        .map(|m| {
+            let ts = Utc
+                .timestamp_opt(m.created_at as i64, 0)
+                .single()
+                .map(|dt| {
+                    dt.with_timezone(&tz_offset)
+                        .format("%b %d %H:%M")
+                        .to_string()
+                })
+                .unwrap_or_else(|| "??:??".to_string());
+            format!(
+                "- [{}] {}: {}",
+                ts,
+                m.role,
+                concise_for_prompt(&m.encrypted_content, 160)
+            )
+        })
+        .collect();
+
+    if !reply_lines.is_empty() {
+        sections.push(format!(
+            "Recent Lightfriend SMS/chat context:\n{}",
+            reply_lines.join("\n")
+        ));
+    }
+
+    sections.join("\n")
+}
+
+fn format_age(seconds: i32) -> String {
+    if seconds < 90 {
+        "just now".to_string()
+    } else if seconds < 3600 {
+        format!("{} min", seconds / 60)
+    } else {
+        let hours = seconds / 3600;
+        let mins = (seconds % 3600) / 60;
+        if mins == 0 {
+            format!("{}h", hours)
+        } else {
+            format!("{}h {}m", hours, mins)
+        }
+    }
+}
+
+fn concise_for_prompt(s: &str, max_chars: usize) -> String {
+    let collapsed = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() <= max_chars {
+        return collapsed;
+    }
+
+    let mut out = collapsed
+        .chars()
+        .take(max_chars.saturating_sub(1))
+        .collect::<String>();
+    out.push_str("...");
+    out
 }
 
 /// Detect if the user sent a message that hasn't been replied to yet.

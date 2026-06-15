@@ -9,7 +9,7 @@ use web_sys::HtmlTextAreaElement;
 use yew::prelude::*;
 
 fn render_markdown(text: &str) -> Html {
-    use pulldown_cmark::{Parser, Options, html::push_html};
+    use pulldown_cmark::{html::push_html, Options, Parser};
     let parser = Parser::new_ext(text, Options::empty());
     let mut html_output = String::new();
     push_html(&mut html_output, parser);
@@ -654,7 +654,8 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                     // Pre-flight: ensure auth tokens are fresh before SSE connection
                     match crate::utils::api::Api::get("/api/auth/status").send().await {
                         Ok(resp) if resp.status() == 401 => {
-                            chat_error.set(Some("Session expired. Redirecting to login...".to_string()));
+                            chat_error
+                                .set(Some("Session expired. Redirecting to login...".to_string()));
                             chat_loading.set(false);
                             if let Some(window) = web_sys::window() {
                                 let _ = window.location().set_href("/login");
@@ -662,7 +663,8 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             return;
                         }
                         Err(_) => {
-                            chat_error.set(Some("Session expired. Redirecting to login...".to_string()));
+                            chat_error
+                                .set(Some("Session expired. Redirecting to login...".to_string()));
                             chat_loading.set(false);
                             if let Some(window) = web_sys::window() {
                                 let _ = window.location().set_href("/login");
@@ -1087,11 +1089,11 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                             .replace("https://", "wss://")
                                             .replace("http://", "ws://")
                                             + ws_path;
-                                        let result =
-                                            crate::utils::voice_web::start_voice_call(
-                                                &full_ws_url, wasm_bindgen::JsValue::NULL,
-                                            )
-                                            .await;
+                                        let result = crate::utils::voice_web::start_voice_call(
+                                            &full_ws_url,
+                                            wasm_bindgen::JsValue::NULL,
+                                        )
+                                        .await;
                                         if result.is_truthy() {
                                             call_active.set(true);
                                             call_duration.set(0);
@@ -1255,7 +1257,8 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                         }
                     }
                 }
-            }).forget();
+            })
+            .forget();
         })
     };
     let stop_click = {

@@ -132,23 +132,23 @@ pub async fn get_cost_stats(
         .filter_map(|p| *p)
         .sum();
 
-    // Get user phone numbers and plan types (to exclude BYOT users)
+    // Get user phone numbers and own-Twilio mode (to exclude users who pay Twilio directly)
     let user_ids: Vec<i32> = sms_data_30d.iter().map(|(uid, _, _)| *uid).collect();
-    let user_data: Vec<(i32, String, Option<String>)> = users::table
+    let user_data: Vec<(i32, String, bool)> = users::table
         .filter(users::id.eq_any(&user_ids))
-        .select((users::id, users::phone_number, users::plan_type))
+        .select((users::id, users::phone_number, users::own_twilio_enabled))
         .load(pg_conn)
         .unwrap_or_default();
 
-    // Build maps for country (detected from phone) and identify BYOT users to exclude
+    // Build maps for country (detected from phone) and identify own-Twilio users to exclude
     let mut country_map: std::collections::HashMap<i32, String> = std::collections::HashMap::new();
     let mut byot_users: std::collections::HashSet<i32> = std::collections::HashSet::new();
 
-    for (id, phone_number, plan_type) in user_data {
+    for (id, phone_number, own_twilio_enabled) in user_data {
         let country = crate::utils::country::get_country_code_from_phone(&phone_number)
             .unwrap_or_else(|| "Unknown".to_string());
         country_map.insert(id, country);
-        if plan_type.as_deref() == Some("byot") {
+        if own_twilio_enabled {
             byot_users.insert(id);
         }
     }

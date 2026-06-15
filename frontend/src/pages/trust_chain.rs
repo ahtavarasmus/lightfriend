@@ -86,10 +86,17 @@ fn short_hash(hash: &str, len: usize) -> String {
 
 fn format_date(iso: &str) -> String {
     let date = js_sys::Date::new(&JsValue::from_str(iso));
-    let months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    let months = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
     let m = date.get_utc_month() as usize;
     let month = months.get(m).unwrap_or(&"???");
-    format!("{} {} {}", date.get_utc_date(), month, date.get_utc_full_year())
+    format!(
+        "{} {} {}",
+        date.get_utc_date(),
+        month,
+        date.get_utc_full_year()
+    )
 }
 
 // -- Main page --
@@ -413,10 +420,16 @@ fn pillars_section(props: &PillarsProps) -> Html {
     }
 }
 
-fn render_pillar_encrypted(d: &TrustChainData, show_extra: bool, toggle: Callback<MouseEvent>) -> Html {
+fn render_pillar_encrypted(
+    d: &TrustChainData,
+    show_extra: bool,
+    toggle: Callback<MouseEvent>,
+) -> Html {
     let image_id = d.image_id.as_deref().unwrap_or("unavailable");
     let approved = d.blockchain.as_ref().map_or(false, |b| b.approved);
-    let contract_addr = d.kms_contract_address.as_deref()
+    let contract_addr = d
+        .kms_contract_address
+        .as_deref()
         .unwrap_or("0x2e51F48F7440b415D9De30b4D73a18C8E9428982");
 
     html! {
@@ -471,7 +484,11 @@ fn render_pillar_encrypted(d: &TrustChainData, show_extra: bool, toggle: Callbac
     }
 }
 
-fn render_pillar_auditable(d: &TrustChainData, show_extra: bool, toggle: Callback<MouseEvent>) -> Html {
+fn render_pillar_auditable(
+    d: &TrustChainData,
+    show_extra: bool,
+    toggle: Callback<MouseEvent>,
+) -> Html {
     let image_id = d.image_id.as_deref().unwrap_or("unavailable");
     let commit = d.commit_sha.as_deref().unwrap_or("unknown");
 
@@ -531,7 +548,11 @@ fn render_pillar_auditable(d: &TrustChainData, show_extra: bool, toggle: Callbac
     }
 }
 
-fn render_pillar_isolated(d: &TrustChainData, show_extra: bool, toggle: Callback<MouseEvent>) -> Html {
+fn render_pillar_isolated(
+    d: &TrustChainData,
+    show_extra: bool,
+    toggle: Callback<MouseEvent>,
+) -> Html {
     let image_id = d.image_id.as_deref().unwrap_or("unavailable");
     let pcr0 = d.pcr0.as_deref().unwrap_or("unavailable");
     let pcr1 = d.pcr1.as_deref().unwrap_or("unavailable");

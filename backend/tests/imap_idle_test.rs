@@ -24,6 +24,7 @@ fn make_preview(uid: &str, from_email: &str, subject: &str) -> ImapEmailPreview 
         snippet: Some("snippet".to_string()),
         body: Some(format!("body for {}", subject)),
         is_read: false,
+        imap_connection_id: None,
     }
 }
 

@@ -133,6 +133,8 @@ pub struct ImapEmailPreview {
     pub snippet: Option<String>,
     pub body: Option<String>,
     pub is_read: bool,
+    #[serde(skip_serializing)]
+    pub imap_connection_id: Option<i32>,
 }
 #[derive(Debug, Serialize)]
 pub struct ImapEmail {
@@ -272,6 +274,7 @@ pub fn parse_imap_message(
         snippet: Some(snippet),
         body: Some(body),
         is_read,
+        imap_connection_id: None,
     })
 }
 
@@ -538,6 +541,15 @@ pub async fn insert_email_into_ontology(
             .mark_messages_seen_in_room(user_id, &room_id, now, now);
     }
 
+    let email_account = imap_connection_id.and_then(|conn_id| {
+        state
+            .user_repository
+            .get_imap_connection_by_id(conn_id)
+            .ok()
+            .flatten()
+            .map(|(_, account, _)| account.email)
+    });
+
     let mut snapshot = json!({
         "message_id": created.id,
         "platform": "email",
@@ -546,7 +558,15 @@ pub async fn insert_email_into_ontology(
         "sender_key": sender_key,
         "content": content,
         "room_id": room_id,
+        "mailbox": "INBOX",
+        "email_uid": email_uid,
     });
+    if let Some(conn_id) = imap_connection_id {
+        snapshot["imap_connection_id"] = json!(conn_id);
+    }
+    if let Some(account) = email_account {
+        snapshot["email_account"] = json!(account);
+    }
     if let Some(pid) = matched_person_id {
         snapshot["person_id"] = json!(pid);
     }
@@ -1159,6 +1179,7 @@ pub async fn fetch_single_imap_email(
         }
     }
 }
+
 pub async fn fetch_emails_imap(
     state: &AppState,
     user_id: i32,
@@ -1195,6 +1216,7 @@ pub async fn fetch_emails_imap(
             limit,
             unprocessed,
             unread_only,
+            Some(account.id),
         )
         .await
         {
@@ -1204,6 +1226,7 @@ pub async fn fetch_emails_imap(
                     if p.from.is_none() || p.from.as_deref() == Some("") {
                         p.from = Some(account.email.clone());
                     }
+                    p.imap_connection_id = Some(account.id);
                 }
                 all_previews.extend(previews);
             }
@@ -1242,6 +1265,7 @@ async fn fetch_emails_imap_for_account(
     limit: Option<u32>,
     unprocessed: bool,
     unread_only: bool,
+    imap_connection_id: Option<i32>,
 ) -> Result<Vec<ImapEmailPreview>, ImapError> {
     tracing::debug!("Fetching IMAP emails for user {}", user_id);
 
@@ -1290,7 +1314,7 @@ async fn fetch_emails_imap_for_account(
                 if unprocessed {
                     match state
                         .user_repository
-                        .is_email_processed(user_id, &uid_str, None)
+                        .is_email_processed(user_id, &uid_str, imap_connection_id)
                     {
                         Ok(true) => continue,
                         Ok(false) => {}

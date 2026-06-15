@@ -22,20 +22,31 @@ pub fn email_connect(props: &EmailProps) -> Html {
     let manual_override = use_state(|| false); // true = show provider dropdown instead of auto-detect
     let manual_provider = use_state(|| "gmail".to_string());
     // Detection result: (provider_key, label, imap_server, imap_port, instructions, instructions_url)
-    let detected = use_state(|| None::<(String, String, String, u16, Option<String>, Option<String>)>);
+    let detected =
+        use_state(|| None::<(String, String, String, u16, Option<String>, Option<String>)>);
     let detected_reset = detected.clone();
     // Provider list for manual override
     let providers = vec![
         ("gmail", "Gmail", "imap.gmail.com", "993"),
         ("icloud", "iCloud", "imap.mail.me.com", "993"),
-        ("outlook", "Outlook / Hotmail", "outlook.office365.com", "993"),
+        (
+            "outlook",
+            "Outlook / Hotmail",
+            "outlook.office365.com",
+            "993",
+        ),
         ("yahoo", "Yahoo Mail", "imap.mail.yahoo.com", "993"),
         ("aol", "AOL", "imap.aol.com", "993"),
         ("fastmail", "Fastmail", "imap.fastmail.com", "993"),
         ("zoho", "Zoho Mail", "imap.zoho.com", "993"),
         ("yandex", "Yandex", "imap.yandex.com", "993"),
         ("gmx", "GMX", "imap.gmx.com", "993"),
-        ("privateemail", "PrivateEmail (Namecheap)", "mail.privateemail.com", "993"),
+        (
+            "privateemail",
+            "PrivateEmail (Namecheap)",
+            "mail.privateemail.com",
+            "993",
+        ),
         ("godaddy", "GoDaddy", "imap.secureserver.net", "993"),
         ("hostinger", "Hostinger", "imap.hostinger.com", "993"),
         ("custom", "Other / Custom", "", ""),
@@ -138,15 +149,43 @@ pub fn email_connect(props: &EmailProps) -> Html {
                         detecting.set(false);
                         if response.ok() {
                             if let Ok(data) = response.json::<serde_json::Value>().await {
-                                let provider = data.get("provider").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
-                                let label = data.get("label").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string();
-                                let server = data.get("imap_server").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                let port = data.get("imap_port").and_then(|v| v.as_u64()).unwrap_or(993) as u16;
-                                let instructions = data.get("instructions").and_then(|v| v.as_str()).map(String::from);
-                                let instructions_url = data.get("instructions_url").and_then(|v| v.as_str()).map(String::from);
+                                let provider = data
+                                    .get("provider")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("unknown")
+                                    .to_string();
+                                let label = data
+                                    .get("label")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("Unknown")
+                                    .to_string();
+                                let server = data
+                                    .get("imap_server")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let port =
+                                    data.get("imap_port")
+                                        .and_then(|v| v.as_u64())
+                                        .unwrap_or(993) as u16;
+                                let instructions = data
+                                    .get("instructions")
+                                    .and_then(|v| v.as_str())
+                                    .map(String::from);
+                                let instructions_url = data
+                                    .get("instructions_url")
+                                    .and_then(|v| v.as_str())
+                                    .map(String::from);
                                 imap_server.set(server.clone());
                                 imap_port.set(port.to_string());
-                                detected.set(Some((provider, label, server, port, instructions, instructions_url)));
+                                detected.set(Some((
+                                    provider,
+                                    label,
+                                    server,
+                                    port,
+                                    instructions,
+                                    instructions_url,
+                                )));
                             }
                         } else {
                             error.set(Some("Failed to detect email provider.".to_string()));

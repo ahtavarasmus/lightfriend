@@ -237,6 +237,7 @@ diesel::table! {
         refresh_token_compromised -> Bool,
         magic_token_expires_at -> Nullable<Int4>,
         plan_type -> Nullable<Text>,
+        own_twilio_enabled -> Bool,
         matrix_e2ee_enabled -> Bool,
         preferred_sms_provider -> Nullable<Text>,
         accountability_friend_phone -> Nullable<Text>,
@@ -315,6 +316,11 @@ diesel::table! {
         updated_at -> Int4,
         price -> Nullable<Float4>,
         price_unit -> Nullable<Text>,
+        encrypted_body -> Nullable<Text>,
+        fallback_provider -> Nullable<Text>,
+        fallback_attempted_at -> Nullable<Int4>,
+        fallback_message_sid -> Nullable<Text>,
+        fallback_error -> Nullable<Text>,
     }
 }
 

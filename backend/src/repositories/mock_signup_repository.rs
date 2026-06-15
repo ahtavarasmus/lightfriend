@@ -49,6 +49,7 @@ impl MockUser {
             refresh_token_compromised: false,
             magic_token_expires_at: None,
             plan_type: None,
+            own_twilio_enabled: false,
             matrix_e2ee_enabled: false,
             preferred_sms_provider: None,
             accountability_friend_phone: None,

@@ -79,13 +79,11 @@ pub fn commitment_dashboard() -> Html {
                             Ok(resp) if resp.ok() => resp.json::<SenderRulesResponse>().await.ok(),
                             _ => None,
                         };
-                        let prompts_result = match Api::get("/api/commitment/recent-prompts")
-                            .send()
-                            .await
-                        {
-                            Ok(resp) if resp.ok() => resp.json::<Vec<PromptView>>().await.ok(),
-                            _ => None,
-                        };
+                        let prompts_result =
+                            match Api::get("/api/commitment/recent-prompts").send().await {
+                                Ok(resp) if resp.ok() => resp.json::<Vec<PromptView>>().await.ok(),
+                                _ => None,
+                            };
                         match (rules_result, prompts_result) {
                             (Some(r), Some(p)) => {
                                 rules.set(r);

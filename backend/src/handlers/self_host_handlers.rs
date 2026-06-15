@@ -18,6 +18,11 @@ pub struct UpdateTwilioCredsRequest {
     auth_token: String,
 }
 
+#[derive(Deserialize)]
+pub struct UpdateOwnTwilioEnabledRequest {
+    enabled: bool,
+}
+
 pub async fn update_twilio_phone(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -293,6 +298,81 @@ pub async fn verify_byot_setup(
     })))
 }
 
+pub async fn update_own_twilio_enabled(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(req): Json<UpdateOwnTwilioEnabledRequest>,
+) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
+    if req.enabled {
+        let user = state
+            .user_core
+            .find_by_id(auth_user.user_id)
+            .map_err(|e| {
+                tracing::error!("Failed to fetch user: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "Failed to fetch user"})),
+                )
+            })?
+            .ok_or((
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"})),
+            ))?;
+
+        if user.preferred_number.as_deref().unwrap_or("").is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(
+                    json!({"error": "Add your Twilio phone number before enabling own Twilio mode"}),
+                ),
+            ));
+        }
+
+        if state
+            .user_repository
+            .get_twilio_credentials(auth_user.user_id)
+            .is_err()
+        {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(
+                    json!({"error": "Add your Twilio credentials before enabling own Twilio mode"}),
+                ),
+            ));
+        }
+    }
+
+    state
+        .user_core
+        .update_own_twilio_enabled(auth_user.user_id, req.enabled)
+        .map_err(|e| {
+            tracing::error!("Failed to update own Twilio mode: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to update own Twilio mode"})),
+            )
+        })?;
+
+    if req.enabled {
+        let _ = state
+            .user_repository
+            .update_sub_credits(auth_user.user_id, 0.0);
+    } else if state
+        .user_core
+        .find_by_id(auth_user.user_id)
+        .ok()
+        .flatten()
+        .is_some_and(|user| user.sub_tier.as_deref() == Some("tier 2"))
+    {
+        let _ = state.user_repository.update_sub_credits(
+            auth_user.user_id,
+            crate::utils::plan_features::MONTHLY_CREDIT_BUDGET,
+        );
+    }
+
+    Ok(StatusCode::OK)
+}
+
 /// Clear BYOT Twilio credentials (manual removal)
 pub async fn clear_twilio_creds(
     State(state): State<Arc<AppState>>,
@@ -303,6 +383,9 @@ pub async fn clear_twilio_creds(
         .clear_twilio_credentials(auth_user.user_id)
     {
         Ok(_) => {
+            let _ = state
+                .user_core
+                .update_own_twilio_enabled(auth_user.user_id, false);
             tracing::info!(
                 "Successfully cleared BYOT credentials for user: {}",
                 auth_user.user_id

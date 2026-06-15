@@ -31,7 +31,8 @@ pub struct User {
     pub refresh_token_hash: Option<String>,     // hash of the currently active refresh token
     pub refresh_token_compromised: bool,        // set if an invalidated refresh token is reused
     pub magic_token_expires_at: Option<i32>,    // expiry for magic link token
-    pub plan_type: Option<String>,              // "assistant", "autopilot", or "byot"
+    pub plan_type: Option<String>,              // "assistant" or "autopilot"
+    pub own_twilio_enabled: bool,               // route phone traffic through user's Twilio account
     pub matrix_e2ee_enabled: bool,              // whether E2EE is enabled for Matrix messaging
     /// Override for SMS provider routing. NULL = country-based routing
     /// (US users prefer Sinch/Telnyx when registered, others use Twilio).
@@ -161,6 +162,12 @@ pub struct MessageStatusLog {
     pub updated_at: i32,
     pub price: Option<f32>,
     pub price_unit: Option<String>,
+    #[serde(skip_serializing)]
+    pub encrypted_body: Option<String>,
+    pub fallback_provider: Option<String>,
+    pub fallback_attempted_at: Option<i32>,
+    pub fallback_message_sid: Option<String>,
+    pub fallback_error: Option<String>,
 }
 
 #[derive(Insertable, Debug)]
@@ -178,6 +185,7 @@ pub struct NewMessageStatusLog {
     pub updated_at: i32,
     pub price: Option<f32>,
     pub price_unit: Option<String>,
+    pub encrypted_body: Option<String>,
 }
 
 // Admin Alert models for tracking system alerts

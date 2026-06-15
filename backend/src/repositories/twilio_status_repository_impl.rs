@@ -6,10 +6,12 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use diesel::prelude::*;
+use diesel::sql_types::{Integer, Nullable, Text};
 
 use crate::pg_schema::message_status_log;
 use crate::repositories::twilio_status_repository::{
-    MessageUserInfo, StatusUpdate, TwilioStatusRepository, TwilioStatusRepositoryError,
+    DeliveryFallbackMessage, MessageUserInfo, StatusUpdate, TwilioStatusRepository,
+    TwilioStatusRepositoryError,
 };
 use crate::PgDbPool;
 
@@ -29,6 +31,103 @@ impl DieselTwilioStatusRepository {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i32
+    }
+
+    /// Atomically claim a failed Twilio message for Telnyx fallback.
+    ///
+    /// The `fallback_attempted_at IS NULL` guard keeps duplicate Twilio
+    /// callback retries from sending the same fallback SMS more than once.
+    pub fn claim_telnyx_delivery_fallback(
+        &self,
+        message_sid: &str,
+    ) -> Result<Option<DeliveryFallbackMessage>, TwilioStatusRepositoryError> {
+        #[derive(QueryableByName)]
+        struct ClaimRow {
+            #[diesel(sql_type = Integer)]
+            user_id: i32,
+            #[diesel(sql_type = Text)]
+            to_number: String,
+            #[diesel(sql_type = Nullable<Text>)]
+            encrypted_body: Option<String>,
+        }
+
+        let mut conn = self
+            .db_pool
+            .get()
+            .map_err(|e| TwilioStatusRepositoryError::Database(e.to_string()))?;
+        let now = Self::get_timestamp();
+
+        let rows: Vec<ClaimRow> = diesel::sql_query(
+            "UPDATE message_status_log \
+             SET fallback_attempted_at = $2, \
+                 fallback_provider = 'telnyx', \
+                 fallback_message_sid = NULL, \
+                 fallback_error = NULL, \
+                 updated_at = $2 \
+             WHERE message_sid = $1 \
+               AND fallback_attempted_at IS NULL \
+             RETURNING user_id, to_number, encrypted_body",
+        )
+        .bind::<Text, _>(message_sid)
+        .bind::<Integer, _>(now)
+        .load(&mut conn)
+        .map_err(|e| TwilioStatusRepositoryError::Database(e.to_string()))?;
+
+        Ok(rows.into_iter().next().map(|row| DeliveryFallbackMessage {
+            user_id: row.user_id,
+            to_number: row.to_number,
+            encrypted_body: row.encrypted_body,
+        }))
+    }
+
+    pub fn record_telnyx_delivery_fallback_success(
+        &self,
+        message_sid: &str,
+        fallback_message_sid: &str,
+    ) -> Result<(), TwilioStatusRepositoryError> {
+        let mut conn = self
+            .db_pool
+            .get()
+            .map_err(|e| TwilioStatusRepositoryError::Database(e.to_string()))?;
+        let now = Self::get_timestamp();
+
+        diesel::update(
+            message_status_log::table.filter(message_status_log::message_sid.eq(message_sid)),
+        )
+        .set((
+            message_status_log::fallback_message_sid.eq(fallback_message_sid),
+            message_status_log::fallback_error.eq(Option::<String>::None),
+            message_status_log::updated_at.eq(now),
+        ))
+        .execute(&mut conn)
+        .map_err(|e| TwilioStatusRepositoryError::Database(e.to_string()))?;
+
+        Ok(())
+    }
+
+    pub fn record_telnyx_delivery_fallback_error(
+        &self,
+        message_sid: &str,
+        error: &str,
+    ) -> Result<(), TwilioStatusRepositoryError> {
+        let mut conn = self
+            .db_pool
+            .get()
+            .map_err(|e| TwilioStatusRepositoryError::Database(e.to_string()))?;
+        let now = Self::get_timestamp();
+        let error = error.chars().take(1000).collect::<String>();
+
+        diesel::update(
+            message_status_log::table.filter(message_status_log::message_sid.eq(message_sid)),
+        )
+        .set((
+            message_status_log::fallback_error.eq(Some(error)),
+            message_status_log::updated_at.eq(now),
+        ))
+        .execute(&mut conn)
+        .map_err(|e| TwilioStatusRepositoryError::Database(e.to_string()))?;
+
+        Ok(())
     }
 }
 

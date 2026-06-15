@@ -1,0 +1,8 @@
+[package]
+name = "stripe_webhook_logic"
+version = "0.1.0"
+edition = "2021"
+
+[lints.rust]
+# `cfg(kani)` is set by the Kani verifier, not by Cargo.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

@@ -119,8 +119,11 @@ pub fn validate_env() {
             // Billing (Stripe)
             "STRIPE_SECRET_KEY",
             "STRIPE_PUBLISHABLE_KEY",
+            "STRIPE_PRICING_TABLE_ID",
             "STRIPE_WEBHOOK_SECRET",
             "STRIPE_CREDITS_PRODUCT_ID",
+            "STRIPE_ASSISTANT_PRODUCT_ID",
+            "STRIPE_AUTOPILOT_PRODUCT_ID",
             // SMS/Voice (Twilio)
             "TWILIO_ACCOUNT_SID",
             "TWILIO_AUTH_TOKEN",
@@ -778,6 +781,10 @@ async fn main() {
             post(stripe_handlers::create_guest_checkout),
         )
         .route(
+            "/api/stripe/pricing-table-config",
+            get(stripe_handlers::get_pricing_table_config),
+        )
+        .route(
             "/api/auth/magic/{token}",
             get(auth_handlers::validate_magic_link),
         )
@@ -1057,6 +1064,10 @@ async fn main() {
             get(self_host_handlers::verify_byot_setup),
         )
         .route(
+            "/api/profile/own-twilio",
+            post(self_host_handlers::update_own_twilio_enabled),
+        )
+        .route(
             "/api/profile/timezone",
             post(profile_handlers::update_timezone),
         )
@@ -1126,6 +1137,10 @@ async fn main() {
         .route(
             "/api/stripe/customer-portal/{user_id}",
             get(stripe_handlers::create_customer_portal_session),
+        )
+        .route(
+            "/api/stripe/pricing-table-session/{user_id}",
+            get(stripe_handlers::create_pricing_table_customer_session),
         )
         .route("/api/auth/tesla/login", get(tesla_auth::tesla_login))
         .route(
@@ -1599,10 +1614,24 @@ async fn main() {
                 ))
             } else {
                 // Cross-origin mode (local dev): exact origin with credentials
-                cors.allow_origin(AllowOrigin::exact(
-                    frontend_url.parse().expect("Invalid FRONTEND_URL"),
-                ))
-                .allow_credentials(true)
+                let mut allowed_origins = vec![frontend_url
+                    .parse::<HeaderValue>()
+                    .expect("Invalid FRONTEND_URL")];
+                if let Some(localhost_url) = frontend_url.strip_prefix("http://127.0.0.1:") {
+                    allowed_origins.push(
+                        format!("http://localhost:{}", localhost_url)
+                            .parse()
+                            .expect("Invalid localhost FRONTEND_URL"),
+                    );
+                } else if let Some(localhost_url) = frontend_url.strip_prefix("http://localhost:") {
+                    allowed_origins.push(
+                        format!("http://127.0.0.1:{}", localhost_url)
+                            .parse()
+                            .expect("Invalid loopback FRONTEND_URL"),
+                    );
+                }
+                cors.allow_origin(AllowOrigin::list(allowed_origins))
+                    .allow_credentials(true)
             }
         })
         // Security headers to prevent clickjacking, XSS, and other attacks

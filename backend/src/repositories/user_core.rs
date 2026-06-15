@@ -215,8 +215,9 @@ pub trait UserCoreOps: Send + Sync {
     // Profile (complex transaction)
     fn update_profile(&self, params: UpdateProfileParams<'_>) -> Result<(), DieselError>;
 
-    // BYOT check
+    // Own Twilio routing
     fn is_byot_user(&self, user_id: i32) -> bool;
+    fn update_own_twilio_enabled(&self, user_id: i32, enabled: bool) -> Result<(), DieselError>;
 
     // Subscription & billing
     fn update_subscription_tier(&self, user_id: i32, tier: Option<&str>)
@@ -1406,7 +1407,7 @@ impl UserCoreOps for UserCore {
         Ok(timestamp)
     }
 
-    /// Check if user is on BYOT (Bring Your Own Twilio) plan by checking plan_type
+    /// Check if user has enabled routing through their own Twilio account.
     fn is_byot_user(&self, user_id: i32) -> bool {
         let mut pg_conn = match self.pg_pool.get() {
             Ok(c) => c,
@@ -1415,9 +1416,16 @@ impl UserCoreOps for UserCore {
 
         users::table
             .filter(users::id.eq(user_id))
-            .select(users::plan_type)
-            .first::<Option<String>>(&mut pg_conn)
-            .map(|pt| pt.as_deref() == Some("byot"))
+            .select(users::own_twilio_enabled)
+            .first::<bool>(&mut pg_conn)
             .unwrap_or(false)
+    }
+
+    fn update_own_twilio_enabled(&self, user_id: i32, enabled: bool) -> Result<(), DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::own_twilio_enabled.eq(enabled))
+            .execute(&mut pg_conn)?;
+        Ok(())
     }
 }

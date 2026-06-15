@@ -8,6 +8,7 @@ backend/database.db
 backend/backend/
 backend/uploads/
 backend/target/
+backend/stripe_webhook_logic/target/
 tools/attestation-verifier/target/
 .env
 docs/OPERATOR_RUNBOOK.md

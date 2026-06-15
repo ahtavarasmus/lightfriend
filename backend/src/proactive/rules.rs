@@ -14,7 +14,9 @@ use tracing::{error, info, warn};
 
 use crate::context::ContextBuilder;
 use crate::models::ontology_models::OntRule;
-use crate::proactive::utils::send_notification;
+use crate::proactive::utils::{
+    compact_email_notification, notification_meta_from_snapshot, send_notification_with_context,
+};
 use crate::repositories::user_core::UserCoreOps;
 use crate::AppState;
 
@@ -169,7 +171,8 @@ fn format_snapshot_message(snap: &serde_json::Value) -> String {
     let content = snap.get("content").and_then(|v| v.as_str()).unwrap_or("");
 
     if content.is_empty() {
-        format!("{} sent a message on {}", sender, platform)
+        let message = format!("{} sent a message on {}", sender, platform);
+        compact_email_notification(&message, snap)
     } else {
         // Truncate long messages to keep SMS short. char_indices keeps the
         // cut on a UTF-8 boundary so multi-byte chars (é, ö, soft hyphens
@@ -178,7 +181,8 @@ fn format_snapshot_message(snap: &serde_json::Value) -> String {
             Some((idx, _)) => format!("{}...", &content[..idx]),
             None => content.to_string(),
         };
-        format!("{} on {}: {}", sender, platform, truncated)
+        let message = format!("{} on {}: {}", sender, platform, truncated);
+        compact_email_notification(&message, snap)
     }
 }
 
@@ -1050,7 +1054,19 @@ async fn execute_flow_action(
                 .and_then(|v| v.as_str())
                 .unwrap_or("sms");
             let content_type = format!("rule_{}", method);
-            let _ = send_notification(state, rule.user_id, message, content_type, None).await;
+            let notification_message = trigger_snapshot
+                .map(|snap| compact_email_notification(message, snap))
+                .unwrap_or_else(|| message.to_string());
+            let notification_meta = trigger_snapshot.and_then(notification_meta_from_snapshot);
+            let _ = send_notification_with_context(
+                state,
+                rule.user_id,
+                &notification_message,
+                content_type,
+                None,
+                notification_meta,
+            )
+            .await;
             info!(
                 "Rule {} ({}): sent {} notification",
                 rule.id, rule.name, method

@@ -1,44 +1,34 @@
 use crate::utils::api::Api;
+use futures::future::{select, Either};
+use gloo_timers::future::TimeoutFuture;
 use yew::prelude::*;
 
 /// Simple page shown after guest checkout completes
-/// If user is logged in, redirects to home. Otherwise shows "check email" message.
+/// Shows "check email" immediately; if the user is already logged in, a
+/// background auth check redirects them back home.
 #[function_component(SubscriptionSuccess)]
 pub fn subscription_success() -> Html {
-    let checking = use_state(|| true);
-    let checking_clone = checking.clone();
-
-    // Check if user is logged in via API
     use_effect_with_deps(
         move |_| {
             wasm_bindgen_futures::spawn_local(async move {
-                if let Ok(response) = Api::get("/api/auth/status").send().await {
+                let auth_check = Api::get("/api/auth/status").send();
+                let timeout = TimeoutFuture::new(2_000);
+                if let Either::Left((Ok(response), _)) =
+                    select(Box::pin(auth_check), Box::pin(timeout)).await
+                {
                     if response.ok() {
                         // User is logged in - redirect to home
                         if let Some(window) = web_sys::window() {
                             let _ = window.location().set_href("/?subscription=success");
                         }
-                        return;
                     }
                 }
-                // Not logged in - show the page
-                checking_clone.set(false);
             });
             || ()
         },
         (),
     );
 
-    // Show loading while checking auth
-    if *checking {
-        return html! {
-            <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);">
-                <p style="color: rgba(255, 255, 255, 0.6);">{"Loading..."}</p>
-            </div>
-        };
-    }
-
-    // Not logged in - show the check email page
     html! {
         <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem; background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);">
             <div style="

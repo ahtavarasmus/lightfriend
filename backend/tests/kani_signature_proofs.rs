@@ -22,7 +22,79 @@
 
 use backend::api::telnyx_utils::verify_telnyx_signature;
 use backend::api::twilio_utils::verify_twilio_signature;
+use backend::utils::stripe_webhook::should_clear_subscription_after_delete;
 use std::collections::BTreeMap;
+
+// =============================================================================
+// Stripe webhook subscription-state transitions
+// =============================================================================
+
+/// PROOF: if Stripe's active-subscriptions list is empty, a deletion event
+/// always clears local subscription state. This is the normal cancellation
+/// case after Stripe has fully converged.
+#[kani::proof]
+fn proof_stripe_delete_empty_active_list_clears_state() {
+    assert!(should_clear_subscription_after_delete("sub_deleted", []));
+}
+
+/// PROOF: for every active-list response of length 0..=3 where every returned
+/// subscription ID equals the just-deleted subscription, we still clear local
+/// state. This is the stale-list race that caused the local test user to stay
+/// subscribed after a successful cancellation webhook.
+#[kani::proof]
+#[kani::unwind(4)]
+fn proof_stripe_delete_ignores_stale_deleted_subscription() {
+    let ids = ["sub_deleted", "sub_deleted", "sub_deleted"];
+    let len: usize = kani::any();
+    kani::assume(len <= ids.len());
+
+    assert!(should_clear_subscription_after_delete(
+        "sub_deleted",
+        ids[..len].iter().copied(),
+    ));
+}
+
+/// PROOF: for every bounded active-list response of length 1..=3, if any
+/// returned subscription ID differs from the deleted subscription, we preserve
+/// local subscription state. This protects users who still have another active
+/// subscription after one old subscription is removed.
+#[kani::proof]
+#[kani::unwind(4)]
+fn proof_stripe_delete_preserves_state_for_any_other_active_subscription() {
+    let slot_0_is_other: bool = kani::any();
+    let slot_1_is_other: bool = kani::any();
+    let slot_2_is_other: bool = kani::any();
+    let ids = [
+        if slot_0_is_other {
+            "sub_other"
+        } else {
+            "sub_deleted"
+        },
+        if slot_1_is_other {
+            "sub_other"
+        } else {
+            "sub_deleted"
+        },
+        if slot_2_is_other {
+            "sub_other"
+        } else {
+            "sub_deleted"
+        },
+    ];
+    let len: usize = kani::any();
+    kani::assume((1..=ids.len()).contains(&len));
+
+    let has_other = ids[..len]
+        .iter()
+        .any(|subscription_id| *subscription_id != "sub_deleted");
+
+    if has_other {
+        assert!(!should_clear_subscription_after_delete(
+            "sub_deleted",
+            ids[..len].iter().copied(),
+        ));
+    }
+}
 
 // =============================================================================
 // Telnyx: pre-crypto validation paths

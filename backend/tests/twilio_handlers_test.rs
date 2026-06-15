@@ -3,7 +3,10 @@
 //! Tests the TwilioStatusCallback struct parsing from Twilio webhook payloads.
 
 use backend::api::twilio_utils::{compute_twilio_signature, verify_twilio_signature};
-use backend::handlers::twilio_handlers::TwilioStatusCallback;
+use backend::channels::router::FALLBACK_PREFIX;
+use backend::handlers::twilio_handlers::{
+    should_attempt_telnyx_delivery_fallback, telnyx_delivery_fallback_body, TwilioStatusCallback,
+};
 use std::collections::BTreeMap;
 
 // =========================================================================
@@ -318,5 +321,44 @@ fn test_byot_signature_round_trip() {
         result.is_ok(),
         "BYOT signature round trip should succeed: {:?}",
         result.err()
+    );
+}
+
+#[test]
+fn failed_or_undelivered_statuses_trigger_telnyx_fallback() {
+    assert!(should_attempt_telnyx_delivery_fallback(
+        "failed",
+        Some("30007")
+    ));
+    assert!(should_attempt_telnyx_delivery_fallback(
+        "undelivered",
+        Some("30003")
+    ));
+    assert!(should_attempt_telnyx_delivery_fallback("failed", None));
+
+    assert!(!should_attempt_telnyx_delivery_fallback("queued", None));
+    assert!(!should_attempt_telnyx_delivery_fallback("sending", None));
+    assert!(!should_attempt_telnyx_delivery_fallback("sent", None));
+    assert!(!should_attempt_telnyx_delivery_fallback("delivered", None));
+}
+
+#[test]
+fn opt_out_failures_do_not_retry_through_telnyx() {
+    assert!(!should_attempt_telnyx_delivery_fallback(
+        "failed",
+        Some("21610")
+    ));
+}
+
+#[test]
+fn telnyx_fallback_body_is_prefixed_and_sanitized_once() {
+    assert_eq!(
+        telnyx_delivery_fallback_body("Check https://bit.ly/x"),
+        format!("{}Check [link]", FALLBACK_PREFIX)
+    );
+
+    assert_eq!(
+        telnyx_delivery_fallback_body(&format!("{}Already marked", FALLBACK_PREFIX)),
+        format!("{}Already marked", FALLBACK_PREFIX)
     );
 }
