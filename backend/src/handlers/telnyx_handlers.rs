@@ -347,6 +347,7 @@ fn upsert_status_row(
         updated_at: now,
         price: None,
         price_unit: None,
+        encrypted_body: None,
     };
 
     let result = diesel::insert_into(message_status_log::table)

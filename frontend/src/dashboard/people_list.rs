@@ -426,9 +426,7 @@ fn render_channel_signals(ce: &ChannelSignalsEntry, baseline_secs: f64) -> Html 
                 Some(r) if sig.response_time_confidence >= 0.2 && r <= 0.67 => {
                     (format!("{:.1}x slower than avg", 1.0 / r), "v-warn")
                 }
-                Some(_) if sig.response_time_confidence >= 0.2 => {
-                    ("near avg".to_string(), "v")
-                }
+                Some(_) if sig.response_time_confidence >= 0.2 => ("near avg".to_string(), "v"),
                 _ => ("low confidence".to_string(), "v"),
             };
 

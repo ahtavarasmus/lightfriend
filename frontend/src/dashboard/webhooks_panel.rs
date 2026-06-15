@@ -162,9 +162,9 @@ pub fn webhooks_panel() -> Html {
                     match Api::get("/api/me/webhook-tokens").send().await {
                         Ok(r) if r.ok() => match r.json::<Vec<WebhookTokenSummary>>().await {
                             Ok(list) => tokens.set(list),
-                            Err(_) => load_error.set(Some(
-                                "Could not parse server response.".to_string(),
-                            )),
+                            Err(_) => {
+                                load_error.set(Some("Could not parse server response.".to_string()))
+                            }
                         },
                         Ok(r) => {
                             let status = r.status();
@@ -173,9 +173,7 @@ pub fn webhooks_panel() -> Html {
                                 .unwrap_or_else(|| format!("Load failed ({}).", status));
                             load_error.set(Some(msg));
                         }
-                        Err(_) => load_error.set(Some(
-                            "Network error loading tokens.".to_string(),
-                        )),
+                        Err(_) => load_error.set(Some("Network error loading tokens.".to_string())),
                     }
                     loading.set(false);
                 });
@@ -295,10 +293,10 @@ pub fn webhooks_panel() -> Html {
                     <code>{"[tag]"}</code>
                     {" prefix on the SMS so you know which sender it came from."}
                     <pre>{format!(
-"curl -X POST {url} \\
-  -H \"Authorization: Bearer <your-token>\" \\
-  -H \"Content-Type: application/json\" \\
-  -d '{{\"message\":\"deploy finished\"}}'",
+    "curl -X POST {url} \\
+    -H \"Authorization: Bearer <your-token>\" \\
+    -H \"Content-Type: application/json\" \\
+    -d '{{\"message\":\"deploy finished\"}}'",
                         url = webhook_endpoint_url()
                     )}</pre>
                     <div class="webhooks-help-block">

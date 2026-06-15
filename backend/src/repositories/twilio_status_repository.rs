@@ -33,6 +33,15 @@ pub struct MessageUserInfo {
     pub from_number: Option<String>,
 }
 
+/// Stored outbound message data needed to replay a Twilio delivery failure
+/// through a backup provider.
+#[derive(Debug, Clone)]
+pub struct DeliveryFallbackMessage {
+    pub user_id: i32,
+    pub to_number: String,
+    pub encrypted_body: Option<String>,
+}
+
 /// Repository trait for Twilio status-related database operations.
 ///
 /// This trait abstracts the database operations needed for processing

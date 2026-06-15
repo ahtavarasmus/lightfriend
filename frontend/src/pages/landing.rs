@@ -1,4 +1,4 @@
-use crate::components::notification::AnimationComponent;
+use crate::profile::stripe::StripePricingTable;
 use crate::utils::api::Api;
 use crate::utils::seo::{use_seo, SeoMeta};
 use crate::Route;
@@ -31,12 +31,38 @@ pub fn landing() -> Html {
     let waitlist_success = use_state(|| false);
     let waitlist_error = use_state(|| None::<String>);
 
-    // Scroll to top only on initial mount
+    // Respect deep links like /#plans; otherwise start the landing page at top.
     {
         use_effect_with_deps(
             move |_| {
                 if let Some(window) = web_sys::window() {
-                    window.scroll_to_with_x_and_y(0.0, 0.0);
+                    let hash = window.location().hash().unwrap_or_default();
+                    let mut scheduled_hash_scroll = false;
+                    if let Some(target_id) = hash.strip_prefix('#') {
+                        if !target_id.is_empty() {
+                            let target_id = target_id.to_string();
+                            let scroll_to_hash = Closure::<dyn Fn()>::new(move || {
+                                if let Some(window) = web_sys::window() {
+                                    if let Some(document) = window.document() {
+                                        if let Some(element) =
+                                            document.get_element_by_id(&target_id)
+                                        {
+                                            element.scroll_into_view();
+                                        }
+                                    }
+                                }
+                            });
+                            let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                scroll_to_hash.as_ref().unchecked_ref(),
+                                100,
+                            );
+                            scroll_to_hash.forget();
+                            scheduled_hash_scroll = true;
+                        }
+                    }
+                    if !scheduled_hash_scroll {
+                        window.scroll_to_with_x_and_y(0.0, 0.0);
+                    }
                 }
                 || ()
             },
@@ -81,11 +107,11 @@ pub fn landing() -> Html {
         result
     };
 
-    // State for expanded integration (-1 = none, 0-5 = which one)
-    let expanded_integration = use_state(|| -1i32);
-
     // State for expanded FAQ item (-1 = none, 0+ = which one)
     let expanded_faq = use_state(|| -1i32);
+
+    // State for expanded capability card (-1 = none, 0-3 = which one)
+    let expanded_cap = use_state(|| -1i32);
 
     // SMS demo scenarios: (label, icon_class, messages)
     // is_user=false means Lightfriend sends it proactively
@@ -180,96 +206,145 @@ pub fn landing() -> Html {
         );
     }
 
-    // Integration data: (icon_class, label, description)
-    let integration_data = vec![
-        ("fab fa-whatsapp", "WhatsApp", "Receive and reply to WhatsApp messages via SMS or voice call. AI filters noise and only forwards what matters."),
-        ("fab fa-telegram", "Telegram", "Access your Telegram chats from any phone. Get notified about important messages, reply directly."),
-        ("fab fa-signal-messenger", "Signal", "Stay on Signal without a smartphone. Messages are bridged securely to your phone via SMS."),
-        ("fas fa-envelope", "Email", "Read and respond to emails via text or voice. AI summarizes long threads and flags urgent ones."),
-        ("fas fa-car", "Tesla", "Lock, unlock, preheat, and check battery status of your Tesla via SMS commands."),
-        ("fas fa-plug", "MCP / Custom", "Connect any external tool or service via MCP (Model Context Protocol). Extend what Lightfriend can do."),
-    ];
-
-    let integration_buttons_html: Vec<Html> = integration_data.iter().enumerate().map(|(idx, (icon, label, _))| {
-        let expanded = expanded_integration.clone();
-        let i = idx as i32;
-        let is_active = *expanded == i;
-        let onclick = {
-            let expanded = expanded.clone();
-            Callback::from(move |e: MouseEvent| {
-                e.prevent_default();
-                if *expanded == i {
-                    expanded.set(-1);
-                } else {
-                    expanded.set(i);
-                }
-            })
-        };
-        html! {
-            <button class={classes!("integration-btn", if is_active { "active" } else { "" })} onclick={onclick} title={*label}>
-                <i class={*icon}></i>
-                <span class="integration-label">{label}</span>
-            </button>
-        }
-    }).collect();
-
-    let integration_detail_html = if *expanded_integration >= 0 {
-        let idx = *expanded_integration as usize;
-        let (_, label, desc) = &integration_data[idx];
-        html! {
-            <div class={classes!("integration-detail", "visible")}>
-                <div class="integration-detail-content">
-                    <h3>{label}</h3>
-                    <p>{desc}</p>
-                </div>
-            </div>
-        }
-    } else {
-        html! { <div class="integration-detail"></div> }
-    };
-
     // FAQ data: (question, answer_html)
     let faq_data: Vec<(&str, Html)> = vec![
-        ("Do I need a phone with internet?", html! {
-            <p>{"No. Lightfriend works through normal voice calls and SMS. Any phone that can call and text will work."}</p>
-        }),
-        ("Can I send and receive messages?", html! {
-            <p>{"Yes. You can reply to WhatsApp, Telegram, Signal, and email directly via SMS or voice call. Lightfriend forwards your reply to the right place."}</p>
-        }),
-        ("What can Lightfriend actually do?", html! {
-            <ul>
-                <li><strong>{"Message bridges:"}</strong>{" WhatsApp, Telegram, Signal - receive and reply from any phone."}</li>
-                <li><strong>{"Email:"}</strong>{" Read and respond to emails via text."}</li>
-                <li><strong>{"Critical notifications:"}</strong>{" AI screens messages and only alerts you about urgent ones."}</li>
-                <li><strong>{"Smart digests:"}</strong>{" Get a summary of what happened, delivered when you want."}</li>
-                <li><strong>{"Web search:"}</strong>{" Ask any question, get a concise answer."}</li>
-                <li><strong>{"Image understanding:"}</strong>{" Send a photo of a menu, sign, or QR code."}</li>
-                <li><strong>{"Tesla control:"}</strong>{" Lock, unlock, preheat via SMS."}</li>
-                <li><strong>{"Rule builder:"}</strong>{" Create custom automations with triggers and conditions."}</li>
-                <li><strong>{"MCP integrations:"}</strong>{" Connect external tools and services."}</li>
-                <li><strong>{"Learns over time:"}</strong>{" Lightfriend builds context about who matters to you and what's urgent. The longer you use it, the better it gets at surfacing the right things."}</li>
-            </ul>
-        }),
-        ("Which countries are supported?", html! {
-            <>
-                <p><strong>{"Full service:"}</strong>{" US, Canada, UK, Finland, Netherlands, Australia."}</p>
-                <p><strong>{"Notification-only:"}</strong>{" 30+ countries across Europe and Asia-Pacific."}</p>
-                <p><strong>{"Elsewhere:"}</strong>{" Bring your own Twilio number."}</p>
-            </>
-        }),
-        ("How does it protect my data?", html! {
-            <>
-                <p>{"Lightfriend runs in its own hardware-isolated enclave, and all AI requests are processed through Tinfoil's verified enclaves. No one - not even the developer - can access your data. Period. Fully open source, with privacy cryptographically verifiable on blockchain."}</p>
-                <p><a href="/trustless" style="color: #7EB2FF;">{"See exactly how it works"}</a></p>
-            </>
-        }),
-        ("How do critical notifications work?", html! {
-            <p>{"When a message arrives on WhatsApp, Telegram, Signal, or email, AI evaluates whether it needs your immediate attention. Urgent messages get forwarded instantly via SMS or phone call. Everything else goes into your digest."}</p>
-        }),
+        (
+            "Do I need a phone with internet?",
+            html! {
+                <p>{"No. Lightfriend works through normal voice calls and SMS. Any phone that can call and text will work."}</p>
+            },
+        ),
+        (
+            "How does it protect my data?",
+            html! {
+                <>
+                    <p>{"Lightfriend runs in its own hardware-isolated enclave, and all AI requests are processed through Tinfoil's verified enclaves. No one - not even the developer - can access your data. Period. Fully open source, with privacy cryptographically verifiable on blockchain."}</p>
+                    <p><a href="/trustless" style="color: #7EB2FF;">{"See exactly how it works"}</a></p>
+                </>
+            },
+        ),
+        (
+            "Can I send and receive messages?",
+            html! {
+                <p>{"Yes. You can reply to WhatsApp, Telegram, Signal, and email directly via SMS or voice call. Lightfriend forwards your reply to the right place."}</p>
+            },
+        ),
+        (
+            "What can Lightfriend actually do?",
+            html! {
+                <>
+                    <p>{"Both plans include the smart assistant and all connected tools as context: WhatsApp, Telegram, Signal, email, web search, image understanding, Tesla, MCP integrations, and more."}</p>
+                    <p>{"Assistant is for asking questions, sending messages, checking context, and getting help when you reach out. Autopilot adds proactive AI features: automatic critical notifications, smart digests, and custom rules that watch for what matters without you asking first."}</p>
+                </>
+            },
+        ),
+        (
+            "How much usage is included?",
+            html! {
+                <>
+                    <p>{"Both plans include $25/month in messaging credits for SMS and voice delivery. The cap is mainly there to prevent abuse and runaway spam. For normal use - asking questions when needed and receiving updates through the day on Autopilot - it should be more than enough."}</p>
+                    <p>{"Actual usage depends on Twilio delivery costs in your country. US and Canada SMS is usually around 1.5 cents per message. Europe is often around 15-30 cents per message, and some countries can be closer to $1 depending on destination and carrier fees."}</p>
+                    <p>
+                        {"You can check current costs on Twilio's "}
+                        <a href="https://www.twilio.com/en-us/sms/pricing" target="_blank" rel="noopener noreferrer">{"SMS pricing"}</a>
+                        {" and "}
+                        <a href="https://www.twilio.com/en-us/voice/pricing/us" target="_blank" rel="noopener noreferrer">{"Voice pricing"}</a>
+                        {" pages."}
+                    </p>
+                </>
+            },
+        ),
+        (
+            "Which countries are supported?",
+            html! {
+                <>
+                    <p><strong>{"Full service:"}</strong>{" US, Canada, UK, Finland, Netherlands, Australia."}</p>
+                    <p><strong>{"Notification-only:"}</strong>{" 30+ countries across Europe and Asia-Pacific."}</p>
+                    <p><strong>{"Elsewhere:"}</strong>{" Bring your own Twilio number."}</p>
+                </>
+            },
+        ),
+        (
+            "How do critical notifications work?",
+            html! {
+                <p>{"When a message arrives on WhatsApp, Telegram, Signal, or email, AI evaluates whether it needs your immediate attention. Urgent messages get forwarded instantly via SMS or phone call. Everything else goes into your digest."}</p>
+            },
+        ),
     ];
 
-    let faq_items_html: Vec<Html> = faq_data.into_iter().enumerate().map(|(idx, (question, answer))| {
-        let expanded = expanded_faq.clone();
+    let faq_items_html: Vec<Html> = faq_data
+        .into_iter()
+        .enumerate()
+        .map(|(idx, (question, answer))| {
+            let expanded = expanded_faq.clone();
+            let i = idx as i32;
+            let is_open = *expanded == i;
+            let onclick = {
+                let expanded = expanded.clone();
+                Callback::from(move |e: MouseEvent| {
+                    e.prevent_default();
+                    if *expanded == i {
+                        expanded.set(-1);
+                    } else {
+                        expanded.set(i);
+                    }
+                })
+            };
+            html! {
+                <div class={classes!("landing-faq-item", if is_open { "open" } else { "" })}>
+                    <button class="landing-faq-question" onclick={onclick}>
+                        <span class="question-text">{question}</span>
+                        <span class="toggle-icon">{if is_open { "\u{2212}" } else { "+" }}</span>
+                    </button>
+                    <div class="landing-faq-answer">
+                        {answer}
+                    </div>
+                </div>
+            }
+        })
+        .collect();
+
+    // Capability cards data: (icon_class, title, one_liner, detail_html)
+    let cap_data: Vec<(&str, &str, &str, Html)> = vec![
+        (
+            "fas fa-comments",
+            "Message your apps",
+            "Text and call WhatsApp, Telegram, Signal, and email from any phone.",
+            html! {
+                <p>{"Reply to messages, send new ones, and get summaries of long threads - all via SMS or voice call. This is what makes switching to a dumbphone possible in the first place."}</p>
+            },
+        ),
+        (
+            "fas fa-bell",
+            "Critical alerts",
+            "Urgent messages reach you instantly. Everything else waits.",
+            html! {
+                <p>{"AI evaluates every incoming message across all your apps. Time-critical ones - lunch invites, emergencies, deadlines - get forwarded immediately as SMS or a phone call. No setup needed, works out of the box."}</p>
+            },
+        ),
+        (
+            "fas fa-list-check",
+            "Daily digests",
+            "Stay informed without the noise. Get a summary when you want it.",
+            html! {
+                <p>{"Non-urgent messages are batched into a digest delivered on your schedule. Keeps you in the loop without constant interruptions throughout the day."}</p>
+            },
+        ),
+        (
+            "fas fa-sliders",
+            "Custom rules",
+            "Build your own automations. Optional, for when defaults aren't enough.",
+            html! {
+                <>
+                    <p>{"Create WHEN/IF/THEN rules: trigger on message arrival, a schedule, or a keyword. Conditions can use AI evaluation, keyword matching, or sender filters - like always forwarding messages from a specific person. Actions include forwarding, summarizing, replying, or running a check."}</p>
+                    <p>{"Set simple reminders. Schedule recurring checks. Everything is optional and customizable."}</p>
+                </>
+            },
+        ),
+    ];
+
+    let cap_cards_html: Vec<Html> = cap_data.into_iter().enumerate().map(|(idx, (icon, title, one_liner, detail))| {
+        let expanded = expanded_cap.clone();
         let i = idx as i32;
         let is_open = *expanded == i;
         let onclick = {
@@ -284,13 +359,17 @@ pub fn landing() -> Html {
             })
         };
         html! {
-            <div class={classes!("landing-faq-item", if is_open { "open" } else { "" })}>
-                <button class="landing-faq-question" onclick={onclick}>
-                    <span class="question-text">{question}</span>
-                    <span class="toggle-icon">{if is_open { "\u{2212}" } else { "+" }}</span>
-                </button>
-                <div class="landing-faq-answer">
-                    {answer}
+            <div class={classes!("cap-card", if is_open { "open" } else { "" })} onclick={onclick}>
+                <div class="cap-card-header">
+                    <i class={icon}></i>
+                    <div class="cap-card-text">
+                        <span class="cap-card-title">{title}</span>
+                        <span class="cap-card-liner">{one_liner}</span>
+                    </div>
+                    <span class="cap-card-toggle">{if is_open { "\u{2212}" } else { "+" }}</span>
+                </div>
+                <div class="cap-card-detail">
+                    {detail}
                 </div>
             </div>
         }
@@ -322,75 +401,124 @@ pub fn landing() -> Html {
                 </div>
                 <div class="hero-content">
                     <div class="hero-right-panel">
-                        <h1 class="hero-title hero-anim hero-anim-1">{"Mute everything. Miss nothing."}</h1>
-                        <p class="hero-subtitle hero-anim hero-anim-2">{"AI watches your WhatsApp, email, and messages. If something matters, it calls or texts you."}</p>
-                        <div class="hero-cta-group hero-anim hero-anim-3">
-                            <Link<Route> to={Route::Pricing} classes="forward-link">
-                                <button class="hero-cta">{"See Plans"}</button>
-                            </Link<Route>>
+                        <h1 class="hero-title hero-anim hero-anim-1">{"Use any phone. Get your apps via text."}</h1>
+                        <div class="hero-diagram hero-anim hero-anim-2">
+                            <div class="diagram-left">
+                                <img src="/assets/empty-phone.png" alt="Your phone" class="diagram-nokia" />
+                                <span class="diagram-node-label">{"Your phone"}</span>
+                            </div>
+                            <div class="diagram-center-group">
+                                <svg class="diagram-left-line" viewBox="0 0 100 24" preserveAspectRatio="none">
+                                    <defs>
+                                        <marker id="arrow-right" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+                                            <path d="M0,0 L6,2 L0,4" fill="rgba(126,178,255,0.6)" />
+                                        </marker>
+                                        <marker id="arrow-left" markerWidth="6" markerHeight="4" refX="1" refY="2" orient="auto">
+                                            <path d="M6,0 L0,2 L6,4" fill="rgba(126,178,255,0.6)" />
+                                        </marker>
+                                    </defs>
+                                    <line x1="4" y1="12" x2="96" y2="12" stroke="rgba(126,178,255,0.4)" stroke-width="1" marker-start="url(#arrow-left)" marker-end="url(#arrow-right)" />
+                                </svg>
+                                <span class="diagram-edge-label">{"SMS / Call"}</span>
+                                <div class="diagram-lf-wrapper">
+                                    <img src="/assets/fav.png" alt="Lightfriend" class="diagram-lf-icon" />
+                                </div>
+                            </div>
+                            <div class="diagram-right-group">
+                                <svg class="diagram-fan-svg" viewBox="0 0 70 130" preserveAspectRatio="none">
+                                    <defs>
+                                        <marker id="fan-arrow-r" markerWidth="5" markerHeight="4" refX="4" refY="2" orient="auto">
+                                            <path d="M0,0 L5,2 L0,4" fill="rgba(126,178,255,0.5)" />
+                                        </marker>
+                                        <marker id="fan-arrow-l" markerWidth="5" markerHeight="4" refX="1" refY="2" orient="auto">
+                                            <path d="M5,0 L0,2 L5,4" fill="rgba(126,178,255,0.5)" />
+                                        </marker>
+                                    </defs>
+                                    <line x1="0" y1="65" x2="65" y2="5" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
+                                    <line x1="0" y1="65" x2="65" y2="35" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
+                                    <line x1="0" y1="65" x2="65" y2="65" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
+                                    <line x1="0" y1="65" x2="65" y2="95" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
+                                    <line x1="0" y1="65" x2="65" y2="125" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
+                                </svg>
+                                <div class="diagram-apps-list">
+                                    <div class="diagram-app-row"><i class="fab fa-whatsapp"></i><span>{"WhatsApp"}</span></div>
+                                    <div class="diagram-app-row"><i class="fab fa-telegram"></i><span>{"Telegram"}</span></div>
+                                    <div class="diagram-app-row"><i class="fab fa-signal-messenger"></i><span>{"Signal"}</span></div>
+                                    <div class="diagram-app-row"><i class="fas fa-envelope"></i><span>{"Email"}</span></div>
+                                    <div class="diagram-app-row"><i class="fas fa-plug"></i><span>{"MCP"}</span></div>
+                                </div>
+                            </div>
                         </div>
-                        <div class="trust-signal hero-anim hero-anim-3">
+                        <div class="hero-cta-group hero-anim hero-anim-3">
+                            <a href="#plans" class="forward-link">
+                                <button class="hero-cta">{"Get started"}</button>
+                            </a>
+                        </div>
+                        <div class="trust-signal hero-anim hero-anim-4">
                             <span class="trust-label">{"As seen on"}</span>
                             <a href="https://www.thelightphone.com/blog/lightos-tips" target="_blank" rel="noopener noreferrer" class="trust-link">
                                 <img src="/assets/lightphone-logo.svg" alt="The Light Phone" class="trust-logo" />
                             </a>
                         </div>
-                        <div class="hero-metric hero-anim hero-anim-3">
-                            <span class="hero-metric-number">{days_smartphone_free}</span>
-                            <span class="hero-metric-label">{"smartphone-free days powered"}</span>
-                        </div>
                     </div>
                 </div>
             </header>
 
-            // Animation - immediately shows how it works
-            <div class="filter-concept">
-                <h2>{"Stay in Your Life"}</h2>
-                <p class="filter-concept-subtitle">{"We'll pull you out only when it's urgent."}</p>
-                <div class="filter-content">
-                    <AnimationComponent />
-                </div>
-                <div class="integrations-row">
-                    <div class="integration-buttons">
-                        { for integration_buttons_html }
-                    </div>
-                    { integration_detail_html }
-                </div>
-            </div>
+            // TODO: Image carousel goes here when "Removed" style photos are ready
 
-            // Section: Verifiably Private
-            <section class="privacy-section scroll-animate">
-                <h2>{"Verifiably Private"}</h2>
-                <div class="privacy-content">
-                    <div class="privacy-visibility">
-                        <div class="privacy-vis-card privacy-can-see">
-                            <h3><i class="fas fa-eye"></i>{" What we can see"}</h3>
-                            <p>{"Only your phone number and email (for subscription management)."}</p>
-                        </div>
-                        <div class="privacy-vis-card privacy-cannot-see">
-                            <h3><i class="fas fa-eye-slash"></i>{" What we can NOT see"}</h3>
-                            <p>{"Your messages, emails, contacts, or any private data."}</p>
-                        </div>
-                    </div>
-                    <div class="privacy-bold-statement">
-                        <h3>{"We Can\u{2019}t See Your Data. Even If We Wanted To."}</h3>
-                        <p>{"Open source. Verified on-chain. AI processed through Tinfoil\u{2019}s verified enclaves. Not a promise - cryptographic proof."}</p>
-                        <a href="/trustless" class="privacy-link">{"See exactly how it works \u{2192}"}</a>
-                    </div>
+            // Capabilities section - what you can do with Lightfriend
+            <section class="capabilities-section scroll-animate">
+                <h2 class="capabilities-title">{"What you get"}</h2>
+                <div class="capabilities-grid">
+                    { for cap_cards_html }
                 </div>
+                <p class="capabilities-footnote">{"Gets better over time - Lightfriend learns what matters to you."}</p>
             </section>
 
-            <section class="trust-proof scroll-animate">
+            <section id="plans" class="landing-pricing-section scroll-animate">
                 <div class="section-intro">
-                    <h2>{"The Story"}</h2>
-                    <img src="/assets/rasmus-pfp.png" alt="Rasmus, founder of Lightfriend" loading="lazy" style="max-width: 200px; border-radius: 50%; margin: 0 auto 1.5rem; display: block;"/>
-                    <p>{"I\u{2019}m "}<a href="https://rasmus.ahtava.com" target="_blank" rel="noopener noreferrer">{"Rasmus"}</a>{". I built Lightfriend because I switched to a dumbphone and needed a way to keep WhatsApp and email without a smartphone."}</p>
+                    <h2>{"Choose your plan"}</h2>
+                </div>
+                <StripePricingTable />
+            </section>
+
+            // Privacy section
+            <section class="privacy-hook scroll-animate">
+                <h2 class="privacy-hook-title">{"Nobody can read your messages. Not even us."}</h2>
+                <p class="privacy-hook-subtitle">{"Lightfriend runs inside a hardware-isolated enclave. Your data is end-to-end private, cryptographically verifiable."}</p>
+                <div class="privacy-hook-links">
+                    <Link<Route> to={Route::Trustless} classes="privacy-hook-link">
+                        {"Verifiably Private →"}
+                    </Link<Route>>
+                    <Link<Route> to={Route::TrustChain} classes="privacy-hook-link">
+                        {"Trust Chain →"}
+                    </Link<Route>>
                 </div>
             </section>
 
             <section class="testimonials-section scroll-animate">
                 <div class="testimonials-content">
+                    <div class="testimonial-metric">
+                        <span class="testimonial-metric-number">{days_smartphone_free}</span>
+                        <span class="testimonial-metric-label">{"smartphone-free days powered"}</span>
+                    </div>
                     <h2>{"Life After Smartphones"}</h2>
+                    <div class="testimonial">
+                        <blockquote>
+                            {"I have ADHD so smartphones were basically impossible for me. I'd check one notification and suddenly an hour was gone. Now I just get a text with the important stuff. No apps, nothing to get lost in. Honestly it's changed everything for how I get through my day."}
+                        </blockquote>
+                    </div>
+                    <div class="testimonial">
+                        <blockquote>
+                            {"As a dumbphone user, I couldn't live without lightfriend. It's useful, smart and most importantly, reliable. A true must have for living a distraction free life."}
+                        </blockquote>
+                    </div>
+                    <div class="testimonial">
+                        <blockquote>
+                            {"Lightfriend has saved me so many times. I\u{2019}ll forget a deadline or miss an important email \u{2014} but then Lightfriend pings me about it before it\u{2019}s too late. It watches my inbox so I don\u{2019}t have to. Honestly, I\u{2019}d be lost without it."}
+                        </blockquote>
+                        <p class="testimonial-author">{"- Kasperi"}</p>
+                    </div>
                     <div class="testimonial">
                         <blockquote>
                             {"Lightfriend proactively alerted me of a security alert in my email when my notifications were disabled making me aware of a threat which I then took care of before anything permanent damage could be done. Thanks to lightfriend monitoring, the issue was resolved and I could go back to work swiftly."}
@@ -401,22 +529,6 @@ pub fn landing() -> Html {
                             {"lightfriend fills in the gaps that the LP3(light phone 3) is missing, without making me want to use my iphone. Also I love that I can talk to Perplexity while I'm out"}
                         </blockquote>
                         <p class="testimonial-author">{"- Max"}</p>
-                    </div>
-                    <div class="testimonial">
-                        <blockquote>
-                            {"As a dumbphone user, I couldn't live without lightfriend. It's useful, smart and most importantly, reliable. A true must have for living a distraction free life."}
-                        </blockquote>
-                    </div>
-                    <div class="testimonial">
-                        <blockquote>
-                            {"I have ADHD so smartphones were basically impossible for me. I'd check one notification and suddenly an hour was gone. Now I just get a text with the important stuff. No apps, nothing to get lost in. Honestly it's changed everything for how I get through my day."}
-                        </blockquote>
-                    </div>
-                    <div class="testimonial">
-                        <blockquote>
-                            {"Lightfriend has saved me so many times. I\u{2019}ll forget a deadline or miss an important email \u{2014} but then Lightfriend pings me about it before it\u{2019}s too late. It watches my inbox so I don\u{2019}t have to. Honestly, I\u{2019}d be lost without it."}
-                        </blockquote>
-                        <p class="testimonial-author">{"- Kasperi"}</p>
                     </div>
                 </div>
             </section>
@@ -431,12 +543,19 @@ pub fn landing() -> Html {
                     </div>
                 </div>
             </div>
+            <section class="trust-proof scroll-animate">
+                <div class="section-intro">
+                    <h2>{"The Story"}</h2>
+                    <img src="/assets/rasmus-pfp.png" alt="Rasmus, founder of Lightfriend" loading="lazy" style="max-width: 200px; border-radius: 50%; margin: 0 auto 1.5rem; display: block;"/>
+                    <p>{"I\u{2019}m "}<a class="story-link" href="https://rasmus.ahtava.com" target="_blank" rel="noopener noreferrer">{"Rasmus"}</a>{". I built Lightfriend because I switched to a dumbphone and needed a way to keep WhatsApp and email without a smartphone."}</p>
+                </div>
+            </section>
             <footer class="footer-cta scroll-animate">
                 <div class="footer-content">
                     <h2>{"Ready for Digital Peace?"}</h2>
-                    <Link<Route> to={Route::Pricing} classes="forward-link">
-                        <button class="hero-cta">{"Start Today"}</button>
-                    </Link<Route>>
+                    <a href="#plans" class="forward-link">
+                        <button class="hero-cta">{"Get started"}</button>
+                    </a>
                     <p class="disclaimer">{"Works with any phone - smartphones, flip phones, and feature phones. No extra hardware required."}</p>
                     <div class="waitlist-section">
                         <p class="waitlist-intro">{"Not ready yet? Get updates when new features launch:"}</p>
@@ -547,6 +666,470 @@ pub fn landing() -> Html {
         background: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.5) 80%, #0d0d0d 100%);
         z-index: -1;
         pointer-events: none;
+    }
+    /* Hero diagram */
+    .hero-diagram {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0;
+        margin: 2rem auto;
+        max-width: 700px;
+        width: 100%;
+    }
+    .diagram-left, .diagram-center, .diagram-right {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    .diagram-node {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.4rem;
+    }
+    .diagram-nokia {
+        width: 60px;
+        height: auto;
+        filter: drop-shadow(0 2px 8px rgba(0,0,0,0.5));
+    }
+    .diagram-node-label {
+        font-size: 0.75rem;
+        color: #999;
+        white-space: nowrap;
+    }
+    .diagram-lf-icon {
+        width: 48px;
+        height: 48px;
+        border-radius: 12px;
+    }
+    .diagram-center-group {
+        display: flex;
+        align-items: center;
+        position: relative;
+        align-self: center;
+    }
+    .diagram-left-line {
+        width: 80px;
+        height: 24px;
+        flex-shrink: 0;
+    }
+    .diagram-edge-label {
+        position: absolute;
+        bottom: -14px;
+        left: 20px;
+        font-size: 0.65rem;
+        color: #7EB2FF;
+        white-space: nowrap;
+    }
+    .diagram-lf-wrapper {
+        flex-shrink: 0;
+        margin-top: 8px;
+    }
+    .diagram-right-group {
+        display: flex;
+        align-items: center;
+        gap: 0;
+    }
+    .diagram-fan-svg {
+        width: 70px;
+        height: 130px;
+        flex-shrink: 0;
+    }
+    .diagram-apps-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+    }
+    .diagram-app-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        height: 1.55rem;
+    }
+    .diagram-app-row i {
+        font-size: 1.1rem;
+        color: rgba(255, 255, 255, 0.6);
+        width: 1.3rem;
+        text-align: center;
+        flex-shrink: 0;
+    }
+    .diagram-app-row span {
+        font-size: 0.8rem;
+        color: #999;
+        white-space: nowrap;
+    }
+    @media (max-width: 768px) {
+        .hero-diagram {
+            gap: 0;
+            max-width: 100%;
+            padding: 0 0.5rem;
+        }
+        .diagram-nokia {
+            width: 40px;
+        }
+        .diagram-lf-icon {
+            width: 36px;
+            height: 36px;
+        }
+        .diagram-left-line {
+            width: 40px;
+        }
+        .diagram-fan-svg {
+            width: 40px;
+            height: 110px;
+        }
+        .diagram-app-row span {
+            font-size: 0.7rem;
+        }
+        .diagram-app-row i {
+            font-size: 0.9rem;
+        }
+        .diagram-app-row {
+            height: 1.3rem;
+        }
+    }
+    /* Testimonial metric */
+    .testimonial-metric {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+    }
+    .testimonial-metric-number {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #7EB2FF;
+    }
+    .testimonial-metric-label {
+        font-size: 0.85rem;
+        color: #999;
+    }
+    /* Capabilities section */
+    .capabilities-section {
+        padding: 5rem 2rem;
+        background: #0d0d0d;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        position: relative;
+        z-index: 2;
+    }
+    .capabilities-title {
+        font-size: 2rem;
+        color: #fff;
+        font-weight: 700;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .capabilities-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+        max-width: 750px;
+        margin: 0 auto;
+    }
+    .cap-card {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        overflow: hidden;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    .cap-card:hover {
+        border-color: rgba(255, 255, 255, 0.25);
+    }
+    .cap-card.open {
+        border-color: rgba(126, 178, 255, 0.3);
+    }
+    .cap-card-header {
+        padding: 1.2rem;
+        display: flex;
+        align-items: flex-start;
+        gap: 0.8rem;
+    }
+    .cap-card-header i {
+        font-size: 1.2rem;
+        color: #7EB2FF;
+        margin-top: 0.15rem;
+        flex-shrink: 0;
+    }
+    .cap-card-text {
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+        flex: 1;
+        min-width: 0;
+    }
+    .cap-card-title {
+        font-size: 1rem;
+        font-weight: 600;
+        color: #fff;
+    }
+    .cap-card-liner {
+        font-size: 0.85rem;
+        color: #999;
+        line-height: 1.5;
+    }
+    .cap-card-toggle {
+        font-size: 1.3rem;
+        color: #7EB2FF;
+        flex-shrink: 0;
+        margin-left: 0.5rem;
+    }
+    .cap-card-detail {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.5s ease;
+        padding: 0 1.2rem;
+    }
+    .cap-card.open .cap-card-detail {
+        max-height: 500px;
+        padding: 0 1.2rem 1.2rem;
+    }
+    .cap-card-detail p {
+        font-size: 0.9rem;
+        color: #999;
+        line-height: 1.6;
+        margin-bottom: 0.5rem;
+    }
+    .capabilities-footnote {
+        text-align: center;
+        color: #666;
+        font-size: 0.85rem;
+        margin-top: 1.5rem;
+        font-style: italic;
+    }
+    @media (max-width: 768px) {
+        .capabilities-section {
+            padding: 3rem 1.5rem;
+        }
+        .capabilities-title {
+            font-size: 1.5rem;
+        }
+        .capabilities-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+    .landing-pricing-section {
+        padding: 5rem 2rem;
+        background: #101010;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        position: relative;
+        z-index: 2;
+    }
+    .landing-pricing-section .stripe-pricing-table-wrap {
+        width: 100%;
+        max-width: 1120px;
+        margin: 0 auto;
+    }
+    .landing-pricing-section .stripe-pricing-table-wrap stripe-pricing-table {
+        display: block;
+        width: 100%;
+    }
+    .stripe-pricing-loading,
+    .stripe-pricing-error {
+        min-height: 160px;
+        display: grid;
+        place-items: center;
+        color: #aaa;
+        font-size: 0.95rem;
+    }
+    .stripe-pricing-error {
+        color: #ffb4a8;
+    }
+    @media (max-width: 768px) {
+        .landing-pricing-section {
+            padding: 3rem 1rem;
+        }
+    }
+    /* Privacy hook section */
+    .privacy-hook {
+        padding: 5rem 2rem;
+        text-align: center;
+        background: #0d0d0d;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        position: relative;
+        z-index: 2;
+    }
+    .privacy-hook-title {
+        font-size: 2rem;
+        color: #fff;
+        font-weight: 700;
+        margin-bottom: 1rem;
+        max-width: 700px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+    .privacy-hook-subtitle {
+        font-size: 1.05rem;
+        color: #999;
+        line-height: 1.6;
+        max-width: 600px;
+        margin: 0 auto 2rem;
+    }
+    .privacy-hook-links {
+        display: flex;
+        justify-content: center;
+        gap: 2rem;
+        flex-wrap: wrap;
+    }
+    .privacy-hook-link {
+        color: #7EB2FF;
+        text-decoration: none;
+        font-size: 0.95rem;
+        font-weight: 500;
+        transition: color 0.3s ease;
+    }
+    .privacy-hook-link:hover {
+        color: #a8ccff;
+    }
+    @media (max-width: 768px) {
+        .privacy-hook {
+            padding: 3rem 1.5rem;
+        }
+        .privacy-hook-title {
+            font-size: 1.5rem;
+        }
+        .privacy-hook-subtitle {
+            font-size: 0.95rem;
+        }
+        .privacy-hook-links {
+            gap: 1.2rem;
+        }
+    }
+    /* Cost hook section */
+    .cost-hook {
+        padding: 4rem 2rem;
+        text-align: center;
+        background: #0d0d0d;
+        position: relative;
+        z-index: 2;
+    }
+    .cost-hook-label {
+        font-size: 1rem;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-bottom: 0.5rem;
+    }
+    .cost-hook-number {
+        font-size: 4rem;
+        font-weight: 800;
+        color: #fff;
+        margin: 0.3rem 0;
+    }
+    .cost-hook-toggle {
+        background: none;
+        border: none;
+        color: #7EB2FF;
+        font-size: 0.9rem;
+        cursor: pointer;
+        padding: 0.5rem 0;
+        margin-top: 0.5rem;
+        transition: color 0.3s ease;
+    }
+    .cost-hook-toggle:hover {
+        color: #a8ccff;
+    }
+    .cost-hook-breakdown {
+        max-width: 700px;
+        margin: 2rem auto 0;
+        text-align: left;
+    }
+    .cost-hook-item {
+        padding: 1.2rem 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .cost-hook-item h3 {
+        font-size: 1.1rem;
+        color: #fff;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+    }
+    .cost-hook-item p {
+        font-size: 0.9rem;
+        color: #999;
+        line-height: 1.7;
+        margin: 0;
+    }
+    .cost-hook-source {
+        font-size: 0.7rem;
+        color: #555;
+        display: block;
+        margin-top: 0.4rem;
+    }
+    .cost-hook-footer {
+        font-size: 0.85rem;
+        color: #777;
+        text-align: center;
+        margin-top: 1.5rem;
+        font-style: italic;
+    }
+    @media (max-width: 768px) {
+        .cost-hook-number {
+            font-size: 3rem;
+        }
+        .cost-hook {
+            padding: 3rem 1.5rem;
+        }
+    }
+    /* Image carousel section */
+    .image-carousel-section {
+        padding: 2rem 0;
+        margin: 0 auto;
+        max-width: 900px;
+        position: relative;
+        z-index: 2;
+        background: #0d0d0d;
+    }
+    .carousel-container {
+        width: 100%;
+        aspect-ratio: 3 / 2;
+        overflow: hidden;
+        border-radius: 8px;
+        background: #111;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .carousel-image {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        filter: grayscale(100%);
+        transition: opacity 0.6s ease;
+    }
+    .carousel-dots {
+        display: flex;
+        justify-content: center;
+        gap: 0.5rem;
+        margin-top: 1rem;
+    }
+    .carousel-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        background: transparent;
+        cursor: pointer;
+        padding: 0;
+        transition: all 0.3s ease;
+    }
+    .carousel-dot.active {
+        background: #fff;
+        border-color: #fff;
+    }
+    .carousel-dot:hover {
+        border-color: rgba(255, 255, 255, 0.6);
+    }
+    @media (max-width: 768px) {
+        .image-carousel-section {
+            padding: 1rem;
+        }
+        .carousel-container {
+            border-radius: 4px;
+        }
     }
     .cta-image-container {
         max-width: 300px;
@@ -1371,7 +1954,7 @@ pub fn landing() -> Html {
         }
     }
     .hero-title {
-        font-size: clamp(2.5rem, 8vw, 5.5rem);
+        font-size: clamp(2.2rem, 5.5vw, 4rem);
         font-weight: 800;
         color: #fff;
         text-shadow: none;
@@ -1917,6 +2500,14 @@ pub fn landing() -> Html {
     .section-intro .hero-cta {
         margin: 1rem auto;
         display: block;
+    }
+    .section-intro .story-link {
+        color: #7EB2FF;
+        text-decoration: none;
+        transition: color 0.3s ease;
+    }
+    .section-intro .story-link:hover {
+        color: #a8ccff;
     }
     .before-after {
         padding: 4rem 2rem;

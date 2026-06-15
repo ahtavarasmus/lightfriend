@@ -77,6 +77,7 @@ pub async fn get_users(
             sub_tier: user.sub_tier,
             credits_left: user.credits_left,
             plan_type: user.plan_type,
+            own_twilio_enabled: user.own_twilio_enabled,
             has_twilio_credentials,
         });
     }

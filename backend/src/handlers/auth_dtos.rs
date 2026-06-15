@@ -42,6 +42,7 @@ pub struct UserResponse {
     pub sub_tier: Option<String>,
     pub credits_left: f32,
     pub plan_type: Option<String>,
+    pub own_twilio_enabled: bool,
     pub has_twilio_credentials: bool,
 }
 

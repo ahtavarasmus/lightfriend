@@ -42,22 +42,61 @@ pub fn is_notification_only_country_code(country: &str) -> bool {
     !LOCAL_NUMBER_COUNTRY_CODES.contains(&country)
 }
 
-/// Check if a Stripe price ID is the Assistant plan (new tier)
-pub fn is_assistant_plan_price(price_id: &str) -> bool {
-    let ids = [
-        std::env::var("STRIPE_ASSISTANT_PLAN_PRICE_ID").ok(),
-        std::env::var("STRIPE_ASSISTANT_PLAN_PRICE_ID_US").ok(),
-    ];
-    ids.iter().filter_map(|p| p.as_ref()).any(|p| p == price_id)
+const DEFAULT_LEGACY_PRODUCT_CUTOFF_TS: i64 = 1_780_704_000; // 2026-06-06 00:00:00 UTC
+
+fn env_product_matches(env_key: &str, product_id: &str) -> bool {
+    std::env::var(env_key)
+        .map(|p| p == product_id)
+        .unwrap_or(false)
 }
 
-/// Check if a Stripe price ID is the BYOT plan
-pub fn is_byot_plan_price(price_id: &str) -> bool {
-    // Legacy BYOT price ID for user on older subscription
-    if price_id == "price_1RWavGKxKvG0CX8G9MFEIy93" {
-        return true;
+fn legacy_product_cutoff_ts() -> i64 {
+    std::env::var("STRIPE_LEGACY_PRODUCT_CUTOFF_TS")
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok())
+        .unwrap_or(DEFAULT_LEGACY_PRODUCT_CUTOFF_TS)
+}
+
+/// Determine plan type from a Stripe product ID.
+///
+/// Unknown pre-cutoff subscription products are treated as legacy Autopilot
+/// subscriptions so existing customers keep access while their current Stripe
+/// subscription remains active. Unknown post-cutoff products are rejected by
+/// returning `None` instead of silently granting a plan.
+pub fn plan_type_from_product(
+    product_id: &str,
+    subscription_created: Option<i64>,
+) -> Option<&'static str> {
+    use stripe_webhook_logic::plan_type_for_product;
+
+    let product_kind = stripe_product_kind(product_id);
+    let subscription_age = subscription_age_for_legacy_cutoff(subscription_created);
+    plan_type_for_product(product_kind, subscription_age).map(|plan| plan.as_str())
+}
+
+pub fn stripe_product_kind(product_id: &str) -> stripe_webhook_logic::ProductKind {
+    use stripe_webhook_logic::ProductKind;
+
+    if env_product_matches("STRIPE_ASSISTANT_PRODUCT_ID", product_id) {
+        return ProductKind::Assistant;
     }
-    std::env::var("STRIPE_BYOT_PLAN_PRICE_ID")
-        .map(|p| p == price_id)
-        .unwrap_or(false)
+    if env_product_matches("STRIPE_AUTOPILOT_PRODUCT_ID", product_id) {
+        return ProductKind::Autopilot;
+    }
+    if env_product_matches("STRIPE_CREDITS_PRODUCT_ID", product_id) {
+        return ProductKind::CreditsAddOn;
+    }
+    ProductKind::Unknown
+}
+
+pub fn subscription_age_for_legacy_cutoff(
+    subscription_created: Option<i64>,
+) -> stripe_webhook_logic::SubscriptionAge {
+    use stripe_webhook_logic::SubscriptionAge;
+
+    match subscription_created {
+        Some(created) if created < legacy_product_cutoff_ts() => SubscriptionAge::PreLegacyCutoff,
+        Some(_) => SubscriptionAge::AtOrAfterLegacyCutoff,
+        None => SubscriptionAge::Missing,
+    }
 }

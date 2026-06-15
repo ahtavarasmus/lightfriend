@@ -1379,12 +1379,13 @@ pub async fn recover_users_from_external(
     })?;
 
     let http_client = reqwest::Client::new();
-    // Stripe customer data: email -> (phone, customer_id, has_active_sub, price_id)
+    // Stripe customer data: email -> (phone, customer_id, has_active_sub, product_id, subscription_created)
     struct StripeInfo {
         phone: Option<String>,
         customer_id: String,
         has_active_sub: bool,
-        price_id: Option<String>,
+        product_id: Option<String>,
+        subscription_created: Option<i64>,
     }
     let mut stripe_customers: std::collections::HashMap<String, StripeInfo> =
         std::collections::HashMap::new();
@@ -1428,18 +1429,21 @@ pub async fn recover_users_from_external(
             let phone = customer["phone"].as_str().map(|s| s.to_string());
             let customer_id = customer["id"].as_str().unwrap_or("").to_string();
 
-            // Check for active subscription and get price ID
+            // Check for active subscription and get product ID
             let mut has_active_sub = false;
-            let mut price_id = None;
+            let mut product_id = None;
+            let mut subscription_created = None;
             if let Some(subs) = customer["subscriptions"]["data"].as_array() {
                 for sub in subs {
                     let status = sub["status"].as_str().unwrap_or("");
                     if status == "active" || status == "trialing" {
                         has_active_sub = true;
-                        // Get the price ID from the first subscription item
+                        subscription_created = sub["created"].as_i64();
+                        // Get the product ID from the first subscription item
                         if let Some(items) = sub["items"]["data"].as_array() {
                             if let Some(item) = items.first() {
-                                price_id = item["price"]["id"].as_str().map(|s| s.to_string());
+                                product_id =
+                                    item["price"]["product"].as_str().map(|s| s.to_string());
                             }
                         }
                         break;
@@ -1454,7 +1458,8 @@ pub async fn recover_users_from_external(
                         phone,
                         customer_id,
                         has_active_sub,
-                        price_id,
+                        product_id,
+                        subscription_created,
                     },
                 );
             }
@@ -1549,33 +1554,31 @@ pub async fn recover_users_from_external(
                             .user_repository
                             .set_stripe_customer_id(user.id, &info.customer_id);
 
-                        // Determine plan_type from price ID
-                        if let Some(ref price_id) = info.price_id {
-                            use crate::utils::country::{
-                                is_assistant_plan_price, is_byot_plan_price,
-                            };
-                            let plan_type = if is_assistant_plan_price(price_id) {
-                                "assistant"
-                            } else if is_byot_plan_price(price_id) {
-                                "byot"
-                            } else {
-                                "autopilot"
-                            };
-                            let _ = state
-                                .user_repository
-                                .update_plan_type(user.id, Some(plan_type));
+                        // Determine plan_type from product ID
+                        if let Some(ref product_id) = info.product_id {
+                            use crate::utils::country::plan_type_from_product;
+                            match plan_type_from_product(product_id, info.subscription_created) {
+                                Some(plan_type) => {
+                                    let _ = state
+                                        .user_repository
+                                        .update_plan_type(user.id, Some(plan_type));
+                                }
+                                None => tracing::error!(
+                                    "Recovery: unknown Stripe product {} for user {}",
+                                    product_id,
+                                    user.id
+                                ),
+                            }
                         }
 
                         // Set credits for active subscribers
                         if info.has_active_sub {
-                            use crate::utils::country::is_byot_plan_price;
                             use crate::utils::plan_features::MONTHLY_CREDIT_BUDGET;
-                            let is_byot = info
-                                .price_id
-                                .as_deref()
-                                .map(is_byot_plan_price)
-                                .unwrap_or(false);
-                            let credits = if is_byot { 0.0 } else { MONTHLY_CREDIT_BUDGET };
+                            let credits = if user.own_twilio_enabled {
+                                0.0
+                            } else {
+                                MONTHLY_CREDIT_BUDGET
+                            };
                             let _ = state.user_repository.update_user_credits(user.id, credits);
                             let _ = state
                                 .user_repository

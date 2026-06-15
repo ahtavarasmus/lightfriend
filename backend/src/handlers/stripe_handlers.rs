@@ -32,71 +32,127 @@ pub struct SubscriptionCheckoutBody {
     pub plan_type: Option<String>,
 }
 
+fn checkout_price_for_plan(plan_type: Option<&str>) -> Result<String, (StatusCode, Json<Value>)> {
+    let env_key = match plan_type {
+        Some("assistant") => "STRIPE_ASSISTANT_CHECKOUT_PRICE_ID",
+        Some("autopilot") | None => "STRIPE_AUTOPILOT_CHECKOUT_PRICE_ID",
+        Some("byot") => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "BYOT is no longer a subscription plan"})),
+            ))
+        }
+        Some(other) => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": format!("Unknown subscription plan: {}", other)})),
+            ))
+        }
+    };
+
+    std::env::var(env_key).map_err(|_| {
+        tracing::error!("{} not found in environment", env_key);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Stripe price is not configured"})),
+        )
+    })
+}
+
+fn pricing_table_config() -> Result<(String, String), (StatusCode, Json<Value>)> {
+    let pricing_table_id = std::env::var("STRIPE_PRICING_TABLE_ID").map_err(|_| {
+        tracing::error!("STRIPE_PRICING_TABLE_ID not found in environment");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Stripe pricing table is not configured"})),
+        )
+    })?;
+    let publishable_key = std::env::var("STRIPE_PUBLISHABLE_KEY").map_err(|_| {
+        tracing::error!("STRIPE_PUBLISHABLE_KEY not found in environment");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Stripe publishable key is not configured"})),
+        )
+    })?;
+    Ok((pricing_table_id, publishable_key))
+}
+
 /// Idempotent subscription setup. Safe to call multiple times.
 /// Uses billing period end as idempotency key - if already set to current period, skips.
 async fn setup_user_subscription(
     state: &Arc<AppState>,
     user_id: i32,
-    price_id: &str,
+    product_id: &str,
+    subscription_created: i64,
     current_period_end: i64,
     _phone_country: Option<&str>,
 ) -> Result<(), String> {
-    // Idempotency: skip if billing date already matches this period
-    if let Ok(Some(existing)) = state.user_core.get_next_billing_date(user_id) {
-        if existing == current_period_end as i32 {
-            tracing::info!(
-                "User {} already set up for billing period ending {}, skipping",
-                user_id,
-                current_period_end
-            );
-            return Ok(());
-        }
-    }
+    let same_billing_period = state
+        .user_core
+        .get_next_billing_date(user_id)
+        .ok()
+        .flatten()
+        .is_some_and(|existing| existing == current_period_end as i32);
 
-    let sub_info = extract_subscription_info(price_id);
+    let user = state
+        .user_core
+        .find_by_id(user_id)
+        .map_err(|e| format!("Failed to fetch user {}: {}", user_id, e))?
+        .ok_or_else(|| format!("User {} not found", user_id))?;
 
-    // Set subscription tier
+    // Set plan_type based on product ID. Unknown legacy products only map to
+    // Autopilot while their pre-cutoff Stripe subscription remains active.
+    let plan_type =
+        crate::utils::country::plan_type_from_product(product_id, Some(subscription_created))
+            .ok_or_else(|| {
+                format!(
+                    "Unknown Stripe product {} for subscription created at {}",
+                    product_id, subscription_created
+                )
+            })?;
+
+    // All subscription products map to tier 2 after the product has been
+    // validated.
     if let Err(e) = state
         .user_repository
-        .set_subscription_tier(user_id, Some(sub_info.tier))
+        .set_subscription_tier(user_id, Some("tier 2"))
     {
-        tracing::error!(
+        return Err(format!(
             "Failed to set subscription tier for user {}: {}",
-            user_id,
-            e
-        );
+            user_id, e
+        ));
     }
 
-    // Set plan_type based on price ID
-    use crate::utils::country::{is_assistant_plan_price, is_byot_plan_price};
-    let plan_type = if is_assistant_plan_price(price_id) {
-        "assistant"
-    } else if is_byot_plan_price(price_id) || user_id == 12 {
-        "byot"
-    } else {
-        "autopilot" // any legacy/unknown price ID -> autopilot
-    };
     if let Err(e) = state
         .user_repository
         .update_plan_type(user_id, Some(plan_type))
     {
-        tracing::error!("Failed to set plan_type for user {}: {}", user_id, e);
+        return Err(format!(
+            "Failed to set plan_type for user {}: {}",
+            user_id, e
+        ));
     }
 
-    // Calculate credits: fixed budget for all hosted plans, all countries
+    // Calculate credits: fixed budget for hosted phone mode only. Customers
+    // using their own Twilio account pay Twilio directly, regardless of plan.
     use crate::utils::plan_features::MONTHLY_CREDIT_BUDGET;
-    let credits: f32 = if sub_info.tier == "tier 2" {
-        if is_byot_plan_price(price_id) {
-            0.0 // BYOT users pay Twilio directly
-        } else {
-            MONTHLY_CREDIT_BUDGET // 25.0 for all hosted plans
-        }
-    } else {
+    let credits: f32 = if user.own_twilio_enabled {
         0.0
+    } else {
+        MONTHLY_CREDIT_BUDGET // 25.0 for all hosted plans
     };
 
-    if let Err(e) = state.user_repository.update_sub_credits(user_id, credits) {
-        tracing::error!("Failed to set credits for user {}: {}", user_id, e);
+    if same_billing_period {
+        tracing::info!(
+            "User {} already has billing period ending {}, skipping monthly credit reset",
+            user_id,
+            current_period_end
+        );
+    } else if let Err(e) = state.user_repository.update_sub_credits(user_id, credits) {
+        return Err(format!(
+            "Failed to set monthly credits for user {}: {}",
+            user_id, e
+        ));
     } else {
         tracing::info!("Set {} monthly credits for user {}", credits, user_id);
     }
@@ -106,11 +162,10 @@ async fn setup_user_subscription(
         .user_core
         .update_next_billing_date(user_id, current_period_end as i32)
     {
-        tracing::error!(
+        return Err(format!(
             "Failed to update next billing date for user {}: {}",
-            user_id,
-            e
-        );
+            user_id, e
+        ));
     } else {
         tracing::info!(
             "Updated next billing date for user {}: {}",
@@ -120,14 +175,152 @@ async fn setup_user_subscription(
     }
 
     tracing::info!(
-        "Setup subscription for user {}: tier={}, plan={}, credits={}",
+        "Setup subscription for user {}: plan={}, credits={}, own_twilio_enabled={}, product={}",
         user_id,
-        sub_info.tier,
         plan_type,
-        credits
+        credits,
+        user.own_twilio_enabled,
+        product_id
     );
 
     Ok(())
+}
+
+async fn find_or_create_user_for_stripe_customer(
+    state: &Arc<AppState>,
+    client: &Client,
+    customer_id: &stripe::CustomerId,
+    email_hint: Option<String>,
+    phone_hint: Option<String>,
+) -> Result<i32, (StatusCode, Json<Value>)> {
+    match state
+        .user_repository
+        .find_by_stripe_customer_id(customer_id.as_ref())
+    {
+        Ok(Some(user)) => return Ok(user.id),
+        Ok(None) => {}
+        Err(e) => {
+            tracing::error!("Error finding user by customer ID: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Database error"})),
+            ));
+        }
+    }
+
+    tracing::info!(
+        "No user found for customer {}, creating from Stripe customer data",
+        customer_id
+    );
+
+    let (email, phone) = match (email_hint, phone_hint) {
+        (Some(email), phone) if !email.trim().is_empty() => (email, phone.unwrap_or_default()),
+        _ => {
+            let retrieve_result = tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                Customer::retrieve(client, customer_id, &[]),
+            )
+            .await
+            .map_err(|_| {
+                tracing::error!("Timed out retrieving Stripe customer {}", customer_id);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "Timed out retrieving customer"})),
+                )
+            })?
+            .map_err(|e| {
+                tracing::error!("Failed to retrieve Stripe customer: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "Failed to retrieve customer"})),
+                )
+            })?;
+
+            (
+                retrieve_result.email.clone().unwrap_or_default(),
+                retrieve_result.phone.clone().unwrap_or_default(),
+            )
+        }
+    };
+
+    use crate::repositories::signup_repository_impl::CompositeSignupRepository;
+    use crate::services::signup_service::{SignupError, SignupResult, SignupService};
+
+    let signup_repo = std::sync::Arc::new(CompositeSignupRepository::new(
+        state.user_core.clone(),
+        state.user_repository.clone(),
+    ));
+    let signup_service = SignupService::new(signup_repo);
+
+    match signup_service.handle_new_subscription(&email, &phone, customer_id.as_ref()) {
+        Ok(SignupResult::ExistingUserLinked {
+            user_id,
+            send_welcome_email,
+            ..
+        }) => {
+            tracing::info!(
+                "Linked existing user {} to Stripe customer {}",
+                user_id,
+                customer_id
+            );
+
+            if send_welcome_email {
+                let email_clone = email.clone();
+                tokio::spawn(async move {
+                    if let Err(e) =
+                        crate::utils::email::send_subscription_activated_email(&email_clone).await
+                    {
+                        tracing::error!("Failed to send subscription activated email: {}", e);
+                    }
+                });
+            }
+
+            Ok(user_id)
+        }
+        Ok(SignupResult::NewUserCreated {
+            user_id,
+            magic_token,
+            email,
+            phone_skipped,
+        }) => {
+            tracing::info!(
+                "Created new user {} from guest checkout (phone_skipped: {})",
+                user_id,
+                phone_skipped
+            );
+
+            let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_default();
+            let magic_link = format!("{}/set-password/{}", frontend_url, magic_token);
+
+            tokio::spawn(async move {
+                if let Err(e) = crate::utils::email::send_magic_link_email_with_options(
+                    &email,
+                    &magic_link,
+                    phone_skipped,
+                )
+                .await
+                {
+                    tracing::error!("Failed to send magic link email: {}", e);
+                }
+            });
+
+            Ok(user_id)
+        }
+        Err(SignupError::EmptyEmail) => {
+            tracing::error!("No email found for Stripe customer {}", customer_id);
+            Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Customer has no email"})),
+            ))
+        }
+        Err(e) => {
+            tracing::error!("Signup error: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to create user"})),
+            ))
+        }
+    }
 }
 
 pub async fn create_unified_subscription_checkout(
@@ -149,7 +342,7 @@ pub async fn create_unified_subscription_checkout(
     );
 
     // Verify user exists in database
-    let user = state
+    let _user = state
         .user_core
         .find_by_id(user_id)
         .map_err(|e| {
@@ -174,7 +367,7 @@ pub async fn create_unified_subscription_checkout(
             Json(json!({"error": "Stripe configuration error"})),
         )
     })?;
-    let client = Client::new(stripe_secret_key);
+    let client = Client::new(stripe_secret_key.clone());
     tracing::debug!("Stripe client initialized");
     // Get or create Stripe customer
     let customer_id = match state.user_repository.get_stripe_customer_id(user_id) {
@@ -228,29 +421,8 @@ pub async fn create_unified_subscription_checkout(
         )
     })?;
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
-    // Select price ID based on subscription type and user's phone number country
-    let detected_country = crate::utils::country::get_country_code_from_phone(&user.phone_number);
-    let country = detected_country.as_deref().unwrap_or("OTHER");
-    tracing::debug!("country: {}", country);
-
     let base_price_id = match body.subscription_type {
-        SubscriptionType::Hosted => {
-            if country == "US" || country == "CA" {
-                match body.plan_type.as_deref() {
-                    Some("assistant") => std::env::var("STRIPE_ASSISTANT_PLAN_PRICE_ID_US")
-                        .expect("STRIPE_ASSISTANT_PLAN_PRICE_ID_US not set"),
-                    _ => std::env::var("STRIPE_AUTOPILOT_PLAN_PRICE_ID_US")
-                        .expect("STRIPE_AUTOPILOT_PLAN_PRICE_ID_US not set"),
-                }
-            } else {
-                match body.plan_type.as_deref() {
-                    Some("assistant") => std::env::var("STRIPE_ASSISTANT_PLAN_PRICE_ID")
-                        .expect("STRIPE_ASSISTANT_PLAN_PRICE_ID not set"),
-                    _ => std::env::var("STRIPE_AUTOPILOT_PLAN_PRICE_ID")
-                        .expect("STRIPE_AUTOPILOT_PLAN_PRICE_ID not set"),
-                }
-            }
-        }
+        SubscriptionType::Hosted => checkout_price_for_plan(body.plan_type.as_deref())?,
     };
     // Build line items
     let line_items = vec![stripe::CreateCheckoutSessionLineItems {
@@ -371,30 +543,12 @@ pub async fn create_guest_checkout(
             Json(json!({"error": "Stripe configuration error"})),
         )
     })?;
-    let client = Client::new(stripe_secret_key);
+    let client = Client::new(stripe_secret_key.clone());
 
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
-    let country = body.selected_country.as_str();
-
-    // Select price ID based on subscription type, country, and plan choice
+    // Select price ID based on plan choice. Prices are single-currency USD.
     let base_price_id = match body.subscription_type {
-        SubscriptionType::Hosted => {
-            if country == "US" || country == "CA" {
-                match body.plan_type.as_deref() {
-                    Some("assistant") => std::env::var("STRIPE_ASSISTANT_PLAN_PRICE_ID_US")
-                        .expect("STRIPE_ASSISTANT_PLAN_PRICE_ID_US not set"),
-                    _ => std::env::var("STRIPE_AUTOPILOT_PLAN_PRICE_ID_US")
-                        .expect("STRIPE_AUTOPILOT_PLAN_PRICE_ID_US not set"),
-                }
-            } else {
-                match body.plan_type.as_deref() {
-                    Some("assistant") => std::env::var("STRIPE_ASSISTANT_PLAN_PRICE_ID")
-                        .expect("STRIPE_ASSISTANT_PLAN_PRICE_ID not set"),
-                    _ => std::env::var("STRIPE_AUTOPILOT_PLAN_PRICE_ID")
-                        .expect("STRIPE_AUTOPILOT_PLAN_PRICE_ID not set"),
-                }
-            }
-        }
+        SubscriptionType::Hosted => checkout_price_for_plan(body.plan_type.as_deref())?,
     };
 
     // Build line items
@@ -410,7 +564,10 @@ pub async fn create_guest_checkout(
 
     // Build metadata
     let mut metadata = std::collections::HashMap::new();
-    metadata.insert("selected_country".to_string(), country.to_string());
+    metadata.insert(
+        "selected_country".to_string(),
+        body.selected_country.clone(),
+    );
     metadata.insert("is_guest_checkout".to_string(), "true".to_string());
     if let Some(ref plan_type) = body.plan_type {
         metadata.insert("plan_type".to_string(), plan_type.clone());
@@ -483,6 +640,119 @@ pub async fn create_guest_checkout(
     })))
 }
 
+pub async fn get_pricing_table_config() -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let (pricing_table_id, publishable_key) = pricing_table_config()?;
+    Ok(Json(json!({
+        "pricing_table_id": pricing_table_id,
+        "publishable_key": publishable_key,
+    })))
+}
+
+pub async fn create_pricing_table_customer_session(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(user_id): Path<i32>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if auth_user.user_id != user_id {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Access denied"})),
+        ));
+    }
+
+    let user = state
+        .user_core
+        .find_by_id(user_id)
+        .map_err(|e| {
+            tracing::error!("Database error when finding user: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to verify user"})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"})),
+            )
+        })?;
+
+    let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY").map_err(|_| {
+        tracing::error!("STRIPE_SECRET_KEY not found in environment");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Stripe configuration error"})),
+        )
+    })?;
+    let client = Client::new(stripe_secret_key.clone());
+
+    let customer_id = match state.user_repository.get_stripe_customer_id(user_id) {
+        Ok(Some(customer_id)) => customer_id,
+        Ok(None) => create_new_customer(&client, user_id, &user.email, &state).await?,
+        Err(e) => {
+            tracing::error!("Database error getting Stripe customer ID: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            ));
+        }
+    };
+
+    let customer_session_response = reqwest::Client::new()
+        .post("https://api.stripe.com/v1/customer_sessions")
+        .bearer_auth(&stripe_secret_key)
+        .form(&[
+            ("customer", customer_id.as_str()),
+            ("components[pricing_table][enabled]", "true"),
+        ])
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to create Stripe customer session: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to create Stripe customer session"})),
+            )
+        })?;
+    if !customer_session_response.status().is_success() {
+        let status = customer_session_response.status();
+        let body = customer_session_response.text().await.unwrap_or_default();
+        tracing::error!(
+            "Stripe customer session request failed: status={}, body={}",
+            status,
+            body
+        );
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to create Stripe customer session"})),
+        ));
+    }
+    let customer_session: Value = customer_session_response.json().await.map_err(|e| {
+        tracing::error!("Failed to parse Stripe customer session response: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to read Stripe customer session"})),
+        )
+    })?;
+    let client_secret = customer_session
+        .get("client_secret")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| {
+            tracing::error!("Stripe customer session response had no client_secret");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Stripe customer session was incomplete"})),
+            )
+        })?;
+
+    let (pricing_table_id, publishable_key) = pricing_table_config()?;
+    Ok(Json(json!({
+        "pricing_table_id": pricing_table_id,
+        "publishable_key": publishable_key,
+        "customer_session_client_secret": client_secret,
+    })))
+}
+
 pub async fn create_customer_portal_session(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -522,21 +792,25 @@ pub async fn create_customer_portal_session(
             )
         })?;
     tracing::debug!("Found Stripe customer ID: {}", customer_id);
-    // Create a Billing Portal Session
-    // Create a Billing Portal Session
-    let mut create_session =
-        CreateBillingPortalSession::new(customer_id.parse().map_err(|_| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Invalid customer ID"})),
-            )
-        })?);
+    let customer = customer_id.parse().map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid customer ID"})),
+        )
+    })?;
+    let mut create_session = CreateBillingPortalSession::new(customer);
     // Store the formatted URL in a variable first
     let return_url = format!(
         "{}/billing",
         std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set")
     );
     create_session.return_url = Some(&return_url);
+    let portal_configuration = std::env::var("STRIPE_CUSTOMER_PORTAL_CONFIG_ID")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    if let Some(ref configuration_id) = portal_configuration {
+        create_session.configuration = Some(configuration_id);
+    }
     tracing::debug!("Creating portal session with return URL: {}", return_url);
     let portal_session = BillingPortalSession::create(&client, create_session)
         .await
@@ -784,110 +1058,6 @@ async fn create_new_customer(
         })?;
     Ok(customer.id.to_string())
 }
-#[derive(Debug, Clone)]
-struct SubscriptionInfo {
-    country: Option<&'static str>,
-    tier: &'static str,
-}
-
-// Helper function to extract subscription info from price ID
-fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
-    // Default values - all subscriptions map to tier 2 (hosted)
-    let mut info = SubscriptionInfo {
-        country: None,
-        tier: "tier 2",
-    };
-
-    // Helper macro to reduce code duplication
-    macro_rules! check_price_id {
-        ($country:expr, $env_var:expr, $tier:expr) => {
-            if price_id == std::env::var($env_var).unwrap_or_default() {
-                info.country = Some($country);
-                info.tier = $tier;
-                return info;
-            }
-        };
-    }
-
-    // Check for new Assistant and Autopilot plans (tier 2)
-    for env_var in [
-        "STRIPE_ASSISTANT_PLAN_PRICE_ID",
-        "STRIPE_ASSISTANT_PLAN_PRICE_ID_US",
-        "STRIPE_AUTOPILOT_PLAN_PRICE_ID",
-        "STRIPE_AUTOPILOT_PLAN_PRICE_ID_US",
-    ] {
-        if price_id == std::env::var(env_var).unwrap_or_default() {
-            info.tier = "tier 2";
-            return info;
-        }
-    }
-
-    // Legacy Monitor and Digest plans (tier 2)
-    if price_id == std::env::var("STRIPE_MONITOR_PLAN_PRICE_ID").unwrap_or_default() {
-        info.tier = "tier 2";
-        return info;
-    }
-    if price_id == std::env::var("STRIPE_DIGEST_PLAN_PRICE_ID").unwrap_or_default() {
-        info.tier = "tier 2";
-        return info;
-    }
-
-    // All legacy and current hosted plans map to tier 2
-    // Check all regional variants for both legacy and current price IDs
-    for country in ["US", "FI", "NL", "UK", "AU", "OTHER", "CA"] {
-        // Legacy price IDs (all map to tier 2 now)
-        check_price_id!(
-            country,
-            format!("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_{}", country),
-            "tier 2"
-        );
-        check_price_id!(
-            country,
-            format!("STRIPE_SUBSCRIPTION_BASIC_DAILY_PRICE_ID_{}", country),
-            "tier 2"
-        );
-        check_price_id!(
-            country,
-            format!("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_{}", country),
-            "tier 2"
-        );
-        check_price_id!(
-            country,
-            format!("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_{}", country),
-            "tier 2"
-        );
-        check_price_id!(
-            country,
-            format!("STRIPE_SUBSCRIPTION_ESCAPE_DAILY_PRICE_ID_{}", country),
-            "tier 2"
-        );
-        check_price_id!(
-            country,
-            format!("STRIPE_SUBSCRIPTION_MONITORING_PRICE_ID_{}", country),
-            "tier 2"
-        );
-        check_price_id!(
-            country,
-            format!("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_{}", country),
-            "tier 2"
-        );
-
-        // Current price IDs
-        check_price_id!(
-            country,
-            format!("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_{}", country),
-            "tier 2"
-        );
-        check_price_id!(
-            country,
-            format!("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_{}", country),
-            "tier 2"
-        );
-    }
-
-    info
-}
-
 pub async fn stripe_webhook(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -939,13 +1109,12 @@ pub async fn stripe_webhook(
                     stripe::Expandable::Object(customer) => customer.id,
                 };
 
-                // Get price ID from subscription
-                let price_id = subscription
+                // Get price and product ID from subscription
+                let price = subscription
                     .items
                     .data
                     .first()
                     .and_then(|item| item.price.as_ref())
-                    .map(|price| price.id.to_string())
                     .ok_or_else(|| {
                         tracing::error!("No price found in subscription items");
                         (
@@ -954,22 +1123,78 @@ pub async fn stripe_webhook(
                         )
                     })?;
 
-                let sub_info = extract_subscription_info(&price_id);
+                let price_id = price.id.to_string();
+                let product_id = match &price.product {
+                    Some(stripe::Expandable::Id(id)) => id.to_string(),
+                    Some(stripe::Expandable::Object(product)) => product.id.to_string(),
+                    None => String::new(),
+                };
+                tracing::info!(
+                    "Subscription price_id={}, product_id={}",
+                    price_id,
+                    product_id
+                );
 
                 // Skip subscription updates that are part of a plan change or being cancelled
-                if event.type_ == stripe::EventType::CustomerSubscriptionUpdated {
-                    let is_plan_change = subscription
-                        .metadata
-                        .get("plan_change")
-                        .map(|val| val == "true")
-                        .unwrap_or(false);
-                    if is_plan_change {
+                let upsert_event = match event.type_ {
+                    stripe::EventType::CustomerSubscriptionCreated => {
+                        stripe_webhook_logic::SubscriptionUpsertEvent::Created
+                    }
+                    _ => stripe_webhook_logic::SubscriptionUpsertEvent::Updated,
+                };
+                let is_plan_change = subscription
+                    .metadata
+                    .get("plan_change")
+                    .map(|val| val == "true")
+                    .unwrap_or(false);
+                let subscription_status = match subscription.status {
+                    stripe::SubscriptionStatus::Active => {
+                        stripe_webhook_logic::SubscriptionStatus::Active
+                    }
+                    stripe::SubscriptionStatus::Trialing => {
+                        stripe_webhook_logic::SubscriptionStatus::Trialing
+                    }
+                    stripe::SubscriptionStatus::Canceled => {
+                        stripe_webhook_logic::SubscriptionStatus::Canceled
+                    }
+                    stripe::SubscriptionStatus::Incomplete => {
+                        stripe_webhook_logic::SubscriptionStatus::Incomplete
+                    }
+                    stripe::SubscriptionStatus::IncompleteExpired => {
+                        stripe_webhook_logic::SubscriptionStatus::IncompleteExpired
+                    }
+                    stripe::SubscriptionStatus::PastDue => {
+                        stripe_webhook_logic::SubscriptionStatus::PastDue
+                    }
+                    stripe::SubscriptionStatus::Paused => {
+                        stripe_webhook_logic::SubscriptionStatus::Paused
+                    }
+                    stripe::SubscriptionStatus::Unpaid => {
+                        stripe_webhook_logic::SubscriptionStatus::Unpaid
+                    }
+                };
+                match stripe_webhook_logic::decide_subscription_upsert(
+                    upsert_event,
+                    subscription_status,
+                    is_plan_change,
+                    subscription.cancel_at_period_end,
+                ) {
+                    stripe_webhook_logic::SubscriptionUpsertDecision::ApplySubscription => {}
+                    stripe_webhook_logic::SubscriptionUpsertDecision::IgnoreInactiveSubscription => {
+                        tracing::info!(
+                            "Skipping inactive subscription {} with status {}",
+                            subscription.id,
+                            subscription.status.as_str()
+                        );
+                        return Ok(StatusCode::OK);
+                    }
+                    stripe_webhook_logic::SubscriptionUpsertDecision::IgnorePlanChangeUpdate => {
                         tracing::info!(
                             "Skipping subscription update as it's part of a plan change"
                         );
                         return Ok(StatusCode::OK);
                     }
-                    if subscription.cancel_at_period_end {
+                    stripe_webhook_logic::SubscriptionUpsertDecision::IgnoreCancelAtPeriodEndUpdate => {
                         tracing::info!(
                             "Skipping subscription update for subscription being cancelled: {}",
                             subscription.id
@@ -978,34 +1203,51 @@ pub async fn stripe_webhook(
                     }
                 }
 
-                // Cancel existing subscriptions when a new one is created
+                // Cancel existing subscriptions when a new one is created.
+                // This is cleanup, not required to grant access, so keep it
+                // out of Stripe's webhook response path.
                 if event.type_ == stripe::EventType::CustomerSubscriptionCreated {
-                    let existing_subscriptions = stripe::Subscription::list(
-                        &client,
-                        &stripe::ListSubscriptions {
-                            customer: Some(customer_id.clone()),
-                            status: Some(stripe::SubscriptionStatusFilter::Active),
-                            ..Default::default()
-                        },
-                    )
-                    .await
-                    .map_err(|e| {
-                        tracing::error!("Failed to list existing subscriptions: {}", e);
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error": "Failed to check existing subscriptions"})),
+                    let client_bg = client.clone();
+                    let customer_id_bg = customer_id.clone();
+                    let current_subscription_id = subscription.id.clone();
+                    tokio::spawn(async move {
+                        let list_result = tokio::time::timeout(
+                            std::time::Duration::from_secs(10),
+                            stripe::Subscription::list(
+                                &client_bg,
+                                &stripe::ListSubscriptions {
+                                    customer: Some(customer_id_bg),
+                                    status: Some(stripe::SubscriptionStatusFilter::Active),
+                                    ..Default::default()
+                                },
+                            ),
                         )
-                    })?;
+                        .await;
 
-                    for existing_sub in existing_subscriptions.data.iter() {
-                        if existing_sub.id != subscription.id {
-                            tracing::info!("Canceling existing subscription: {}", existing_sub.id);
-                            // Add plan_change metadata so the deletion webhook knows to skip processing
+                        let existing_subscriptions = match list_result {
+                            Ok(Ok(subscriptions)) => subscriptions,
+                            Ok(Err(e)) => {
+                                tracing::error!("Failed to list existing subscriptions: {}", e);
+                                return;
+                            }
+                            Err(_) => {
+                                tracing::error!("Timed out listing existing subscriptions");
+                                return;
+                            }
+                        };
+
+                        for sub_id in existing_subscriptions
+                            .data
+                            .iter()
+                            .filter(|s| s.id != current_subscription_id)
+                            .map(|s| s.id.clone())
+                        {
+                            tracing::info!("Canceling existing subscription: {}", sub_id);
                             let mut metadata = std::collections::HashMap::new();
                             metadata.insert("plan_change".to_string(), "true".to_string());
                             let _ = Subscription::update(
-                                &client,
-                                &existing_sub.id,
+                                &client_bg,
+                                &sub_id,
                                 UpdateSubscription {
                                     cancel_at_period_end: Some(true),
                                     metadata: Some(metadata),
@@ -1014,7 +1256,7 @@ pub async fn stripe_webhook(
                             )
                             .await;
                         }
-                    }
+                    });
                 }
 
                 // Find or create user (only on Created event, not Updated)
@@ -1024,122 +1266,14 @@ pub async fn stripe_webhook(
                 {
                     Ok(Some(user)) => user.id,
                     Ok(None) if event.type_ == stripe::EventType::CustomerSubscriptionCreated => {
-                        // Guest checkout - create user from Stripe customer
-                        tracing::info!(
-                            "No user found for customer {}, creating from Stripe customer data",
-                            customer_id
-                        );
-
-                        let customer = Customer::retrieve(&client, &customer_id, &[])
-                            .await
-                            .map_err(|e| {
-                                tracing::error!("Failed to retrieve Stripe customer: {}", e);
-                                (
-                                    StatusCode::INTERNAL_SERVER_ERROR,
-                                    Json(json!({"error": "Failed to retrieve customer"})),
-                                )
-                            })?;
-
-                        let email = customer.email.clone().unwrap_or_default();
-                        let phone = customer.phone.clone().unwrap_or_default();
-
-                        // Use SignupService to handle user creation/linking
-                        use crate::repositories::signup_repository_impl::CompositeSignupRepository;
-                        use crate::services::signup_service::{
-                            SignupError, SignupResult, SignupService,
-                        };
-
-                        let signup_repo = std::sync::Arc::new(CompositeSignupRepository::new(
-                            state.user_core.clone(),
-                            state.user_repository.clone(),
-                        ));
-                        let signup_service = SignupService::new(signup_repo);
-
-                        match signup_service.handle_new_subscription(
-                            &email,
-                            &phone,
-                            customer_id.as_ref(),
-                        ) {
-                            Ok(SignupResult::ExistingUserLinked {
-                                user_id,
-                                send_welcome_email,
-                                ..
-                            }) => {
-                                tracing::info!(
-                                    "Linked existing user {} to Stripe customer {}",
-                                    user_id,
-                                    customer_id
-                                );
-
-                                if send_welcome_email {
-                                    let email_clone = email.clone();
-                                    tokio::spawn(async move {
-                                        if let Err(e) =
-                                            crate::utils::email::send_subscription_activated_email(
-                                                &email_clone,
-                                            )
-                                            .await
-                                        {
-                                            tracing::error!(
-                                                "Failed to send subscription activated email: {}",
-                                                e
-                                            );
-                                        }
-                                    });
-                                }
-
-                                user_id
-                            }
-                            Ok(SignupResult::NewUserCreated {
-                                user_id,
-                                magic_token,
-                                email,
-                                phone_skipped,
-                            }) => {
-                                tracing::info!(
-                                    "Created new user {} from guest checkout (phone_skipped: {})",
-                                    user_id,
-                                    phone_skipped
-                                );
-
-                                let frontend_url =
-                                    std::env::var("FRONTEND_URL").unwrap_or_default();
-                                let magic_link =
-                                    format!("{}/set-password/{}", frontend_url, magic_token);
-
-                                tokio::spawn(async move {
-                                    if let Err(e) =
-                                        crate::utils::email::send_magic_link_email_with_options(
-                                            &email,
-                                            &magic_link,
-                                            phone_skipped,
-                                        )
-                                        .await
-                                    {
-                                        tracing::error!("Failed to send magic link email: {}", e);
-                                    }
-                                });
-
-                                user_id
-                            }
-                            Err(SignupError::EmptyEmail) => {
-                                tracing::error!(
-                                    "No email found for Stripe customer {}",
-                                    customer_id
-                                );
-                                return Err((
-                                    StatusCode::BAD_REQUEST,
-                                    Json(json!({"error": "Customer has no email"})),
-                                ));
-                            }
-                            Err(e) => {
-                                tracing::error!("Signup error: {}", e);
-                                return Err((
-                                    StatusCode::INTERNAL_SERVER_ERROR,
-                                    Json(json!({"error": "Failed to create user"})),
-                                ));
-                            }
-                        }
+                        find_or_create_user_for_stripe_customer(
+                            &state,
+                            &client,
+                            &customer_id,
+                            None,
+                            None,
+                        )
+                        .await?
                     }
                     Ok(None) => {
                         // Subscription update for non-existent user - shouldn't normally happen
@@ -1175,33 +1309,35 @@ pub async fn stripe_webhook(
                         )
                     })?;
 
-                // Update subscription country
+                let phone_country =
+                    crate::utils::country::get_country_code_from_phone(&user.phone_number);
+
+                // Update subscription country from user's phone number
                 if let Err(e) = state
                     .user_core
-                    .update_sub_country(user.id, sub_info.country)
+                    .update_sub_country(user.id, phone_country.as_deref())
                 {
                     tracing::error!("Failed to update subscription country: {}", e);
                 }
-
-                // Use centralized subscription setup (idempotent)
-                let phone_country =
-                    crate::utils::country::get_country_code_from_phone(&user.phone_number);
                 if let Err(e) = setup_user_subscription(
                     &state,
                     user.id,
-                    &price_id,
+                    &product_id,
+                    subscription.created,
                     subscription.current_period_end,
                     phone_country.as_deref(),
                 )
                 .await
                 {
                     tracing::error!("Failed to setup subscription: {}", e);
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "Failed to setup subscription"})),
+                    ));
                 }
 
-                // Set preferred Lightfriend number (for non-BYOT plans)
-                if !crate::utils::country::is_byot_plan_price(&price_id)
-                    && user.preferred_number.is_none()
-                {
+                // Set preferred Lightfriend number for hosted phone mode.
+                if !user.own_twilio_enabled && user.preferred_number.is_none() {
                     if let Some(ref country) = phone_country {
                         let _ = state
                             .user_core
@@ -1218,18 +1354,11 @@ pub async fn stripe_webhook(
                     stripe::Expandable::Object(customer) => customer.id,
                 };
 
-                // Check if this deletion is part of a subscription change/upgrade
                 let is_subscription_change = subscription
                     .metadata
                     .get("plan_change")
                     .map(|val| val == "true")
                     .unwrap_or(false);
-                if is_subscription_change {
-                    tracing::info!(
-                        "Subscription deletion is part of a plan change, skipping tier update"
-                    );
-                    return Ok(StatusCode::OK);
-                }
 
                 if let Ok(Some(user)) = state
                     .user_repository
@@ -1252,11 +1381,53 @@ pub async fn stripe_webhook(
                             Json(json!({"error": "Failed to check existing subscriptions"})),
                         )
                     })?;
-                    // Simplified deletion logic - just check if any active subscriptions remain
-                    if active_subscriptions.data.is_empty() {
+                    let active_subscription_snapshots: Vec<_> = active_subscriptions
+                        .data
+                        .iter()
+                        .map(|active_subscription| {
+                            let product_kind = active_subscription
+                                .items
+                                .data
+                                .first()
+                                .and_then(|item| item.price.as_ref())
+                                .and_then(|price| price.product.as_ref())
+                                .map(|product| match product {
+                                    stripe::Expandable::Id(id) => {
+                                        crate::utils::country::stripe_product_kind(id)
+                                    }
+                                    stripe::Expandable::Object(product) => {
+                                        crate::utils::country::stripe_product_kind(
+                                            product.id.as_ref(),
+                                        )
+                                    }
+                                })
+                                .unwrap_or(stripe_webhook_logic::ProductKind::Unknown);
+
+                            stripe_webhook_logic::ActiveSubscriptionSnapshot {
+                                is_deleted_subscription: active_subscription.id == subscription.id,
+                                product_kind,
+                                subscription_age:
+                                    crate::utils::country::subscription_age_for_legacy_cutoff(Some(
+                                        active_subscription.created,
+                                    )),
+                            }
+                        })
+                        .collect();
+
+                    match stripe_webhook_logic::decide_subscription_delete(
+                        is_subscription_change,
+                        &active_subscription_snapshots,
+                    ) {
+                        stripe_webhook_logic::SubscriptionDeletedDecision::IgnorePlanChangeDelete => {
+                            tracing::info!(
+                                "Subscription deletion is part of a plan change, skipping tier update"
+                            );
+                            return Ok(StatusCode::OK);
+                        }
+                        stripe_webhook_logic::SubscriptionDeletedDecision::ClearSubscription => {
                         // No active subscriptions left, clear subscription tier, country, plan_type, credits, and billing date
                         tracing::info!(
-                            "No active subscriptions remaining, clearing subscription info"
+                            "No active plan subscriptions remaining, clearing subscription info"
                         );
                         if let Err(e) = state.user_repository.set_subscription_tier(user.id, None) {
                             tracing::error!("Failed to clear subscription tier: {}", e);
@@ -1276,29 +1447,21 @@ pub async fn stripe_webhook(
                         if let Err(e) = state.user_core.update_next_billing_date(user.id, 0) {
                             tracing::error!("Failed to clear next billing date: {}", e);
                         }
-                    } else {
-                        // User still has active subscriptions - update to the first one found
-                        if let Some(remaining_sub) = active_subscriptions.data.first() {
-                            if let Some(tier_info) = remaining_sub
-                                .items
-                                .data
-                                .first()
-                                .and_then(|item| item.price.as_ref())
-                                .map(|price| extract_subscription_info(&price.id))
+                        }
+                        stripe_webhook_logic::SubscriptionDeletedDecision::KeepPlan(remaining_plan) => {
+                            // Always tier 2 for any active subscription
+                            tracing::info!("User still has active subscription, keeping tier 2");
+                            if let Err(e) = state
+                                .user_repository
+                                .set_subscription_tier(user.id, Some("tier 2"))
                             {
-                                tracing::info!("Updating subscription tier to {} based on remaining subscription", tier_info.tier);
-                                if let Err(e) = state
-                                    .user_repository
-                                    .set_subscription_tier(user.id, Some(tier_info.tier))
-                                {
-                                    tracing::error!("Failed to update subscription tier: {}", e);
-                                }
-                                if let Err(e) = state
-                                    .user_core
-                                    .update_sub_country(user.id, tier_info.country)
-                                {
-                                    tracing::error!("Failed to update subscription country: {}", e);
-                                }
+                                tracing::error!("Failed to update subscription tier: {}", e);
+                            }
+                            if let Err(e) = state
+                                .user_repository
+                                .update_plan_type(user.id, Some(remaining_plan.as_str()))
+                            {
+                                tracing::error!("Failed to update plan_type: {}", e);
                             }
                         }
                     }
@@ -1312,9 +1475,151 @@ pub async fn stripe_webhook(
                     tracing::info!("Checkout session found: {}", session.id);
 
                     // Subscription handling is now done in CustomerSubscriptionCreated webhook
-                    // This handler only processes credit pack purchases (payment mode)
+                    // This handler also acts as an idempotent fallback for
+                    // Pricing Table guest checkouts because it includes the
+                    // customer email/phone that we need to create the account.
                     if matches!(session.mode, stripe::CheckoutSessionMode::Subscription) {
-                        tracing::info!("Subscription checkout completed - setup handled by CustomerSubscriptionCreated webhook");
+                        let customer_id = session
+                            .customer
+                            .as_ref()
+                            .map(|customer| customer.id())
+                            .ok_or_else(|| {
+                            tracing::error!("Subscription checkout session had no customer");
+                            (
+                                StatusCode::BAD_REQUEST,
+                                Json(json!({"error": "Checkout session has no customer"})),
+                            )
+                        })?;
+
+                        let subscription = match session.subscription {
+                            Some(stripe::Expandable::Object(subscription)) => *subscription,
+                            Some(stripe::Expandable::Id(subscription_id)) => tokio::time::timeout(
+                                std::time::Duration::from_secs(10),
+                                Subscription::retrieve(&client, &subscription_id, &[]),
+                            )
+                            .await
+                            .map_err(|_| {
+                                tracing::error!(
+                                    "Timed out retrieving subscription {}",
+                                    subscription_id
+                                );
+                                (
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    Json(json!({"error": "Timed out retrieving subscription"})),
+                                )
+                            })?
+                            .map_err(|e| {
+                                tracing::error!(
+                                    "Failed to retrieve subscription {}: {}",
+                                    subscription_id,
+                                    e
+                                );
+                                (
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    Json(json!({"error": "Failed to retrieve subscription"})),
+                                )
+                            })?,
+                            None => {
+                                tracing::error!(
+                                    "Subscription checkout session had no subscription"
+                                );
+                                return Err((
+                                    StatusCode::BAD_REQUEST,
+                                    Json(json!({"error": "Checkout session has no subscription"})),
+                                ));
+                            }
+                        };
+
+                        let price = subscription
+                            .items
+                            .data
+                            .first()
+                            .and_then(|item| item.price.as_ref())
+                            .ok_or_else(|| {
+                                tracing::error!(
+                                    "No price found in subscription {}",
+                                    subscription.id
+                                );
+                                (
+                                    StatusCode::BAD_REQUEST,
+                                    Json(json!({"error": "Subscription has no price"})),
+                                )
+                            })?;
+                        let product_id = match price.product.as_ref().ok_or_else(|| {
+                            tracing::error!("No product found in subscription price {}", price.id);
+                            (
+                                StatusCode::BAD_REQUEST,
+                                Json(json!({"error": "Subscription price has no product"})),
+                            )
+                        })? {
+                            stripe::Expandable::Id(id) => id.to_string(),
+                            stripe::Expandable::Object(product) => product.id.to_string(),
+                        };
+
+                        let (email_hint, phone_hint) = session
+                            .customer_details
+                            .as_ref()
+                            .map(|details| (details.email.clone(), details.phone.clone()))
+                            .unwrap_or((None, None));
+
+                        let user_id = find_or_create_user_for_stripe_customer(
+                            &state,
+                            &client,
+                            &customer_id,
+                            email_hint,
+                            phone_hint,
+                        )
+                        .await?;
+
+                        let user = state
+                            .user_core
+                            .find_by_id(user_id)
+                            .map_err(|e| {
+                                (
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    Json(json!({"error": format!("DB error: {}", e)})),
+                                )
+                            })?
+                            .ok_or_else(|| {
+                                (
+                                    StatusCode::NOT_FOUND,
+                                    Json(json!({"error": "User not found"})),
+                                )
+                            })?;
+                        let phone_country =
+                            crate::utils::country::get_country_code_from_phone(&user.phone_number);
+
+                        if let Err(e) = state
+                            .user_core
+                            .update_sub_country(user.id, phone_country.as_deref())
+                        {
+                            tracing::error!("Failed to update subscription country: {}", e);
+                        }
+                        if let Err(e) = setup_user_subscription(
+                            &state,
+                            user.id,
+                            &product_id,
+                            subscription.created,
+                            subscription.current_period_end,
+                            phone_country.as_deref(),
+                        )
+                        .await
+                        {
+                            tracing::error!("Failed to setup subscription: {}", e);
+                            return Err((
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({"error": "Failed to setup subscription"})),
+                            ));
+                        }
+
+                        if !user.own_twilio_enabled && user.preferred_number.is_none() {
+                            if let Some(ref country) = phone_country {
+                                let _ = state
+                                    .user_core
+                                    .set_preferred_number_for_country(user.id, country);
+                            }
+                        }
+
                         return Ok(StatusCode::OK);
                     }
 

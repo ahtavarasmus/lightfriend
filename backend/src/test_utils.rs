@@ -593,11 +593,13 @@ pub fn set_byot_credentials(state: &Arc<crate::AppState>, user_id: i32) {
         .user_repository
         .update_twilio_credentials(user_id, "AC_test_sid", "test_auth_token")
         .expect("Failed to set BYOT credentials");
-    // Also set plan_type to "byot" so is_byot_user() returns true
-    set_plan_type(state, user_id, "byot");
+    state
+        .user_core
+        .update_own_twilio_enabled(user_id, true)
+        .expect("Failed to enable own Twilio mode");
 }
 
-/// Set the plan_type for a user (used for BYOT testing)
+/// Set the plan_type for a user.
 pub fn set_plan_type(state: &Arc<crate::AppState>, user_id: i32, plan_type: &str) {
     use crate::pg_schema::users;
     use diesel::prelude::*;
@@ -1228,6 +1230,22 @@ pub mod mock_user_core {
         fn is_byot_user(&self, user_id: i32) -> bool {
             self.calls.lock().unwrap().is_byot_user_calls.push(user_id);
             self.byot_users.lock().unwrap().contains(&user_id)
+        }
+
+        fn update_own_twilio_enabled(
+            &self,
+            user_id: i32,
+            enabled: bool,
+        ) -> Result<(), DieselError> {
+            let mut byot_users = self.byot_users.lock().unwrap();
+            if enabled {
+                if !byot_users.contains(&user_id) {
+                    byot_users.push(user_id);
+                }
+            } else {
+                byot_users.retain(|id| *id != user_id);
+            }
+            Ok(())
         }
 
         fn update_subscription_tier(

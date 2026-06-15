@@ -69,6 +69,7 @@ rubato = "0.16"  # Audio resampling for voice pipeline (8kHz<->16kHz<->24kHz)
 rocksdb = { version = "0.24", optional = true }
 pulldown-cmark = "0.12"
 serde_yaml = "0.9"
+stripe_webhook_logic = { path = "stripe_webhook_logic" }
 
 [features]
 default = []

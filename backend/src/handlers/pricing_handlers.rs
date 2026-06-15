@@ -1286,11 +1286,11 @@ pub async fn get_byot_usage(
             "User not found".to_string(),
         ))?;
 
-    // Verify this is a BYOT user
-    if user.plan_type.as_deref() != Some("byot") {
+    // Verify this user has own-Twilio routing enabled.
+    if !user.own_twilio_enabled {
         return Err((
             axum::http::StatusCode::BAD_REQUEST,
-            "This endpoint is only for BYOT users".to_string(),
+            "This endpoint is only for users with own Twilio enabled".to_string(),
         ));
     }
 

@@ -483,6 +483,12 @@ pub struct PgMessageStatusLog {
     pub updated_at: i32,
     pub price: Option<f32>,
     pub price_unit: Option<String>,
+    #[serde(skip_serializing)]
+    pub encrypted_body: Option<String>,
+    pub fallback_provider: Option<String>,
+    pub fallback_attempted_at: Option<i32>,
+    pub fallback_message_sid: Option<String>,
+    pub fallback_error: Option<String>,
 }
 
 #[derive(Insertable, Debug)]
@@ -500,6 +506,7 @@ pub struct NewPgMessageStatusLog {
     pub updated_at: i32,
     pub price: Option<f32>,
     pub price_unit: Option<String>,
+    pub encrypted_body: Option<String>,
 }
 
 // -- admin_alerts --

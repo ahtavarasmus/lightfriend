@@ -1,6 +1,7 @@
 use crate::admin_alert;
 use crate::repositories::twilio_status_repository::TwilioStatusRepository;
 use crate::AppState;
+use crate::UserCoreOps;
 use axum::extract::State;
 use axum::http::StatusCode;
 use serde::Deserialize;
@@ -142,6 +143,21 @@ pub async fn twilio_status_callback(
         }
     }
 
+    if should_attempt_telnyx_delivery_fallback(&payload.MessageStatus, payload.ErrorCode.as_deref())
+    {
+        let state_for_fallback = state.clone();
+        let repository_for_fallback = repository.clone();
+        let message_sid = payload.MessageSid.clone();
+        tokio::spawn(async move {
+            attempt_telnyx_delivery_fallback(
+                state_for_fallback,
+                repository_for_fallback,
+                message_sid,
+            )
+            .await;
+        });
+    }
+
     // Deduct credits on final status with actual Twilio price
     let is_final = matches!(
         payload.MessageStatus.as_str(),
@@ -189,6 +205,242 @@ pub async fn twilio_status_callback(
 
     // Always return 200 OK to Twilio
     StatusCode::OK
+}
+
+pub fn should_attempt_telnyx_delivery_fallback(status: &str, error_code: Option<&str>) -> bool {
+    if error_code == Some("21610") {
+        return false;
+    }
+
+    matches!(status, "failed" | "undelivered")
+}
+
+pub fn telnyx_delivery_fallback_body(body: &str) -> String {
+    let body = crate::utils::sms_sanitizer::apply_sms_url_filter(body);
+    if body.starts_with(crate::channels::router::FALLBACK_PREFIX) {
+        body
+    } else {
+        format!("{}{}", crate::channels::router::FALLBACK_PREFIX, body)
+    }
+}
+
+async fn attempt_telnyx_delivery_fallback(
+    state: Arc<AppState>,
+    repository: Arc<
+        crate::repositories::twilio_status_repository_impl::DieselTwilioStatusRepository,
+    >,
+    message_sid: String,
+) {
+    if std::env::var("ENVIRONMENT").unwrap_or_default() == "development" {
+        let reason = "skipping Telnyx delivery fallback in development environment";
+        tracing::info!("{} for sid={}", reason, message_sid);
+        if let Err(e) = repository.record_telnyx_delivery_fallback_error(&message_sid, reason) {
+            tracing::error!(
+                "Failed to record Telnyx delivery fallback dev skip for sid={}: {}",
+                message_sid,
+                e
+            );
+        }
+        return;
+    }
+
+    if state.channel_router.channel("telnyx").is_none() {
+        let reason = "telnyx channel not configured";
+        tracing::warn!(
+            "Cannot replay failed Twilio delivery via Telnyx for sid={}: {}",
+            message_sid,
+            reason
+        );
+        if let Err(e) = repository.record_telnyx_delivery_fallback_error(&message_sid, reason) {
+            tracing::error!(
+                "Failed to record Telnyx delivery fallback error for sid={}: {}",
+                message_sid,
+                e
+            );
+        }
+        return;
+    }
+
+    let fallback = match claim_telnyx_delivery_fallback_with_retry(&repository, &message_sid).await
+    {
+        Some(fallback) => fallback,
+        None => return,
+    };
+
+    let encrypted_body = match fallback.encrypted_body.as_deref() {
+        Some(body) if !body.is_empty() => body,
+        _ => {
+            let reason = "missing encrypted outbound body";
+            tracing::warn!(
+                "Cannot replay failed Twilio delivery via Telnyx for sid={}: {}",
+                message_sid,
+                reason
+            );
+            if let Err(e) = repository.record_telnyx_delivery_fallback_error(&message_sid, reason) {
+                tracing::error!(
+                    "Failed to record Telnyx delivery fallback error for sid={}: {}",
+                    message_sid,
+                    e
+                );
+            }
+            return;
+        }
+    };
+
+    let body = match crate::utils::encryption::decrypt(encrypted_body) {
+        Ok(body) => body,
+        Err(e) => {
+            let reason = format!("failed to decrypt outbound body: {}", e);
+            tracing::error!(
+                "Cannot replay failed Twilio delivery via Telnyx for sid={}: {}",
+                message_sid,
+                reason
+            );
+            if let Err(record_err) =
+                repository.record_telnyx_delivery_fallback_error(&message_sid, &reason)
+            {
+                tracing::error!(
+                    "Failed to record Telnyx delivery fallback error for sid={}: {}",
+                    message_sid,
+                    record_err
+                );
+            }
+            return;
+        }
+    };
+
+    if body.trim().is_empty() {
+        let reason = "stored outbound body was empty";
+        tracing::warn!(
+            "Cannot replay failed Twilio delivery via Telnyx for sid={}: {}",
+            message_sid,
+            reason
+        );
+        if let Err(e) = repository.record_telnyx_delivery_fallback_error(&message_sid, reason) {
+            tracing::error!(
+                "Failed to record Telnyx delivery fallback error for sid={}: {}",
+                message_sid,
+                e
+            );
+        }
+        return;
+    }
+
+    let user = match state.user_core.find_by_id(fallback.user_id) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            let reason = format!("user {} not found", fallback.user_id);
+            tracing::warn!(
+                "Cannot replay failed Twilio delivery via Telnyx for sid={}: {}",
+                message_sid,
+                reason
+            );
+            if let Err(e) = repository.record_telnyx_delivery_fallback_error(&message_sid, &reason)
+            {
+                tracing::error!(
+                    "Failed to record Telnyx delivery fallback error for sid={}: {}",
+                    message_sid,
+                    e
+                );
+            }
+            return;
+        }
+        Err(e) => {
+            let reason = format!("find user failed: {}", e);
+            tracing::error!(
+                "Cannot replay failed Twilio delivery via Telnyx for sid={}: {}",
+                message_sid,
+                reason
+            );
+            if let Err(record_err) =
+                repository.record_telnyx_delivery_fallback_error(&message_sid, &reason)
+            {
+                tracing::error!(
+                    "Failed to record Telnyx delivery fallback error for sid={}: {}",
+                    message_sid,
+                    record_err
+                );
+            }
+            return;
+        }
+    };
+
+    let fallback_body = telnyx_delivery_fallback_body(&body);
+    match state
+        .channel_router
+        .notify(&user, "telnyx", &fallback.to_number, &fallback_body)
+        .await
+    {
+        Ok(fallback_sid) => {
+            let fallback_sid = fallback_sid.into_inner();
+            tracing::warn!(
+                "Replayed failed Twilio delivery via Telnyx: original_sid={} fallback_sid={} user_id={}",
+                message_sid,
+                fallback_sid,
+                fallback.user_id
+            );
+            if let Err(e) =
+                repository.record_telnyx_delivery_fallback_success(&message_sid, &fallback_sid)
+            {
+                tracing::error!(
+                    "Failed to record Telnyx delivery fallback success for sid={}: {}",
+                    message_sid,
+                    e
+                );
+            }
+        }
+        Err(e) => {
+            let reason = e.to_string();
+            tracing::error!(
+                "Telnyx delivery fallback failed for original_sid={} user_id={}: {}",
+                message_sid,
+                fallback.user_id,
+                reason
+            );
+            if let Err(record_err) =
+                repository.record_telnyx_delivery_fallback_error(&message_sid, &reason)
+            {
+                tracing::error!(
+                    "Failed to record Telnyx delivery fallback error for sid={}: {}",
+                    message_sid,
+                    record_err
+                );
+            }
+        }
+    }
+}
+
+async fn claim_telnyx_delivery_fallback_with_retry(
+    repository: &crate::repositories::twilio_status_repository_impl::DieselTwilioStatusRepository,
+    message_sid: &str,
+) -> Option<crate::repositories::twilio_status_repository::DeliveryFallbackMessage> {
+    const CLAIM_ATTEMPTS: usize = 4;
+
+    for attempt in 1..=CLAIM_ATTEMPTS {
+        match repository.claim_telnyx_delivery_fallback(message_sid) {
+            Ok(Some(fallback)) => return Some(fallback),
+            Ok(None) if attempt < CLAIM_ATTEMPTS => {
+                tokio::time::sleep(std::time::Duration::from_millis(250 * attempt as u64)).await;
+            }
+            Ok(None) => {
+                tracing::info!(
+                    "Telnyx delivery fallback already claimed or unavailable for sid={}",
+                    message_sid
+                );
+                return None;
+            }
+            Err(e) => {
+                tracing::error!(
+                    "Failed to claim Telnyx delivery fallback for sid={}: {}",
+                    message_sid,
+                    e
+                );
+                return None;
+            }
+        }
+    }
+
+    None
 }
 
 /// No-op Twilio client for when credentials aren't available

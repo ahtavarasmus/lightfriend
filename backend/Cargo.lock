@@ -529,6 +529,7 @@ dependencies = [
  "serial_test",
  "sha1",
  "sha2",
+ "stripe_webhook_logic",
  "strsim",
  "thiserror 1.0.69",
  "time",
@@ -5674,6 +5675,10 @@ dependencies = [
  "proc-macro2",
  "quote",
 ]
+
+[[package]]
+name = "stripe_webhook_logic"
+version = "0.1.0"
 
 [[package]]
 name = "strsim"

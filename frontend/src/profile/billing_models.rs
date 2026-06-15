@@ -52,6 +52,7 @@ pub struct UserProfile {
     pub nearby_places: Option<String>,
     pub server_ip: Option<String>,
     pub plan_type: Option<String>,
+    pub own_twilio_enabled: bool,
     pub phone_service_active: Option<bool>,
     pub llm_provider: Option<String>,
     pub auto_create_items: Option<bool>,

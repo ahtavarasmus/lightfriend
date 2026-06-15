@@ -80,6 +80,120 @@ pub struct NotificationMeta {
     pub platform: Option<String>,
     pub sender: Option<String>,
     pub content: Option<String>,
+    pub history_annotation: Option<String>,
+}
+
+pub fn notification_meta_from_snapshot(snap: &serde_json::Value) -> Option<NotificationMeta> {
+    Some(NotificationMeta {
+        platform: snap
+            .get("platform")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        sender: snap
+            .get("sender_name")
+            .or_else(|| snap.get("sender"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        content: snap
+            .get("content")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        history_annotation: email_ref_annotation_from_snapshot(snap),
+    })
+}
+
+pub fn compact_email_notification(message: &str, snap: &serde_json::Value) -> String {
+    let is_email = snap
+        .get("platform")
+        .and_then(|v| v.as_str())
+        .map(|platform| platform.eq_ignore_ascii_case("email"))
+        .unwrap_or(false);
+    if !is_email {
+        return message.to_string();
+    }
+
+    let Some(account) = snap
+        .get("email_account")
+        .and_then(|v| v.as_str())
+        .filter(|account| !account.trim().is_empty())
+    else {
+        return message.to_string();
+    };
+
+    let trimmed = message.trim();
+    if trimmed.starts_with(&format!("{}:", account)) {
+        return trimmed.to_string();
+    }
+
+    let lower = trimmed.to_lowercase();
+    let sender = snap
+        .get("sender_name")
+        .or_else(|| snap.get("sender"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let sender_on_email = format!("{} on email:", sender).to_lowercase();
+
+    let body = if !sender.is_empty() && lower.starts_with(&sender_on_email) {
+        trimmed
+            .split_once(':')
+            .map(|(_, tail)| tail.trim())
+            .unwrap_or(trimmed)
+    } else if lower.starts_with("critical email") || lower.starts_with("email from") {
+        trimmed
+            .split_once(':')
+            .map(|(_, tail)| tail.trim())
+            .unwrap_or(trimmed)
+    } else {
+        trimmed
+    };
+
+    if body.is_empty() {
+        account.to_string()
+    } else {
+        format!("{}: {}", account, body)
+    }
+}
+
+fn email_ref_annotation_from_snapshot(snap: &serde_json::Value) -> Option<String> {
+    let is_email = snap
+        .get("platform")
+        .and_then(|v| v.as_str())
+        .map(|platform| platform.eq_ignore_ascii_case("email"))
+        .unwrap_or(false);
+    if !is_email {
+        return None;
+    }
+
+    let uid = snap
+        .get("email_uid")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .or_else(|| {
+            snap.get("room_id")
+                .and_then(|v| v.as_str())
+                .and_then(|room_id| room_id.strip_prefix("email_"))
+                .map(str::to_string)
+        })?;
+
+    let mailbox = snap
+        .get("mailbox")
+        .and_then(|v| v.as_str())
+        .unwrap_or("INBOX");
+
+    let mut parts = Vec::new();
+    if let Some(account_id) = snap.get("imap_connection_id").and_then(|v| v.as_i64()) {
+        parts.push(format!("account_id={}", account_id));
+    }
+    if let Some(account) = snap.get("email_account").and_then(|v| v.as_str()) {
+        parts.push(format!("account={}", account));
+    }
+    parts.push(format!("mailbox={}", mailbox));
+    parts.push(format!("uid={}", uid));
+    if let Some(message_id) = snap.get("message_id").and_then(|v| v.as_i64()) {
+        parts.push(format!("ont_message_id={}", message_id));
+    }
+
+    Some(format!("[email_ref {}]", parts.join(" ")))
 }
 
 /// Extract platform name from a content_type string like "whatsapp_profile_sms".
@@ -117,7 +231,7 @@ pub async fn send_notification_with_context(
     notification: &str,
     content_type: String,
     first_message: Option<String>,
-    _meta: Option<NotificationMeta>,
+    meta: Option<NotificationMeta>,
 ) -> bool {
     let current_time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -164,6 +278,12 @@ pub async fn send_notification_with_context(
     };
 
     let mut sms_delivered = false;
+    let history_notification = meta
+        .as_ref()
+        .and_then(|m| m.history_annotation.as_deref())
+        .filter(|annotation| !annotation.trim().is_empty())
+        .map(|annotation| format!("{} {}", notification, annotation.trim()))
+        .unwrap_or_else(|| notification.to_string());
 
     match notification_type {
         "call" => {
@@ -226,7 +346,7 @@ pub async fn send_notification_with_context(
                     let entry = crate::pg_models::NewPgMessageHistory {
                         user_id: user.id,
                         role: "assistant".to_string(),
-                        encrypted_content: notification.to_string(),
+                        encrypted_content: history_notification.clone(),
                         tool_name: None,
                         tool_call_id: None,
                         tool_calls_json: None,
@@ -275,7 +395,7 @@ pub async fn send_notification_with_context(
                     let entry = crate::pg_models::NewPgMessageHistory {
                         user_id: user.id,
                         role: "assistant".to_string(),
-                        encrypted_content: notification.to_string(),
+                        encrypted_content: history_notification.clone(),
                         tool_name: None,
                         tool_call_id: None,
                         tool_calls_json: None,

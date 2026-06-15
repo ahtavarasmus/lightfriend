@@ -1308,8 +1308,8 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
     let event_delay = use_state(|| 600i32); // default: 10 min delay before rule fires
                                             // (display_name, platform, is_group, group_mode)
                                             // group_mode: None for non-groups, Some("all") or Some("mention_only") for groups
-    // Full contact index fetched once per builder session. The dropdown
-    // filters this locally (see `score_contact`) — no per-keystroke HTTP.
+                                            // Full contact index fetched once per builder session. The dropdown
+                                            // filters this locally (see `score_contact`) — no per-keystroke HTTP.
     let all_contacts = use_state(Vec::<Contact>::new);
     let contacts_loading = use_state(|| true);
     let contacts_load_error = use_state(|| None::<String>);
@@ -1391,9 +1391,8 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
         let selected_contact = selected_contact.clone();
         use_effect_with_deps(
             move |(contacts, value, key)| {
-                let should_resolve = *key == "sender"
-                    && !value.is_empty()
-                    && selected_contact.is_none();
+                let should_resolve =
+                    *key == "sender" && !value.is_empty() && selected_contact.is_none();
                 if should_resolve {
                     let v_lower = value.to_lowercase();
                     // Exact display-name match (case-insensitive). If
@@ -1511,8 +1510,7 @@ pub fn rule_builder(props: &RuleBuilderProps) -> Html {
                                 contacts_loading.set(false);
                             }
                             Err(e) => {
-                                contacts_load_error
-                                    .set(Some(format!("parse error: {}", e)));
+                                contacts_load_error.set(Some(format!("parse error: {}", e)));
                                 contacts_loading.set(false);
                             }
                         },

@@ -99,7 +99,8 @@ pub struct ProfileResponse {
     estimated_monitoring_cost: f32,
     location: Option<String>,
     nearby_places: Option<String>,
-    plan_type: Option<String>,        // "assistant", "autopilot", or "byot"
+    plan_type: Option<String>,        // "assistant" or "autopilot"
+    own_twilio_enabled: bool,         // whether phone traffic routes through user's Twilio account
     phone_service_active: bool, // whether phone service is active - can be disabled for security
     llm_provider: Option<String>, // "openai" (default) or "tinfoil" - user's LLM provider preference
     auto_create_items: bool, // whether to auto-detect and create trackable items from emails/messages
@@ -250,6 +251,7 @@ pub async fn get_profile(
                 location: user_info.location,
                 nearby_places: user_info.nearby_places,
                 plan_type: user.plan_type,
+                own_twilio_enabled: user.own_twilio_enabled,
                 phone_service_active: user_settings.phone_service_active,
                 llm_provider: user_settings.llm_provider,
                 auto_create_items: user_settings.auto_create_items,
@@ -271,8 +273,8 @@ pub async fn get_profile(
     }
 }
 
-/// Returns available sending numbers for notification-only country users
-/// Allows them to choose between US messaging service and local numbers (FI, NL, GB, AU)
+/// Returns available Lightfriend sending numbers.
+/// Users can choose one of these, or enable own-Twilio routing separately.
 pub async fn get_available_sending_numbers(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -295,19 +297,7 @@ pub async fn get_available_sending_numbers(
 
     let is_notification_only =
         crate::utils::country::is_notification_only_country(&user.phone_number);
-    let has_byot = state.user_core.is_byot_user(auth_user.user_id);
-
-    // Only show selector for notification-only users without BYOT
-    let show_selector = is_notification_only && !has_byot;
-
-    if !show_selector {
-        return Ok(Json(json!({
-            "show_selector": false,
-            "available_numbers": [],
-            "current_preferred": user.preferred_number,
-            "is_notification_only": is_notification_only
-        })));
-    }
+    let own_twilio_enabled = state.user_core.is_byot_user(auth_user.user_id);
 
     // Build list of available numbers
     let mut available_numbers = Vec::new();
@@ -348,11 +338,37 @@ pub async fn get_available_sending_numbers(
         }));
     }
 
+    let current_preferred = if own_twilio_enabled {
+        user.preferred_number.clone()
+    } else {
+        let preferred_is_lightfriend_number =
+            user.preferred_number.as_ref().is_some_and(|preferred| {
+                available_numbers.iter().any(|number| {
+                    number
+                        .get("number")
+                        .and_then(|number| number.as_str())
+                        .is_some_and(|number| number == preferred)
+                })
+            });
+
+        if preferred_is_lightfriend_number {
+            user.preferred_number.clone()
+        } else {
+            available_numbers
+                .first()
+                .and_then(|number| number.get("number"))
+                .and_then(|number| number.as_str())
+                .map(|number| number.to_string())
+        }
+    };
+
     Ok(Json(json!({
         "show_selector": true,
         "available_numbers": available_numbers,
-        "current_preferred": user.preferred_number,
-        "is_notification_only": true
+        "current_preferred": current_preferred,
+        "is_notification_only": is_notification_only,
+        "own_twilio_enabled": own_twilio_enabled,
+        "has_twilio_credentials": state.user_repository.has_twilio_credentials(auth_user.user_id)
     })))
 }
 
@@ -864,33 +880,6 @@ pub async fn patch_profile_field(
                 )
             })?;
 
-            // Get user to check if they're in a notification-only country
-            let user = state
-                .user_core
-                .find_by_id(user_id)
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": format!("Database error: {}", e)})),
-                    )
-                })?
-                .ok_or_else(|| {
-                    (
-                        StatusCode::NOT_FOUND,
-                        Json(json!({"error": "User not found"})),
-                    )
-                })?;
-
-            // Only allow notification-only country users to change this setting
-            if !crate::utils::country::is_notification_only_country(&user.phone_number) {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(
-                        json!({"error": "This setting is only available for notification-only countries"}),
-                    ),
-                ));
-            }
-
             // Validate the number is one of the allowed local numbers
             let allowed_numbers = vec![
                 std::env::var("USA_PHONE").ok(),
@@ -919,6 +908,29 @@ pub async fn patch_profile_field(
                         Json(json!({"error": format!("Database error: {}", e)})),
                     )
                 })?;
+
+            state
+                .user_core
+                .update_own_twilio_enabled(user_id, false)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
+
+            if state
+                .user_core
+                .find_by_id(user_id)
+                .ok()
+                .flatten()
+                .is_some_and(|user| user.sub_tier.as_deref() == Some("tier 2"))
+            {
+                let _ = state.user_repository.update_sub_credits(
+                    user_id,
+                    crate::utils::plan_features::MONTHLY_CREDIT_BUDGET,
+                );
+            }
         }
         _ => {
             return Err((

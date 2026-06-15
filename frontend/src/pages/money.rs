@@ -1444,51 +1444,51 @@ pub fn credit_pricing(props: &FeatureListProps) -> Html {
 #[function_component(UnifiedPricing)]
 pub fn unified_pricing(props: &PricingProps) -> Html {
     let show_country_selector = use_state(|| false);
-    // Assistant plan prices (lower tier)
+    // Assistant plan prices (lower tier) - unified 39 across all countries
     let hosted_prices: HashMap<String, f64> = HashMap::from([
-        ("US".to_string(), 19.00),
-        ("CA".to_string(), 19.00),
-        ("FI".to_string(), 29.00),
-        ("NL".to_string(), 29.00),
-        ("GB".to_string(), 29.00),
-        ("AU".to_string(), 29.00),
+        ("US".to_string(), 39.00),
+        ("CA".to_string(), 39.00),
+        ("FI".to_string(), 39.00),
+        ("NL".to_string(), 39.00),
+        ("GB".to_string(), 39.00),
+        ("AU".to_string(), 39.00),
         // Notification-only countries
-        ("DE".to_string(), 29.00),
-        ("FR".to_string(), 29.00),
-        ("ES".to_string(), 29.00),
-        ("IT".to_string(), 29.00),
-        ("PT".to_string(), 29.00),
-        ("BE".to_string(), 29.00),
-        ("AT".to_string(), 29.00),
-        ("CH".to_string(), 29.00),
-        ("PL".to_string(), 29.00),
-        ("CZ".to_string(), 29.00),
-        ("SE".to_string(), 29.00),
-        ("DK".to_string(), 29.00),
-        ("NO".to_string(), 29.00),
-        ("IE".to_string(), 29.00),
-        ("NZ".to_string(), 29.00),
-        ("GR".to_string(), 29.00),
-        ("HU".to_string(), 29.00),
-        ("RO".to_string(), 29.00),
-        ("SK".to_string(), 29.00),
-        ("BG".to_string(), 29.00),
-        ("HR".to_string(), 29.00),
-        ("SI".to_string(), 29.00),
-        ("LT".to_string(), 29.00),
-        ("LV".to_string(), 29.00),
-        ("EE".to_string(), 29.00),
-        ("LU".to_string(), 29.00),
-        ("MT".to_string(), 29.00),
-        ("CY".to_string(), 29.00),
-        ("IS".to_string(), 29.00),
-        ("JP".to_string(), 29.00),
-        ("KR".to_string(), 29.00),
-        ("SG".to_string(), 29.00),
-        ("HK".to_string(), 29.00),
-        ("TW".to_string(), 29.00),
-        ("IL".to_string(), 29.00),
-        ("Other".to_string(), 19.00), // BYOT plan stays at 19 EUR
+        ("DE".to_string(), 39.00),
+        ("FR".to_string(), 39.00),
+        ("ES".to_string(), 39.00),
+        ("IT".to_string(), 39.00),
+        ("PT".to_string(), 39.00),
+        ("BE".to_string(), 39.00),
+        ("AT".to_string(), 39.00),
+        ("CH".to_string(), 39.00),
+        ("PL".to_string(), 39.00),
+        ("CZ".to_string(), 39.00),
+        ("SE".to_string(), 39.00),
+        ("DK".to_string(), 39.00),
+        ("NO".to_string(), 39.00),
+        ("IE".to_string(), 39.00),
+        ("NZ".to_string(), 39.00),
+        ("GR".to_string(), 39.00),
+        ("HU".to_string(), 39.00),
+        ("RO".to_string(), 39.00),
+        ("SK".to_string(), 39.00),
+        ("BG".to_string(), 39.00),
+        ("HR".to_string(), 39.00),
+        ("SI".to_string(), 39.00),
+        ("LT".to_string(), 39.00),
+        ("LV".to_string(), 39.00),
+        ("EE".to_string(), 39.00),
+        ("LU".to_string(), 39.00),
+        ("MT".to_string(), 39.00),
+        ("CY".to_string(), 39.00),
+        ("IS".to_string(), 39.00),
+        ("JP".to_string(), 39.00),
+        ("KR".to_string(), 39.00),
+        ("SG".to_string(), 39.00),
+        ("HK".to_string(), 39.00),
+        ("TW".to_string(), 39.00),
+        ("IL".to_string(), 39.00),
+        ("Other".to_string(), 39.00), // BYOT plan
     ]);
     let _hosted_total_price = hosted_prices.get(&props.selected_country).unwrap_or(&0.0);
     let pricing_css = r#"
@@ -1523,6 +1523,15 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
     .hosted-plans-section, .self-hosted-plans-section {
         margin: 4rem auto;
         max-width: 1200px;
+    }
+    .lifestyle-cost-context {
+        text-align: center;
+        color: #888;
+        font-size: 1rem;
+        margin-bottom: 0.5rem;
+    }
+    .lifestyle-cost-context strong {
+        color: #fff;
     }
     .section-title {
         text-align: center;
@@ -1969,7 +1978,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                     html! {}
                 }
             }
-            <h2 class="section-title">{"Plans"}</h2>
+            <h2 class="section-title">{"Choose your lifestyle"}</h2>
             <div class="pricing-grid">
                 {
                     if props.selected_country == "US" || props.selected_country == "CA" {
@@ -1979,7 +1988,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             Feature { text: "Connect WhatsApp, email, Telegram, Signal".to_string(), sub_items: vec![] },
                             Feature { text: "Set reminders and scheduled alerts".to_string(), sub_items: vec![] },
                             Feature { text: "Web search, ask questions, get answers".to_string(), sub_items: vec![] },
-                            Feature { text: "$25/month in messaging credits included".to_string(), sub_items: vec![] },
+                            Feature { text: "Generous messaging included".to_string(), sub_items: vec![] },
                         ];
                         let autopilot_features = vec![
                             Feature { text: "Everything in Assistant, plus:".to_string(), sub_items: vec![] },
@@ -1987,14 +1996,14 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             Feature { text: "Only important messages reach you".to_string(), sub_items: vec![] },
                             Feature { text: "Automatic tracking of deadlines and commitments".to_string(), sub_items: vec![] },
                             Feature { text: "Daily digests and custom automation rules".to_string(), sub_items: vec![] },
-                            Feature { text: "$25/month in messaging credits included".to_string(), sub_items: vec![] },
+                            Feature { text: "Generous messaging included".to_string(), sub_items: vec![] },
                         ];
                         html! {
                             <>
                                 <PricingCard
                                     plan_name={"Assistant Plan"}
                                     best_for={"Text and call your AI assistant. Set reminders, ask questions."}
-                                    price={19.0}
+                                    price={39.0}
                                     currency={"$"}
                                     period={"/month"}
                                     features={assistant_features}
@@ -2014,7 +2023,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <PricingCard
                                     plan_name={"Autopilot Plan"}
                                     best_for={"Lightfriend watches your messages and only alerts you when it matters."}
-                                    price={29.0}
+                                    price={59.0}
                                     currency={"$"}
                                     period={"/month"}
                                     features={autopilot_features}
@@ -2044,7 +2053,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             <PricingCard
                                 plan_name={"BYOT Plan"}
                                 best_for={"All Autopilot features. Bring your own Twilio number, pay messaging directly."}
-                                price={19.0}
+                                price={39.0}
                                 currency={"€"}
                                 period={"/month"}
                                 features={byot_features}
@@ -2074,7 +2083,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             Feature { text: "Connect WhatsApp, email, Telegram, Signal".to_string(), sub_items: vec![] },
                             Feature { text: "Set reminders and scheduled alerts".to_string(), sub_items: vec![] },
                             Feature { text: "Web search, ask questions, get answers".to_string(), sub_items: vec![] },
-                            Feature { text: "$25/month in messaging credits included".to_string(), sub_items: vec![] },
+                            Feature { text: "Generous messaging included".to_string(), sub_items: vec![] },
                         ];
                         let autopilot_features = vec![
                             Feature { text: "Everything in Assistant, plus:".to_string(), sub_items: vec![] },
@@ -2082,7 +2091,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                             Feature { text: "Only important messages reach you".to_string(), sub_items: vec![] },
                             Feature { text: "Automatic tracking of deadlines and commitments".to_string(), sub_items: vec![] },
                             Feature { text: "Daily digests and custom automation rules".to_string(), sub_items: vec![] },
-                            Feature { text: "$25/month in messaging credits included".to_string(), sub_items: vec![] },
+                            Feature { text: "Generous messaging included".to_string(), sub_items: vec![] },
                         ];
 
                         let byot_features = vec![
@@ -2096,7 +2105,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <PricingCard
                                     plan_name={"Assistant Plan"}
                                     best_for={"Text and call your AI assistant. Set reminders, ask questions."}
-                                    price={29.0}
+                                    price={39.0}
                                     currency={"€"}
                                     period={"/month"}
                                     features={assistant_features}
@@ -2117,7 +2126,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <PricingCard
                                     plan_name={"Autopilot Plan"}
                                     best_for={"Lightfriend watches your messages and only alerts you when it matters."}
-                                    price={49.0}
+                                    price={59.0}
                                     currency={"€"}
                                     period={"/month"}
                                     features={autopilot_features}
@@ -2140,7 +2149,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                     <PricingCard
                                         plan_name={"BYOT Plan"}
                                         best_for={"All Autopilot features. Bring your own Twilio number, pay messaging directly."}
-                                        price={19.0}
+                                        price={39.0}
                                         currency={"€"}
                                         period={"/month"}
                                         features={byot_features}
@@ -2189,7 +2198,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Assistant (29 EUR) and Autopilot (49 EUR) both include the same message credits. Phone number included. No hidden fees."}</p>
+                                    <p>{"Plans bill monthly. Assistant (39 EUR) and Autopilot (59 EUR) both include the same message credits. Phone number included. No hidden fees."}</p>
                                 </details>
                                 <details>
                                     <summary>{"What's the difference between Assistant and Autopilot?"}</summary>
@@ -2206,7 +2215,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Assistant (29 EUR) and Autopilot (49 EUR) both include the same message credits. Messages sent from a US number. No hidden fees."}</p>
+                                    <p>{"Plans bill monthly. Assistant (39 EUR) and Autopilot (59 EUR) both include the same message credits. Messages sent from a US number. No hidden fees."}</p>
                                 </details>
                                 <details>
                                     <summary>{"What's the difference between Assistant and Autopilot?"}</summary>

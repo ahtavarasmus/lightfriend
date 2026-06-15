@@ -199,7 +199,7 @@ body {
 }
 
 .nav-landing .nav-logo {
-    font-size: 2.8rem;
+    font-size: 2rem;
 }
 .nav-logo:hover {
     opacity: 0.8;
@@ -2491,7 +2491,30 @@ button[type="submit"].loading::after {
 
 .subscribe-prompt p {
     color: #999;
-    margin-bottom: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.subscribe-prompt .stripe-pricing-table-wrap {
+    width: min(1120px, 100%);
+    margin: 0 auto;
+}
+
+.stripe-pricing-table-wrap stripe-pricing-table {
+    display: block;
+    width: 100%;
+}
+
+.stripe-pricing-loading,
+.stripe-pricing-error {
+    min-height: 160px;
+    display: grid;
+    place-items: center;
+    color: #aaa;
+    font-size: 0.95rem;
+}
+
+.stripe-pricing-error {
+    color: #ffb4a8;
 }
 
 .subscribe-link {

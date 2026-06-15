@@ -99,8 +99,7 @@ impl<T: TwilioClient> TwilioMessageService<T> {
     ///
     /// Credential resolution logic:
     /// 1. BYOT users always use their own credentials
-    /// 2. Users in local-number or notification-only countries use global credentials
-    /// 3. Other users must have their own credentials
+    /// 2. Everyone else uses Lightfriend's global credentials
     pub fn resolve_credentials(
         &self,
         user: &User,
@@ -114,25 +113,12 @@ impl<T: TwilioClient> TwilioMessageService<T> {
             return Ok(TwilioCredentials::new(account_sid, auth_token));
         }
 
-        // Check if user is in a supported country that uses global credentials
-        let is_local = crate::utils::country::is_local_number_country(&user.phone_number);
-        let is_notification_only =
-            crate::utils::country::is_notification_only_country(&user.phone_number);
-
-        if is_local || is_notification_only {
-            // Use global Twilio credentials
-            let account_sid = env::var("TWILIO_ACCOUNT_SID")
-                .map_err(|_| TwilioMessageError::MissingEnvVar("TWILIO_ACCOUNT_SID".into()))?;
-            let auth_token = env::var("TWILIO_AUTH_TOKEN")
-                .map_err(|_| TwilioMessageError::MissingEnvVar("TWILIO_AUTH_TOKEN".into()))?;
-            return Ok(TwilioCredentials::new(account_sid, auth_token));
-        }
-
-        // Non-supported country must have their own credentials
-        let (account_sid, auth_token) = self
-            .user_repository
-            .get_twilio_credentials(user.id)
-            .map_err(|_| TwilioMessageError::NoCredentials)?;
+        // Non-BYOT users route through Lightfriend's Twilio account, regardless
+        // of their own phone country.
+        let account_sid = env::var("TWILIO_ACCOUNT_SID")
+            .map_err(|_| TwilioMessageError::MissingEnvVar("TWILIO_ACCOUNT_SID".into()))?;
+        let auth_token = env::var("TWILIO_AUTH_TOKEN")
+            .map_err(|_| TwilioMessageError::MissingEnvVar("TWILIO_AUTH_TOKEN".into()))?;
         Ok(TwilioCredentials::new(account_sid, auth_token))
     }
 
@@ -155,6 +141,18 @@ impl<T: TwilioClient> TwilioMessageService<T> {
         let mut from_number: Option<String> = None;
         let mut use_messaging_service = false;
         let mut update_preferred = false;
+        let lightfriend_numbers = [
+            env::var("USA_PHONE").ok(),
+            env::var("CAN_PHONE").ok(),
+            env::var("FIN_PHONE").ok(),
+            env::var("NL_PHONE").ok(),
+            env::var("GB_PHONE").ok(),
+            env::var("AUS_PHONE").ok(),
+        ];
+        let selected_lightfriend_number = lightfriend_numbers
+            .iter()
+            .flatten()
+            .find(|number| number.as_str() == preferred);
 
         // BYOT users always use their own preferred number (regardless of country)
         if has_byot_credentials {
@@ -172,23 +170,33 @@ impl<T: TwilioClient> TwilioMessageService<T> {
                 );
             }
         }
-        // Notification-only countries without BYOT: check if user selected US or local number
-        else if is_notification_only {
+        // If the user explicitly selected a Lightfriend number, respect it.
+        // The US number is sent through the messaging service; other configured
+        // Lightfriend numbers are sent as From numbers.
+        else if let Some(selected_number) = selected_lightfriend_number {
             let us_phone = env::var("USA_PHONE").ok();
-            if preferred.is_empty() || us_phone.as_deref() == Some(preferred) {
+            if us_phone.as_deref() == Some(selected_number.as_str()) {
                 use_messaging_service = true;
                 tracing::info!(
-                    "Using US messaging service for notification-only country user {}",
+                    "Using US messaging service for user {} with selected US number",
                     user.id
                 );
             } else {
-                from_number = Some(preferred.to_string());
+                from_number = Some(selected_number.to_string());
                 tracing::info!(
-                    "Using selected local number {} for notification-only user {}",
-                    preferred,
+                    "Using selected Lightfriend number {} for user {}",
+                    selected_number,
                     user.id
                 );
             }
+        }
+        // Notification-only countries without BYOT: check if user selected US or local number
+        else if is_notification_only {
+            use_messaging_service = true;
+            tracing::info!(
+                "Using US messaging service for notification-only country user {}",
+                user.id
+            );
         } else if let Some(ref c) = country {
             match c.as_str() {
                 "US" => {
@@ -250,9 +258,9 @@ impl<T: TwilioClient> TwilioMessageService<T> {
                     }
                 }
                 _ => {
-                    // Unsupported country without BYOT - no From number available
-                    tracing::warn!(
-                        "No From number configured for country {} (user {})",
+                    use_messaging_service = true;
+                    tracing::info!(
+                        "Using US messaging service for country {} user {}",
                         c,
                         user.id
                     );
@@ -355,7 +363,7 @@ impl<T: TwilioClient> TwilioMessageService<T> {
         );
 
         // Log initial status to database
-        self.log_message_status(user, &message_sid, from_number.as_deref())?;
+        self.log_message_status(user, &message_sid, from_number.as_deref(), body)?;
 
         Ok(message_sid)
     }
@@ -439,6 +447,8 @@ impl<T: TwilioClient> TwilioMessageService<T> {
             );
         }
 
+        let body_for_status = options.body.clone();
+
         // Send the message
         let result = self
             .twilio_client
@@ -448,7 +458,12 @@ impl<T: TwilioClient> TwilioMessageService<T> {
         tracing::debug!("Successfully sent message with SID: {}", result.message_sid);
 
         // Log initial status to database
-        self.log_message_status(user, &result.message_sid, from_number.as_deref())?;
+        self.log_message_status(
+            user,
+            &result.message_sid,
+            from_number.as_deref(),
+            &body_for_status,
+        )?;
 
         Ok(MessageSendResult {
             message_sid: result.message_sid,
@@ -553,6 +568,7 @@ impl<T: TwilioClient> TwilioMessageService<T> {
         user: &User,
         message_sid: &str,
         from_number: Option<&str>,
+        body: &str,
     ) -> Result<(), TwilioMessageError> {
         let mut conn = match self.db_pool.get() {
             Ok(c) => c,
@@ -567,6 +583,18 @@ impl<T: TwilioClient> TwilioMessageService<T> {
             .unwrap()
             .as_secs() as i32;
 
+        let encrypted_body = match crate::utils::encryption::encrypt(body) {
+            Ok(encrypted) => Some(encrypted),
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to encrypt outbound SMS body for fallback replay (sid={}): {}",
+                    message_sid,
+                    e
+                );
+                None
+            }
+        };
+
         let new_status = NewMessageStatusLog {
             message_sid: message_sid.to_string(),
             user_id: user.id,
@@ -580,6 +608,7 @@ impl<T: TwilioClient> TwilioMessageService<T> {
             updated_at: now,
             price: None,
             price_unit: None,
+            encrypted_body,
         };
 
         if let Err(e) = diesel::insert_into(message_status_log::table)

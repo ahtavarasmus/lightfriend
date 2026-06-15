@@ -164,21 +164,15 @@ pub async fn validate_twilio_signature(
         }
     };
 
-    // BYOT users with their own credentials always use their own account
+    // BYOT users with their own credentials always use their own account.
+    // Everyone else receives callbacks from Lightfriend's Twilio account.
     let auth_token = if state.user_core.is_byot_user(user.id) {
         match state.user_repository.get_twilio_credentials(user.id) {
             Ok((_, token)) => token,
             Err(_) => return Err(StatusCode::UNAUTHORIZED),
         }
-    } else if crate::utils::country::is_local_number_country(&user.phone_number)
-        || crate::utils::country::is_notification_only_country(&user.phone_number)
-    {
-        std::env::var("TWILIO_AUTH_TOKEN").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     } else {
-        match state.user_repository.get_twilio_credentials(user.id) {
-            Ok((_, token)) => token,
-            Err(_) => return Err(StatusCode::UNAUTHORIZED),
-        }
+        std::env::var("TWILIO_AUTH_TOKEN").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     };
 
     let url = match std::env::var("SERVER_URL") {

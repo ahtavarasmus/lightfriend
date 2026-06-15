@@ -269,7 +269,10 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                 // navigated away mid-login and came back) but our local state
                                 // forgot, resume the "connecting" UI so the countdown + cancel
                                 // button are visible again.
-                                if !status.connected && status.status == "connecting" && !*is_connecting {
+                                if !status.connected
+                                    && status.status == "connecting"
+                                    && !*is_connecting
+                                {
                                     is_connecting.set(true);
                                     was_connecting.set(true);
                                 }
@@ -535,9 +538,7 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                 }
                                 Err(_) => {
                                     is_connecting.set(false);
-                                    error.set(Some(
-                                        "Failed to parse pairing response".to_string(),
-                                    ));
+                                    error.set(Some("Failed to parse pairing response".to_string()));
                                 }
                             }
                         } else {

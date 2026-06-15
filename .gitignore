@@ -8,6 +8,7 @@ backend/database.db
 backend/backend/
 backend/uploads/
 backend/target/
+backend/stripe_webhook_logic/target/
 tools/attestation-verifier/target/
 .env
 docs/OPERATOR_RUNBOOK.md
@@ -48,3 +49,8 @@ contracts/out/
 .gstack/
 .env.local
 scripts/__pycache__/
+
+# Local/generic agent skills
+.agents/skills/senior-devops/
+.agents/skills/senior-security/
+.agents/skills/skill-creator/
