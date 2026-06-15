@@ -26,12 +26,14 @@ WORKDIR /app
 # Generate recipe for dependency caching
 FROM backend-builder AS planner
 COPY backend/Cargo.toml backend/Cargo.lock ./
+COPY backend/stripe_webhook_logic ./stripe_webhook_logic
 COPY backend/src ./src
 RUN cargo chef prepare --recipe-path recipe.json
 
 # Build dependencies (cached unless Cargo.toml/lock changes)
 FROM backend-builder AS cacher
 COPY --from=planner /app/recipe.json recipe.json
+COPY backend/stripe_webhook_logic ./stripe_webhook_logic
 RUN apt-get update && apt-get install -y \
     libpq-dev \
     pkg-config \
