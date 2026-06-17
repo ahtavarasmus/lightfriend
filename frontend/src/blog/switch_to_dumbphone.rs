@@ -1,7 +1,5 @@
 use crate::utils::seo::{use_seo, SeoMeta};
-use crate::Route;
 use yew::prelude::*;
-use yew_router::components::Link;
 
 #[function_component(SwitchToDumbphoneGuide)]
 pub fn switch_to_dumbphone_guide() -> Html {
@@ -70,9 +68,9 @@ pub fn switch_to_dumbphone_guide() -> Html {
                 </ol>
                 <div class="blog-cta">
                     <h3>{"Ready to Switch to a Dumbphone?"}</h3>
-                    <Link<Route> to={Route::Pricing} classes="forward-link">
+                    <a href="/#plans" class="forward-link">
                         <button class="hero-cta">{"Get Started with Lightfriend"}</button>
-                    </Link<Route>>
+                    </a>
                 </div>
             </section>
             <style>

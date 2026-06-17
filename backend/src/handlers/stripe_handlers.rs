@@ -77,8 +77,9 @@ fn pricing_table_config() -> Result<(String, String), (StatusCode, Json<Value>)>
     Ok((pricing_table_id, publishable_key))
 }
 
-/// Idempotent subscription setup. Safe to call multiple times.
-/// Uses billing period end as idempotency key - if already set to current period, skips.
+/// Idempotent subscription entitlement setup. Safe to call multiple times.
+/// Stripe webhooks update access and Stripe renewal metadata only; Lightfriend
+/// grants included usage through its own monthly usage windows.
 async fn setup_user_subscription(
     state: &Arc<AppState>,
     user_id: i32,
@@ -87,19 +88,6 @@ async fn setup_user_subscription(
     current_period_end: i64,
     _phone_country: Option<&str>,
 ) -> Result<(), String> {
-    let same_billing_period = state
-        .user_core
-        .get_next_billing_date(user_id)
-        .ok()
-        .flatten()
-        .is_some_and(|existing| existing == current_period_end as i32);
-
-    let user = state
-        .user_core
-        .find_by_id(user_id)
-        .map_err(|e| format!("Failed to fetch user {}: {}", user_id, e))?
-        .ok_or_else(|| format!("User {} not found", user_id))?;
-
     // Set plan_type based on product ID. Unknown legacy products only map to
     // Autopilot while their pre-cutoff Stripe subscription remains active.
     let plan_type =
@@ -133,31 +121,9 @@ async fn setup_user_subscription(
         ));
     }
 
-    // Calculate credits: fixed budget for hosted phone mode only. Customers
-    // using their own Twilio account pay Twilio directly, regardless of plan.
-    use crate::utils::plan_features::MONTHLY_CREDIT_BUDGET;
-    let credits: f32 = if user.own_twilio_enabled {
-        0.0
-    } else {
-        MONTHLY_CREDIT_BUDGET // 25.0 for all hosted plans
-    };
-
-    if same_billing_period {
-        tracing::info!(
-            "User {} already has billing period ending {}, skipping monthly credit reset",
-            user_id,
-            current_period_end
-        );
-    } else if let Err(e) = state.user_repository.update_sub_credits(user_id, credits) {
-        return Err(format!(
-            "Failed to set monthly credits for user {}: {}",
-            user_id, e
-        ));
-    } else {
-        tracing::info!("Set {} monthly credits for user {}", credits, user_id);
-    }
-
-    // Set next billing date (this is what makes it idempotent)
+    // Store Stripe's next billing date for billing display/portal context. This
+    // can be monthly or yearly and is intentionally separate from the internal
+    // included-usage reset window.
     if let Err(e) = state
         .user_core
         .update_next_billing_date(user_id, current_period_end as i32)
@@ -175,11 +141,9 @@ async fn setup_user_subscription(
     }
 
     tracing::info!(
-        "Setup subscription for user {}: plan={}, credits={}, own_twilio_enabled={}, product={}",
+        "Setup subscription entitlement for user {}: plan={}, product={}",
         user_id,
         plan_type,
-        credits,
-        user.own_twilio_enabled,
         product_id
     );
 
@@ -560,7 +524,7 @@ pub async fn create_guest_checkout(
 
     // Success URL redirects to password setup page with session_id
     let success_url = format!("{}/subscription-success", domain_url);
-    let cancel_url = format!("{}/pricing?checkout=canceled", domain_url);
+    let cancel_url = format!("{}/?checkout=canceled#plans", domain_url);
 
     // Build metadata
     let mut metadata = std::collections::HashMap::new();
@@ -1425,7 +1389,8 @@ pub async fn stripe_webhook(
                             return Ok(StatusCode::OK);
                         }
                         stripe_webhook_logic::SubscriptionDeletedDecision::ClearSubscription => {
-                        // No active subscriptions left, clear subscription tier, country, plan_type, credits, and billing date
+                        // No active subscriptions left, clear entitlement,
+                        // included usage, and Stripe billing date.
                         tracing::info!(
                             "No active plan subscriptions remaining, clearing subscription info"
                         );
@@ -1439,9 +1404,8 @@ pub async fn stripe_webhook(
                         if let Err(e) = state.user_repository.update_plan_type(user.id, None) {
                             tracing::error!("Failed to clear plan_type: {}", e);
                         }
-                        // Clear monthly credits
-                        if let Err(e) = state.user_repository.update_sub_credits(user.id, 0.0) {
-                            tracing::error!("Failed to clear subscription credits: {}", e);
+                        if let Err(e) = state.user_repository.clear_included_usage_window(user.id) {
+                            tracing::error!("Failed to clear included usage window: {}", e);
                         }
                         // Clear next billing date
                         if let Err(e) = state.user_core.update_next_billing_date(user.id, 0) {

@@ -243,7 +243,6 @@ impl BlogStore {
         // Static pages
         let static_pages = [
             ("/", "1.0", "weekly"),
-            ("/pricing", "0.9", "weekly"),
             ("/faq", "0.7", "monthly"),
             ("/terms", "0.4", "monthly"),
             ("/privacy", "0.4", "monthly"),

@@ -15,7 +15,7 @@ pub fn uses_hosted_credits(plan_type: Option<&str>) -> bool {
     matches!(plan_type, Some("assistant") | Some("autopilot"))
 }
 
-/// Monthly credit budget for all hosted plans.
+/// Included usage budget for each internal monthly hosted-usage window.
 /// Credits are abstract units - Twilio prices (in USD) are deducted directly with a margin.
 pub const MONTHLY_CREDIT_BUDGET: f32 = 25.0;
 

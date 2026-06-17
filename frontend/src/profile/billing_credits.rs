@@ -562,7 +562,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                 <>
                                     <div style="display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 12px;">
                                         <div>
-                                            <div style="color: #888; font-size: 0.8rem; margin-bottom: 4px;">{"Monthly credits"}</div>
+                                            <div style="color: #888; font-size: 0.8rem; margin-bottom: 4px;">{"Included usage this month"}</div>
                                             <div style="color: #4ade80; font-size: 1.4rem; font-weight: 600;">
                                                 {format!("${:.2}", user_profile.credits_left)}
                                             </div>
@@ -575,12 +575,14 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                         </div>
                                     </div>
                                     {
-                                        if let Some(days) = user_profile.days_until_billing {
-                                            let billing_date = chrono::Utc::now() + chrono::Duration::days(days as i64);
-                                            let formatted_date = billing_date.format("%B %d, %Y").to_string();
+                                        if let Some(renews_at) = user_profile.included_usage_renews_at {
+                                            let reset_date = chrono::DateTime::<chrono::Utc>::from_timestamp(renews_at as i64, 0)
+                                                .unwrap_or_else(chrono::Utc::now);
+                                            let formatted_date = reset_date.format("%B %d, %Y").to_string();
+                                            let days = user_profile.days_until_usage_reset.unwrap_or(0);
                                             html! {
                                                 <div style="color: #888; font-size: 0.85rem;">
-                                                    {"Resets "}
+                                                    {"Included usage renews "}
                                                     <span style="color: #ccc;">{formatted_date}</span>
                                                     {format!(" ({} days)", days)}
                                                 </div>
@@ -611,7 +613,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                             if entries.is_empty() {
                                 html! {
                                     <div style="color: #666; font-size: 0.9rem; padding: 8px 0;">
-                                        {"No usage recorded this billing period."}
+                                        {"No usage recorded in this included-usage window."}
                                     </div>
                                 }
                             } else {

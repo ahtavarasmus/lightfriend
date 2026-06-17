@@ -257,7 +257,7 @@ pub fn render_blog_post(post: &BlogPost, related: &[BlogPost]) -> String {
             </div>
             <div class="nav-right">
                 <a href="/blog" class="nav-link">Blog</a>
-                <a href="/pricing" class="nav-link">Pricing</a>
+                <a href="/#plans" class="nav-link">Pricing</a>
                 <a href="/login" class="nav-link">Login</a>
             </div>
         </div>
@@ -279,7 +279,7 @@ pub fn render_blog_post(post: &BlogPost, related: &[BlogPost]) -> String {
         {related_html}
         <div class="blog-cta">
             <h3>Works with any phone that can text</h3>
-            <a href="/pricing" class="hero-cta">Get Started</a>
+            <a href="/#plans" class="hero-cta">Get Started</a>
             <p>No smartphone needed. No app to install.</p>
         </div>
     </div>
@@ -287,7 +287,7 @@ pub fn render_blog_post(post: &BlogPost, related: &[BlogPost]) -> String {
         <div class="footer-links">
             <a href="/">Home</a>
             <a href="/blog">Blog</a>
-            <a href="/pricing">Pricing</a>
+            <a href="/#plans">Pricing</a>
             <a href="/terms">Terms</a>
             <a href="/privacy">Privacy</a>
             <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer">GitHub</a>
@@ -432,7 +432,7 @@ pub fn render_blog_index(
             </div>
             <div class="nav-right">
                 <a href="/blog" class="nav-link">Blog</a>
-                <a href="/pricing" class="nav-link">Pricing</a>
+                <a href="/#plans" class="nav-link">Pricing</a>
                 <a href="/login" class="nav-link">Login</a>
             </div>
         </div>
@@ -451,7 +451,7 @@ pub fn render_blog_index(
         </section>
         <div class="blog-cta">
             <h3>Works with any phone that can text</h3>
-            <a href="/pricing" class="hero-cta">Get Started</a>
+            <a href="/#plans" class="hero-cta">Get Started</a>
             <p>No smartphone needed. No app to install.</p>
         </div>
     </div>
@@ -459,7 +459,7 @@ pub fn render_blog_index(
         <div class="footer-links">
             <a href="/">Home</a>
             <a href="/blog">Blog</a>
-            <a href="/pricing">Pricing</a>
+            <a href="/#plans">Pricing</a>
             <a href="/terms">Terms</a>
             <a href="/privacy">Privacy</a>
             <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer">GitHub</a>

@@ -672,9 +672,9 @@ pub mod login {
                                 </div>
                                 <div class="auth-redirect">
                                     {"New? "}
-                                    <Link<Route> to={Route::Pricing}>
+                                    <a href="/#plans">
                                         {"Subscribe here →"}
-                                    </Link<Route>>
+                                    </a>
                                 </div>
                             </>
                         }

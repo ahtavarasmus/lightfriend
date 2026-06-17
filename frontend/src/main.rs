@@ -40,7 +40,6 @@ mod pages {
     pub mod home;
     pub mod landing;
     pub mod lightphone3_whatsapp_guide;
-    pub mod money;
     pub mod prompt_injection_safe;
     pub mod signal_on_dumbphone;
     pub mod subscription_success;
@@ -313,7 +312,7 @@ pub fn pricing_wrapper() -> Html {
     use_seo(SeoMeta {
         title: "Pricing \u{2013} Lightfriend AI Assistant for Dumbphones",
         description: "Lightfriend pricing plans. AI that watches your WhatsApp, Telegram, Signal, and email - only interrupts when it matters. Works with any phone including dumbphones. Privacy verifiable on blockchain.",
-        canonical: "https://lightfriend.ai/pricing",
+        canonical: "https://lightfriend.ai/#plans",
         og_type: "website",
     });
     {

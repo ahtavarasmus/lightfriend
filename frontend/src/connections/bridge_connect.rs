@@ -997,7 +997,7 @@ pub fn bridge_connect(props: &BridgeConnectProps) -> Html {
                                 <div class="upgrade-prompt">
                                     <div class="upgrade-content">
                                         <h3>{format!("Upgrade to Enable {} Integration", bridge_name)}</h3>
-                                        <a href="/pricing" class="upgrade-button">
+                                        <a href="/#plans" class="upgrade-button">
                                             {"View Pricing Plans"}
                                         </a>
                                     </div>

@@ -1,7 +1,5 @@
 use crate::utils::seo::{use_seo, SeoMeta};
-use crate::Route;
 use yew::prelude::*;
-use yew_router::components::Link;
 
 #[function_component(ReadMoreAccidentallyGuide)]
 pub fn read_more_accidentally_guide() -> Html {
@@ -60,9 +58,9 @@ pub fn read_more_accidentally_guide() -> Html {
                 </ol>
                 <div class="blog-cta">
                     <h3>{"Ready to Accidentally Become a Bookworm?"}</h3>
-                    <Link<Route> to={Route::Pricing} classes="forward-link">
+                    <a href="/#plans" class="forward-link">
                         <button class="hero-cta">{"Get Started with Lightfriend"}</button>
-                    </Link<Route>>
+                    </a>
                 </div>
             </section>
             <style>

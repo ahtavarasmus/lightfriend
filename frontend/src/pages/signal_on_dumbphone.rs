@@ -149,9 +149,9 @@ pub fn signal_on_dumbphone() -> Html {
 
                 <div class="blog-cta">
                     <h3>{"Get Signal on Your Dumbphone"}</h3>
-                    <Link<Route> to={Route::Pricing} classes="forward-link">
+                    <a href="/#plans" class="forward-link">
                         <button class="hero-cta">{"See Plans"}</button>
-                    </Link<Route>>
+                    </a>
                     <p>{"Works with any phone that can send a text message."}</p>
                 </div>
             </section>

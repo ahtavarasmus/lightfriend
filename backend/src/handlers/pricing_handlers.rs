@@ -415,11 +415,11 @@ pub struct DashboardCreditsResponse {
     pub has_local_numbers: bool,
     /// User's plan type: "assistant", "autopilot", or "byot"
     pub plan_type: Option<String>,
-    /// Monthly credits info (if user has subscription)
+    /// Included usage info for the current Lightfriend usage window.
     pub monthly: Option<CreditEquivalents>,
     /// Overage credits info (if user has overage credits)
     pub overage: Option<CreditEquivalents>,
-    /// Days until billing resets
+    /// Days until included usage resets.
     pub days_until_billing: Option<i32>,
 }
 
@@ -471,6 +471,8 @@ pub async fn get_dashboard_credits(
             axum::http::StatusCode::NOT_FOUND,
             "User not found".to_string(),
         ))?;
+    let user = crate::utils::usage::ensure_current_included_usage_window(&state, &user)
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
     // Determine country
     let country_code = crate::utils::country::get_country_code_from_phone(&user.phone_number)
@@ -563,7 +565,7 @@ pub async fn get_dashboard_credits(
         }
     };
 
-    // Monthly credits (credits_left)
+    // Included usage remaining in the current Lightfriend usage window.
     let monthly = if user.credits_left > 0.0 || user.sub_tier.is_some() {
         Some(calculate_equivalents(user.credits_left, !is_us_ca))
     } else {
@@ -579,10 +581,10 @@ pub async fn get_dashboard_credits(
         None
     };
 
-    // Calculate days until billing
-    let days_until_billing = if let Some(next_billing) = user.next_billing_date_timestamp {
+    // Calculate days until included usage resets.
+    let days_until_billing = if let Some(usage_reset) = user.included_usage_window_end_timestamp {
         let now = chrono::Utc::now().timestamp() as i32;
-        let days = (next_billing - now) / 86400;
+        let days = (usage_reset - now) / 86400;
         Some(days.max(0))
     } else {
         None
@@ -679,14 +681,14 @@ pub struct UsageProjectionResponse {
     /// Voice as percentage of plan capacity
     pub voice_percentage: f32,
 
-    // === ACTUAL USAGE THIS BILLING PERIOD ===
-    /// Actual notifications used this billing period (not projected)
+    // === ACTUAL USAGE THIS INCLUDED-USAGE WINDOW ===
+    /// Actual notifications used this included-usage window (not projected)
     pub actual_notifications_used: i32,
-    /// Actual voice minutes used this billing period
+    /// Actual voice minutes used this included-usage window
     pub actual_voice_mins_used: i32,
-    /// Actual messages sent this billing period
+    /// Actual messages sent this included-usage window
     pub actual_messages_used: i32,
-    /// Actual digests sent this billing period
+    /// Actual digests sent this included-usage window
     pub actual_digests_used: i32,
 }
 
@@ -731,6 +733,8 @@ pub async fn get_usage_projection(
             axum::http::StatusCode::NOT_FOUND,
             "User not found".to_string(),
         ))?;
+    let user = crate::utils::usage::ensure_current_included_usage_window(&state, &user)
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
     // Digests have been removed - always zero
     let digest_count: i32 = 0;
@@ -906,17 +910,12 @@ pub async fn get_usage_projection(
             .unwrap()
             .as_secs() as i64;
 
-        // Calculate billing period start
-        let billing_period_start: i64 = if let Some(next_billing) = user.next_billing_date_timestamp
-        {
-            // Billing period started 30 days before next billing date
-            (next_billing as i64) - 2_592_000 // 30 days in seconds
-        } else {
-            // No billing date set, default to 30 days ago
-            now - 2_592_000
-        };
+        let billing_period_start: i64 = user
+            .included_usage_window_start_timestamp
+            .map(i64::from)
+            .unwrap_or(now - i64::from(crate::utils::usage::INCLUDED_USAGE_WINDOW_SECONDS));
 
-        // Actual SMS notifications this billing period
+        // Actual SMS notifications this included-usage window
         let actual_sms_notis: i64 = usage_logs::table
             .filter(usage_logs::user_id.eq(auth_user.user_id))
             .filter(
@@ -931,7 +930,7 @@ pub async fn get_usage_projection(
             .get_result(&mut conn)
             .unwrap_or(0);
 
-        // Actual call notifications this billing period
+        // Actual call notifications this included-usage window
         let actual_call_notis: i64 = usage_logs::table
             .filter(usage_logs::user_id.eq(auth_user.user_id))
             .filter(
@@ -944,7 +943,7 @@ pub async fn get_usage_projection(
             .get_result(&mut conn)
             .unwrap_or(0);
 
-        // Actual messages this billing period
+        // Actual messages this included-usage window
         let actual_msgs: i64 = usage_logs::table
             .filter(usage_logs::user_id.eq(auth_user.user_id))
             .filter(
@@ -957,7 +956,7 @@ pub async fn get_usage_projection(
             .get_result(&mut conn)
             .unwrap_or(0);
 
-        // Actual voice minutes this billing period
+        // Actual voice minutes this included-usage window
         let actual_voice_secs: Option<f32> = usage_logs::table
             .select(sql::<diesel::sql_types::Nullable<Float>>(
                 "CAST(SUM(COALESCE(call_duration, 0)) AS real)",
@@ -972,7 +971,7 @@ pub async fn get_usage_projection(
             .first(&mut conn)
             .unwrap_or(None);
 
-        // Actual digests this billing period
+        // Actual digests this included-usage window
         let actual_digs: i64 = usage_logs::table
             .filter(usage_logs::user_id.eq(auth_user.user_id))
             .filter(usage_logs::activity_type.eq("digest"))
@@ -1006,10 +1005,10 @@ pub async fn get_usage_projection(
         0.0
     };
 
-    // Calculate days until billing
-    let days_until_billing = if let Some(next_billing) = user.next_billing_date_timestamp {
+    // Calculate days until included usage resets.
+    let days_until_billing = if let Some(usage_reset) = user.included_usage_window_end_timestamp {
         let now = chrono::Utc::now().timestamp() as i32;
-        let days = (next_billing - now) / 86400;
+        let days = (usage_reset - now) / 86400;
         Some(days.max(0))
     } else {
         None
@@ -1130,7 +1129,7 @@ pub async fn get_usage_projection(
                 message: "Upgrade to Autopilot for more capacity and automatic features"
                     .to_string(),
                 action_type: "upgrade_plan".to_string(),
-                action_link: Some("/pricing".to_string()),
+                action_link: Some("/#plans".to_string()),
             })
         }
     } else if crate::utils::plan_features::uses_hosted_credits(plan_type.as_deref()) {

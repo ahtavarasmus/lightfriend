@@ -86,9 +86,9 @@ pub fn prompt_injection_safe() -> Html {
 
                 <div class="blog-cta">
                     <h3>{"An AI Assistant You Can Trust With Your Real Data"}</h3>
-                    <Link<Route> to={Route::Pricing} classes="forward-link">
+                    <a href="/#plans" class="forward-link">
                         <button class="hero-cta">{"See Plans"}</button>
-                    </Link<Route>>
+                    </a>
                     <p>{"Read-only by default. Open source. Hardware-encrypted."}</p>
                 </div>
             </section>

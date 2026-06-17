@@ -49,6 +49,38 @@ impl crate::repositories::user_repository::UserRepository {
         Ok(())
     }
 
+    pub fn reset_included_usage_window(
+        &self,
+        user_id: i32,
+        window_start: i32,
+        window_end: i32,
+        included_credits: f32,
+    ) -> Result<(), DieselError> {
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
+        diesel::update(users::table.find(user_id))
+            .set((
+                users::credits_left.eq(included_credits),
+                users::included_usage_window_start_timestamp.eq(Some(window_start)),
+                users::included_usage_window_end_timestamp.eq(Some(window_end)),
+                users::last_credits_notification.eq(None::<i32>),
+            ))
+            .execute(&mut pg_conn)?;
+        Ok(())
+    }
+
+    pub fn clear_included_usage_window(&self, user_id: i32) -> Result<(), DieselError> {
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
+        diesel::update(users::table.find(user_id))
+            .set((
+                users::credits_left.eq(0.0),
+                users::included_usage_window_start_timestamp.eq(None::<i32>),
+                users::included_usage_window_end_timestamp.eq(None::<i32>),
+                users::last_credits_notification.eq(None::<i32>),
+            ))
+            .execute(&mut pg_conn)?;
+        Ok(())
+    }
+
     pub fn increase_credits(&self, user_id: i32, amount: f32) -> Result<(), DieselError> {
         let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
         let user = users::table.find(user_id).first::<User>(&mut pg_conn)?;

@@ -1571,18 +1571,14 @@ pub async fn recover_users_from_external(
                             }
                         }
 
-                        // Set credits for active subscribers
+                        // Initialize included usage for active subscribers through
+                        // the same internal monthly-window policy used elsewhere.
                         if info.has_active_sub {
-                            use crate::utils::plan_features::MONTHLY_CREDIT_BUDGET;
-                            let credits = if user.own_twilio_enabled {
-                                0.0
-                            } else {
-                                MONTHLY_CREDIT_BUDGET
-                            };
-                            let _ = state.user_repository.update_user_credits(user.id, credits);
-                            let _ = state
-                                .user_repository
-                                .update_user_credits_left(user.id, credits);
+                            if let Ok(Some(user)) = state.user_core.find_by_id(user.id) {
+                                let _ = crate::utils::usage::ensure_current_included_usage_window(
+                                    &state, &user,
+                                );
+                            }
                         }
                     }
                 }

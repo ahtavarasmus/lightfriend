@@ -116,9 +116,9 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
 
                 <div class="blog-cta">
                     <h3>{"Ready to Add WhatsApp to Your Light Phone 3?"}</h3>
-                    <Link<Route> to={Route::Pricing} classes="forward-link">
+                    <a href="/#plans" class="forward-link">
                         <button class="hero-cta">{"Get Started with Lightfriend"}</button>
-                    </Link<Route>>
+                    </a>
                     <p>{"Join 100+ users enhancing their minimalist phones today!"}</p>
                 </div>
             </section>

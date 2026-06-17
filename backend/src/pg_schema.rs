@@ -243,6 +243,8 @@ diesel::table! {
         accountability_friend_phone -> Nullable<Text>,
         accountability_friend_name -> Nullable<Text>,
         accountability_enabled -> Bool,
+        included_usage_window_start_timestamp -> Nullable<Int4>,
+        included_usage_window_end_timestamp -> Nullable<Int4>,
     }
 }
 

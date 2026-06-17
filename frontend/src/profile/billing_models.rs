@@ -42,6 +42,8 @@ pub struct UserProfile {
     pub notification_type: Option<String>,
     pub sub_country: Option<String>,
     pub days_until_billing: Option<i32>,
+    pub included_usage_renews_at: Option<i32>,
+    pub days_until_usage_reset: Option<i32>,
     pub twilio_sid: Option<String>,
     pub twilio_token: Option<String>,
     pub openrouter_api_key: Option<String>,

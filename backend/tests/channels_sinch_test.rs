@@ -35,6 +35,8 @@ fn user() -> User {
         accountability_friend_phone: None,
         accountability_friend_name: None,
         accountability_enabled: false,
+        included_usage_window_start_timestamp: None,
+        included_usage_window_end_timestamp: None,
     }
 }
 

@@ -94,6 +94,8 @@ pub struct ProfileResponse {
     notification_type: Option<String>,
     sub_country: Option<String>,
     days_until_billing: Option<i32>,
+    included_usage_renews_at: Option<i32>,
+    days_until_usage_reset: Option<i32>,
     twilio_sid: Option<String>,
     twilio_token: Option<String>,
     estimated_monitoring_cost: f32,
@@ -130,6 +132,11 @@ pub async fn get_profile(
     })?;
     match user {
         Some(user) => {
+            let user = crate::utils::usage::ensure_current_included_usage_window(&state, &user)
+                .map_err(|e| {
+                    tracing::error!("get_profile: usage window refresh failed: {}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e})))
+                })?;
             let user_settings = state
                 .user_core
                 .get_user_settings(auth_user.user_id)
@@ -156,6 +163,14 @@ pub async fn get_profile(
                     .unwrap()
                     .as_secs() as i32;
                 (date - current_time) / (24 * 60 * 60)
+            });
+            let included_usage_renews_at = user.included_usage_window_end_timestamp;
+            let days_until_usage_reset = included_usage_renews_at.map(|date| {
+                let current_time = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i32;
+                ((date - current_time) / (24 * 60 * 60)).max(0)
             });
             // Fetch Twilio credentials and mask them
             let (twilio_sid, twilio_token) = match state
@@ -245,6 +260,8 @@ pub async fn get_profile(
                 notification_type: user_settings.notification_type,
                 sub_country: user_settings.sub_country,
                 days_until_billing,
+                included_usage_renews_at,
+                days_until_usage_reset,
                 twilio_sid,
                 twilio_token,
                 estimated_monitoring_cost,
@@ -919,17 +936,17 @@ pub async fn patch_profile_field(
                     )
                 })?;
 
-            if state
-                .user_core
-                .find_by_id(user_id)
-                .ok()
-                .flatten()
-                .is_some_and(|user| user.sub_tier.as_deref() == Some("tier 2"))
-            {
-                let _ = state.user_repository.update_sub_credits(
-                    user_id,
-                    crate::utils::plan_features::MONTHLY_CREDIT_BUDGET,
-                );
+            if let Some(user) = state.user_core.find_by_id(user_id).ok().flatten() {
+                if user.sub_tier.as_deref() == Some("tier 2") {
+                    if let Err(e) =
+                        crate::utils::usage::ensure_current_included_usage_window(&state, &user)
+                    {
+                        tracing::error!(
+                            "Failed to refresh included usage after hosted number restore: {}",
+                            e
+                        );
+                    }
+                }
             }
         }
         _ => {
@@ -1780,6 +1797,9 @@ pub async fn web_chat(
         ));
     }
 
+    let user = crate::utils::usage::ensure_current_included_usage_window(&state, &user)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
+
     // Determine cost based on region (US/CA uses message count, others use euro value)
     let is_us_or_ca = user.phone_number.starts_with("+1");
     let (credits_left_cost, credits_cost) = if is_us_or_ca {
@@ -1960,6 +1980,16 @@ pub async fn web_chat_stream(
             ));
             return;
         }
+
+        let user = match crate::utils::usage::ensure_current_included_usage_window(&state, &user) {
+            Ok(user) => user,
+            Err(e) => {
+                yield Ok(axum::response::sse::Event::default().data(
+                    serde_json::json!({"step": "error", "message": e}).to_string(),
+                ));
+                return;
+            }
+        };
 
         let is_us_or_ca = user.phone_number.starts_with("+1");
         let (credits_left_cost, credits_cost) = if is_us_or_ca {
@@ -2288,6 +2318,9 @@ pub async fn web_chat_with_image(
             Json(json!({"error": "Please subscribe to use the web chat feature"})),
         ));
     }
+
+    let user = crate::utils::usage::ensure_current_included_usage_window(&state, &user)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
 
     // Determine cost based on region
     let is_us_or_ca = user.phone_number.starts_with("+1");

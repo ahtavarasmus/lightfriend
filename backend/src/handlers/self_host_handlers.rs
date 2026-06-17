@@ -356,18 +356,17 @@ pub async fn update_own_twilio_enabled(
     if req.enabled {
         let _ = state
             .user_repository
-            .update_sub_credits(auth_user.user_id, 0.0);
-    } else if state
-        .user_core
-        .find_by_id(auth_user.user_id)
-        .ok()
-        .flatten()
-        .is_some_and(|user| user.sub_tier.as_deref() == Some("tier 2"))
-    {
-        let _ = state.user_repository.update_sub_credits(
-            auth_user.user_id,
-            crate::utils::plan_features::MONTHLY_CREDIT_BUDGET,
-        );
+            .clear_included_usage_window(auth_user.user_id);
+    } else if let Some(user) = state.user_core.find_by_id(auth_user.user_id).ok().flatten() {
+        if user.sub_tier.as_deref() == Some("tier 2") {
+            if let Err(e) = crate::utils::usage::ensure_current_included_usage_window(&state, &user)
+            {
+                tracing::error!(
+                    "Failed to refresh included usage after own Twilio disable: {}",
+                    e
+                );
+            }
+        }
     }
 
     Ok(StatusCode::OK)

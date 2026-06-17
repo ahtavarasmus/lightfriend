@@ -1,8 +1,86 @@
 use crate::utils::country::get_country_code_from_phone;
-use crate::utils::plan_features::TWILIO_COST_MARGIN;
+use crate::utils::plan_features::{MONTHLY_CREDIT_BUDGET, TWILIO_COST_MARGIN};
 use crate::AppState;
 use crate::UserCoreOps;
 use std::sync::Arc;
+
+pub const INCLUDED_USAGE_WINDOW_SECONDS: i32 = 30 * 24 * 60 * 60;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IncludedUsageWindow {
+    pub start: i32,
+    pub end: i32,
+}
+
+pub fn current_included_usage_window(
+    now: i32,
+    current_start: Option<i32>,
+    current_end: Option<i32>,
+) -> (IncludedUsageWindow, bool) {
+    match (current_start, current_end) {
+        (Some(start), Some(end)) if start > 0 && end > start && now < end => {
+            (IncludedUsageWindow { start, end }, false)
+        }
+        (Some(mut start), Some(mut end)) if start > 0 && end > start => {
+            while now >= end {
+                start = end;
+                end = end.saturating_add(INCLUDED_USAGE_WINDOW_SECONDS);
+            }
+            (IncludedUsageWindow { start, end }, true)
+        }
+        _ => {
+            let start = now;
+            let end = now.saturating_add(INCLUDED_USAGE_WINDOW_SECONDS);
+            (IncludedUsageWindow { start, end }, true)
+        }
+    }
+}
+
+pub fn ensure_current_included_usage_window(
+    state: &Arc<AppState>,
+    user: &crate::models::user_models::User,
+) -> Result<crate::models::user_models::User, String> {
+    if user.sub_tier.as_deref() != Some("tier 2") || state.user_core.is_byot_user(user.id) {
+        if user.credits_left > 0.0
+            || user.included_usage_window_start_timestamp.is_some()
+            || user.included_usage_window_end_timestamp.is_some()
+        {
+            state
+                .user_repository
+                .clear_included_usage_window(user.id)
+                .map_err(|e| format!("Failed to clear included usage window: {}", e))?;
+            return state
+                .user_core
+                .find_by_id(user.id)
+                .map_err(|e| format!("Failed to refresh user after usage clear: {}", e))?
+                .ok_or_else(|| "User not found after usage clear".to_string());
+        }
+
+        return Ok(user.clone());
+    }
+
+    let now = chrono::Utc::now().timestamp() as i32;
+    let (window, should_reset) = current_included_usage_window(
+        now,
+        user.included_usage_window_start_timestamp,
+        user.included_usage_window_end_timestamp,
+    );
+
+    if !should_reset {
+        return Ok(user.clone());
+    }
+
+    state
+        .user_repository
+        .reset_included_usage_window(user.id, window.start, window.end, MONTHLY_CREDIT_BUDGET)
+        .map_err(|e| format!("Failed to reset included usage window: {}", e))?;
+
+    state
+        .user_core
+        .find_by_id(user.id)
+        .map_err(|e| format!("Failed to refresh user after usage reset: {}", e))?
+        .ok_or_else(|| "User not found after usage reset".to_string())
+}
 
 /// Checks if a user has sufficient credits to perform an action.
 ///
@@ -36,6 +114,8 @@ pub async fn check_user_credits(
     if state.user_core.is_byot_user(user.id) {
         return Ok(());
     }
+
+    let user = ensure_current_included_usage_window(state, user)?;
 
     // Calculate minimum required credits
     let required = match event_type {
@@ -179,6 +259,8 @@ pub fn deduct_user_credits(
         return Ok(());
     }
 
+    let user = ensure_current_included_usage_window(state, &user)?;
+
     // Calculate deduction for voice/web events
     let cost = get_activity_cost(state, &user.phone_number, event_type, amount);
     if cost <= 0.0 {
@@ -272,6 +354,8 @@ pub fn deduct_from_twilio_price(
     if state.user_core.is_byot_user(user_id) {
         return Ok(0.0);
     }
+
+    let user = ensure_current_included_usage_window(state, &user)?;
 
     let abs_price = twilio_price_usd.abs();
     if abs_price == 0.0 {

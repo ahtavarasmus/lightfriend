@@ -109,7 +109,7 @@ pub async fn get_recent_usage(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<Vec<UsageLogEntry>>, (StatusCode, Json<serde_json::Value>)> {
-    // Get billing period start from user's next_billing_date_timestamp
+    // Get the current included-usage window for usage feed filtering.
     let user = state
         .user_core
         .find_by_id(auth_user.user_id)
@@ -123,21 +123,20 @@ pub async fn get_recent_usage(
             StatusCode::NOT_FOUND,
             Json(json!({"error": "User not found"})),
         ))?;
+    let user = crate::utils::usage::ensure_current_included_usage_window(&state, &user)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
 
-    // Calculate billing period start (30 days before next billing, or 30 days ago)
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i32;
-    let billing_period_start = if let Some(next_billing) = user.next_billing_date_timestamp {
-        next_billing - 30 * 86400
-    } else {
-        now - 30 * 86400
-    };
+    let usage_window_start = user
+        .included_usage_window_start_timestamp
+        .unwrap_or(now - crate::utils::usage::INCLUDED_USAGE_WINDOW_SECONDS);
 
     let logs = state
         .user_repository
-        .get_recent_usage_logs(auth_user.user_id, billing_period_start, 50)
+        .get_recent_usage_logs(auth_user.user_id, usage_window_start, 50)
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,

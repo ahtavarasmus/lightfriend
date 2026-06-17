@@ -432,6 +432,14 @@ pub async fn start_rule_test(
         ));
     }
 
+    let user =
+        crate::utils::usage::ensure_current_included_usage_window(&state, &user).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e })),
+            )
+        })?;
+
     let is_us_or_ca = user.phone_number.starts_with("+1");
     let (credits_left_cost, credits_cost) = if is_us_or_ca {
         (WEB_CHAT_COST_US, WEB_CHAT_COST_EUR)

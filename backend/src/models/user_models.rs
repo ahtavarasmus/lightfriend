@@ -24,7 +24,7 @@ pub struct User {
     pub stripe_payment_method_id: Option<String>,
     pub stripe_checkout_session_id: Option<String>,
     pub sub_tier: Option<String>, // tier 2 only, differentiated by plan_type
-    pub credits_left: f32, // free credits that reset every month while in the monthly sub. will always be consumed before one time credits
+    pub credits_left: f32, // included hosted usage remaining in the current Lightfriend usage window
     pub last_credits_notification: Option<i32>, // Unix timestamp of last insufficient credits notification to prevent spam
     pub next_billing_date_timestamp: Option<i32>, // when is user next billed for their subscription
     pub magic_token: Option<String>,            // token for magic link login/password setup
@@ -44,6 +44,9 @@ pub struct User {
     pub accountability_friend_phone: Option<String>,
     pub accountability_friend_name: Option<String>,
     pub accountability_enabled: bool,
+    // Internal Lightfriend allowance window, independent from Stripe billing interval.
+    pub included_usage_window_start_timestamp: Option<i32>,
+    pub included_usage_window_end_timestamp: Option<i32>,
 }
 
 #[derive(Queryable, Selectable, Insertable, Clone)]

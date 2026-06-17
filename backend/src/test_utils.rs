@@ -63,9 +63,17 @@ pub fn create_test_pg_pool() -> crate::PgDbPool {
 
     // Run PG migrations and truncate all tables for test isolation
     if let Ok(mut conn) = pool.get() {
-        let _ = conn.run_pending_migrations(PG_MIGRATIONS);
-        // Truncate all PG tables so each test starts clean
         use diesel::RunQueryDsl;
+        let _ = conn.run_pending_migrations(PG_MIGRATIONS);
+        let _ = diesel::sql_query(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS included_usage_window_start_timestamp INTEGER",
+        )
+        .execute(&mut conn);
+        let _ = diesel::sql_query(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS included_usage_window_end_timestamp INTEGER",
+        )
+        .execute(&mut conn);
+        // Truncate all PG tables so each test starts clean
         // Core tables - always exist
         let _ = diesel::sql_query(
             "TRUNCATE users, user_settings, refund_info, \
@@ -253,11 +261,31 @@ pub fn create_test_user(
         .user_core
         .create_user(new_user)
         .expect("Failed to create test user");
-    state
+    let user = state
         .user_core
         .find_by_email(&params.email)
         .expect("Failed to find created user")
-        .expect("User not found after creation")
+        .expect("User not found after creation");
+
+    if params.sub_tier.as_deref() == Some("tier 2") {
+        let now = chrono::Utc::now().timestamp() as i32;
+        state
+            .user_repository
+            .reset_included_usage_window(
+                user.id,
+                now.saturating_sub(60),
+                now.saturating_add(crate::utils::usage::INCLUDED_USAGE_WINDOW_SECONDS),
+                params.credits_left,
+            )
+            .expect("Failed to seed test included usage window");
+        return state
+            .user_core
+            .find_by_id(user.id)
+            .expect("Failed to refresh created user")
+            .expect("User not found after usage window seed");
+    }
+
+    user
 }
 
 /// Mock LLM response builder for testing without calling real API.

@@ -272,7 +272,7 @@ pub fn youtube_connect(props: &YouTubeConnectProps) -> Html {
                     <div class="upgrade-prompt">
                         <div class="upgrade-content">
                             <h3>{"Subscribe to Enable YouTube Integration"}</h3>
-                            <a href="/pricing" class="upgrade-button">
+                            <a href="/#plans" class="upgrade-button">
                                 {"View Pricing Plans"}
                             </a>
                         </div>

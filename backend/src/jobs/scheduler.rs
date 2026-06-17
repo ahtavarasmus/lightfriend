@@ -756,6 +756,67 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .await
         .expect("Failed to add alert cleanup job to scheduler");
 
+    // Included usage window refresh - runs daily at 2:30am UTC. The usage
+    // helper also refreshes lazily on reads/deductions; this keeps dashboards
+    // up to date for subscribed users who have not triggered usage yet.
+    let state_clone = Arc::clone(&state);
+    let included_usage_refresh_job = Job::new_async("0 30 2 * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            debug!("Running included usage window refresh...");
+
+            match state.user_core.get_users_by_tier("tier 2") {
+                Ok(users) => {
+                    let mut refreshed = 0usize;
+                    let mut failed = 0usize;
+
+                    for user in users {
+                        match crate::utils::usage::ensure_current_included_usage_window(
+                            &state, &user,
+                        ) {
+                            Ok(updated) => {
+                                if updated.included_usage_window_start_timestamp
+                                    != user.included_usage_window_start_timestamp
+                                    || updated.included_usage_window_end_timestamp
+                                        != user.included_usage_window_end_timestamp
+                                    || (updated.credits_left - user.credits_left).abs()
+                                        > f32::EPSILON
+                                {
+                                    refreshed += 1;
+                                }
+                            }
+                            Err(e) => {
+                                failed += 1;
+                                error!(
+                                    "Failed to refresh included usage window for user {}: {}",
+                                    user.id, e
+                                );
+                            }
+                        }
+                    }
+
+                    if refreshed > 0 || failed > 0 {
+                        tracing::info!(
+                            "Included usage refresh complete: refreshed={}, failed={}",
+                            refreshed,
+                            failed
+                        );
+                    }
+                }
+                Err(e) => error!(
+                    "Failed to load subscribed users for included usage refresh: {}",
+                    e
+                ),
+            }
+        })
+    })
+    .expect("Failed to create included usage refresh job");
+
+    sched
+        .add(included_usage_refresh_job)
+        .await
+        .expect("Failed to add included usage refresh job to scheduler");
+
     // Cleanup job - runs daily at 3am UTC to remove old logs and expire stale records
     let state_clone = Arc::clone(&state);
     let task_cleanup_job = Job::new_async("0 0 3 * * *", move |_, _| {
