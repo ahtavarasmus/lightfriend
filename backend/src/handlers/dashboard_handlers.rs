@@ -11,6 +11,10 @@ use std::{sync::Arc, time::Duration};
 
 use std::collections::HashMap;
 
+use crate::repositories::user_repository::{
+    SYSTEM_ALERT_ACTIVITY_TYPES, SYSTEM_ALERT_FEEDBACK_ACTIVITY_TYPES,
+    SYSTEM_ALERT_FEEDBACK_SHOULD_WAIT, SYSTEM_ALERT_FEEDBACK_WORTH_IT,
+};
 use crate::{handlers::auth_middleware::AuthUser, AppState, UserCoreOps};
 
 #[derive(Deserialize)]
@@ -31,6 +35,21 @@ pub struct DashboardSummaryResponse {
     pub sunrise_hour: Option<f32>,
     pub sunset_hour: Option<f32>,
     pub watched_contacts: Vec<WatchedContact>,
+    pub value_stats: DashboardValueStats,
+}
+
+#[derive(Serialize)]
+pub struct DashboardValueStats {
+    pub period_label: String,
+    pub watched_messages: i64,
+    pub quieted_messages: i64,
+    pub interruptions_sent: i64,
+    pub quiet_percent: Option<i64>,
+    pub feedback_total: i64,
+    pub feedback_worth_it: i64,
+    pub feedback_should_wait: i64,
+    pub worth_it_percent: Option<i64>,
+    pub value_sentence: String,
 }
 
 #[derive(Serialize)]
@@ -102,6 +121,18 @@ pub async fn get_dashboard_summary(
         .earliest()
         .map(|dt| dt.timestamp() as i32)
         .unwrap_or(now_ts - 86400);
+
+    let month_start_local = local_now
+        .date_naive()
+        .with_day(1)
+        .unwrap_or_else(|| local_now.date_naive())
+        .and_hms_opt(0, 0, 0)
+        .unwrap();
+    let month_start_ts = month_start_local
+        .and_local_timezone(tz)
+        .earliest()
+        .map(|dt| dt.timestamp() as i32)
+        .unwrap_or(now_ts - 30 * 86400);
 
     // Use stored lat/lon
     let (latitude, longitude) = match user_info.as_ref() {
@@ -199,6 +230,52 @@ pub async fn get_dashboard_summary(
         })
         .collect();
 
+    let quieted_messages = state
+        .user_repository
+        .count_usage_activities_since(user_id, month_start_ts, &["system_screened"])
+        .unwrap_or(0);
+    let interruptions_sent = state
+        .user_repository
+        .count_usage_activities_since(user_id, month_start_ts, SYSTEM_ALERT_ACTIVITY_TYPES)
+        .unwrap_or(0);
+    let watched_messages = quieted_messages + interruptions_sent;
+    let feedback_worth_it = state
+        .user_repository
+        .count_usage_activities_since(user_id, month_start_ts, &[SYSTEM_ALERT_FEEDBACK_WORTH_IT])
+        .unwrap_or(0);
+    let feedback_should_wait = state
+        .user_repository
+        .count_usage_activities_since(
+            user_id,
+            month_start_ts,
+            &[SYSTEM_ALERT_FEEDBACK_SHOULD_WAIT],
+        )
+        .unwrap_or(0);
+    let feedback_total = state
+        .user_repository
+        .count_usage_activities_since(
+            user_id,
+            month_start_ts,
+            SYSTEM_ALERT_FEEDBACK_ACTIVITY_TYPES,
+        )
+        .unwrap_or(0);
+    let quiet_percent = percent(quieted_messages, watched_messages);
+    let worth_it_percent = percent(feedback_worth_it, feedback_total);
+    let value_sentence =
+        build_value_sentence(watched_messages, quieted_messages, interruptions_sent);
+    let value_stats = DashboardValueStats {
+        period_label: "This month".to_string(),
+        watched_messages,
+        quieted_messages,
+        interruptions_sent,
+        quiet_percent,
+        feedback_total,
+        feedback_worth_it,
+        feedback_should_wait,
+        worth_it_percent,
+        value_sentence,
+    };
+
     // Get active events
     let events: Vec<EventItem> = state
         .ontology_repository
@@ -226,7 +303,36 @@ pub async fn get_dashboard_summary(
         sunrise_hour,
         sunset_hour,
         watched_contacts,
+        value_stats,
     }))
+}
+
+fn percent(part: i64, total: i64) -> Option<i64> {
+    if total <= 0 {
+        None
+    } else {
+        Some(((part as f64 / total as f64) * 100.0).round() as i64)
+    }
+}
+
+fn build_value_sentence(watched: i64, quieted: i64, interruptions: i64) -> String {
+    if watched <= 0 {
+        return "Lightfriend is ready to watch for what matters.".to_string();
+    }
+
+    let interruption_phrase = if interruptions == 1 {
+        "the 1 message most likely to matter".to_string()
+    } else {
+        format!("the {} messages most likely to matter", interruptions)
+    };
+
+    format!(
+        "Lightfriend watched {} {}, let {} wait, and interrupted you for {}.",
+        watched,
+        if watched == 1 { "message" } else { "messages" },
+        quieted,
+        interruption_phrase
+    )
 }
 
 pub fn format_time_display(timestamp: i32, tz: &chrono_tz::Tz) -> String {

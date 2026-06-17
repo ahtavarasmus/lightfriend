@@ -249,6 +249,13 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let timezone_auto = use_state(|| (*user_profile).timezone_auto.unwrap_or(true));
     let phone_service_active = use_state(|| (*user_profile).phone_service_active.unwrap_or(true));
     let agent_language = use_state(|| (*user_profile).agent_language.clone());
+    let voice_provider = use_state(|| {
+        if (*user_profile).voice_provider.is_empty() {
+            "tinfoil".to_string()
+        } else {
+            (*user_profile).voice_provider.clone()
+        }
+    });
     let notification_type = use_state(|| {
         (*user_profile)
             .notification_type
@@ -319,6 +326,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let timezone_auto_save_state = use_state(|| FieldSaveState::Idle);
     let phone_service_active_save_state = use_state(|| FieldSaveState::Idle);
     let agent_language_save_state = use_state(|| FieldSaveState::Idle);
+    let voice_provider_save_state = use_state(|| FieldSaveState::Idle);
     let notification_type_save_state = use_state(|| FieldSaveState::Idle);
     let feature_updates_save_state = use_state(|| FieldSaveState::Idle);
     let auto_create_items_save_state = use_state(|| FieldSaveState::Idle);
@@ -368,6 +376,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let accountability_friend_name_original_eff = accountability_friend_name_original.clone();
         let user_profile_state = user_profile.clone();
         let agent_language = agent_language.clone();
+        let voice_provider = voice_provider.clone();
         let notification_type = notification_type.clone();
         let preferred_sending_number_eff = preferred_sending_number.clone();
         let selected_lightfriend_number_eff = selected_lightfriend_number.clone();
@@ -415,6 +424,11 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 accountability_friend_name_eff.set(name_val.clone());
                 accountability_friend_name_original_eff.set(name_val);
                 agent_language.set(props_profile.agent_language.clone());
+                voice_provider.set(if props_profile.voice_provider.is_empty() {
+                    "tinfoil".to_string()
+                } else {
+                    props_profile.voice_provider.clone()
+                });
                 notification_type.set(props_profile.notification_type.clone());
                 let preferred = props_profile.preferred_number.clone().unwrap_or_default();
                 preferred_sending_number_eff.set(preferred.clone());
@@ -1032,6 +1046,64 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         })
     };
 
+    // Voice provider change handler
+    let on_voice_provider_change = {
+        let voice_provider = voice_provider.clone();
+        let save_state = voice_provider_save_state.clone();
+        let user_profile = user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |e: Event| {
+            let select: HtmlInputElement = e.target_unchecked_into();
+            let new_val = select.value();
+            voice_provider.set(new_val.clone());
+            let save_state = save_state.clone();
+            let user_profile = user_profile.clone();
+            let on_profile_update = on_profile_update.clone();
+            save_state.set(FieldSaveState::Saving);
+            spawn_local(async move {
+                let request = PatchFieldRequest {
+                    field: "voice_provider".to_string(),
+                    value: serde_json::Value::String(new_val.clone()),
+                };
+                match Api::patch("/api/profile/field")
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    Ok(response) if response.ok() => {
+                        let mut profile = (*user_profile).clone();
+                        profile.voice_provider = new_val;
+                        on_profile_update.emit(profile);
+                        save_state.set(FieldSaveState::Success);
+                        let save_state_clone = save_state.clone();
+                        spawn_local(async move {
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
+                            save_state_clone.set(FieldSaveState::Idle);
+                        });
+                    }
+                    Ok(response) => {
+                        let error_msg = if let Ok(error_json) =
+                            response.json::<serde_json::Value>().await
+                        {
+                            error_json
+                                .get("error")
+                                .and_then(|e| e.as_str())
+                                .unwrap_or("Failed to save")
+                                .to_string()
+                        } else {
+                            "Failed to save".to_string()
+                        };
+                        save_state.set(FieldSaveState::Error(error_msg));
+                    }
+                    Err(_) => {
+                        save_state.set(FieldSaveState::Error("Network error".to_string()));
+                    }
+                }
+            });
+        })
+    };
+
     // Notification type change handler
     let on_notification_type_change = {
         let notification_type = notification_type.clone();
@@ -1117,8 +1189,10 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 {
                     Ok(response) if response.ok() => {
                         let mut profile = (*user_profile).clone();
-                        profile.preferred_number = Some(new_val);
+                        profile.preferred_number = Some(new_val.clone());
+                        profile.sms_from_number = Some(new_val);
                         profile.own_twilio_enabled = false;
+                        user_profile.set(profile.clone());
                         on_profile_update.emit(profile);
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
@@ -1285,12 +1359,14 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         selected_lightfriend_number.set(BYOT_NUMBER_OPTION.to_string());
                         preferred_sending_number.set(phone.clone());
                         let mut profile = (*user_profile).clone();
-                        profile.preferred_number = Some(phone);
+                        profile.preferred_number = Some(phone.clone());
+                        profile.sms_from_number = Some(phone);
                         profile.own_twilio_enabled = true;
                         if !using_saved_creds {
                             profile.twilio_sid = Some("...".to_string());
                             profile.twilio_token = Some("...".to_string());
                         }
+                        user_profile.set(profile.clone());
                         on_profile_update.emit(profile);
                         save_state.set(FieldSaveState::Success);
                         let save_state_clone = save_state.clone();
@@ -2784,6 +2860,34 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 </div>
             </div>
 
+            // Voice Provider field
+            <div class="profile-field">
+                <div class="field-label-group">
+                    <span class="field-label">{"Voice Call Quality"}</span>
+                    <div class="tooltip">
+                        <span class="tooltip-icon">{"?"}</span>
+                        <span class="tooltip-text">
+                            {"Private uses verifiable Tinfoil voice models. Premium uses OpenAI Realtime for better call quality, but call audio and transcripts are processed by OpenAI."}
+                        </span>
+                    </div>
+                </div>
+                <div class="field-input-container">
+                    <select
+                        class="profile-input"
+                        value={(*voice_provider).clone()}
+                        onchange={on_voice_provider_change.clone()}
+                    >
+                        <option value="tinfoil" selected={*voice_provider == "tinfoil"}>
+                            {"Private voice (Tinfoil)"}
+                        </option>
+                        <option value="openai_realtime" selected={*voice_provider == "openai_realtime"}>
+                            {"Premium voice (OpenAI Realtime)"}
+                        </option>
+                    </select>
+                    {render_save_indicator(&*voice_provider_save_state)}
+                </div>
+            </div>
+
             // Notification Type field
             <div class="profile-field">
                 <div class="field-label-group">
@@ -2840,10 +2944,15 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                             numbers.iter().map(|num| {
                                                 let number = num.get("number").and_then(|v| v.as_str()).unwrap_or("");
                                                 let label = num.get("label").and_then(|v| v.as_str()).unwrap_or("Unknown");
+                                                let option_label = if number.is_empty() {
+                                                    label.to_string()
+                                                } else {
+                                                    format!("{} ({})", label, number)
+                                                };
                                                 let is_selected = current == number;
                                                 html! {
                                                     <option value={number.to_string()} selected={is_selected}>
-                                                        {label}
+                                                        {option_label}
                                                     </option>
                                                 }
                                             }).collect::<Html>()

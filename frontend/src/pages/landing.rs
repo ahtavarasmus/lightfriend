@@ -2,8 +2,6 @@ use crate::profile::stripe::StripePricingTable;
 use crate::utils::api::Api;
 use crate::utils::seo::{use_seo, SeoMeta};
 use crate::Route;
-use gloo_timers::callback::Timeout;
-use js_sys;
 use serde::Deserialize;
 use serde_json::json;
 use wasm_bindgen::prelude::Closure;
@@ -19,8 +17,8 @@ struct SmartphoneFreeDaysResponse {
 #[function_component(Landing)]
 pub fn landing() -> Html {
     use_seo(SeoMeta {
-        title: "Lightfriend: Mute Everything. Miss Nothing. AI Assistant for Dumbphones",
-        description: "AI watches your WhatsApp, Telegram, Signal, and email - and only interrupts you when something actually matters. Works with any phone including dumbphones and Light Phone via SMS and voice calls. Privacy verifiable on blockchain - no trust required.",
+        title: "Lightfriend: Free.",
+        description: "The feed cannot follow you to a dumbphone. Lightfriend keeps important WhatsApp, Telegram, Signal, and email messages reachable by SMS or call.",
         canonical: "https://lightfriend.ai",
         og_type: "website",
     });
@@ -113,99 +111,6 @@ pub fn landing() -> Html {
     // State for expanded capability card (-1 = none, 0-3 = which one)
     let expanded_cap = use_state(|| -1i32);
 
-    // SMS demo scenarios: (label, icon_class, messages)
-    // is_user=false means Lightfriend sends it proactively
-    let scenarios: Vec<(&str, &str, Vec<(bool, &str)>)> = vec![
-        ("WhatsApp", "fab fa-whatsapp", vec![
-            (false, "WhatsApp from Mom: \"Are you coming for dinner tonight?\" - Sent 10 min ago."),
-            (true, "Reply: sounds great, see you at 7!"),
-            (false, "Message sent to Mom \u{2713}"),
-        ]),
-        ("Email", "fas fa-envelope", vec![
-            (false, "Your Amazon package has been delivered to your front porch. Order: wireless headphones."),
-            (true, "Any other deliveries today?"),
-            (false, "Yes - IKEA order is out for delivery, estimated arrival by 4pm."),
-        ]),
-        ("Reminder", "fas fa-bell", vec![
-            (false, "Reminder: Pick up your prescription from the pharmacy. They close at 6pm today."),
-            (true, "Thanks, what's the pharmacy's number?"),
-            (false, "City Pharmacy: (555) 234-5678. Open until 6pm."),
-        ]),
-        ("Tracking", "fas fa-eye", vec![
-            (false, "You haven't replied to your neighbor Jake's Signal message from yesterday about borrowing the ladder. Want to respond?"),
-            (true, "Reply: Hey sure, come grab it anytime this weekend!"),
-            (false, "Message sent to Jake \u{2713}"),
-        ]),
-        ("Tesla", "fas fa-car", vec![
-            (true, "Preheat my Tesla"),
-            (false, "Done - cabin heating started \u{2713} Current battery: 72%, outside temp: -15\u{00b0}C."),
-        ]),
-    ];
-    let scenario_idx = use_state(|| 0usize);
-    let scenario_count = scenarios.len();
-
-    // Auto-rotation timer for SMS demo
-    {
-        let scenario_idx_effect = scenario_idx.clone();
-        let dep = *scenario_idx;
-        use_effect_with_deps(
-            move |idx: &usize| {
-                let idx_val = *idx;
-                let scenario_idx = scenario_idx_effect.clone();
-                let timeout = Timeout::new(8_000, move || {
-                    scenario_idx.set((idx_val + 1) % scenario_count);
-                });
-                move || drop(timeout)
-            },
-            dep,
-        );
-    }
-
-    // Set up IntersectionObserver for scroll animations
-    {
-        use_effect_with_deps(
-            move |_| {
-                let setup = Closure::<dyn Fn()>::new(move || {
-                    let _ = js_sys::eval(
-                        r#"
-                        if (!window._scrollObserver) {
-                            var delay = 0;
-                            window._scrollObserver = new IntersectionObserver(function(entries) {
-                                entries.forEach(function(entry) {
-                                    if (entry.isIntersecting) {
-                                        var el = entry.target;
-                                        var stagger = el.dataset.stagger || 0;
-                                        setTimeout(function() {
-                                            el.classList.add('visible');
-                                        }, stagger * 120);
-                                    }
-                                });
-                            }, { threshold: 0.08, rootMargin: '0px 0px -80px 0px' });
-                        }
-                        var groups = {};
-                        document.querySelectorAll('.scroll-animate:not(.visible)').forEach(function(el) {
-                            var parent = el.parentElement;
-                            var key = parent ? parent.className : 'root';
-                            if (!groups[key]) groups[key] = 0;
-                            el.dataset.stagger = groups[key]++;
-                            window._scrollObserver.observe(el);
-                        });
-                    "#,
-                    );
-                });
-                if let Some(window) = web_sys::window() {
-                    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-                        setup.as_ref().unchecked_ref(),
-                        100,
-                    );
-                }
-                setup.forget();
-                || ()
-            },
-            (),
-        );
-    }
-
     // FAQ data: (question, answer_html)
     let faq_data: Vec<(&str, Html)> = vec![
         (
@@ -219,7 +124,7 @@ pub fn landing() -> Html {
             html! {
                 <>
                     <p>{"Lightfriend runs in its own hardware-isolated enclave, and all AI requests are processed through Tinfoil's verified enclaves. No one - not even the developer - can access your data. Period. Fully open source, with privacy cryptographically verifiable on blockchain."}</p>
-                    <p><a href="/trustless" style="color: #7EB2FF;">{"See exactly how it works"}</a></p>
+                    <p><a href="/trustless" style="color: var(--landing-blue);">{"See exactly how it works"}</a></p>
                 </>
             },
         ),
@@ -308,32 +213,32 @@ pub fn landing() -> Html {
     let cap_data: Vec<(&str, &str, &str, Html)> = vec![
         (
             "fas fa-comments",
-            "Message your apps",
-            "Text and call WhatsApp, Telegram, Signal, and email from any phone.",
+            "Messages",
+            "WhatsApp, Telegram, Signal, email - from any phone.",
             html! {
                 <p>{"Reply to messages, send new ones, and get summaries of long threads - all via SMS or voice call. This is what makes switching to a dumbphone possible in the first place."}</p>
             },
         ),
         (
             "fas fa-bell",
-            "Critical alerts",
-            "Urgent messages reach you instantly. Everything else waits.",
+            "Alerts",
+            "Urgent things reach you. Everything else waits.",
             html! {
                 <p>{"AI evaluates every incoming message across all your apps. Time-critical ones - lunch invites, emergencies, deadlines - get forwarded immediately as SMS or a phone call. No setup needed, works out of the box."}</p>
             },
         ),
         (
             "fas fa-list-check",
-            "Daily digests",
-            "Stay informed without the noise. Get a summary when you want it.",
+            "Digests",
+            "Catch up once. Not all day.",
             html! {
                 <p>{"Non-urgent messages are batched into a digest delivered on your schedule. Keeps you in the loop without constant interruptions throughout the day."}</p>
             },
         ),
         (
             "fas fa-sliders",
-            "Custom rules",
-            "Build your own automations. Optional, for when defaults aren't enough.",
+            "Rules",
+            "Optional automation when defaults aren't enough.",
             html! {
                 <>
                     <p>{"Create WHEN/IF/THEN rules: trigger on message arrival, a schedule, or a keyword. Conditions can use AI evaluation, keyword matching, or sender filters - like always forwarding messages from a specific person. Actions include forwarding, summarizing, replying, or running a check."}</p>
@@ -394,77 +299,100 @@ pub fn landing() -> Html {
                 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
             </head>
             <header class="hero">
-                <div class="hero-background"></div>
-                <div class="hero-overlay"></div>
                 <div class="hero-particles">
                     { for particles_html }
                 </div>
                 <div class="hero-content">
-                    <div class="hero-right-panel">
-                        <h1 class="hero-title hero-anim hero-anim-1">{"Use any phone. Get your apps via text."}</h1>
-                        <div class="hero-diagram hero-anim hero-anim-2">
-                            <div class="diagram-left">
-                                <img src="/assets/empty-phone.png" alt="Your phone" class="diagram-nokia" />
-                                <span class="diagram-node-label">{"Your phone"}</span>
-                            </div>
-                            <div class="diagram-center-group">
-                                <svg class="diagram-left-line" viewBox="0 0 100 24" preserveAspectRatio="none">
-                                    <defs>
-                                        <marker id="arrow-right" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
-                                            <path d="M0,0 L6,2 L0,4" fill="rgba(126,178,255,0.6)" />
-                                        </marker>
-                                        <marker id="arrow-left" markerWidth="6" markerHeight="4" refX="1" refY="2" orient="auto">
-                                            <path d="M6,0 L0,2 L6,4" fill="rgba(126,178,255,0.6)" />
-                                        </marker>
-                                    </defs>
-                                    <line x1="4" y1="12" x2="96" y2="12" stroke="rgba(126,178,255,0.4)" stroke-width="1" marker-start="url(#arrow-left)" marker-end="url(#arrow-right)" />
-                                </svg>
-                                <span class="diagram-edge-label">{"SMS / Call"}</span>
-                                <div class="diagram-lf-wrapper">
-                                    <img src="/assets/fav.png" alt="Lightfriend" class="diagram-lf-icon" />
-                                </div>
-                            </div>
-                            <div class="diagram-right-group">
-                                <svg class="diagram-fan-svg" viewBox="0 0 70 130" preserveAspectRatio="none">
-                                    <defs>
-                                        <marker id="fan-arrow-r" markerWidth="5" markerHeight="4" refX="4" refY="2" orient="auto">
-                                            <path d="M0,0 L5,2 L0,4" fill="rgba(126,178,255,0.5)" />
-                                        </marker>
-                                        <marker id="fan-arrow-l" markerWidth="5" markerHeight="4" refX="1" refY="2" orient="auto">
-                                            <path d="M5,0 L0,2 L5,4" fill="rgba(126,178,255,0.5)" />
-                                        </marker>
-                                    </defs>
-                                    <line x1="0" y1="65" x2="65" y2="5" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
-                                    <line x1="0" y1="65" x2="65" y2="35" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
-                                    <line x1="0" y1="65" x2="65" y2="65" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
-                                    <line x1="0" y1="65" x2="65" y2="95" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
-                                    <line x1="0" y1="65" x2="65" y2="125" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
-                                </svg>
-                                <div class="diagram-apps-list">
-                                    <div class="diagram-app-row"><i class="fab fa-whatsapp"></i><span>{"WhatsApp"}</span></div>
-                                    <div class="diagram-app-row"><i class="fab fa-telegram"></i><span>{"Telegram"}</span></div>
-                                    <div class="diagram-app-row"><i class="fab fa-signal-messenger"></i><span>{"Signal"}</span></div>
-                                    <div class="diagram-app-row"><i class="fas fa-envelope"></i><span>{"Email"}</span></div>
-                                    <div class="diagram-app-row"><i class="fas fa-plug"></i><span>{"MCP"}</span></div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="hero-cta-group hero-anim hero-anim-3">
-                            <a href="#plans" class="forward-link">
-                                <button class="hero-cta">{"Get started"}</button>
-                            </a>
-                        </div>
-                        <div class="trust-signal hero-anim hero-anim-4">
-                            <span class="trust-label">{"As seen on"}</span>
-                            <a href="https://www.thelightphone.com/blog/lightos-tips" target="_blank" rel="noopener noreferrer" class="trust-link">
-                                <img src="/assets/lightphone-logo.svg" alt="The Light Phone" class="trust-logo" />
-                            </a>
-                        </div>
+                    <div class="hero-right-panel hero-word-panel">
+                        <h1 class="hero-title hero-word-title hero-anim hero-anim-1">{"FREE LIKE A CHILD"}</h1>
                     </div>
                 </div>
             </header>
 
             // TODO: Image carousel goes here when "Removed" style photos are ready
+
+            <section class="fight-section scroll-animate">
+                <div class="fight-copy">
+                    <h2>{"THIS FIGHT IS RIGGED"}</h2>
+                    <p>{"Stop fighting the phone. Leave the ring."}</p>
+                    <a href="#plans" class="story-cta-link">{"Start 7-day free trial"}</a>
+                </div>
+            </section>
+
+            <section id="apps" class="app-bridge-section scroll-animate">
+                <div class="app-bridge-copy">
+                    <p>{"Lightfriend watches WhatsApp, Signal, Telegram, and email. Important things reach any phone by SMS or call."}</p>
+                </div>
+                <div class="hero-diagram app-bridge-visual">
+                    <div class="diagram-left">
+                        <img src="/assets/empty-phone.png" alt="Your phone" class="diagram-nokia" />
+                        <span class="diagram-node-label">{"Your phone"}</span>
+                    </div>
+                    <div class="diagram-center-group">
+                        <svg class="diagram-left-line" viewBox="0 0 100 24" preserveAspectRatio="none">
+                            <defs>
+                                <marker id="arrow-right" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+                                    <path d="M0,0 L6,2 L0,4" fill="rgba(126,178,255,0.6)" />
+                                </marker>
+                                <marker id="arrow-left" markerWidth="6" markerHeight="4" refX="1" refY="2" orient="auto">
+                                    <path d="M6,0 L0,2 L6,4" fill="rgba(126,178,255,0.6)" />
+                                </marker>
+                            </defs>
+                            <line x1="4" y1="12" x2="96" y2="12" stroke="rgba(126,178,255,0.4)" stroke-width="1" marker-start="url(#arrow-left)" marker-end="url(#arrow-right)" />
+                        </svg>
+                        <span class="diagram-edge-label">{"SMS / Call"}</span>
+                        <div class="diagram-lf-wrapper">
+                            <img src="/assets/fav.png" alt="Lightfriend" class="diagram-lf-icon" />
+                        </div>
+                    </div>
+                    <div class="diagram-right-group">
+                        <svg class="diagram-fan-svg" viewBox="0 0 70 130" preserveAspectRatio="none">
+                            <defs>
+                                <marker id="fan-arrow-r" markerWidth="5" markerHeight="4" refX="4" refY="2" orient="auto">
+                                    <path d="M0,0 L5,2 L0,4" fill="rgba(126,178,255,0.5)" />
+                                </marker>
+                                <marker id="fan-arrow-l" markerWidth="5" markerHeight="4" refX="1" refY="2" orient="auto">
+                                    <path d="M5,0 L0,2 L5,4" fill="rgba(126,178,255,0.5)" />
+                                </marker>
+                            </defs>
+                            <line x1="0" y1="65" x2="65" y2="5" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
+                            <line x1="0" y1="65" x2="65" y2="35" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
+                            <line x1="0" y1="65" x2="65" y2="65" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
+                            <line x1="0" y1="65" x2="65" y2="95" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
+                            <line x1="0" y1="65" x2="65" y2="125" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
+                        </svg>
+                        <div class="diagram-apps-list">
+                            <div class="diagram-app-row"><i class="fab fa-whatsapp"></i><span>{"WhatsApp"}</span></div>
+                            <div class="diagram-app-row"><i class="fab fa-telegram"></i><span>{"Telegram"}</span></div>
+                            <div class="diagram-app-row"><i class="fab fa-signal-messenger"></i><span>{"Signal"}</span></div>
+                            <div class="diagram-app-row"><i class="fas fa-envelope"></i><span>{"Email"}</span></div>
+                            <div class="diagram-app-row"><i class="fas fa-plug"></i><span>{"MCP"}</span></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="tradeoff" class="choice-section scroll-animate">
+                <h2>{"No tradeoff."}</h2>
+                <div class="choice-grid">
+                    <div class="choice-card">
+                        <span class="choice-label">{"Smartphone"}</span>
+                        <strong>{"Connected."}</strong>
+                        <strong class="choice-bad">{"Distracted."}</strong>
+                    </div>
+                    <div class="choice-card">
+                        <span class="choice-label">{"Dumbphone"}</span>
+                        <strong>{"Calm."}</strong>
+                        <strong class="choice-bad">{"Cut off."}</strong>
+                    </div>
+                    <div class="choice-card choice-card-primary">
+                        <span class="choice-label">{"Lightfriend"}</span>
+                        <strong>{"Calm."}</strong>
+                        <strong>{"Connected."}</strong>
+                    </div>
+                </div>
+                <a href="#plans" class="story-cta-link">{"Start 7-day free trial"}</a>
+            </section>
 
             // Capabilities section - what you can do with Lightfriend
             <section class="capabilities-section scroll-animate">
@@ -473,13 +401,6 @@ pub fn landing() -> Html {
                     { for cap_cards_html }
                 </div>
                 <p class="capabilities-footnote">{"Gets better over time - Lightfriend learns what matters to you."}</p>
-            </section>
-
-            <section id="plans" class="landing-pricing-section scroll-animate">
-                <div class="section-intro">
-                    <h2>{"Choose your plan"}</h2>
-                </div>
-                <StripePricingTable />
             </section>
 
             // Privacy section
@@ -494,6 +415,7 @@ pub fn landing() -> Html {
                         {"Trust Chain →"}
                     </Link<Route>>
                 </div>
+                <a href="#plans" class="story-cta-link">{"Start 7-day free trial"}</a>
             </section>
 
             <section class="testimonials-section scroll-animate">
@@ -550,11 +472,17 @@ pub fn landing() -> Html {
                     <p>{"I\u{2019}m "}<a class="story-link" href="https://rasmus.ahtava.com" target="_blank" rel="noopener noreferrer">{"Rasmus"}</a>{". I built Lightfriend because I switched to a dumbphone and needed a way to keep WhatsApp and email without a smartphone."}</p>
                 </div>
             </section>
+            <section id="plans" class="landing-pricing-section scroll-animate">
+                <div class="section-intro">
+                    <h2>{"Choose your plan"}</h2>
+                </div>
+                <StripePricingTable />
+            </section>
             <footer class="footer-cta scroll-animate">
                 <div class="footer-content">
                     <h2>{"Ready for Digital Peace?"}</h2>
                     <a href="#plans" class="forward-link">
-                        <button class="hero-cta">{"Get started"}</button>
+                        <button class="hero-cta">{"Start 7-day free trial"}</button>
                     </a>
                     <p class="disclaimer">{"Works with any phone - smartphones, flip phones, and feature phones. No extra hardware required."}</p>
                     <div class="waitlist-section">
@@ -657,15 +585,32 @@ pub fn landing() -> Html {
             </footer>
             <style>
                 {r#"
-    .hero-overlay {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.5) 80%, #0d0d0d 100%);
-        z-index: -1;
-        pointer-events: none;
+    .story-cta-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-top: 2rem;
+        padding: 0.8rem 1.15rem;
+        border-radius: 8px;
+        color: #111;
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.42);
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+        text-decoration: none;
+        font-size: 0.95rem;
+        font-weight: 800;
+    }
+    .story-cta-link:hover {
+        transform: translateY(-1px);
+        background: #fff;
+    }
+    .story-cta-dark {
+        color: #fff;
+        background: rgba(0, 0, 0, 0.78);
+        border-color: rgba(0, 0, 0, 0.18);
+    }
+    .story-cta-dark:hover {
+        background: #000;
     }
     /* Hero diagram */
     .hero-diagram {
@@ -695,7 +640,8 @@ pub fn landing() -> Html {
     }
     .diagram-node-label {
         font-size: 0.75rem;
-        color: #999;
+        color: rgba(255, 255, 255, 0.72);
+        text-shadow: 0 1px 12px rgba(0, 0, 0, 0.28);
         white-space: nowrap;
     }
     .diagram-lf-icon {
@@ -719,7 +665,9 @@ pub fn landing() -> Html {
         bottom: -14px;
         left: 20px;
         font-size: 0.65rem;
-        color: #7EB2FF;
+        color: #60a5ff;
+        font-weight: 800;
+        text-shadow: 0 1px 12px rgba(0, 0, 0, 0.3);
         white-space: nowrap;
     }
     .diagram-lf-wrapper {
@@ -749,14 +697,17 @@ pub fn landing() -> Html {
     }
     .diagram-app-row i {
         font-size: 1.1rem;
-        color: rgba(255, 255, 255, 0.6);
+        color: rgba(255, 255, 255, 0.78);
         width: 1.3rem;
         text-align: center;
         flex-shrink: 0;
+        filter: drop-shadow(0 1px 8px rgba(0, 0, 0, 0.2));
     }
     .diagram-app-row span {
         font-size: 0.8rem;
-        color: #999;
+        color: rgba(255, 255, 255, 0.76);
+        font-weight: 700;
+        text-shadow: 0 1px 12px rgba(0, 0, 0, 0.28);
         white-space: nowrap;
     }
     @media (max-width: 768px) {
@@ -800,17 +751,347 @@ pub fn landing() -> Html {
     .testimonial-metric-number {
         font-size: 1.5rem;
         font-weight: 700;
-        color: #7EB2FF;
+        color: var(--landing-blue);
     }
     .testimonial-metric-label {
         font-size: 0.85rem;
-        color: #999;
+        color: var(--landing-faint);
+    }
+    /* Visual proof section */
+    .word-section {
+        min-height: 100vh;
+        padding: 0 2rem !important;
+        background: transparent !important;
+        border-top: 0 !important;
+        text-align: center;
+    }
+    .word-section h2,
+    .fight-copy h2,
+    .app-bridge-copy h2 {
+        color: #fff;
+        font-size: 7rem;
+        line-height: 0.95;
+        margin: 0;
+        font-weight: 900;
+        overflow-wrap: anywhere;
+    }
+    .landing-page > section.child-word-section {
+        background: transparent !important;
+    }
+    .landing-page > section.child-word-section h2 {
+        color: #111;
+    }
+    .fight-section {
+        min-height: 100vh;
+        padding: 0 2rem !important;
+        background: transparent !important;
+        border-top: 0 !important;
+        text-align: center;
+    }
+    .fight-copy {
+        max-width: 980px;
+        margin: 0 auto;
+    }
+    .fight-copy p {
+        margin: 1.4rem auto 0;
+        color: var(--landing-text);
+        font-size: 1.25rem;
+        line-height: 1.45;
+        font-weight: 650;
+    }
+    .scroll-proof-section {
+        padding: 5rem 2rem;
+        gap: 2.5rem;
+        background: transparent;
+        position: relative;
+        z-index: 2;
+    }
+    .scroll-proof-copy {
+        max-width: 760px;
+        margin: 0 auto;
+        text-align: center;
+    }
+    .section-eyebrow {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--landing-blue);
+        font-size: 0.86rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0;
+        margin-bottom: 0.8rem;
+    }
+    .scroll-proof-copy h2 {
+        color: #fff;
+        font-size: clamp(2rem, 5vw, 4rem);
+        line-height: 1.05;
+        margin: 0;
+        font-weight: 800;
+    }
+    .scroll-proof-copy p {
+        max-width: 560px;
+        margin: 1rem auto 0;
+        color: var(--landing-muted);
+        font-size: 1rem;
+        line-height: 1.6;
+    }
+    .proof-flow {
+        display: grid;
+        grid-template-columns: minmax(0, 1.05fr) minmax(200px, 0.58fr) minmax(0, 0.86fr);
+        gap: 1rem;
+        align-items: stretch;
+        width: 100%;
+        max-width: 1216px;
+        margin: 0 auto;
+    }
+    .proof-card {
+        min-height: 390px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.035);
+        overflow: hidden;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+    }
+    .proof-step {
+        color: #fff;
+        font-size: 0.9rem;
+        font-weight: 700;
+        padding: 1rem 1rem 0;
+    }
+    .signal-window {
+        margin: 1rem;
+        padding: 1rem;
+        border-radius: 8px;
+        background: #050505;
+        min-height: 300px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 0.8rem;
+    }
+    .signal-bubble {
+        align-self: flex-start;
+        max-width: 82%;
+        padding: 0.82rem 1rem;
+        border-radius: 18px;
+        background: #3a3a3a;
+        color: #f3f3f3;
+        font-size: 0.98rem;
+        line-height: 1.35;
+    }
+    .signal-bubble-wide {
+        max-width: 96%;
+    }
+    .proof-signal-shot {
+        width: calc(100% - 2rem);
+        height: 330px;
+        object-fit: contain;
+        object-position: center;
+        border-radius: 8px;
+        margin: 1rem;
+        padding: 0.4rem;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: #050505;
+    }
+    .proof-decision-card {
+        justify-content: space-between;
+        align-items: center;
+        text-align: center;
+        padding-bottom: 1rem;
+    }
+    .decision-core {
+        display: grid;
+        place-items: center;
+        gap: 0.9rem;
+        margin: auto 0;
+    }
+    .decision-core img {
+        width: 68px;
+        height: 68px;
+        border-radius: 16px;
+    }
+    .decision-core span {
+        color: #fff;
+        font-size: 1.7rem;
+        font-weight: 800;
+    }
+    .decision-actions {
+        display: flex;
+        gap: 0.6rem;
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+    .decision-actions span {
+        color: #0d0d0d;
+        background: #f0f0f0;
+        border-radius: 999px;
+        padding: 0.45rem 0.8rem;
+        font-size: 0.82rem;
+        font-weight: 800;
+    }
+    .proof-phone-card {
+        background: #050505;
+    }
+    .proof-phone-shot {
+        width: calc(100% - 2rem);
+        height: 330px;
+        object-fit: cover;
+        object-position: top center;
+        border-radius: 8px;
+        margin: 1rem;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: #000;
+    }
+    .choice-section {
+        padding: 4.5rem 2rem;
+        background: transparent;
+        position: relative;
+        z-index: 2;
+    }
+    .choice-section h2 {
+        font-size: clamp(2.4rem, 6vw, 5rem);
+        line-height: 1;
+        margin: 0 0 2rem;
+        color: #fff;
+        font-weight: 850;
+        text-align: center;
+    }
+    .choice-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 1rem;
+        width: 100%;
+        max-width: 880px;
+        margin: 0 auto;
+    }
+    .choice-card {
+        min-height: 190px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 0.35rem;
+        padding: 1.4rem;
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.105);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 20px 60px rgba(20, 36, 48, 0.12);
+        backdrop-filter: blur(14px) saturate(1.1);
+        -webkit-backdrop-filter: blur(14px) saturate(1.1);
+    }
+    .choice-label {
+        color: var(--landing-blue);
+        font-size: 0.82rem;
+        font-weight: 800;
+        text-transform: uppercase;
+        margin-bottom: 0.6rem;
+    }
+    .choice-card strong {
+        color: #fff;
+        font-size: clamp(1.55rem, 3vw, 2.25rem);
+        line-height: 1.05;
+        text-shadow: 0 2px 20px rgba(0, 0, 0, 0.32);
+    }
+    .choice-card .choice-bad {
+        color: rgba(255, 255, 255, 0.64);
+    }
+    .choice-card-primary {
+        border-color: rgba(126, 178, 255, 0.54);
+        background: rgba(126, 178, 255, 0.13);
+    }
+    .app-bridge-section {
+        min-height: 100vh;
+        padding: 4rem 2rem 5rem;
+        background: transparent !important;
+        position: relative;
+        z-index: 2;
+        gap: 1.8rem;
+    }
+    .app-bridge-copy {
+        max-width: 920px;
+        margin: 0 auto;
+        text-align: center;
+    }
+    .app-bridge-copy h2 {
+        font-size: 5.7rem;
+    }
+    .app-bridge-copy p {
+        max-width: 720px;
+        margin: 1.4rem auto 0;
+        color: var(--landing-text);
+        font-size: 1.18rem;
+        line-height: 1.5;
+        font-weight: 760;
+        text-shadow: var(--landing-text-shadow);
+    }
+    .app-bridge-visual {
+        margin: 1.2rem auto 0;
+        padding: 2rem;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(255, 255, 255, 0.085);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 20px 70px rgba(20, 36, 48, 0.14);
+        backdrop-filter: blur(12px) saturate(1.08);
+        -webkit-backdrop-filter: blur(12px) saturate(1.08);
+        max-width: 760px;
+        box-sizing: border-box;
+    }
+    @media (max-width: 900px) {
+        .proof-flow {
+            grid-template-columns: 1fr;
+            max-width: 520px;
+        }
+        .proof-card {
+            min-height: auto;
+        }
+        .signal-window {
+            min-height: 260px;
+        }
+        .proof-phone-shot {
+            height: 360px;
+        }
+        .proof-signal-shot {
+            height: 260px;
+        }
+    }
+    @media (max-width: 768px) {
+        .word-section h2,
+        .fight-copy h2 {
+            font-size: 3.7rem;
+        }
+        .app-bridge-copy h2 {
+            font-size: 3rem;
+        }
+        .fight-copy p,
+        .app-bridge-copy p {
+            font-size: 1.02rem;
+        }
+        .scroll-proof-section,
+        .choice-section,
+        .app-bridge-section {
+            padding: 3.5rem 1rem;
+        }
+        .scroll-proof-copy p {
+            font-size: 0.95rem;
+        }
+        .app-bridge-visual {
+            padding: 1rem;
+            width: 100%;
+        }
+        .choice-grid {
+            grid-template-columns: 1fr;
+        }
+        .choice-card {
+            min-height: 150px;
+        }
     }
     /* Capabilities section */
     .capabilities-section {
         padding: 5rem 2rem;
-        background: #0d0d0d;
-        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        background: transparent;
+        border-top: 0;
         position: relative;
         z-index: 2;
     }
@@ -850,7 +1131,7 @@ pub fn landing() -> Html {
     }
     .cap-card-header i {
         font-size: 1.2rem;
-        color: #7EB2FF;
+        color: var(--landing-blue);
         margin-top: 0.15rem;
         flex-shrink: 0;
     }
@@ -868,12 +1149,12 @@ pub fn landing() -> Html {
     }
     .cap-card-liner {
         font-size: 0.85rem;
-        color: #999;
+        color: var(--landing-muted);
         line-height: 1.5;
     }
     .cap-card-toggle {
         font-size: 1.3rem;
-        color: #7EB2FF;
+        color: var(--landing-blue);
         flex-shrink: 0;
         margin-left: 0.5rem;
     }
@@ -889,13 +1170,13 @@ pub fn landing() -> Html {
     }
     .cap-card-detail p {
         font-size: 0.9rem;
-        color: #999;
+        color: var(--landing-muted);
         line-height: 1.6;
         margin-bottom: 0.5rem;
     }
     .capabilities-footnote {
         text-align: center;
-        color: #666;
+        color: var(--landing-faint);
         font-size: 0.85rem;
         margin-top: 1.5rem;
         font-style: italic;
@@ -913,8 +1194,8 @@ pub fn landing() -> Html {
     }
     .landing-pricing-section {
         padding: 5rem 2rem;
-        background: #101010;
-        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        background: transparent;
+        border-top: 0;
         position: relative;
         z-index: 2;
     }
@@ -932,7 +1213,7 @@ pub fn landing() -> Html {
         min-height: 160px;
         display: grid;
         place-items: center;
-        color: #aaa;
+        color: var(--landing-muted);
         font-size: 0.95rem;
     }
     .stripe-pricing-error {
@@ -947,8 +1228,8 @@ pub fn landing() -> Html {
     .privacy-hook {
         padding: 5rem 2rem;
         text-align: center;
-        background: #0d0d0d;
-        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        background: transparent;
+        border-top: 0;
         position: relative;
         z-index: 2;
     }
@@ -963,7 +1244,7 @@ pub fn landing() -> Html {
     }
     .privacy-hook-subtitle {
         font-size: 1.05rem;
-        color: #999;
+        color: var(--landing-muted);
         line-height: 1.6;
         max-width: 600px;
         margin: 0 auto 2rem;
@@ -975,14 +1256,14 @@ pub fn landing() -> Html {
         flex-wrap: wrap;
     }
     .privacy-hook-link {
-        color: #7EB2FF;
+        color: var(--landing-blue);
         text-decoration: none;
         font-size: 0.95rem;
         font-weight: 500;
         transition: color 0.3s ease;
     }
     .privacy-hook-link:hover {
-        color: #a8ccff;
+        color: #c6ddff;
     }
     @media (max-width: 768px) {
         .privacy-hook {
@@ -1008,7 +1289,7 @@ pub fn landing() -> Html {
     }
     .cost-hook-label {
         font-size: 1rem;
-        color: #888;
+        color: var(--landing-faint);
         text-transform: uppercase;
         letter-spacing: 0.1em;
         margin-bottom: 0.5rem;
@@ -1022,7 +1303,7 @@ pub fn landing() -> Html {
     .cost-hook-toggle {
         background: none;
         border: none;
-        color: #7EB2FF;
+        color: var(--landing-blue);
         font-size: 0.9rem;
         cursor: pointer;
         padding: 0.5rem 0;
@@ -1049,7 +1330,7 @@ pub fn landing() -> Html {
     }
     .cost-hook-item p {
         font-size: 0.9rem;
-        color: #999;
+        color: var(--landing-muted);
         line-height: 1.7;
         margin: 0;
     }
@@ -1147,7 +1428,7 @@ pub fn landing() -> Html {
         max-width: 1200px;
         position: relative;
         z-index: 2;
-        background: #0d0d0d;
+        background: transparent;
         text-align: center;
     }
     .filter-concept h2 {
@@ -1157,7 +1438,7 @@ pub fn landing() -> Html {
     }
     .filter-concept-subtitle {
         font-size: 1.2rem;
-        color: #bbb;
+        color: var(--landing-muted);
         line-height: 1.6;
         max-width: 700px;
         margin: 0 auto 2rem;
@@ -1184,7 +1465,7 @@ pub fn landing() -> Html {
         border-radius: 12px;
         cursor: pointer;
         transition: all 0.3s ease;
-        color: rgba(255, 255, 255, 0.5);
+        color: var(--landing-faint);
     }
     .integration-btn:hover {
         border-color: rgba(255, 255, 255, 0.25);
@@ -1193,7 +1474,7 @@ pub fn landing() -> Html {
     }
     .integration-btn.active {
         border-color: rgba(126, 178, 255, 0.5);
-        color: #7EB2FF;
+        color: var(--landing-blue);
         background: rgba(126, 178, 255, 0.08);
     }
     .integration-btn i {
@@ -1226,7 +1507,7 @@ pub fn landing() -> Html {
     }
     .integration-detail-content p {
         font-size: 1rem;
-        color: #999;
+        color: var(--landing-muted);
         line-height: 1.6;
     }
     @media (max-width: 768px) {
@@ -1297,7 +1578,7 @@ pub fn landing() -> Html {
     }
     .trust-proof p {
         font-size: 1.3rem;
-        color: #bbb;
+        color: var(--landing-muted);
         line-height: 1.8;
         font-weight: 400;
         margin-bottom: 1.5rem;
@@ -1336,11 +1617,11 @@ pub fn landing() -> Html {
         transition: color 0.3s ease;
     }
     .landing-faq-question:hover {
-        color: #7EB2FF;
+        color: var(--landing-blue);
     }
     .landing-faq-question .toggle-icon {
         font-size: 1.5rem;
-        color: #7EB2FF;
+        color: var(--landing-blue);
         flex-shrink: 0;
         margin-left: 1rem;
     }
@@ -1356,7 +1637,7 @@ pub fn landing() -> Html {
     }
     .landing-faq-answer p {
         font-size: 1rem;
-        color: #999;
+        color: var(--landing-muted);
         line-height: 1.6;
         margin-bottom: 0.75rem;
     }
@@ -1366,7 +1647,7 @@ pub fn landing() -> Html {
         margin: 0.5rem 0;
     }
     .landing-faq-answer li {
-        color: #999;
+        color: var(--landing-muted);
         padding: 0.4rem 0;
         padding-left: 1.2rem;
         position: relative;
@@ -1377,10 +1658,10 @@ pub fn landing() -> Html {
         content: '\2022';
         position: absolute;
         left: 0.3rem;
-        color: #7EB2FF;
+        color: var(--landing-blue);
     }
     .landing-faq-answer a {
-        color: #7EB2FF;
+        color: var(--landing-blue);
         text-decoration: none;
     }
     .landing-faq-answer a:hover {
@@ -1391,7 +1672,7 @@ pub fn landing() -> Html {
         text-align: center;
     }
     .faq-more-link a {
-        color: #7EB2FF;
+        color: var(--landing-blue);
         text-decoration: none;
         font-size: 1rem;
     }
@@ -1536,7 +1817,7 @@ pub fn landing() -> Html {
     }
     .difference-text p {
         font-size: 1.4rem;
-        color: #bbb;
+        color: var(--landing-muted);
         line-height: 1.8;
         font-weight: 400;
     }
@@ -1551,7 +1832,7 @@ pub fn landing() -> Html {
     }
     .comparison-table p {
         text-align: center;
-        color: #ddd;
+        color: var(--landing-text);
         margin-bottom: 1.5rem;
     }
     .comparison-table table {
@@ -1559,7 +1840,7 @@ pub fn landing() -> Html {
         border-collapse: collapse;
         margin: 0 auto;
         font-size: 1rem;
-        color: #ddd;
+        color: var(--landing-text);
     }
     .comparison-table th, .comparison-table td {
         padding: 1rem;
@@ -1568,7 +1849,7 @@ pub fn landing() -> Html {
     }
     .comparison-table th {
         background: rgba(0, 0, 0, 0.5);
-        color: #7EB2FF;
+        color: var(--landing-blue);
     }
     .comparison-table tr:hover {
         background: rgba(255, 255, 255, 0.1);
@@ -1583,7 +1864,7 @@ pub fn landing() -> Html {
     }
     .highlight {
         font-weight: 700;
-        color: #7EB2FF;
+        color: var(--landing-blue);
     }
     .difference-image {
         flex: 1;
@@ -1620,6 +1901,12 @@ pub fn landing() -> Html {
         }
     }
     .landing-page {
+        --landing-text-shadow: 0 2px 18px rgba(0, 0, 0, 0.46), 0 1px 2px rgba(0, 0, 0, 0.42);
+        --landing-soft-shadow: 0 1px 14px rgba(0, 0, 0, 0.34);
+        --landing-text: rgba(255, 255, 255, 0.96);
+        --landing-muted: rgba(255, 255, 255, 0.84);
+        --landing-faint: rgba(255, 255, 255, 0.70);
+        --landing-blue: #8fc5ff;
         position: relative;
         min-height: 100vh;
         background: #0d0d0d;
@@ -1630,6 +1917,52 @@ pub fn landing() -> Html {
         overflow-x: clip;
         box-sizing: border-box;
         z-index: 0;
+        isolation: isolate;
+    }
+    .landing-page::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background-image: url('/assets/child-field-hero.png');
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        z-index: 0;
+        pointer-events: none;
+    }
+    .landing-page::after {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background: linear-gradient(to bottom,
+            rgba(13, 13, 13, 0.08) 0%,
+            rgba(13, 13, 13, 0.18) 35%,
+            rgba(13, 13, 13, 0.74) 100%
+        );
+        z-index: 0;
+        pointer-events: none;
+    }
+    .landing-page h1,
+    .landing-page h2,
+    .landing-page h3,
+    .landing-page p,
+    .landing-page li,
+    .landing-page blockquote,
+    .landing-page strong,
+    .landing-page .choice-label,
+    .landing-page .landing-faq-question,
+    .landing-page .story-link,
+    .landing-page .privacy-hook-link,
+    .landing-page .development-links a,
+    .landing-page .legal-links a {
+        text-shadow: var(--landing-text-shadow);
+    }
+    .landing-page > header,
+    .landing-page > section,
+    .landing-page > footer,
+    .landing-page > .filter-concept {
+        position: relative;
+        z-index: 1;
     }
     .landing-page > section,
     .landing-page > footer {
@@ -1640,8 +1973,8 @@ pub fn landing() -> Html {
         padding-top: 3rem;
         padding-bottom: 3rem;
         box-sizing: border-box;
-        background: #0d0d0d;
-        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        background: transparent;
+        border-top: 0;
     }
     .landing-page > section:first-of-type {
         border-top: none;
@@ -1778,7 +2111,7 @@ pub fn landing() -> Html {
         margin-bottom: 1rem;
     }
     .how-it-works > p {
-        color: #7EB2FF;
+        color: var(--landing-blue);
         margin-bottom: 4rem;
         font-size: 1.2rem;
     }
@@ -1822,7 +2155,7 @@ pub fn landing() -> Html {
         font-weight: 600;
     }
     .step p {
-        color: #999;
+        color: var(--landing-muted);
         font-size: 1rem;
         line-height: 1.6;
     }
@@ -1853,7 +2186,7 @@ pub fn landing() -> Html {
     .footer-cta {
         padding: 6rem 0;
         background: transparent;
-        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        border-top: 0;
         text-align: left;
         position: relative;
         z-index: 1;
@@ -1878,7 +2211,7 @@ pub fn landing() -> Html {
     }
     .footer-cta .subtitle {
         font-size: 1.2rem;
-        color: #999;
+        color: var(--landing-muted);
         margin-bottom: 2.5rem;
         line-height: 1.6;
     }
@@ -1900,6 +2233,8 @@ pub fn landing() -> Html {
         flex-direction: column;
         pointer-events: auto;
         padding: 0 2rem;
+        box-sizing: border-box;
+        overflow-x: clip;
     }
     .hero-notification-card {
         text-align: center;
@@ -1922,46 +2257,36 @@ pub fn landing() -> Html {
         max-width: 400px;
         border-radius: 12px;
     }
-    .hero-background {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-image: url('/assets/aurora-bg.jpg');
-        background-size: cover;
-        background-position: center;
-        background-repeat: no-repeat;
-        opacity: 1;
-        z-index: -2;
-        pointer-events: none;
-    }
-    .hero-background::after {
-        content: '';
-        position: absolute;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        height: 50%;
-        background: linear-gradient(to bottom,
-            rgba(13, 13, 13, 0) 0%,
-            rgba(13, 13, 13, 1) 100%
-        );
-    }
-    @media (max-width: 768px) {
-        .hero-background {
-            background-position: 70% center;
-        }
-    }
     .hero-title {
-        font-size: clamp(2.2rem, 5.5vw, 4rem);
+        font-size: clamp(3rem, 7vw, 6.2rem);
         font-weight: 800;
         color: #fff;
         text-shadow: none;
-        margin: 0 auto 0.5rem;
+        margin: 0 auto 0.8rem;
         width: 100%;
-        line-height: 1.15;
+        line-height: 0.98;
         text-align: center;
+        max-width: 100%;
+        overflow-wrap: break-word;
+    }
+    .hero-title span {
+        display: block;
+    }
+    .hero-word-title {
+        font-size: clamp(3.2rem, 8.5vw, 7.25rem);
+        line-height: 0.9;
+        font-weight: 900;
+        margin: 0;
+        white-space: normal;
+        text-shadow: 0 4px 30px rgba(0, 0, 0, 0.45);
+    }
+    .hero-kicker {
+        color: var(--landing-blue);
+        font-size: 0.86rem;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0;
+        margin: 0 0 1rem;
     }
     .hero-tagline {
         font-size: 1.15rem;
@@ -1974,19 +2299,37 @@ pub fn landing() -> Html {
         text-align: center;
     }
     .hero-subtitle {
-        font-size: 1.4rem;
-        font-weight: 300;
-        letter-spacing: 0.02em;
-        max-width: 600px;
-        margin: 0 auto 1rem;
-        line-height: 1.6;
+        font-size: clamp(1rem, 1.8vw, 1.28rem);
+        font-weight: 500;
+        letter-spacing: 0;
+        max-width: 640px;
+        margin: 0 auto 1.2rem;
+        line-height: 1.45;
         text-align: center;
-        color: #fff;
+        color: rgba(255, 255, 255, 0.82);
+    }
+    .hero-pill-row {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+        margin-top: 0.3rem;
+        max-width: 100%;
+    }
+    .hero-pill-row span {
+        color: #f5f5f5;
+        background: rgba(0, 0, 0, 0.42);
+        border: 1px solid rgba(255, 255, 255, 0.13);
+        border-radius: 999px;
+        padding: 0.48rem 0.76rem;
+        font-size: 0.86rem;
+        font-weight: 750;
     }
     .highlight-icon {
         font-size: 1.2rem;
         margin: 0 0.2rem;
-        color: #7EB2FF;
+        color: var(--landing-blue);
         vertical-align: middle;
     }
     @media (max-width: 768px) {
@@ -1997,13 +2340,23 @@ pub fn landing() -> Html {
             padding: 0 1rem;
         }
         .hero-title {
-            font-size: clamp(1.8rem, 7vw, 2.5rem);
+            font-size: clamp(2.5rem, 12vw, 4.4rem);
+        }
+        .hero-word-title {
+            font-size: clamp(3.1rem, 15vw, 4.8rem);
         }
         .hero-tagline {
             font-size: 0.95rem;
         }
         .hero-subtitle {
-            font-size: 1.15rem;
+            font-size: 1rem;
+        }
+        .hero-pill-row {
+            gap: 0.4rem;
+        }
+        .hero-pill-row span {
+            font-size: 0.78rem;
+            padding: 0.42rem 0.62rem;
         }
         .highlight-icon {
             font-size: 1rem;
@@ -2099,7 +2452,7 @@ pub fn landing() -> Html {
     .hero-metric-number {
         font-size: 1.3rem;
         font-weight: 700;
-        color: #7EB2FF;
+        color: var(--landing-blue);
     }
     .hero-metric-label {
         font-size: 0.85rem;
@@ -2125,8 +2478,10 @@ pub fn landing() -> Html {
         flex-direction: column;
         align-items: center;
         margin: 0 auto;
-        max-width: 800px;
-        padding-top: 30vh;
+        max-width: 920px;
+        width: 100%;
+        box-sizing: border-box;
+        padding-top: 24vh;
         padding-bottom: 4rem;
         z-index: 3;
     }
@@ -2146,7 +2501,19 @@ pub fn landing() -> Html {
         .hero-right-panel {
             max-width: 100%;
             padding: 0 1rem;
-            padding-top: 28vh;
+            padding-top: 22vh;
+        }
+    }
+    .hero-word-panel {
+        justify-content: center;
+        min-height: 100vh;
+        padding-top: 0;
+        padding-bottom: 0;
+    }
+    @media (max-width: 768px) {
+        .hero-word-panel {
+            padding-top: 0;
+            padding-bottom: 0;
         }
     }
 
@@ -2204,7 +2571,7 @@ pub fn landing() -> Html {
     }
     .sms-assistant {
         background: rgba(255, 255, 255, 0.1);
-        color: #ddd;
+        color: var(--landing-text);
         align-self: flex-start;
         border-bottom-left-radius: 4px;
     }
@@ -2396,7 +2763,7 @@ pub fn landing() -> Html {
         cursor: pointer;
         transition: all 0.3s ease;
         background: rgba(255, 255, 255, 0.08);
-        color: rgba(255, 255, 255, 0.5);
+        color: var(--landing-faint);
         font-family: inherit;
     }
     .sms-tab i {
@@ -2425,7 +2792,7 @@ pub fn landing() -> Html {
     .demo-customization-note {
         text-align: center;
         font-size: 0.78rem;
-        color: rgba(255, 255, 255, 0.4);
+        color: var(--landing-faint);
         margin-top: 0.8rem;
         font-style: italic;
     }
@@ -2442,17 +2809,19 @@ pub fn landing() -> Html {
         }
     }
     .hero-anim {
-        opacity: 0;
-        animation: heroFadeIn 0.7s ease forwards;
+        opacity: 1;
+        animation: none;
     }
-    .hero-anim-1 { animation-delay: 0.2s; }
-    .hero-anim-2 { animation-delay: 0.5s; }
-    .hero-anim-3 { animation-delay: 0.8s; }
-    .hero-anim-4 { animation-delay: 1.1s; }
-    .hero-anim-5 { animation-delay: 1.5s; }
+    .hero-anim-1,
+    .hero-anim-2,
+    .hero-anim-3,
+    .hero-anim-4,
+    .hero-anim-5 {
+        animation-delay: 0s;
+    }
 
     .faq-link {
-        color: #7EB2FF;
+        color: var(--landing-blue);
         text-decoration: none;
         font-size: 1rem;
         transition: all 0.3s ease;
@@ -2502,7 +2871,7 @@ pub fn landing() -> Html {
         display: block;
     }
     .section-intro .story-link {
-        color: #7EB2FF;
+        color: var(--landing-blue);
         text-decoration: none;
         transition: color 0.3s ease;
     }
@@ -2525,7 +2894,7 @@ pub fn landing() -> Html {
     }
     .before-after p {
         font-size: 1.3rem;
-        color: #bbb;
+        color: var(--landing-muted);
         line-height: 1.8;
         font-weight: 400;
         max-width: 700px;
@@ -2543,12 +2912,12 @@ pub fn landing() -> Html {
         margin-top: 1rem;
     }
     .legal-links a {
-        color: #666;
+        color: var(--landing-faint);
         text-decoration: none;
         transition: color 0.3s ease;
     }
     .legal-links a:hover {
-        color: #7EB2FF;
+        color: var(--landing-blue);
     }
     @media (max-width: 768px) {
         .section-intro {
@@ -2562,7 +2931,7 @@ pub fn landing() -> Html {
         border-top: 1px solid rgba(255, 255, 255, 0.1);
     }
     .waitlist-intro {
-        color: #888;
+        color: var(--landing-muted);
         font-size: 1rem;
         margin-bottom: 1rem;
     }
@@ -2589,7 +2958,7 @@ pub fn landing() -> Html {
         border-color: #1E90FF;
     }
     .waitlist-input::placeholder {
-        color: #666;
+        color: rgba(255, 255, 255, 0.62);
     }
     .waitlist-button {
         padding: 0.75rem 1.5rem;
@@ -2637,13 +3006,13 @@ pub fn landing() -> Html {
     .development-links {
         margin-top: 2rem;
         font-size: 0.9rem;
-        color: #666;
+        color: var(--landing-faint);
     }
     .development-links p {
         margin: 0.5rem 0;
     }
     .development-links a {
-        color: #007bff;
+        color: var(--landing-blue);
         text-decoration: none;
         position: relative;
         padding: 0 2px;
@@ -2662,7 +3031,7 @@ pub fn landing() -> Html {
         transition: transform 0.3s ease;
     }
     .development-links a:hover {
-        color: #7EB2FF;
+        color: #c6ddff;
     }
     .development-links a:hover::after {
         transform: scaleX(1);
@@ -2702,31 +3071,15 @@ pub fn landing() -> Html {
         opacity: 0.9;
     }
     /* ========== Scroll Animations ========== */
-    .scroll-animate {
-        opacity: 0;
-        transform: translateY(30px);
-        transition: opacity 0.7s ease, transform 0.7s ease;
-    }
-    .scroll-animate.visible {
-        opacity: 1;
-        transform: translateY(0);
-    }
-    /* Demo-story section staggered entrance */
-    .demo-story-left.scroll-animate {
-        transform: translateX(-30px);
-        transition: opacity 0.7s ease, transform 0.7s ease;
-    }
-    .demo-story-right.scroll-animate {
-        transform: translateX(30px);
-        transition: opacity 0.7s ease 0.2s, transform 0.7s ease 0.2s;
-    }
-    .demo-story-left.scroll-animate.visible {
-        opacity: 1;
-        transform: translateX(0);
-    }
+    .scroll-animate,
+    .scroll-animate.visible,
+    .demo-story-left.scroll-animate,
+    .demo-story-right.scroll-animate,
+    .demo-story-left.scroll-animate.visible,
     .demo-story-right.scroll-animate.visible {
         opacity: 1;
-        transform: translateX(0);
+        transform: none;
+        transition: none;
     }
 
     /* ========== Your Data, Connected ========== */
@@ -2755,7 +3108,7 @@ pub fn landing() -> Html {
         font-size: 0.8rem;
         text-transform: uppercase;
         letter-spacing: 0.12em;
-        color: rgba(255, 255, 255, 0.5);
+        color: var(--landing-faint);
         margin-bottom: 1rem;
         font-weight: 600;
     }
@@ -2780,11 +3133,11 @@ pub fn landing() -> Html {
     }
     .connected-item i {
         font-size: 1.2rem;
-        color: #7EB2FF;
+        color: var(--landing-blue);
     }
     .connected-item span {
         font-size: 0.95rem;
-        color: #ddd;
+        color: var(--landing-text);
         font-weight: 500;
     }
     @media (max-width: 768px) {
@@ -2837,7 +3190,7 @@ pub fn landing() -> Html {
         border-radius: 20px;
         margin-bottom: 0.75rem;
         background: rgba(126, 178, 255, 0.15);
-        color: #7EB2FF;
+        color: var(--landing-blue);
     }
     .rule-block h3 {
         font-size: 1.2rem;
@@ -2847,7 +3200,7 @@ pub fn landing() -> Html {
     }
     .rule-block-desc {
         font-size: 0.9rem;
-        color: rgba(255, 255, 255, 0.5);
+        color: var(--landing-faint);
         margin-bottom: 1rem;
     }
     .rule-block-list {
@@ -2857,7 +3210,7 @@ pub fn landing() -> Html {
     }
     .rule-block-list li {
         font-size: 0.9rem;
-        color: #bbb;
+        color: var(--landing-muted);
         line-height: 1.6;
         padding: 0.3rem 0;
         padding-left: 1.2rem;
@@ -2876,7 +3229,7 @@ pub fn landing() -> Html {
     .rules-note {
         margin-top: 1.5rem;
         font-size: 0.95rem;
-        color: rgba(255, 255, 255, 0.5);
+        color: var(--landing-faint);
         max-width: 700px;
         margin-left: auto;
         margin-right: auto;
@@ -2927,7 +3280,7 @@ pub fn landing() -> Html {
     }
     .interaction-icon i {
         font-size: 1.8rem;
-        color: #7EB2FF;
+        color: var(--landing-blue);
     }
     .interaction-card h3 {
         font-size: 1.15rem;
@@ -2937,7 +3290,7 @@ pub fn landing() -> Html {
     }
     .interaction-card p {
         font-size: 0.9rem;
-        color: #bbb;
+        color: var(--landing-muted);
         line-height: 1.5;
         margin: 0;
     }
@@ -2987,12 +3340,12 @@ pub fn landing() -> Html {
         font-weight: 600;
     }
     .privacy-vis-card h3 i {
-        color: #7EB2FF;
+        color: var(--landing-blue);
         margin-right: 0.3rem;
     }
     .privacy-vis-card p {
         font-size: 0.95rem;
-        color: #bbb;
+        color: var(--landing-muted);
         line-height: 1.6;
         margin: 0;
     }
@@ -3008,12 +3361,12 @@ pub fn landing() -> Html {
     }
     .privacy-bold-statement p {
         font-size: 1.05rem;
-        color: #bbb;
+        color: var(--landing-muted);
         line-height: 1.7;
         margin-bottom: 1.5rem;
     }
     .privacy-link {
-        color: #7EB2FF;
+        color: var(--landing-blue);
         font-size: 1.05rem;
         font-weight: 600;
         text-decoration: none;
@@ -3064,7 +3417,7 @@ pub fn landing() -> Html {
     }
     .testimonial blockquote {
         font-size: 1.2rem;
-        color: #ddd;
+        color: var(--landing-text);
         line-height: 1.6;
         margin: 0;
         font-style: italic;
@@ -3072,7 +3425,7 @@ pub fn landing() -> Html {
     .testimonial-author {
         text-align: right;
         font-size: 1rem;
-        color: #bbb;
+        color: var(--landing-muted);
         margin-top: 1rem;
     }
     @media (max-width: 768px) {
@@ -3099,7 +3452,7 @@ pub fn landing() -> Html {
         color: #fff;
     }
     .adhd-subtitle {
-        color: #999;
+        color: var(--landing-muted);
         font-size: 1.1rem;
         margin-bottom: 2.5rem;
         max-width: 600px;
@@ -3133,7 +3486,7 @@ pub fn landing() -> Html {
         margin-bottom: 0.75rem;
     }
     .adhd-card p {
-        color: #999;
+        color: var(--landing-muted);
         font-size: 0.95rem;
         line-height: 1.5;
     }

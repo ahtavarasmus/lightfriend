@@ -71,6 +71,7 @@ pub mod utils {
     pub mod webauthn_config;
 }
 pub mod proactive {
+    pub mod alert_feedback;
     pub mod commitment_replies;
     pub mod rules;
     pub mod signal_extraction;

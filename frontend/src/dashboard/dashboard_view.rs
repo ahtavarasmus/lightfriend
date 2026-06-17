@@ -263,6 +263,67 @@ const DASHBOARD_STYLES: &str = r#"
     margin: 0 0.4rem;
     color: #444;
 }
+.value-stats-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    padding: 0.75rem 0.85rem;
+    border-radius: 8px;
+    border: 1px solid rgba(126, 178, 255, 0.16);
+    background: rgba(126, 178, 255, 0.06);
+}
+.value-stats-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+.value-stats-kicker {
+    color: #7EB2FF;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+.value-stats-quality {
+    color: #4ade80;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.value-stats-sentence {
+    color: #e6e6e6;
+    font-size: 0.92rem;
+    line-height: 1.45;
+}
+.value-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.45rem;
+}
+.value-stat {
+    min-width: 0;
+    padding: 0.45rem 0.5rem;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+}
+.value-stat-number {
+    color: #fff;
+    font-size: 1.15rem;
+    font-weight: 700;
+    line-height: 1.1;
+}
+.value-stat-label {
+    color: #9ca3af;
+    font-size: 0.68rem;
+    line-height: 1.25;
+    margin-top: 0.25rem;
+}
+.value-stats-feedback {
+    color: #9ca3af;
+    font-size: 0.74rem;
+    line-height: 1.35;
+}
 
 /* ---- Tracked Events ---- */
 .events-section {
@@ -747,6 +808,11 @@ const DASHBOARD_STYLES: &str = r#"
     .monitoring-status { color: #16a34a; }
     .monitoring-dot { background: #16a34a; }
     .assistant-plan-note { color: #666; background: rgba(0,0,0,0.02); border-color: rgba(0,0,0,0.08); }
+    .value-stats-card { background: rgba(30, 100, 220, 0.05); border-color: rgba(30, 100, 220, 0.14); }
+    .value-stats-sentence { color: #333; }
+    .value-stat { background: rgba(255,255,255,0.8); border-color: rgba(0,0,0,0.08); }
+    .value-stat-number { color: #1f2937; }
+    .value-stat-label, .value-stats-feedback { color: #666; }
     .rules-compact-bar { border-bottom-color: rgba(0,0,0,0.06); color: #888; }
     .rules-expandable.expanded { border-bottom-color: rgba(0,0,0,0.06); }
 }
@@ -766,6 +832,21 @@ struct DashboardSummaryResponse {
     watched_contacts: Vec<WatchedContactResponse>,
     sunrise_hour: Option<f32>,
     sunset_hour: Option<f32>,
+    value_stats: DashboardValueStatsResponse,
+}
+
+#[derive(Clone, PartialEq, Deserialize)]
+struct DashboardValueStatsResponse {
+    period_label: String,
+    watched_messages: i64,
+    quieted_messages: i64,
+    interruptions_sent: i64,
+    quiet_percent: Option<i64>,
+    feedback_total: i64,
+    feedback_worth_it: i64,
+    feedback_should_wait: i64,
+    worth_it_percent: Option<i64>,
+    value_sentence: String,
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
@@ -1473,6 +1554,55 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
             .unwrap_or_else(|| timestamp.to_string())
     };
 
+    let value_stats_card = (*summary)
+        .as_ref()
+        .map(|s| s.value_stats.clone())
+        .map(|stats| {
+            let quiet_detail = stats
+                .quiet_percent
+                .map(|pct| format!("{}% quiet", pct))
+                .unwrap_or_else(|| "No quiet ratio yet".to_string());
+            let quality = stats
+                .worth_it_percent
+                .map(|pct| format!("{}% worth it", pct));
+            let feedback_text = if stats.feedback_total > 0 {
+                format!(
+                    "{} alert ratings: {} worth it, {} should have waited.",
+                    stats.feedback_total, stats.feedback_worth_it, stats.feedback_should_wait
+                )
+            } else {
+                "After an important alert, reply 1 if it was worth it or 2 if it should have waited.".to_string()
+            };
+
+            html! {
+                <div class="value-stats-card">
+                    <div class="value-stats-header">
+                        <div class="value-stats-kicker">{stats.period_label.clone()}</div>
+                        if let Some(quality_text) = quality {
+                            <div class="value-stats-quality">{quality_text}</div>
+                        }
+                    </div>
+                    <div class="value-stats-sentence">{stats.value_sentence.clone()}</div>
+                    <div class="value-stats-grid">
+                        <div class="value-stat">
+                            <div class="value-stat-number">{stats.watched_messages}</div>
+                            <div class="value-stat-label">{"watched"}</div>
+                        </div>
+                        <div class="value-stat">
+                            <div class="value-stat-number">{stats.quieted_messages}</div>
+                            <div class="value-stat-label">{format!("let wait - {}", quiet_detail)}</div>
+                        </div>
+                        <div class="value-stat">
+                            <div class="value-stat-number">{stats.interruptions_sent}</div>
+                            <div class="value-stat-label">{"interruptions"}</div>
+                        </div>
+                    </div>
+                    <div class="value-stats-feedback">{feedback_text}</div>
+                </div>
+            }
+        })
+        .unwrap_or_default();
+
     let on_toggle_custom_rules = {
         let custom_rules_open = custom_rules_open.clone();
         Callback::from(move |_: web_sys::MouseEvent| {
@@ -1850,6 +1980,8 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                             })}
                         </div>
                     }
+
+                    {value_stats_card}
 
                     // ChatBox
                     <div>

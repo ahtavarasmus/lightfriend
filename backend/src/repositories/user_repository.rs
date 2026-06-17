@@ -52,6 +52,19 @@ const HISTORY_WINDOW_SECS: i32 = 48 * 3600;
 /// a tool call or two. Bounds context size for very chatty users.
 const HISTORY_MAX_MESSAGES: i64 = 200;
 
+pub const SYSTEM_ALERT_ACTIVITY_TYPES: &[&str] = &[
+    "system_important",
+    "system_important_sms",
+    "system_important_call",
+    "system_important_call_sms",
+];
+pub const SYSTEM_ALERT_FEEDBACK_WORTH_IT: &str = "system_alert_feedback_worth_it";
+pub const SYSTEM_ALERT_FEEDBACK_SHOULD_WAIT: &str = "system_alert_feedback_should_wait";
+pub const SYSTEM_ALERT_FEEDBACK_ACTIVITY_TYPES: &[&str] = &[
+    SYSTEM_ALERT_FEEDBACK_WORTH_IT,
+    SYSTEM_ALERT_FEEDBACK_SHOULD_WAIT,
+];
+
 pub struct UserRepository {
     pub pool: PgDbPool,
 }
@@ -526,6 +539,66 @@ impl UserRepository {
             )
             .count()
             .get_result(&mut conn)
+    }
+
+    pub fn count_usage_activities_since(
+        &self,
+        user_id: i32,
+        since_ts: i32,
+        activity_types: &[&str],
+    ) -> Result<i64, DieselError> {
+        if activity_types.is_empty() {
+            return Ok(0);
+        }
+
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        usage_logs::table
+            .filter(usage_logs::user_id.eq(user_id))
+            .filter(usage_logs::created_at.gt(since_ts))
+            .filter(
+                usage_logs::success
+                    .eq(true)
+                    .or(usage_logs::success.is_null()),
+            )
+            .filter(usage_logs::activity_type.eq_any(activity_types))
+            .count()
+            .get_result(&mut conn)
+    }
+
+    pub fn latest_system_alert_for_feedback(
+        &self,
+        user_id: i32,
+        since_ts: i32,
+    ) -> Result<Option<crate::pg_models::PgUsageLog>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        usage_logs::table
+            .filter(usage_logs::user_id.eq(user_id))
+            .filter(usage_logs::created_at.gt(since_ts))
+            .filter(
+                usage_logs::success
+                    .eq(true)
+                    .or(usage_logs::success.is_null()),
+            )
+            .filter(usage_logs::activity_type.eq_any(SYSTEM_ALERT_ACTIVITY_TYPES))
+            .order(usage_logs::created_at.desc())
+            .first::<crate::pg_models::PgUsageLog>(&mut conn)
+            .optional()
+    }
+
+    pub fn has_system_alert_feedback_after(
+        &self,
+        user_id: i32,
+        created_after: i32,
+    ) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let count: i64 = usage_logs::table
+            .filter(usage_logs::user_id.eq(user_id))
+            .filter(usage_logs::created_at.ge(created_after))
+            .filter(usage_logs::activity_type.eq_any(SYSTEM_ALERT_FEEDBACK_ACTIVITY_TYPES))
+            .count()
+            .get_result(&mut conn)?;
+
+        Ok(count > 0)
     }
 
     /// Get recent usage logs for a user (for activity feed).

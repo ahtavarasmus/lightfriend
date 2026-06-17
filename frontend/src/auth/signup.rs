@@ -401,27 +401,29 @@ pub mod login {
             })
         };
         html! {
-        <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem;">
+        <div class="auth-page-shell">
             <style>
             {r#".login-container,
 .register-container {
-    background: rgba(30, 30, 30, 0.7); /* Darker container */
-    border: 1px solid rgba(30, 144, 255, 0.1);
-    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.105);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 8px;
     padding: 3rem;
     width: 100%;
     max-width: 480px;
-    backdrop-filter: blur(10px);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(14px) saturate(1.1);
+    -webkit-backdrop-filter: blur(14px) saturate(1.1);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 20px 70px rgba(20, 36, 48, 0.16);
 }
 .login-container h1,
 .register-container h1 {
     font-size: 2rem;
     margin-bottom: 1.5rem;
     text-align: center;
-    background: linear-gradient(45deg, #fff, #7EB2FF);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: #fff;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    text-shadow: 0 2px 18px rgba(0, 0, 0, 0.46), 0 1px 2px rgba(0, 0, 0, 0.42);
 }
 @media (max-width: 768px) {
     .login-container,
@@ -433,17 +435,17 @@ pub mod login {
 .auth-redirect {
     margin-top: 2rem;
     text-align: center;
-    color: rgba(255, 255, 255, 0.6); /* Dimmer text */
+    color: rgba(255, 255, 255, 0.78);
     font-size: 0.9rem;
 }
 .auth-redirect a {
-    color: #1E90FF;
+    color: #8fc5ff;
     text-decoration: none;
     transition: color 0.3s ease;
     margin-left: 0.25rem;
 }
 .auth-redirect a:hover {
-    color: #7EB2FF;
+    color: #c6ddff;
     text-decoration: underline;
 }
 /* Custom checkbox styling */
@@ -464,9 +466,9 @@ pub mod login {
     -webkit-appearance: none !important;
     width: 1px !important;
     height: 1px !important;
-    border: 2px solid rgba(30, 144, 255, 0.5) !important;
+    border: 2px solid rgba(143, 197, 255, 0.62) !important;
     border-radius: 4px !important;
-    background: rgba(30, 30, 30, 0.7) !important;
+    background: rgba(255, 255, 255, 0.72) !important;
     cursor: pointer !important;
     position: relative !important;
     margin-top: 2px !important;
@@ -477,8 +479,8 @@ pub mod login {
     transform-origin: left center !important;
 }
 #terms-checkbox-container input[type="checkbox"]:checked {
-    background: #1E90FF !important;
-    border-color: #1E90FF !important;
+    background: #8fc5ff !important;
+    border-color: #8fc5ff !important;
 }
 #terms-checkbox-container input[type="checkbox"]:checked::after {
     content: "✓" !important;
@@ -490,24 +492,22 @@ pub mod login {
     display: block !important;
 }
 #terms-checkbox-container input[type="checkbox"]:hover {
-    border-color: #1E90FF !important;
+    border-color: #8fc5ff !important;
 }
 #terms-checkbox-container a {
-    color: #1E90FF;
+    color: #8fc5ff;
     text-decoration: none;
     transition: color 0.3s ease;
 }
 #terms-checkbox-container a:hover {
-    color: #7EB2FF;
+    color: #c6ddff;
     text-decoration: underline;
 }
 .hero-background {
         position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
+        inset: 0;
         height: 100vh;
-        background-image: url('/assets/aurora-bg.jpg');
+        background-image: url('/assets/child-field-hero.png');
         background-size: cover;
         background-position: center;
         background-repeat: no-repeat;
@@ -518,13 +518,11 @@ pub mod login {
     .hero-background::after {
         content: '';
         position: absolute;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        height: 50%;
+        inset: 0;
         background: linear-gradient(to bottom,
-            rgba(26, 26, 26, 0) 0%,
-            rgba(26, 26, 26, 1) 100%
+            rgba(13, 13, 13, 0.08) 0%,
+            rgba(13, 13, 13, 0.18) 35%,
+            rgba(13, 13, 13, 0.74) 100%
         );
     }"#}
             </style>
@@ -584,7 +582,7 @@ pub mod login {
                                         </button>
                                     </form>
                                     <div class="auth-redirect">
-                                        <a href="#" onclick={on_toggle_backup} style="color: #1E90FF; text-decoration: none;">
+                                        <a href="#" onclick={on_toggle_backup} style="color: #8fc5ff; text-decoration: none;">
                                             {if *use_backup_code { "Use authenticator code instead" } else { "Use backup code instead" }}
                                         </a>
                                     </div>
@@ -592,7 +590,7 @@ pub mod login {
                                         if *webauthn_enabled && *webauthn_supported {
                                             html! {
                                                 <div class="auth-redirect">
-                                                    <a href="#" onclick={on_switch_to_webauthn.clone()} style="color: #1E90FF; text-decoration: none;">
+                                                    <a href="#" onclick={on_switch_to_webauthn.clone()} style="color: #8fc5ff; text-decoration: none;">
                                                         {"Use passkey instead"}
                                                     </a>
                                                 </div>
@@ -626,7 +624,7 @@ pub mod login {
                                         if *totp_enabled {
                                             html! {
                                                 <div class="auth-redirect">
-                                                    <a href="#" onclick={on_switch_to_totp.clone()} style="color: #1E90FF; text-decoration: none;">
+                                                    <a href="#" onclick={on_switch_to_totp.clone()} style="color: #8fc5ff; text-decoration: none;">
                                                         {"Use authenticator app instead"}
                                                     </a>
                                                 </div>
@@ -713,23 +711,25 @@ pub mod password_reset {
     // Shared CSS styles
     const AUTH_STYLES: &str = r#".login-container,
 .register-container {
-    background: rgba(30, 30, 30, 0.7);
-    border: 1px solid rgba(30, 144, 255, 0.1);
-    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.105);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 8px;
     padding: 3rem;
     width: 100%;
     max-width: 480px;
-    backdrop-filter: blur(10px);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(14px) saturate(1.1);
+    -webkit-backdrop-filter: blur(14px) saturate(1.1);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 20px 70px rgba(20, 36, 48, 0.16);
 }
 .login-container h1,
 .register-container h1 {
     font-size: 2rem;
     margin-bottom: 1.5rem;
     text-align: center;
-    background: linear-gradient(45deg, #fff, #7EB2FF);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: #fff;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    text-shadow: 0 2px 18px rgba(0, 0, 0, 0.46), 0 1px 2px rgba(0, 0, 0, 0.42);
 }
 @media (max-width: 768px) {
     .login-container,
@@ -741,26 +741,24 @@ pub mod password_reset {
 .auth-redirect {
     margin-top: 2rem;
     text-align: center;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.78);
     font-size: 0.9rem;
 }
 .auth-redirect a {
-    color: #1E90FF;
+    color: #8fc5ff;
     text-decoration: none;
     transition: color 0.3s ease;
     margin-left: 0.25rem;
 }
 .auth-redirect a:hover {
-    color: #7EB2FF;
+    color: #c6ddff;
     text-decoration: underline;
 }
 .hero-background {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
+    inset: 0;
     height: 100vh;
-    background-image: url('/assets/aurora-bg.jpg');
+    background-image: url('/assets/child-field-hero.png');
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
@@ -771,13 +769,11 @@ pub mod password_reset {
 .hero-background::after {
     content: '';
     position: absolute;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    height: 50%;
+    inset: 0;
     background: linear-gradient(to bottom,
-        rgba(26, 26, 26, 0) 0%,
-        rgba(26, 26, 26, 1) 100%
+        rgba(13, 13, 13, 0.08) 0%,
+        rgba(13, 13, 13, 0.18) 35%,
+        rgba(13, 13, 13, 0.74) 100%
     );
 }
 .contact-info {
@@ -787,11 +783,11 @@ pub mod password_reset {
     margin: 1.5rem 0;
 }
 .contact-info a {
-    color: #1E90FF;
+    color: #8fc5ff;
     text-decoration: none;
 }
 .contact-info a:hover {
-    color: #7EB2FF;
+    color: #c6ddff;
     text-decoration: underline;
 }"#;
 
@@ -800,7 +796,7 @@ pub mod password_reset {
     #[function_component]
     pub fn PasswordReset() -> Html {
         html! {
-            <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem;">
+        <div class="auth-page-shell">
                 <style>{AUTH_STYLES}</style>
                 <div class="hero-background"></div>
                 <div class="login-container">
@@ -968,7 +964,7 @@ pub mod password_reset {
         };
 
         html! {
-            <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem;">
+            <div class="auth-page-shell">
                 <style>{AUTH_STYLES}</style>
                 <div class="hero-background"></div>
                 <div class="login-container">
@@ -1014,7 +1010,7 @@ pub mod password_reset {
                                             type="password"
                                             placeholder="New Password"
                                             autocomplete="new-password"
-                                            onchange={let new_password = new_password.clone(); move |e: Event| {
+                                            oninput={let new_password = new_password.clone(); move |e: InputEvent| {
                                                 let input: HtmlInputElement = e.target_unchecked_into();
                                                 new_password.set(input.value());
                                             }}
@@ -1023,7 +1019,7 @@ pub mod password_reset {
                                             type="password"
                                             placeholder="Confirm Password"
                                             autocomplete="new-password"
-                                            onchange={let confirm_password = confirm_password.clone(); move |e: Event| {
+                                            oninput={let confirm_password = confirm_password.clone(); move |e: InputEvent| {
                                                 let input: HtmlInputElement = e.target_unchecked_into();
                                                 confirm_password.set(input.value());
                                             }}

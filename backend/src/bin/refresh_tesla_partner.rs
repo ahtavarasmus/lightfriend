@@ -126,7 +126,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let reg_body = reg_resp.text().await.unwrap_or_default();
         println!("  partner_accounts re-register: HTTP {}", reg_status);
         if !reg_body.is_empty() {
-            println!("    body: {}", truncate(&reg_body, 400));
+            // Print full body so we can see the full public_key field.
+            println!("    body: {}", reg_body);
+        }
+
+        // 3. GET what Tesla currently has cached for this partner.
+        let get_url = format!(
+            "{}/api/1/partner_accounts/public_key?domain={}",
+            base_url, domain
+        );
+        let get_resp = http
+            .get(&get_url)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .send()
+            .await?;
+        let get_status = get_resp.status();
+        let get_body = get_resp.text().await.unwrap_or_default();
+        println!("  GET cached public_key: HTTP {}", get_status);
+        if !get_body.is_empty() && get_body.len() < 2000 {
+            println!("    body: {}", get_body);
         }
     }
 

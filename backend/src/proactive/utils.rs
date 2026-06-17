@@ -278,12 +278,20 @@ pub async fn send_notification_with_context(
     };
 
     let mut sms_delivered = false;
+    let outbound_notification = if content_type.starts_with("system_important") {
+        format!(
+            "{}\n\nReply 1=worth it, 2=should wait.",
+            notification.trim_end()
+        )
+    } else {
+        notification.to_string()
+    };
     let history_notification = meta
         .as_ref()
         .and_then(|m| m.history_annotation.as_deref())
         .filter(|annotation| !annotation.trim().is_empty())
-        .map(|annotation| format!("{} {}", notification, annotation.trim()))
-        .unwrap_or_else(|| notification.to_string());
+        .map(|annotation| format!("{} {}", outbound_notification, annotation.trim()))
+        .unwrap_or_else(|| outbound_notification.clone());
 
     match notification_type {
         "call" => {
@@ -336,7 +344,7 @@ pub async fn send_notification_with_context(
 
             match state
                 .channel_router
-                .send_to_user(&user, notification, None)
+                .send_to_user(&user, &outbound_notification, None)
                 .await
             {
                 Ok(response_sid) => {
@@ -385,7 +393,7 @@ pub async fn send_notification_with_context(
             }
             match state
                 .channel_router
-                .send_to_user(&user, notification, None)
+                .send_to_user(&user, &outbound_notification, None)
                 .await
             {
                 Ok(response_sid) => {

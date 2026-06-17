@@ -343,6 +343,18 @@ pub fn nav(props: &NavProps) -> Html {
     let NavProps { auth_state } = props;
     let route = use_route::<Route>();
     let is_pricing = matches!(route, Some(Route::Pricing));
+    let is_public_landing = matches!(
+        route,
+        Some(
+            Route::Home
+                | Route::Login
+                | Route::SetPassword
+                | Route::SetPasswordWithToken { .. }
+                | Route::SubscriptionSuccess
+                | Route::PasswordReset
+                | Route::PasswordResetWithToken { .. }
+        )
+    ) && *auth_state != AuthState::LoggedIn;
     let is_scrolled = use_state(|| false);
     {
         let is_scrolled = is_scrolled.clone();
@@ -374,6 +386,20 @@ pub fn nav(props: &NavProps) -> Html {
             },
             (),
         );
+    }
+    if is_public_landing {
+        return html! {
+            <nav class="top-nav landing-mini-nav">
+                <div class="landing-mini-nav-content">
+                    <a href="/#plans" class="nav-link landing-mini-nav-link">
+                        {"Pricing"}
+                    </a>
+                    <Link<Route> to={Route::Login} classes="nav-login-button landing-mini-login-button">
+                        {"Login"}
+                    </Link<Route>>
+                </div>
+            </nav>
+        };
     }
     html! {
         <nav class={classes!("top-nav", (*is_scrolled).then(|| "scrolled"), is_pricing.then(|| "nav-static"), (*auth_state == AuthState::LoggedOut).then(|| "nav-landing"))}>

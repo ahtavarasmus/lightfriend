@@ -286,27 +286,29 @@ pub fn SetPassword(props: &SetPasswordProps) -> Html {
     };
 
     html! {
-        <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem;">
+        <div class="auth-page-shell">
             <style>
             {r#".login-container,
 .register-container {
-    background: rgba(30, 30, 30, 0.7);
-    border: 1px solid rgba(30, 144, 255, 0.1);
-    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.105);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 8px;
     padding: 3rem;
     width: 100%;
     max-width: 480px;
-    backdrop-filter: blur(10px);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(14px) saturate(1.1);
+    -webkit-backdrop-filter: blur(14px) saturate(1.1);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 20px 70px rgba(20, 36, 48, 0.16);
 }
 .login-container h1,
 .register-container h1 {
     font-size: 2rem;
     margin-bottom: 1.5rem;
     text-align: center;
-    background: linear-gradient(45deg, #fff, #7EB2FF);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: #fff;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    text-shadow: 0 2px 18px rgba(0, 0, 0, 0.46), 0 1px 2px rgba(0, 0, 0, 0.42);
 }
 @media (max-width: 768px) {
     .login-container,
@@ -317,11 +319,9 @@ pub fn SetPassword(props: &SetPasswordProps) -> Html {
 }
 .hero-background {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
+    inset: 0;
     height: 100vh;
-    background-image: url('/assets/aurora-bg.jpg');
+    background-image: url('/assets/child-field-hero.png');
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
@@ -332,13 +332,11 @@ pub fn SetPassword(props: &SetPasswordProps) -> Html {
 .hero-background::after {
     content: '';
     position: absolute;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    height: 50%;
+    inset: 0;
     background: linear-gradient(to bottom,
-        rgba(26, 26, 26, 0) 0%,
-        rgba(26, 26, 26, 1) 100%
+        rgba(13, 13, 13, 0.08) 0%,
+        rgba(13, 13, 13, 0.18) 35%,
+        rgba(13, 13, 13, 0.74) 100%
     );
 }"#}
             </style>

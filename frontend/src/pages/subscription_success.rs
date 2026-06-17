@@ -30,54 +30,37 @@ pub fn subscription_success() -> Html {
     );
 
     html! {
-        <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem; background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);">
-            <div style="
-                background: rgba(30, 30, 30, 0.9);
-                border: 1px solid rgba(30, 144, 255, 0.3);
-                border-radius: 16px;
-                padding: 3rem;
-                max-width: 500px;
-                text-align: center;
-                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-            ">
-                <div style="font-size: 4rem; margin-bottom: 1rem;">{"🎉"}</div>
+        <div class="auth-page-shell">
+            <div class="hero-background"></div>
+            <div class="auth-success-card">
                 <h1 style="
-                    color: #ffffff;
-                    font-size: 1.8rem;
+                    font-size: 1.9rem;
                     margin-bottom: 1rem;
-                    font-weight: 600;
+                    font-weight: 750;
                 ">
                     {"Welcome to Lightfriend!"}
                 </h1>
                 <p style="
-                    color: rgba(255, 255, 255, 0.8);
                     font-size: 1.1rem;
                     line-height: 1.6;
                     margin-bottom: 1.5rem;
                 ">
                     {"Your subscription is being set up. Check your email for a link to create your password and get started."}
                 </p>
-                <div style="
-                    background: rgba(30, 144, 255, 0.1);
-                    border: 1px solid rgba(30, 144, 255, 0.3);
-                    border-radius: 8px;
-                    padding: 1rem;
-                    margin-bottom: 1.5rem;
-                ">
+                <div class="auth-success-note">
                     <p style="
-                        color: rgba(255, 255, 255, 0.9);
                         font-size: 0.95rem;
                         margin: 0;
                     ">
-                        {"📧 Check your inbox (and spam folder) for an email from Lightfriend."}
+                        {"Check your inbox and spam folder for an email from Lightfriend."}
                     </p>
                 </div>
                 <p style="
-                    color: rgba(255, 255, 255, 0.5);
+                    color: rgba(255, 255, 255, 0.78);
                     font-size: 0.9rem;
                 ">
                     {"Already have an account? "}
-                    <a href="/login" style="color: #1e90ff; text-decoration: none;">{"Log in here"}</a>
+                    <a href="/login" style="text-decoration: none;">{"Log in here"}</a>
                 </p>
             </div>
         </div>

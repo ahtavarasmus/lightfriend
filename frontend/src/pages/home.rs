@@ -5,8 +5,8 @@ use crate::profile::billing_models::UserProfile;
 use crate::profile::stripe::StripePricingTable;
 use crate::utils::api::Api;
 use futures::future::{select, Either};
-use gloo_timers::future::TimeoutFuture;
 use gloo_timers::callback::Timeout;
+use gloo_timers::future::TimeoutFuture;
 use serde::Deserialize;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
@@ -162,16 +162,15 @@ pub fn Home() -> Html {
                 spawn_local(async move {
                     let profile_request = Api::get("/api/profile").send();
                     let timeout = TimeoutFuture::new(5_000);
-                    let result =
-                        match select(Box::pin(profile_request), Box::pin(timeout)).await {
-                            Either::Left((result, _)) => result,
-                            Either::Right((_, _)) => {
-                                gloo_console::log!("Profile fetch timed out; showing public page");
-                                auth_status.set(Some(false));
-                                error.set(Some("Profile request timed out".to_string()));
-                                return;
-                            }
-                        };
+                    let result = match select(Box::pin(profile_request), Box::pin(timeout)).await {
+                        Either::Left((result, _)) => result,
+                        Either::Right((_, _)) => {
+                            gloo_console::log!("Profile fetch timed out; showing public page");
+                            auth_status.set(Some(false));
+                            error.set(Some("Profile request timed out".to_string()));
+                            return;
+                        }
+                    };
                     match result {
                         Ok(response) => {
                             if !response.ok() {

@@ -715,6 +715,33 @@ pub async fn process_sms(
         return SmsResult::Success { response: reply }.into_response();
     }
 
+    // Important-alert feedback path: after a recent urgent alert, a bare
+    // "1"/"2" records whether the interruption was useful. Commitment replies
+    // get first priority above because they have their own pending prompt.
+    if let Some(reply) =
+        crate::proactive::alert_feedback::try_handle_reply(state, &user, &payload.body).await
+    {
+        if !options.skip_twilio_send {
+            let state_clone = state.clone();
+            let user_clone = user.clone();
+            let reply_clone = reply.clone();
+            tokio::spawn(async move {
+                if let Err(e) = state_clone
+                    .channel_router
+                    .send_to_user(&user_clone, &reply_clone, None)
+                    .await
+                {
+                    tracing::error!(
+                        "Failed to send alert-feedback confirmation to user {}: {}",
+                        user_clone.id,
+                        e
+                    );
+                }
+            });
+        }
+        return SmsResult::Success { response: reply }.into_response();
+    }
+
     // Handle 'cancel' message specially
     if payload.body.trim().to_lowercase() == "c" {
         match crate::tool_call_utils::utils::cancel_pending_message(state, user.id).await {
