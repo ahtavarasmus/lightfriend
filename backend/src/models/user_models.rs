@@ -78,6 +78,7 @@ pub struct UserSettings {
     pub digest_time: Option<String>,
     pub auto_track_items_system: bool,
     pub auto_confirm_tracked_items: bool,
+    pub voice_provider: String,
 }
 
 #[derive(Insertable)]

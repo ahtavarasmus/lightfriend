@@ -171,6 +171,16 @@
                                 window._voicePlaybackQueue = [];
                             } else if (msg.type === 'audio_end') {
                                 window._voicePlayAudio();
+                            } else if (msg.type === 'audio_clear') {
+                                window._voicePlaybackQueue = [];
+                                if (window._voicePlaybackSrc) {
+                                    try { window._voicePlaybackSrc.stop(); } catch(e) {}
+                                    window._voicePlaybackSrc = null;
+                                }
+                                if (window._voicePlaybackCtx) {
+                                    window._voicePlaybackCtx.close().catch(()=>{});
+                                    window._voicePlaybackCtx = null;
+                                }
                             } else if (msg.type === 'error') {
                                 console.error('Voice pipeline error:', msg.message);
                             } else if (msg.type === 'vad') {

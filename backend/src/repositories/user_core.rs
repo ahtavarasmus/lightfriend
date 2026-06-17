@@ -120,6 +120,8 @@ pub trait UserCoreOps: Send + Sync {
     ) -> Result<(), DieselError>;
     fn update_llm_provider(&self, user_id: i32, provider: &str) -> Result<(), DieselError>;
     fn get_llm_provider(&self, user_id: i32) -> Result<Option<String>, DieselError>;
+    fn update_voice_provider(&self, user_id: i32, provider: &str) -> Result<(), DieselError>;
+    fn get_voice_provider(&self, user_id: i32) -> Result<String, DieselError>;
 
     // Phone service
     fn update_phone_service_active(&self, user_id: i32, active: bool) -> Result<(), DieselError>;
@@ -940,6 +942,25 @@ impl UserCoreOps for UserCore {
             .filter(user_settings::user_id.eq(user_id))
             .select(user_settings::llm_provider)
             .first::<Option<String>>(&mut pg_conn)?;
+        Ok(result)
+    }
+
+    fn update_voice_provider(&self, user_id: i32, provider: &str) -> Result<(), DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        self.ensure_user_settings_exist(user_id)?;
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set(user_settings::voice_provider.eq(provider))
+            .execute(&mut pg_conn)?;
+        Ok(())
+    }
+
+    fn get_voice_provider(&self, user_id: i32) -> Result<String, DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        self.ensure_user_settings_exist(user_id)?;
+        let result = user_settings::table
+            .filter(user_settings::user_id.eq(user_id))
+            .select(user_settings::voice_provider)
+            .first::<String>(&mut pg_conn)?;
         Ok(result)
     }
 

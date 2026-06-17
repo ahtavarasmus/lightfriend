@@ -306,6 +306,33 @@ enum TransportMode {
     WebCall,
 }
 
+#[derive(Debug, PartialEq, Clone, Copy)]
+enum VoiceProvider {
+    Tinfoil,
+    OpenAiRealtime,
+}
+
+fn voice_provider_for_user(state: &Arc<AppState>, user_id: i32) -> VoiceProvider {
+    match state.user_core.get_voice_provider(user_id) {
+        Ok(provider) if provider == "openai_realtime" => VoiceProvider::OpenAiRealtime,
+        Ok(_) => VoiceProvider::Tinfoil,
+        Err(e) => {
+            tracing::warn!(
+                "Failed to load voice_provider for user {}: {}; defaulting to tinfoil",
+                user_id,
+                e
+            );
+            VoiceProvider::Tinfoil
+        }
+    }
+}
+
+fn openai_realtime_available() -> bool {
+    std::env::var("OPENAI_API_KEY")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false)
+}
+
 struct CallSession {
     state: CallState,
     transport: TransportMode,
@@ -365,6 +392,18 @@ pub async fn voice_incoming(State(state): State<Arc<AppState>>, body: String) ->
     if let Err(e) = crate::utils::usage::check_user_credits(&state, &user, "voice", None).await {
         tracing::warn!("User {} insufficient credits: {}", user.id, e);
         return twiml_say("You don't have enough credits for a voice call. Please add credits on the Lightfriend website.");
+    }
+
+    if voice_provider_for_user(&state, user.id) == VoiceProvider::OpenAiRealtime
+        && !openai_realtime_available()
+    {
+        tracing::error!(
+            "User {} selected OpenAI Realtime voice but OPENAI_API_KEY is not configured",
+            user.id
+        );
+        return twiml_say(
+            "Premium voice is not configured right now. Please switch to private voice or try again later.",
+        );
     }
 
     // Build WebSocket URL
@@ -577,6 +616,17 @@ pub async fn voice_web_start(
         return Err((StatusCode::FORBIDDEN, Json(serde_json::json!({"error": e}))));
     }
 
+    if voice_provider_for_user(&state, user_id) == VoiceProvider::OpenAiRealtime
+        && !openai_realtime_available()
+    {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "Premium voice is not configured right now. Please switch to private voice or try again later."
+            })),
+        ));
+    }
+
     // Generate a one-time token for WebSocket auth (expires in 30s)
     let token = uuid::Uuid::new_v4().to_string();
     let expiry = std::time::SystemTime::now()
@@ -636,6 +686,11 @@ pub async fn voice_web_ws(
 /// No Twilio, no mulaw. Direct browser <-> server audio.
 async fn handle_web_ws(state: Arc<AppState>, socket: WebSocket, user_id: i32) {
     use futures::stream::StreamExt;
+
+    if voice_provider_for_user(&state, user_id) == VoiceProvider::OpenAiRealtime {
+        handle_openai_web_ws(state, socket, user_id).await;
+        return;
+    }
 
     let (ws_tx, mut ws_rx) = socket.split();
     let (send_tx, send_rx) = mpsc::channel::<Message>(64);
@@ -888,6 +943,20 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
 
                     let is_outbound = custom_greeting.is_some();
 
+                    if voice_provider_for_user(&state, user_id) == VoiceProvider::OpenAiRealtime {
+                        handle_openai_twilio_session(
+                            state.clone(),
+                            &send_tx,
+                            &mut ws_rx,
+                            user_id,
+                            start.stream_sid.clone(),
+                            custom_greeting,
+                            is_outbound,
+                        )
+                        .await;
+                        return;
+                    }
+
                     match init_session(
                         &state,
                         user_id,
@@ -1120,12 +1189,708 @@ async fn sender_loop(
     mut ws_tx: futures::stream::SplitSink<WebSocket, Message>,
     mut send_rx: mpsc::Receiver<Message>,
 ) {
-    use futures::SinkExt;
+    use futures_util::SinkExt;
 
     while let Some(msg) = send_rx.recv().await {
         if ws_tx.send(msg).await.is_err() {
             break;
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// OpenAI Realtime premium voice pipeline
+// ---------------------------------------------------------------------------
+
+type OpenAiWsStream =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+enum OpenAiRealtimeAudioMode {
+    TwilioPcmu,
+    WebPcm24,
+}
+
+struct OpenAiRealtimeInit {
+    instructions: String,
+    tools: Vec<serde_json::Value>,
+    user: crate::models::user_models::User,
+    user_given_info: String,
+}
+
+fn openai_realtime_model() -> String {
+    std::env::var("OPENAI_REALTIME_MODEL").unwrap_or_else(|_| "gpt-realtime-2".to_string())
+}
+
+fn openai_realtime_voice() -> String {
+    std::env::var("OPENAI_REALTIME_VOICE").unwrap_or_else(|_| "marin".to_string())
+}
+
+fn openai_realtime_reasoning_effort() -> String {
+    std::env::var("OPENAI_REALTIME_REASONING_EFFORT").unwrap_or_else(|_| "low".to_string())
+}
+
+fn openai_safety_identifier(user_id: i32) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(format!("lightfriend:voice:{}", user_id));
+    hex::encode(hasher.finalize())
+}
+
+fn realtime_tool_from_chat_tool(
+    tool: &openai_api_rs::v1::chat_completion::Tool,
+) -> Option<serde_json::Value> {
+    let value = serde_json::to_value(tool).ok()?;
+    if value.get("type").and_then(|t| t.as_str()) != Some("function") {
+        return None;
+    }
+
+    let function = value.get("function")?;
+    let name = function.get("name")?.clone();
+    let mut realtime_tool = serde_json::json!({
+        "type": "function",
+        "name": name,
+    });
+
+    if let Some(description) = function.get("description") {
+        realtime_tool["description"] = description.clone();
+    }
+    if let Some(parameters) = function.get("parameters") {
+        realtime_tool["parameters"] = parameters.clone();
+    }
+
+    Some(realtime_tool)
+}
+
+async fn init_openai_realtime(
+    state: &Arc<AppState>,
+    user_id: i32,
+) -> Result<OpenAiRealtimeInit, String> {
+    let ctx = ContextBuilder::for_user(state, user_id)
+        .with_user_context()
+        .build()
+        .await
+        .map_err(|e| format!("context build error: {}", e))?;
+
+    let system_prompt =
+        crate::agent_core::build_system_prompt(&ctx, crate::agent_core::ChannelMode::Voice);
+    let instructions = format!(
+        "{}\n\nRealtime voice rules:\n- Speak naturally and briefly.\n- Use audio responses unless a tool result makes a short spoken confirmation enough.\n- When a tool is needed, call it and wait for the function output before answering.\n- If interrupted, stop and listen.",
+        system_prompt
+    );
+
+    let tools = crate::agent_core::build_tools(state, user_id, true)
+        .await
+        .iter()
+        .filter_map(realtime_tool_from_chat_tool)
+        .collect();
+
+    let user_given_info = ctx.user_given_info.clone().unwrap_or_default();
+
+    Ok(OpenAiRealtimeInit {
+        instructions,
+        tools,
+        user: ctx.user.clone(),
+        user_given_info,
+    })
+}
+
+fn openai_session_update(
+    init: &OpenAiRealtimeInit,
+    mode: OpenAiRealtimeAudioMode,
+) -> serde_json::Value {
+    let (input_format, output_format) = match mode {
+        OpenAiRealtimeAudioMode::TwilioPcmu => (
+            serde_json::json!({"type": "audio/pcmu"}),
+            serde_json::json!({"type": "audio/pcmu"}),
+        ),
+        OpenAiRealtimeAudioMode::WebPcm24 => (
+            serde_json::json!({"type": "audio/pcm", "rate": 24000}),
+            serde_json::json!({"type": "audio/pcm", "rate": 24000}),
+        ),
+    };
+
+    serde_json::json!({
+        "type": "session.update",
+        "session": {
+            "type": "realtime",
+            "model": openai_realtime_model(),
+            "instructions": init.instructions,
+            "output_modalities": ["audio"],
+            "audio": {
+                "input": {
+                    "format": input_format,
+                    "turn_detection": {
+                        "type": "server_vad",
+                        "threshold": 0.5,
+                        "prefix_padding_ms": 300,
+                        "silence_duration_ms": 500,
+                        "create_response": true,
+                        "interrupt_response": true
+                    }
+                },
+                "output": {
+                    "format": output_format,
+                    "voice": openai_realtime_voice()
+                }
+            },
+            "reasoning": {
+                "effort": openai_realtime_reasoning_effort()
+            },
+            "tools": init.tools,
+            "tool_choice": "auto"
+        }
+    })
+}
+
+fn openai_response_create(instructions: Option<String>) -> serde_json::Value {
+    match instructions {
+        Some(instructions) => serde_json::json!({
+            "type": "response.create",
+            "response": {
+                "instructions": instructions,
+                "output_modalities": ["audio"]
+            }
+        }),
+        None => serde_json::json!({"type": "response.create"}),
+    }
+}
+
+fn openai_greeting_response(greeting: &str) -> serde_json::Value {
+    openai_response_create(Some(format!(
+        "Say exactly this to the user, in a warm concise voice: {}",
+        greeting
+    )))
+}
+
+async fn connect_openai_realtime(
+    user_id: i32,
+) -> Result<
+    (
+        mpsc::Sender<serde_json::Value>,
+        futures_util::stream::SplitStream<OpenAiWsStream>,
+    ),
+    String,
+> {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    use tokio_tungstenite::tungstenite::http::HeaderValue;
+    use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
+
+    let api_key = std::env::var("OPENAI_API_KEY")
+        .map_err(|_| "OPENAI_API_KEY is required for premium voice".to_string())?;
+    let url = format!(
+        "wss://api.openai.com/v1/realtime?model={}",
+        openai_realtime_model()
+    );
+    let mut request = url
+        .into_client_request()
+        .map_err(|e| format!("OpenAI Realtime request build failed: {}", e))?;
+    request.headers_mut().insert(
+        "Authorization",
+        HeaderValue::from_str(&format!("Bearer {}", api_key))
+            .map_err(|e| format!("invalid OpenAI auth header: {}", e))?,
+    );
+    request
+        .headers_mut()
+        .insert("OpenAI-Beta", HeaderValue::from_static("realtime=v1"));
+    request.headers_mut().insert(
+        "OpenAI-Safety-Identifier",
+        HeaderValue::from_str(&openai_safety_identifier(user_id))
+            .map_err(|e| format!("invalid safety identifier header: {}", e))?,
+    );
+
+    let (stream, _) = tokio_tungstenite::connect_async(request)
+        .await
+        .map_err(|e| format!("OpenAI Realtime connect failed: {}", e))?;
+    let (mut openai_ws_tx, openai_ws_rx) = stream.split();
+    let (openai_tx, mut openai_rx) = mpsc::channel::<serde_json::Value>(128);
+
+    tokio::spawn(async move {
+        while let Some(event) = openai_rx.recv().await {
+            let text = event.to_string();
+            if openai_ws_tx
+                .send(TungsteniteMessage::Text(text.into()))
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+
+    Ok((openai_tx, openai_ws_rx))
+}
+
+fn tool_answer_from_dispatch(result: crate::agent_core::ToolDispatchResult) -> String {
+    match result {
+        crate::agent_core::ToolDispatchResult::Answer(answer) => answer,
+        crate::agent_core::ToolDispatchResult::AnswerWithTask { answer, .. } => answer,
+        crate::agent_core::ToolDispatchResult::EarlyReturn { response, .. } => response.message,
+        crate::agent_core::ToolDispatchResult::SubscriptionRequired(message) => message,
+        crate::agent_core::ToolDispatchResult::Unknown(message) => message,
+        crate::agent_core::ToolDispatchResult::Error(error) => format!("Tool error: {}", error),
+    }
+}
+
+async fn dispatch_realtime_tool_call(
+    init: &OpenAiRealtimeInit,
+    state: &Arc<AppState>,
+    name: &str,
+    arguments: &str,
+    call_id: &str,
+) -> String {
+    let current_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i32;
+    let result = crate::agent_core::dispatch_tool(
+        state,
+        &init.user,
+        name,
+        arguments,
+        call_id,
+        &init.user_given_info,
+        current_time,
+        None,
+    )
+    .await;
+    tool_answer_from_dispatch(result)
+}
+
+async fn handle_realtime_function_call(
+    item: &serde_json::Value,
+    init: &OpenAiRealtimeInit,
+    state: &Arc<AppState>,
+    openai_tx: &mpsc::Sender<serde_json::Value>,
+) {
+    if item.get("type").and_then(|v| v.as_str()) != Some("function_call") {
+        return;
+    }
+
+    let call_id = item
+        .get("call_id")
+        .and_then(|v| v.as_str())
+        .or_else(|| item.get("id").and_then(|v| v.as_str()))
+        .unwrap_or_default();
+    let name = item
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let arguments = item
+        .get("arguments")
+        .and_then(|v| v.as_str())
+        .unwrap_or("{}");
+
+    if call_id.is_empty() || name.is_empty() {
+        tracing::warn!(
+            "OpenAI Realtime function_call missing call_id/name: {}",
+            item
+        );
+        return;
+    }
+
+    tracing::info!("OpenAI Realtime requested tool {}", name);
+    let answer = dispatch_realtime_tool_call(init, state, name, arguments, call_id).await;
+
+    let output = serde_json::json!({
+        "type": "conversation.item.create",
+        "item": {
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": answer
+        }
+    });
+    let _ = openai_tx.send(output).await;
+    let _ = openai_tx.send(openai_response_create(None)).await;
+}
+
+async fn handle_openai_reader(
+    mut openai_rx: futures_util::stream::SplitStream<OpenAiWsStream>,
+    send_tx: mpsc::Sender<Message>,
+    openai_tx: mpsc::Sender<serde_json::Value>,
+    init: OpenAiRealtimeInit,
+    state: Arc<AppState>,
+    mode: OpenAiRealtimeAudioMode,
+    stream_sid: Option<String>,
+) {
+    use futures_util::StreamExt;
+    use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
+
+    let mut web_audio_open = false;
+
+    while let Some(msg) = openai_rx.next().await {
+        let msg = match msg {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!("OpenAI Realtime WS receive error: {}", e);
+                break;
+            }
+        };
+
+        let text = match msg {
+            TungsteniteMessage::Text(t) => t.to_string(),
+            TungsteniteMessage::Close(_) => break,
+            _ => continue,
+        };
+
+        let event: serde_json::Value = match serde_json::from_str(&text) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!("Failed to parse OpenAI Realtime event: {} / {}", e, text);
+                continue;
+            }
+        };
+
+        let event_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        match event_type {
+            "response.audio.delta" | "response.output_audio.delta" => {
+                let delta = event.get("delta").and_then(|v| v.as_str()).unwrap_or("");
+                if delta.is_empty() {
+                    continue;
+                }
+
+                match mode {
+                    OpenAiRealtimeAudioMode::TwilioPcmu => {
+                        if let Some(ref stream_sid) = stream_sid {
+                            let msg = serde_json::json!({
+                                "event": "media",
+                                "streamSid": stream_sid,
+                                "media": { "payload": delta }
+                            });
+                            let _ = send_tx.send(Message::Text(msg.to_string().into())).await;
+                        }
+                    }
+                    OpenAiRealtimeAudioMode::WebPcm24 => {
+                        if !web_audio_open {
+                            let meta = serde_json::json!({
+                                "type": "audio_start",
+                                "sample_rate": 24000,
+                                "channels": 1
+                            });
+                            let _ = send_tx.send(Message::Text(meta.to_string().into())).await;
+                            web_audio_open = true;
+                        }
+                        match BASE64.decode(delta) {
+                            Ok(bytes) => {
+                                for chunk in bytes.chunks(4096) {
+                                    let _ =
+                                        send_tx.send(Message::Binary(chunk.to_vec().into())).await;
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("OpenAI audio delta base64 decode failed: {}", e)
+                            }
+                        }
+                    }
+                }
+            }
+            "response.audio.done" | "response.output_audio.done" => match mode {
+                OpenAiRealtimeAudioMode::TwilioPcmu => {
+                    if let Some(ref stream_sid) = stream_sid {
+                        let mark_msg = serde_json::json!({
+                            "event": "mark",
+                            "streamSid": stream_sid,
+                            "mark": { "name": "openai_response" }
+                        });
+                        let _ = send_tx
+                            .send(Message::Text(mark_msg.to_string().into()))
+                            .await;
+                    }
+                }
+                OpenAiRealtimeAudioMode::WebPcm24 => {
+                    if web_audio_open {
+                        let end = serde_json::json!({"type": "audio_end"});
+                        let _ = send_tx.send(Message::Text(end.to_string().into())).await;
+                        web_audio_open = false;
+                    }
+                }
+            },
+            "input_audio_buffer.speech_started" => match mode {
+                OpenAiRealtimeAudioMode::TwilioPcmu => {
+                    if let Some(ref stream_sid) = stream_sid {
+                        let clear_msg = serde_json::json!({
+                            "event": "clear",
+                            "streamSid": stream_sid
+                        });
+                        let _ = send_tx
+                            .send(Message::Text(clear_msg.to_string().into()))
+                            .await;
+                    }
+                    let _ = openai_tx
+                        .send(serde_json::json!({"type": "response.cancel"}))
+                        .await;
+                }
+                OpenAiRealtimeAudioMode::WebPcm24 => {
+                    let clear_msg = serde_json::json!({"type": "audio_clear"});
+                    let _ = send_tx
+                        .send(Message::Text(clear_msg.to_string().into()))
+                        .await;
+                    web_audio_open = false;
+                    let _ = openai_tx
+                        .send(serde_json::json!({"type": "response.cancel"}))
+                        .await;
+                }
+            },
+            "response.output_item.done" => {
+                if let Some(item) = event.get("item") {
+                    handle_realtime_function_call(item, &init, &state, &openai_tx).await;
+                }
+            }
+            "response.done" => {
+                if let Some(items) = event
+                    .get("response")
+                    .and_then(|r| r.get("output"))
+                    .and_then(|o| o.as_array())
+                {
+                    for item in items {
+                        handle_realtime_function_call(item, &init, &state, &openai_tx).await;
+                    }
+                }
+            }
+            "error" => {
+                tracing::error!("OpenAI Realtime error event: {}", event);
+                if mode == OpenAiRealtimeAudioMode::WebPcm24 {
+                    let err = serde_json::json!({
+                        "type": "error",
+                        "message": event
+                            .get("error")
+                            .and_then(|e| e.get("message"))
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("OpenAI Realtime error")
+                    });
+                    let _ = send_tx.send(Message::Text(err.to_string().into())).await;
+                }
+            }
+            "session.created" | "session.updated" | "response.created" | "rate_limits.updated" => {}
+            other => {
+                tracing::debug!("OpenAI Realtime event: {}", other);
+            }
+        }
+    }
+}
+
+async fn start_openai_realtime_session(
+    state: Arc<AppState>,
+    user_id: i32,
+    mode: OpenAiRealtimeAudioMode,
+    send_tx: mpsc::Sender<Message>,
+    stream_sid: Option<String>,
+    greeting: Option<String>,
+) -> Result<mpsc::Sender<serde_json::Value>, String> {
+    let init = init_openai_realtime(&state, user_id).await?;
+    let (openai_tx, openai_rx) = connect_openai_realtime(user_id).await?;
+    openai_tx
+        .send(openai_session_update(&init, mode))
+        .await
+        .map_err(|_| "OpenAI Realtime writer closed".to_string())?;
+
+    let reader_openai_tx = openai_tx.clone();
+    tokio::spawn(handle_openai_reader(
+        openai_rx,
+        send_tx,
+        reader_openai_tx,
+        init,
+        state,
+        mode,
+        stream_sid,
+    ));
+
+    if let Some(greeting) = greeting {
+        let _ = openai_tx.send(openai_greeting_response(&greeting)).await;
+    }
+
+    Ok(openai_tx)
+}
+
+async fn handle_openai_twilio_session(
+    state: Arc<AppState>,
+    send_tx: &mpsc::Sender<Message>,
+    ws_rx: &mut futures::stream::SplitStream<WebSocket>,
+    user_id: i32,
+    stream_sid: String,
+    custom_greeting: Option<String>,
+    is_outbound: bool,
+) {
+    use futures::stream::StreamExt;
+
+    let greeting = custom_greeting.unwrap_or_else(|| build_greeting(&state, user_id));
+    let openai_tx = match start_openai_realtime_session(
+        state.clone(),
+        user_id,
+        OpenAiRealtimeAudioMode::TwilioPcmu,
+        send_tx.clone(),
+        Some(stream_sid.clone()),
+        Some(greeting),
+    )
+    .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to start OpenAI Realtime Twilio session: {}", e);
+            return;
+        }
+    };
+
+    let call_start = Instant::now();
+
+    while let Some(msg) = ws_rx.next().await {
+        let msg = match msg {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!("Twilio WS receive error during OpenAI session: {}", e);
+                break;
+            }
+        };
+
+        let text = match msg {
+            Message::Text(t) => t,
+            Message::Close(_) => break,
+            _ => continue,
+        };
+
+        let twilio_msg: TwilioWsMessage = match serde_json::from_str(&text) {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to parse Twilio WS message during OpenAI session: {}",
+                    e
+                );
+                continue;
+            }
+        };
+
+        match twilio_msg.event.as_str() {
+            "media" => {
+                if let Some(media) = twilio_msg.media {
+                    let _ = openai_tx
+                        .send(serde_json::json!({
+                            "type": "input_audio_buffer.append",
+                            "audio": media.payload
+                        }))
+                        .await;
+                }
+            }
+            "stop" => {
+                let duration_secs = call_start.elapsed().as_secs() as i32;
+                let event_type = if is_outbound { "noti_call" } else { "voice" };
+                tracing::info!(
+                    "OpenAI Realtime call ended for user {}. Duration: {}s, type: {}",
+                    user_id,
+                    duration_secs,
+                    event_type
+                );
+                if let Err(e) = crate::utils::usage::deduct_user_credits(
+                    &state,
+                    user_id,
+                    event_type,
+                    Some(duration_secs),
+                ) {
+                    tracing::error!(
+                        "Failed to deduct credits for OpenAI Realtime call user {}: {}",
+                        user_id,
+                        e
+                    );
+                }
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    tracing::info!("OpenAI Realtime Twilio session closed for user {}", user_id);
+}
+
+async fn handle_openai_web_ws(state: Arc<AppState>, socket: WebSocket, user_id: i32) {
+    use futures::stream::StreamExt;
+
+    let (ws_tx, mut ws_rx) = socket.split();
+    let (send_tx, send_rx) = mpsc::channel::<Message>(64);
+    tokio::spawn(sender_loop(ws_tx, send_rx));
+
+    let greeting = build_greeting(&state, user_id);
+    let openai_tx = match start_openai_realtime_session(
+        state.clone(),
+        user_id,
+        OpenAiRealtimeAudioMode::WebPcm24,
+        send_tx.clone(),
+        None,
+        Some(greeting),
+    )
+    .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to start OpenAI Realtime web session: {}", e);
+            let err = serde_json::json!({"type": "error", "message": e});
+            let _ = send_tx.send(Message::Text(err.to_string().into())).await;
+            return;
+        }
+    };
+
+    let ready = serde_json::json!({"type": "ready", "user_id": user_id});
+    let _ = send_tx.send(Message::Text(ready.to_string().into())).await;
+
+    let call_start = Instant::now();
+    const MAX_CALL_DURATION: std::time::Duration = std::time::Duration::from_secs(600);
+
+    while let Some(msg) = tokio::select! {
+        msg = ws_rx.next() => msg,
+        _ = tokio::time::sleep(MAX_CALL_DURATION.saturating_sub(call_start.elapsed())) => {
+            tracing::info!("OpenAI Realtime web call max duration reached for user {}", user_id);
+            None
+        }
+    } {
+        let msg = match msg {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!("OpenAI Realtime web WS error: {}", e);
+                break;
+            }
+        };
+
+        match msg {
+            Message::Binary(data) => {
+                let pcm_16k: Vec<i16> = data
+                    .chunks_exact(2)
+                    .map(|c| i16::from_le_bytes([c[0], c[1]]))
+                    .collect();
+                let pcm_24k = resample(&pcm_16k, 16000, 24000);
+                let bytes: Vec<u8> = pcm_24k.iter().flat_map(|&s| s.to_le_bytes()).collect();
+                let _ = openai_tx
+                    .send(serde_json::json!({
+                        "type": "input_audio_buffer.append",
+                        "audio": BASE64.encode(bytes)
+                    }))
+                    .await;
+            }
+            Message::Text(text) => {
+                if let Ok(cmd) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if cmd.get("type").and_then(|t| t.as_str()) == Some("ping") {
+                        let pong = serde_json::json!({"type": "pong"});
+                        let _ = send_tx.send(Message::Text(pong.to_string().into())).await;
+                    }
+                }
+            }
+            Message::Close(_) => break,
+            _ => {}
+        }
+    }
+
+    let duration_secs = call_start.elapsed().as_secs() as i32;
+    tracing::info!(
+        "OpenAI Realtime web call ended for user {}. Duration: {}s",
+        user_id,
+        duration_secs
+    );
+    if let Err(e) =
+        crate::utils::usage::deduct_user_credits(&state, user_id, "voice", Some(duration_secs))
+    {
+        tracing::error!(
+            "Failed to deduct credits for OpenAI Realtime web call user {}: {}",
+            user_id,
+            e
+        );
     }
 }
 

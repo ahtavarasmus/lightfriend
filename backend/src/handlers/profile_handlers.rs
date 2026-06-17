@@ -105,6 +105,7 @@ pub struct ProfileResponse {
     own_twilio_enabled: bool,         // whether phone traffic routes through user's Twilio account
     phone_service_active: bool, // whether phone service is active - can be disabled for security
     llm_provider: Option<String>, // "openai" (default) or "tinfoil" - user's LLM provider preference
+    voice_provider: String,       // "tinfoil" (private) or "openai_realtime" (premium)
     auto_create_items: bool, // whether to auto-detect and create trackable items from emails/messages
     system_important_notify: bool, // whether system auto-notifies for important messages
     has_any_connection: bool, // whether user has connected any service (email, bridges)
@@ -271,6 +272,7 @@ pub async fn get_profile(
                 own_twilio_enabled: user.own_twilio_enabled,
                 phone_service_active: user_settings.phone_service_active,
                 llm_provider: user_settings.llm_provider,
+                voice_provider: user_settings.voice_provider,
                 auto_create_items: user_settings.auto_create_items,
                 system_important_notify: user_settings.system_important_notify,
                 has_any_connection,
@@ -888,6 +890,32 @@ pub async fn patch_profile_field(
             // No-op: Tinfoil is now the sole provider. Accept silently for
             // backward compatibility with older frontends.
             tracing::debug!("llm_provider change ignored - Tinfoil is sole provider");
+        }
+        "voice_provider" => {
+            let value = request.value.as_str().ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "voice_provider must be a string"})),
+                )
+            })?;
+            let allowed_providers = ["tinfoil", "openai_realtime"];
+            if !allowed_providers.contains(&value) {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(
+                        json!({"error": "Invalid voice provider. Must be 'tinfoil' or 'openai_realtime'"}),
+                    ),
+                ));
+            }
+            state
+                .user_core
+                .update_voice_provider(user_id, value)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
         }
         "preferred_number" => {
             let value = request.value.as_str().ok_or_else(|| {

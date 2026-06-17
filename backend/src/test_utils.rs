@@ -748,6 +748,7 @@ pub mod mock_user_core {
         pub byot_users: Mutex<Vec<i32>>,
         pub phone_service_active: Mutex<HashMap<i32, bool>>,
         pub llm_provider: Mutex<HashMap<i32, String>>,
+        pub voice_provider: Mutex<HashMap<i32, String>>,
 
         // Error injection
         pub find_by_id_error: Mutex<Option<DieselError>>,
@@ -772,6 +773,7 @@ pub mod mock_user_core {
                 byot_users: Mutex::new(Vec::new()),
                 phone_service_active: Mutex::new(HashMap::new()),
                 llm_provider: Mutex::new(HashMap::new()),
+                voice_provider: Mutex::new(HashMap::new()),
                 find_by_id_error: Mutex::new(None),
                 find_by_phone_error: Mutex::new(None),
             }
@@ -1045,6 +1047,24 @@ pub mod mock_user_core {
 
         fn get_llm_provider(&self, user_id: i32) -> Result<Option<String>, DieselError> {
             Ok(self.llm_provider.lock().unwrap().get(&user_id).cloned())
+        }
+
+        fn update_voice_provider(&self, user_id: i32, provider: &str) -> Result<(), DieselError> {
+            self.voice_provider
+                .lock()
+                .unwrap()
+                .insert(user_id, provider.to_string());
+            Ok(())
+        }
+
+        fn get_voice_provider(&self, user_id: i32) -> Result<String, DieselError> {
+            Ok(self
+                .voice_provider
+                .lock()
+                .unwrap()
+                .get(&user_id)
+                .cloned()
+                .unwrap_or_else(|| "tinfoil".to_string()))
         }
 
         fn update_phone_service_active(
