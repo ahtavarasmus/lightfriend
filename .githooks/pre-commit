@@ -1,25 +1,26 @@
 #!/usr/bin/env bash
-# Pre-commit validation.
+# Fast pre-commit validation.
 #
-# Runs the three checks CI runs, in the order they would fail cheapest first:
-#   1. cargo clippy -D warnings (catches style issues CI rejects, e.g.
-#      too_many_arguments, unwrap-after-is_some, doc-list-indent).
-#   2. cargo test (unit + integration; strict = no ignores, no skips).
-#   3. trunk build (catches frontend type/WASM compile errors).
+# The full CI-shaped suite is intentionally opt-in because this project has a
+# large Rust dependency graph and many integration test crates. Running clippy,
+# every test binary, and trunk build on each local commit makes normal edit/run
+# cycles painfully slow.
 #
-# Why these and not `cargo run`:
-#   The backend needs ~20 env vars to boot (ADMIN_EMAILS, PG_DATABASE_URL,
-#   encryption keys, Twilio, Stripe, etc). A fresh worktree won't have them
-#   and adding stubs just to make boot succeed gives no real signal -- the
-#   runtime paths we'd hit (DB connect, Tesla API, etc) are integration
-#   tests, not local validation. Clippy + compile-time test run + trunk
-#   build catches every CI failure class we've shipped so far.
+# Default behavior:
+#   - backend/frontend: cargo fmt --check only
 #
-# Skip via `git commit --no-verify` when genuinely needed (e.g. committing
-# a doc-only change on a machine without Rust toolchain). Don't skip to
-# push broken code.
+# Full local gate:
+#   LIGHTFRIEND_FULL_PRECOMMIT=1 git commit ...
+#
+# Emergency skip:
+#   LIGHTFRIEND_SKIP_PRECOMMIT=1 git commit ...
 
 set -euo pipefail
+
+if [ "${LIGHTFRIEND_SKIP_PRECOMMIT:-}" = "1" ]; then
+  echo "pre-commit: skipped via LIGHTFRIEND_SKIP_PRECOMMIT=1"
+  exit 0
+fi
 
 # Only run if any Rust/frontend source is staged; otherwise skip to keep
 # doc-only / config-only commits fast.
@@ -55,23 +56,35 @@ fail() { printf "${red}    FAILED${reset}\n"; exit 1; }
 start=$(date +%s)
 
 if $need_backend; then
-  step "cargo clippy --all-targets -- -D warnings"
-  (cd "$repo_root/backend" && cargo clippy --all-targets --no-deps -- -D warnings) || fail
-  ok
+  if [ "${LIGHTFRIEND_FULL_PRECOMMIT:-}" = "1" ]; then
+    step "cargo clippy --all-targets -- -D warnings"
+    (cd "$repo_root/backend" && cargo clippy --all-targets --no-deps -- -D warnings) || fail
+    ok
 
-  step "cargo test --no-fail-fast"
-  (cd "$repo_root/backend" && cargo test --no-fail-fast) || fail
-  ok
+    step "cargo test --no-fail-fast"
+    (cd "$repo_root/backend" && cargo test --no-fail-fast) || fail
+    ok
+  else
+    step "cargo fmt --check"
+    (cd "$repo_root/backend" && cargo fmt --check) || fail
+    ok
+  fi
 fi
 
 if $need_frontend; then
-  step "trunk build"
-  if ! command -v trunk >/dev/null 2>&1; then
-    printf "${red}    trunk not installed (cargo install trunk)${reset}\n"
-    exit 1
+  if [ "${LIGHTFRIEND_FULL_PRECOMMIT:-}" = "1" ]; then
+    step "trunk build"
+    if ! command -v trunk >/dev/null 2>&1; then
+      printf "${red}    trunk not installed (cargo install trunk)${reset}\n"
+      exit 1
+    fi
+    (cd "$repo_root/frontend" && trunk build) || fail
+    ok
+  else
+    step "cargo fmt --check"
+    (cd "$repo_root/frontend" && cargo fmt --check) || fail
+    ok
   fi
-  (cd "$repo_root/frontend" && trunk build) || fail
-  ok
 fi
 
 end=$(date +%s)

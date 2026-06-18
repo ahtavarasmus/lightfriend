@@ -40,8 +40,13 @@ jobs:
             echo "has-secrets=false" >> $GITHUB_OUTPUT
           fi
 
+  ci:
+    # Gate image publication and deploy on the same validation suite PRs run.
+    needs: authorize
+    uses: ./.github/workflows/ci.yml
+
   build-and-push:
-    needs: check-secrets
+    needs: [check-secrets, ci]
     if: needs.check-secrets.outputs.has-secrets == 'true'
     runs-on: ubuntu-latest
     outputs:
@@ -124,7 +129,7 @@ jobs:
           path: /tmp/image-build.json
 
   build-eif:
-    needs: [check-secrets, build-and-push]
+    needs: [check-secrets, ci, build-and-push]
     if: needs.check-secrets.outputs.has-secrets == 'true' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     outputs:
@@ -319,7 +324,7 @@ jobs:
           path: /tmp/eif-metadata.json
 
   deploy:
-    needs: [authorize, build-and-push, build-eif]
+    needs: [authorize, ci, build-and-push, build-eif]
     if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

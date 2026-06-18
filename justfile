@@ -57,7 +57,7 @@ verify:
 # ── Development ─────────────────────────────────────────────────────────
 
 # Install macOS Homebrew prerequisites (idempotent; no-op on non-macOS)
-setup-mac: install-hooks
+setup-mac:
     #!/usr/bin/env bash
     # Installs the keg-only Homebrew formulas the backend links against at
     # runtime. rpaths to their `brew --prefix`/lib dirs are baked into
@@ -72,10 +72,7 @@ setup-mac: install-hooks
     fi
     brew install sqlite openssl@3 libiconv postgresql@14
 
-# Point git at .githooks/ so pre-commit runs cargo clippy + cargo test +
-# trunk build on every commit. Idempotent, runs automatically on first
-# dev-backend invocation via setup-mac. Also works in fresh worktrees
-# (each worktree has its own git config).
+# Optional: point git at .githooks/ when you want local checks.
 install-hooks:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -85,7 +82,7 @@ install-hooks:
       echo "Installed git hooks (core.hooksPath = .githooks)."
     fi
 
-# Development: Run backend locally (auto-installs macOS deps and git hooks on first run)
+# Development: Run backend locally (auto-installs macOS deps on first run)
 dev-backend: setup-mac
     cd backend && cargo run
 
@@ -93,9 +90,21 @@ dev-backend: setup-mac
 dev-frontend:
     cd frontend && trunk serve
 
+# Development: Fast backend compile check without linking/running tests
+check-backend:
+    cd backend && cargo check --bin backend
+
+# Development: Fast backend compile check for test code without linking tests
+check-backend-tests:
+    cd backend && cargo check --tests
+
 # Development: Run tests for backend
-test-backend:
-    cd backend && cargo test
+test-backend ARGS="":
+    cd backend && cargo test {{ARGS}}
+
+# Development: Run one integration test crate, e.g. `just test-backend-file sms_sanitizer_test`
+test-backend-file FILE:
+    cd backend && cargo test --test {{FILE}}
 
 # Development: Run tests for frontend
 test-frontend:
