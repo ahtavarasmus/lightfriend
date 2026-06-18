@@ -19,6 +19,7 @@ use crate::models::user_models::{NewMessageStatusLog, User};
 use crate::pg_schema::message_status_log;
 use crate::repositories::user_core::UserCore;
 use crate::repositories::user_repository::UserRepository;
+use crate::utils::sms_sanitizer::{clamp_sms_body, SMS_BODY_CHARACTER_LIMIT};
 use crate::PgDbPool;
 
 /// Errors that can occur during message operations.
@@ -283,6 +284,17 @@ impl<T: TwilioClient> TwilioMessageService<T> {
         media_sid: Option<&String>,
         user: &User,
     ) -> Result<String, TwilioMessageError> {
+        let body_len = body.chars().count();
+        let body = clamp_sms_body(body);
+        if body_len > SMS_BODY_CHARACTER_LIMIT {
+            tracing::warn!(
+                "Truncated Twilio SMS for user {} from {} to {} chars",
+                user.id,
+                body_len,
+                SMS_BODY_CHARACTER_LIMIT
+            );
+        }
+
         // Resolve credentials first (needed for media URL construction)
         let credentials = self.resolve_credentials(user)?;
 
@@ -327,7 +339,7 @@ impl<T: TwilioClient> TwilioMessageService<T> {
 
         let options = SendMessageOptions {
             to: user.phone_number.clone(),
-            body: body.to_string(),
+            body: body.clone(),
             media_url,
             from: from_number.clone(),
             messaging_service_sid,
@@ -363,7 +375,7 @@ impl<T: TwilioClient> TwilioMessageService<T> {
         );
 
         // Log initial status to database
-        self.log_message_status(user, &message_sid, from_number.as_deref(), body)?;
+        self.log_message_status(user, &message_sid, from_number.as_deref(), &body)?;
 
         Ok(message_sid)
     }
@@ -427,9 +439,20 @@ impl<T: TwilioClient> TwilioMessageService<T> {
             .filter(|s| !s.is_empty())
             .map(|url| format!("{}/api/twilio/status-callback", url));
 
+        let body_len = config.body.chars().count();
+        let body = clamp_sms_body(&config.body);
+        if body_len > SMS_BODY_CHARACTER_LIMIT {
+            tracing::warn!(
+                "Truncated direct Twilio SMS for user {} from {} to {} chars",
+                user.id,
+                body_len,
+                SMS_BODY_CHARACTER_LIMIT
+            );
+        }
+
         let options = SendMessageOptions {
             to: config.to,
-            body: config.body,
+            body,
             media_url: config.media_url,
             from: from_number.clone(),
             messaging_service_sid,

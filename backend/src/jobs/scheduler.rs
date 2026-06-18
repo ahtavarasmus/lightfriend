@@ -1259,11 +1259,17 @@ const DIGEST_TEASER_CAP: usize = 100;
 /// summary target — these messages need enough context to act.
 const DIGEST_HIGH_SIGNAL_TEASER_CAP: usize = 160;
 
+/// Cap inline event/list names so a single long title cannot blow up the SMS.
+const DIGEST_INLINE_ITEM_CAP: usize = 80;
+
 /// How many high-signal items to show individually before collapsing to counts.
 const HIGH_SIGNAL_CAP: usize = 3;
 
 /// How many sender names to list in collapsed FYI / New / Done sections.
 const NAMES_LIST_CAP: usize = 5;
+
+/// How many same-sender messages to render inside one collapsed FYI line.
+const FYI_GROUP_MESSAGE_CAP: usize = 3;
 
 /// Strip a leading sender-name prefix from a summary, even when the LLM
 /// re-states it despite the prompt. Handles common patterns like:
@@ -1341,6 +1347,19 @@ fn format_digest_message_with_cap(
     }
 }
 
+pub fn truncate_digest_piece(text: &str, cap: usize) -> String {
+    let trimmed = text.trim();
+    if trimmed.chars().count() <= cap {
+        return trimmed.to_string();
+    }
+
+    let keep = cap.saturating_sub(3);
+    let mut out: String = trimmed.chars().take(keep).collect();
+    out = out.trim_end().to_string();
+    out.push_str("...");
+    out
+}
+
 /// Render a high-signal section (Critical / Important): per-item lines with
 /// short teasers, capped at HIGH_SIGNAL_CAP. Anything beyond is summarized
 /// with "+N more".
@@ -1385,6 +1404,7 @@ fn format_digest_group(group: &[&crate::models::ontology_models::OntMessage]) ->
     let sender_name = &sorted[0].sender_name;
     let teasers: Vec<String> = sorted
         .iter()
+        .take(FYI_GROUP_MESSAGE_CAP)
         .map(|m| {
             let (raw_summary, cap) = match m.summary.as_deref() {
                 Some(s) => (s, DIGEST_TEASER_CAP),
@@ -1400,14 +1420,23 @@ fn format_digest_group(group: &[&crate::models::ontology_models::OntMessage]) ->
     if teasers.is_empty() {
         format!("- {}", sender_name)
     } else {
-        format!("- {}: {}", sender_name, teasers.join("; "))
+        let mut line = format!("- {}: {}", sender_name, teasers.join("; "));
+        if sorted.len() > FYI_GROUP_MESSAGE_CAP {
+            line.push_str(&format!(
+                "; + {} more",
+                sorted.len() - FYI_GROUP_MESSAGE_CAP
+            ));
+        }
+        line
     }
 }
 
 /// Render FYI section with per-item summaries, similar to high-signal sections
 /// but with a higher cap since these are shorter teasers. Adjacent messages
 /// from the same (sender, room) collapse into a single line.
-fn render_fyi_inline(messages: &[crate::models::ontology_models::OntMessage]) -> Option<String> {
+pub fn render_fyi_inline(
+    messages: &[crate::models::ontology_models::OntMessage],
+) -> Option<String> {
     if messages.is_empty() {
         return None;
     }
@@ -1648,13 +1677,14 @@ pub async fn build_digest_for_user(
             .iter()
             .take(5)
             .map(|event| {
+                let description = truncate_digest_piece(&event.description, DIGEST_INLINE_ITEM_CAP);
                 let time_str = if let Some(due) = event.due_at {
                     let local_due = due as i64 + tz_offset_secs as i64;
                     let h = ((local_due % 86400 + 86400) % 86400 / 3600) as i32;
                     let m = (((local_due % 86400 + 86400) % 86400) % 3600 / 60) as i32;
-                    format!("{:02}:{:02} {}", h, m, event.description)
+                    format!("{:02}:{:02} {}", h, m, description)
                 } else {
-                    event.description.clone()
+                    description
                 };
                 time_str
             })
@@ -1688,7 +1718,7 @@ pub async fn build_digest_for_user(
         let names: Vec<String> = recent_events
             .iter()
             .take(NAMES_LIST_CAP)
-            .map(|e| e.description.clone())
+            .map(|e| truncate_digest_piece(&e.description, DIGEST_INLINE_ITEM_CAP))
             .collect();
         let mut line = format!("New: {}", names.join(", "));
         if total > NAMES_LIST_CAP {
@@ -1703,7 +1733,7 @@ pub async fn build_digest_for_user(
         let names: Vec<String> = completed_events
             .iter()
             .take(NAMES_LIST_CAP)
-            .map(|e| e.description.clone())
+            .map(|e| truncate_digest_piece(&e.description, DIGEST_INLINE_ITEM_CAP))
             .collect();
         let mut line = format!("Done: {}", names.join(", "));
         if total > NAMES_LIST_CAP {
@@ -1755,6 +1785,7 @@ pub async fn build_digest_for_user(
     };
 
     let digest_text = format!("{}\n\n{}", header, digest_parts.join("\n\n"));
+    let digest_text = crate::utils::sms_sanitizer::clamp_sms_body(&digest_text);
     Some((digest_text, message_ids))
 }
 

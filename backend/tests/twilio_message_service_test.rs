@@ -8,6 +8,7 @@ use backend::test_utils::{
     create_test_state, create_test_user, set_byot_credentials, set_preferred_number,
     setup_test_encryption, TestUserParams,
 };
+use backend::utils::sms_sanitizer::SMS_BODY_CHARACTER_LIMIT;
 use backend::UserCoreOps;
 use serial_test::serial;
 use std::sync::Arc;
@@ -388,6 +389,27 @@ async fn test_send_sms_notification_only_default_flow() {
         "Notification-only should use messaging service"
     );
     assert!(call.from.is_none());
+}
+
+#[tokio::test]
+#[serial]
+async fn test_send_sms_clamps_overlong_body_before_twilio_call() {
+    setup_test_env();
+    let state = create_test_state();
+    let params = TestUserParams::us_user(10.0, 5.0);
+    let user = create_test_user(&state, &params);
+
+    let (service, mock_client) = create_test_service(&state);
+    let body = "x".repeat(SMS_BODY_CHARACTER_LIMIT + 50);
+
+    let result = service.dispatch_sms(&body, None, &user).await;
+    assert!(result.is_ok());
+
+    let calls = mock_client.get_calls();
+    assert_eq!(calls.send_message_calls.len(), 1);
+    let call = &calls.send_message_calls[0];
+    assert_eq!(call.body.chars().count(), SMS_BODY_CHARACTER_LIMIT);
+    assert!(call.body.ends_with("[truncated]"));
 }
 
 // `test_send_sms_skips_in_development` was removed in the channel-router

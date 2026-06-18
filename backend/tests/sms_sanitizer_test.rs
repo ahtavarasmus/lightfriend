@@ -1,4 +1,6 @@
-use backend::utils::sms_sanitizer::{apply_sms_url_filter, unfang_text};
+use backend::utils::sms_sanitizer::{
+    apply_sms_url_filter, clamp_sms_body, unfang_text, SMS_BODY_CHARACTER_LIMIT,
+};
 
 #[test]
 fn preserves_text_without_urls() {
@@ -132,4 +134,22 @@ fn full_sanitizer_unfangs_then_filters_urls() {
     let output = apply_sms_url_filter(input);
     // The URL gets unfanged, then domain-replaced. Email is left in place.
     assert_eq!(output, "See [link: example.com] and email user@gmail.com");
+}
+
+#[test]
+fn clamp_sms_body_enforces_provider_limit() {
+    let input = "a".repeat(SMS_BODY_CHARACTER_LIMIT + 25);
+    let output = clamp_sms_body(&input);
+
+    assert_eq!(output.chars().count(), SMS_BODY_CHARACTER_LIMIT);
+    assert!(output.ends_with("[truncated]"));
+}
+
+#[test]
+fn clamp_sms_body_preserves_utf8_boundaries() {
+    let input = "å".repeat(SMS_BODY_CHARACTER_LIMIT + 1);
+    let output = clamp_sms_body(&input);
+
+    assert_eq!(output.chars().count(), SMS_BODY_CHARACTER_LIMIT);
+    assert!(output.ends_with("[truncated]"));
 }

@@ -21,6 +21,7 @@ use crate::channels::traits::{
     ChannelError, ChannelMessageId, IncomingMessage, MediaRef, MessageChannel,
 };
 use crate::models::user_models::User;
+use crate::utils::sms_sanitizer::{clamp_sms_body, SMS_BODY_CHARACTER_LIMIT};
 
 /// Tag prepended to fallback-provider sends so the recipient can tell the
 /// SMS is still Lightfriend even though it comes from a different number.
@@ -104,7 +105,9 @@ impl ChannelRouter {
             .channels
             .get(channel_id)
             .ok_or_else(|| ChannelError::NotConfigured(channel_id.to_string()))?;
-        chan.send(user, address, body, None).await
+        let body = crate::utils::sms_sanitizer::apply_sms_url_filter(body);
+        let body = clamp_sms_body(&body);
+        chan.send(user, address, &body, None).await
     }
 
     /// Send a message to a user. Tries providers in priority order
@@ -171,6 +174,17 @@ impl ChannelRouter {
             } else {
                 format!("{}{}", FALLBACK_PREFIX, body)
             };
+            let attempt_body_len = attempt_body.chars().count();
+            let attempt_body = clamp_sms_body(&attempt_body);
+            if attempt_body_len > SMS_BODY_CHARACTER_LIMIT {
+                tracing::warn!(
+                    "Truncated outbound SMS for user {} via '{}' from {} to {} chars",
+                    user.id,
+                    channel_id,
+                    attempt_body_len,
+                    SMS_BODY_CHARACTER_LIMIT
+                );
+            }
 
             match chan
                 .send(user, &user.phone_number, &attempt_body, media.clone())

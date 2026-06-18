@@ -4,9 +4,13 @@
 //! verify the new repository queries used to fetch each section's content
 //! (events due today, messages by urgency, with the seen/replied filters).
 
-use backend::jobs::scheduler::{build_digest_for_user, category_score, strip_sender_prefix};
-use backend::models::ontology_models::{NewOntEvent, NewOntMessage};
+use backend::jobs::scheduler::{
+    build_digest_for_user, category_score, render_fyi_inline, strip_sender_prefix,
+    truncate_digest_piece,
+};
+use backend::models::ontology_models::{NewOntEvent, NewOntMessage, OntMessage};
 use backend::test_utils::{create_test_state, create_test_user, TestUserParams};
+use backend::utils::sms_sanitizer::SMS_BODY_CHARACTER_LIMIT;
 use backend::UserCoreOps;
 use serial_test::serial;
 
@@ -119,6 +123,81 @@ fn category_score_unknown_is_neutral() {
     let unknown = category_score(None);
     assert!(unknown < category_score(Some("work")));
     assert!(unknown > category_score(Some("social")));
+}
+
+fn digest_test_message(
+    id: i64,
+    sender: &str,
+    room: &str,
+    summary: &str,
+    created_at: i32,
+) -> OntMessage {
+    OntMessage {
+        id,
+        user_id: 1,
+        room_id: room.to_string(),
+        platform: "whatsapp".to_string(),
+        sender_name: sender.to_string(),
+        sender_key: None,
+        content: "x".to_string(),
+        person_id: Some(1),
+        created_at,
+        urgency: Some("medium".to_string()),
+        category: Some("social".to_string()),
+        summary: Some(summary.to_string()),
+        digest_delivered_at: None,
+        classification_prompt: None,
+        classification_result: None,
+        resolved_at: None,
+        seen_at: None,
+        matrix_event_id: None,
+        commitment_prompt: None,
+        commitment_result: None,
+    }
+}
+
+#[test]
+fn fyi_group_collapses_same_sender_backlog_under_sms_limit() {
+    let now: i32 = 1_775_894_400;
+    let long_detail = "detail ".repeat(30);
+    let messages: Vec<OntMessage> = (0..30)
+        .map(|i| {
+            digest_test_message(
+                i as i64,
+                "Busy Chat",
+                "!one_busy_room",
+                &format!("update {} {}", i, long_detail),
+                now - i,
+            )
+        })
+        .collect();
+
+    let fyi = render_fyi_inline(&messages).expect("FYI section");
+
+    assert!(
+        fyi.chars().count() <= SMS_BODY_CHARACTER_LIMIT,
+        "FYI line should stay below Twilio's hard limit, got {} chars:\n{}",
+        fyi.chars().count(),
+        fyi
+    );
+    assert!(
+        fyi.contains("+ 27 more"),
+        "same-sender backlog should collapse overflow in one FYI line:\n{}",
+        fyi
+    );
+}
+
+#[test]
+fn truncate_digest_piece_shortens_long_inline_titles() {
+    let long_title = "Very long event title ".repeat(80);
+    let piece = truncate_digest_piece(&long_title, 80);
+
+    assert!(piece.chars().count() <= 80);
+    assert!(piece.ends_with("..."));
+    assert!(
+        !piece.contains(&long_title.chars().take(200).collect::<String>()),
+        "full long title should not be rendered into SMS digest"
+    );
 }
 
 // =============================================================================

@@ -340,6 +340,47 @@ async fn url_filter_runs_before_channel_dispatch() {
     assert_eq!(received, "Email user@gmail.com about [link]");
 }
 
+#[tokio::test]
+#[serial_test::serial]
+async fn overlong_body_is_clamped_before_channel_dispatch() {
+    use backend::utils::sms_sanitizer::SMS_BODY_CHARACTER_LIMIT;
+    use std::sync::Mutex;
+
+    struct CapturingChannel {
+        last_body: Mutex<String>,
+    }
+    #[async_trait]
+    impl MessageChannel for CapturingChannel {
+        fn id(&self) -> &'static str {
+            "twilio"
+        }
+        async fn send(
+            &self,
+            _user: &User,
+            _address: &str,
+            body: &str,
+            _media: Option<MediaRef>,
+        ) -> Result<ChannelMessageId, ChannelError> {
+            *self.last_body.lock().unwrap() = body.to_string();
+            Ok(ChannelMessageId("captured".to_string()))
+        }
+    }
+
+    let chan = Arc::new(CapturingChannel {
+        last_body: Mutex::new(String::new()),
+    });
+    let mut router = ChannelRouter::new();
+    router.register(chan.clone());
+
+    let user = user_with_phone("+12025551234");
+    let body = "x".repeat(SMS_BODY_CHARACTER_LIMIT + 50);
+    router.send_to_user(&user, &body, None).await.unwrap();
+
+    let received = chan.last_body.lock().unwrap().clone();
+    assert_eq!(received.chars().count(), SMS_BODY_CHARACTER_LIMIT);
+    assert!(received.ends_with("[truncated]"));
+}
+
 #[test]
 fn pick_channel_returns_correct_id() {
     let twilio = Arc::new(RecordingChannel::new("twilio"));
@@ -485,6 +526,31 @@ async fn fallback_body_has_lightfriend_backup_prefix() {
     let telnyx_body = telnyx.last_body.lock().unwrap().clone();
     assert_eq!(twilio_body, "hello");
     assert_eq!(telnyx_body, format!("{}hello", FALLBACK_PREFIX));
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn fallback_body_is_clamped_after_backup_prefix() {
+    use backend::channels::router::FALLBACK_PREFIX;
+    use backend::utils::sms_sanitizer::SMS_BODY_CHARACTER_LIMIT;
+
+    let failing_twilio = Arc::new(FailingChannel::new("twilio", 1));
+    let telnyx = Arc::new(FailingChannel::new("telnyx", 0));
+    let mut router = ChannelRouter::new();
+    router.register(failing_twilio.clone());
+    router.register(telnyx.clone());
+    router.set_route("US", vec!["twilio".to_string(), "telnyx".to_string()]);
+
+    let user = user_with_phone("+12025551234");
+    let body = "x".repeat(SMS_BODY_CHARACTER_LIMIT);
+    router.send_to_user(&user, &body, None).await.unwrap();
+
+    let twilio_body = failing_twilio.last_body.lock().unwrap().clone();
+    let telnyx_body = telnyx.last_body.lock().unwrap().clone();
+    assert_eq!(twilio_body.chars().count(), SMS_BODY_CHARACTER_LIMIT);
+    assert_eq!(telnyx_body.chars().count(), SMS_BODY_CHARACTER_LIMIT);
+    assert!(telnyx_body.starts_with(FALLBACK_PREFIX));
+    assert!(telnyx_body.ends_with("[truncated]"));
 }
 
 #[tokio::test]

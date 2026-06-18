@@ -17,6 +17,11 @@
 use regex::Regex;
 use std::sync::OnceLock;
 
+/// Twilio's hard maximum for one SMS/MMS `Body` request.
+pub const SMS_BODY_CHARACTER_LIMIT: usize = 1600;
+
+const SMS_TRUNCATION_NOTICE: &str = "\n\n[truncated]";
+
 fn url_re() -> &'static Regex {
     static URL_RE: OnceLock<Regex> = OnceLock::new();
     URL_RE.get_or_init(|| Regex::new(r#"https?://[^\s<>"'\)\]\}]+"#).expect("valid url regex"))
@@ -59,6 +64,20 @@ const SHORTENER_DOMAINS: &[&str] = &[
 pub fn apply_sms_url_filter(body: &str) -> String {
     let body = unfang_text(body);
     apply_url_filter_only(&body)
+}
+
+/// Clamp a body to the provider-safe SMS request size while preserving UTF-8
+/// boundaries and making the truncation visible to the recipient.
+pub fn clamp_sms_body(body: &str) -> String {
+    if body.chars().count() <= SMS_BODY_CHARACTER_LIMIT {
+        return body.to_string();
+    }
+
+    let notice_len = SMS_TRUNCATION_NOTICE.chars().count();
+    let keep = SMS_BODY_CHARACTER_LIMIT.saturating_sub(notice_len);
+    let mut out: String = body.chars().take(keep).collect();
+    out.push_str(SMS_TRUNCATION_NOTICE);
+    out
 }
 
 /// Re-fang defanged emails and domains. Patterns handled:
