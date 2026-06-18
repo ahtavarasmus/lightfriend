@@ -1218,6 +1218,12 @@ struct OpenAiRealtimeInit {
     user_given_info: String,
 }
 
+struct OpenAiReaderSession {
+    mode: OpenAiRealtimeAudioMode,
+    stream_sid: Option<String>,
+    greeting: Option<String>,
+}
+
 fn openai_realtime_model() -> String {
     std::env::var("OPENAI_REALTIME_MODEL").unwrap_or_else(|_| "gpt-realtime-2".to_string())
 }
@@ -1391,13 +1397,15 @@ async fn connect_openai_realtime(
         HeaderValue::from_str(&format!("Bearer {}", api_key))
             .map_err(|e| format!("invalid OpenAI auth header: {}", e))?,
     );
-    request
-        .headers_mut()
-        .insert("OpenAI-Beta", HeaderValue::from_static("realtime=v1"));
     request.headers_mut().insert(
         "OpenAI-Safety-Identifier",
         HeaderValue::from_str(&openai_safety_identifier(user_id))
             .map_err(|e| format!("invalid safety identifier header: {}", e))?,
+    );
+    tracing::info!(
+        "Connecting OpenAI Realtime voice session for user {} with model {}",
+        user_id,
+        openai_realtime_model()
     );
 
     let (stream, _) = tokio_tungstenite::connect_async(request)
@@ -1511,8 +1519,7 @@ async fn handle_openai_reader(
     openai_tx: mpsc::Sender<serde_json::Value>,
     init: OpenAiRealtimeInit,
     state: Arc<AppState>,
-    mode: OpenAiRealtimeAudioMode,
-    stream_sid: Option<String>,
+    mut session: OpenAiReaderSession,
 ) {
     use futures_util::StreamExt;
     use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
@@ -1550,9 +1557,9 @@ async fn handle_openai_reader(
                     continue;
                 }
 
-                match mode {
+                match session.mode {
                     OpenAiRealtimeAudioMode::TwilioPcmu => {
-                        if let Some(ref stream_sid) = stream_sid {
+                        if let Some(ref stream_sid) = session.stream_sid {
                             let msg = serde_json::json!({
                                 "event": "media",
                                 "streamSid": stream_sid,
@@ -1585,9 +1592,9 @@ async fn handle_openai_reader(
                     }
                 }
             }
-            "response.audio.done" | "response.output_audio.done" => match mode {
+            "response.audio.done" | "response.output_audio.done" => match session.mode {
                 OpenAiRealtimeAudioMode::TwilioPcmu => {
-                    if let Some(ref stream_sid) = stream_sid {
+                    if let Some(ref stream_sid) = session.stream_sid {
                         let mark_msg = serde_json::json!({
                             "event": "mark",
                             "streamSid": stream_sid,
@@ -1606,9 +1613,9 @@ async fn handle_openai_reader(
                     }
                 }
             },
-            "input_audio_buffer.speech_started" => match mode {
+            "input_audio_buffer.speech_started" => match session.mode {
                 OpenAiRealtimeAudioMode::TwilioPcmu => {
-                    if let Some(ref stream_sid) = stream_sid {
+                    if let Some(ref stream_sid) = session.stream_sid {
                         let clear_msg = serde_json::json!({
                             "event": "clear",
                             "streamSid": stream_sid
@@ -1650,7 +1657,7 @@ async fn handle_openai_reader(
             }
             "error" => {
                 tracing::error!("OpenAI Realtime error event: {}", event);
-                if mode == OpenAiRealtimeAudioMode::WebPcm24 {
+                if session.mode == OpenAiRealtimeAudioMode::WebPcm24 {
                     let err = serde_json::json!({
                         "type": "error",
                         "message": event
@@ -1662,7 +1669,12 @@ async fn handle_openai_reader(
                     let _ = send_tx.send(Message::Text(err.to_string().into())).await;
                 }
             }
-            "session.created" | "session.updated" | "response.created" | "rate_limits.updated" => {}
+            "session.updated" => {
+                if let Some(greeting) = session.greeting.take() {
+                    let _ = openai_tx.send(openai_greeting_response(&greeting)).await;
+                }
+            }
+            "session.created" | "response.created" | "rate_limits.updated" => {}
             other => {
                 tracing::debug!("OpenAI Realtime event: {}", other);
             }
@@ -1692,13 +1704,12 @@ async fn start_openai_realtime_session(
         reader_openai_tx,
         init,
         state,
-        mode,
-        stream_sid,
+        OpenAiReaderSession {
+            mode,
+            stream_sid,
+            greeting,
+        },
     ));
-
-    if let Some(greeting) = greeting {
-        let _ = openai_tx.send(openai_greeting_response(&greeting)).await;
-    }
 
     Ok(openai_tx)
 }
