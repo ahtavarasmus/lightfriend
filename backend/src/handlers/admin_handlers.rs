@@ -2,8 +2,10 @@ use crate::UserCoreOps;
 use axum::{extract::State, http::StatusCode, Json};
 use diesel::prelude::*;
 use rand::Rng;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -21,10 +23,113 @@ pub struct EmailBroadcastRequest {
     pub message: String,
     #[serde(default = "default_audience")]
     pub audience: String,
+    #[serde(default)]
+    pub exclude_recipients: String,
 }
 
 fn default_audience() -> String {
     "all".to_string()
+}
+
+pub fn parse_broadcast_excluded_emails(
+    input: &str,
+    subject_filter: Option<&str>,
+) -> HashSet<String> {
+    let input = input.trim();
+    if input.is_empty() {
+        return HashSet::new();
+    }
+
+    let mut lines = input.lines().filter(|line| !line.trim().is_empty());
+    if let Some(header) = lines.next() {
+        let header_columns = split_csv_line(header);
+        if let Some(to_index) = header_columns
+            .iter()
+            .position(|column| column.trim().eq_ignore_ascii_case("to"))
+        {
+            let subject_index = header_columns
+                .iter()
+                .position(|column| column.trim().eq_ignore_ascii_case("subject"));
+            let normalized_subject_filter = subject_filter
+                .map(|subject| subject.trim().to_lowercase())
+                .filter(|subject| !subject.is_empty());
+
+            return lines
+                .filter_map(|line| {
+                    let columns = split_csv_line(line);
+                    if let (Some(index), Some(subject)) =
+                        (subject_index, normalized_subject_filter.as_deref())
+                    {
+                        let row_subject = columns
+                            .get(index)
+                            .map(|value| value.trim().to_lowercase())
+                            .unwrap_or_default();
+                        if row_subject != subject {
+                            return None;
+                        }
+                    }
+                    columns.get(to_index).cloned()
+                })
+                .filter_map(|email| normalize_email(&email))
+                .collect();
+        }
+    }
+
+    let email_regex =
+        Regex::new(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}").expect("valid regex");
+    email_regex
+        .find_iter(input)
+        .filter_map(|email| normalize_email(email.as_str()))
+        .collect()
+}
+
+fn split_csv_line(line: &str) -> Vec<String> {
+    let mut columns = Vec::new();
+    let mut current = String::new();
+    let mut chars = line.chars().peekable();
+    let mut in_quotes = false;
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' if in_quotes && chars.peek() == Some(&'"') => {
+                current.push('"');
+                chars.next();
+            }
+            '"' => in_quotes = !in_quotes,
+            ',' if !in_quotes => {
+                columns.push(current.trim().trim_matches('"').to_string());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    columns.push(current.trim().trim_matches('"').to_string());
+    columns
+}
+
+fn normalize_email(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    let candidate = if let (Some(start), Some(end)) = (trimmed.find('<'), trimmed.rfind('>')) {
+        &trimmed[start + 1..end]
+    } else {
+        trimmed
+    };
+    let email = candidate
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '<' | '>' | ',' | ';'))
+        .to_lowercase();
+
+    let (local, domain) = email.split_once('@')?;
+    if local.is_empty()
+        || domain.is_empty()
+        || !domain.contains('.')
+        || email.chars().any(char::is_whitespace)
+    {
+        return None;
+    }
+
+    Some(email)
 }
 
 #[derive(Serialize)]
@@ -209,6 +314,10 @@ pub async fn broadcast_email(
             })?
     };
 
+    let excluded_emails =
+        parse_broadcast_excluded_emails(&request.exclude_recipients, Some(&request.subject));
+    let excluded_count = excluded_emails.len();
+
     // Clone what we need for the task
     let state_clone = state.clone();
     let request_clone = request.clone();
@@ -219,11 +328,19 @@ pub async fn broadcast_email(
         let mut failed_count = 0;
         let mut error_details = Vec::new();
 
-        // Collect registered user emails to avoid sending duplicates to waitlist entries
-        let mut sent_emails: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // Collect registered user emails to avoid sending duplicates to waitlist entries.
+        // Seed this with explicit exclusions so excluded users cannot receive the
+        // same broadcast through a waitlist entry.
+        let mut sent_emails = excluded_emails.clone();
 
         // Send to registered users with notify enabled
         for user in users {
+            let normalized_user_email = user.email.trim().to_lowercase();
+            if excluded_emails.contains(&normalized_user_email) {
+                tracing::info!("Skipping excluded broadcast recipient {}", user.email);
+                continue;
+            }
+
             let user_settings = match state_clone.user_core.get_user_settings(user.id) {
                 Ok(settings) => settings,
                 Err(e) => {
@@ -343,8 +460,18 @@ pub async fn broadcast_email(
             if request_clone.audience == "only_subs" {
                 break;
             }
+            let normalized_entry_email = entry.email.trim().to_lowercase();
+            if excluded_emails.contains(&normalized_entry_email) {
+                tracing::info!(
+                    "Skipping excluded waitlist broadcast recipient {}",
+                    entry.email
+                );
+                sent_emails.insert(normalized_entry_email);
+                continue;
+            }
+
             // Skip if already sent to this email (user is both registered and on waitlist)
-            if sent_emails.contains(&entry.email.to_lowercase()) {
+            if sent_emails.contains(&normalized_entry_email) {
                 tracing::info!(
                     "Skipping waitlist entry {} - already sent as registered user",
                     entry.email
@@ -438,7 +565,8 @@ pub async fn broadcast_email(
 
     // Respond immediately
     Ok(Json(json!({
-        "message": "Email broadcast queued and will process in the background"
+        "message": "Email broadcast queued and will process in the background",
+        "excluded_count": excluded_count
     })))
 }
 

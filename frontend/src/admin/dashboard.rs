@@ -11,6 +11,7 @@ struct EmailBroadcastMessage {
     subject: String,
     message: String,
     audience: String,
+    exclude_recipients: String,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -432,6 +433,7 @@ pub fn admin_dashboard() -> Html {
     let email_subject = use_state(|| String::new());
     let email_message = use_state(|| String::new());
     let email_audience = use_state(|| "all".to_string());
+    let email_exclusions = use_state(|| String::new());
     let delete_modal = use_state(|| DeleteModalState {
         show: false,
         user_id: None,
@@ -657,6 +659,18 @@ pub fn admin_dashboard() -> Html {
                                             <option value="only_non_subs" selected={*email_audience == "only_non_subs"}>{"Non-subscribers only"}</option>
                                         </select>
                                         <textarea
+                                            value={(*email_exclusions).clone()}
+                                            onchange={{
+                                                let email_exclusions = email_exclusions.clone();
+                                                Callback::from(move |e: Event| {
+                                                    let input: web_sys::HtmlTextAreaElement = e.target_unchecked_into();
+                                                    email_exclusions.set(input.value());
+                                                })
+                                            }}
+                                            placeholder="Exclude recipients: paste emails, or paste a Resend CSV export. If it has a subject column, only rows matching this subject are skipped..."
+                                            class="broadcast-textarea"
+                                        />
+                                        <textarea
                                             value={(*email_message).clone()}
                                             onchange={{
                                                 let email_message = email_message.clone();
@@ -673,11 +687,13 @@ pub fn admin_dashboard() -> Html {
                                                 let email_subject = email_subject.clone();
                                                 let email_message = email_message.clone();
                                                 let email_audience = email_audience.clone();
+                                                let email_exclusions = email_exclusions.clone();
                                                 let error = error.clone();
                                                 Callback::from(move |_| {
                                                     let email_subject = email_subject.clone();
                                                     let email_message = email_message.clone();
                                                     let email_audience = email_audience.clone();
+                                                    let email_exclusions = email_exclusions.clone();
                                                     let error = error.clone();
 
                                                     if email_subject.is_empty() || email_message.is_empty() {
@@ -691,6 +707,7 @@ pub fn admin_dashboard() -> Html {
                                                             subject: (*email_subject).clone(),
                                                             message: (*email_message).clone(),
                                                             audience: audience_val,
+                                                            exclude_recipients: (*email_exclusions).clone(),
                                                         };
 
                                                         match Api::post("/api/admin/broadcast-email")
@@ -703,6 +720,7 @@ pub fn admin_dashboard() -> Html {
                                                                 if response.ok() {
                                                                     email_subject.set(String::new());
                                                                     email_message.set(String::new());
+                                                                    email_exclusions.set(String::new());
                                                                     error.set(Some("Email broadcast sent successfully".to_string()));
                                                                 } else {
                                                                     error.set(Some("Failed to send email broadcast".to_string()));
