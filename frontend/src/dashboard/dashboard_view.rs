@@ -284,12 +284,6 @@ const DASHBOARD_STYLES: &str = r#"
     font-weight: 700;
     text-transform: uppercase;
 }
-.value-stats-quality {
-    color: #4ade80;
-    font-size: 0.75rem;
-    font-weight: 600;
-    white-space: nowrap;
-}
 .value-stats-sentence {
     color: #e6e6e6;
     font-size: 0.92rem;
@@ -297,7 +291,7 @@ const DASHBOARD_STYLES: &str = r#"
 }
 .value-stats-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.45rem;
 }
 .value-stat {
@@ -845,7 +839,6 @@ struct DashboardValueStatsResponse {
     feedback_total: i64,
     feedback_worth_it: i64,
     feedback_should_wait: i64,
-    worth_it_percent: Option<i64>,
     value_sentence: String,
 }
 
@@ -1562,9 +1555,6 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 .quiet_percent
                 .map(|pct| format!("{}% quiet", pct))
                 .unwrap_or_else(|| "No quiet ratio yet".to_string());
-            let quality = stats
-                .worth_it_percent
-                .map(|pct| format!("{}% worth it", pct));
             let feedback_text = if stats.feedback_total > 0 {
                 format!(
                     "{} alert ratings: {} worth it, {} should have waited.",
@@ -1578,16 +1568,9 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 <div class="value-stats-card">
                     <div class="value-stats-header">
                         <div class="value-stats-kicker">{stats.period_label.clone()}</div>
-                        if let Some(quality_text) = quality {
-                            <div class="value-stats-quality">{quality_text}</div>
-                        }
                     </div>
                     <div class="value-stats-sentence">{stats.value_sentence.clone()}</div>
                     <div class="value-stats-grid">
-                        <div class="value-stat">
-                            <div class="value-stat-number">{stats.watched_messages}</div>
-                            <div class="value-stat-label">{"watched"}</div>
-                        </div>
                         <div class="value-stat">
                             <div class="value-stat-number">{stats.quieted_messages}</div>
                             <div class="value-stat-label">{format!("let wait - {}", quiet_detail)}</div>

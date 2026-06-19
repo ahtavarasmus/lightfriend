@@ -190,7 +190,7 @@ pub async fn check_user_credits(
 }
 
 /// Tinfoil inference cost per minute (STT + LLM + TTS).
-/// This covers whisper transcription, llama3-3-70b inference, and qwen3-tts.
+/// This covers whisper transcription, gemma4-31b inference, and qwen3-tts.
 const TINFOIL_COST_PER_MIN: f32 = 0.05;
 
 /// Estimate voice call cost for pre-send credit check.

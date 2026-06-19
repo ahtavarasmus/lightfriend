@@ -320,6 +320,11 @@ fn build_value_sentence(watched: i64, quieted: i64, interruptions: i64) -> Strin
         return "Lightfriend is ready to watch for what matters.".to_string();
     }
 
+    let quieted_phrase = if quieted == 1 {
+        "1 message".to_string()
+    } else {
+        format!("{} messages", quieted)
+    };
     let interruption_phrase = if interruptions == 1 {
         "the 1 message most likely to matter".to_string()
     } else {
@@ -327,11 +332,8 @@ fn build_value_sentence(watched: i64, quieted: i64, interruptions: i64) -> Strin
     };
 
     format!(
-        "Lightfriend watched {} {}, let {} wait, and interrupted you for {}.",
-        watched,
-        if watched == 1 { "message" } else { "messages" },
-        quieted,
-        interruption_phrase
+        "Lightfriend let {} wait and interrupted you for {}.",
+        quieted_phrase, interruption_phrase
     )
 }
 
