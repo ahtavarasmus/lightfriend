@@ -5,6 +5,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
+    cmp::Ordering,
     collections::HashMap,
     sync::OnceLock,
     time::{Duration, Instant},
@@ -118,6 +119,13 @@ pub struct HistoricalBuild {
     pub is_current: bool,
     pub commit_message: Option<String>,
     pub pr_number: Option<u64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HistoryOrderKey {
+    pub block_number: Option<u64>,
+    pub log_index: Option<u64>,
+    pub timestamp: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -380,6 +388,42 @@ async fn fetch_block_timestamp(client: &Client, rpc_url: &str, block_hex: &str) 
     Some(dt.to_rfc3339())
 }
 
+fn parse_rpc_hex_u64(hex_str: &str) -> Option<u64> {
+    let clean = hex_str.strip_prefix("0x").unwrap_or(hex_str);
+    u64::from_str_radix(clean, 16).ok()
+}
+
+fn timestamp_from_unix_secs(ts_secs: u64) -> Option<String> {
+    let dt = chrono::DateTime::from_timestamp(ts_secs as i64, 0)?;
+    Some(dt.to_rfc3339())
+}
+
+fn log_hex_field_u64(log: &serde_json::Value, field: &str) -> Option<u64> {
+    log.get(field)
+        .and_then(|v| v.as_str())
+        .and_then(parse_rpc_hex_u64)
+}
+
+fn timestamp_from_log_block_timestamp(log: &serde_json::Value) -> Option<String> {
+    let ts_secs = log_hex_field_u64(log, "blockTimestamp")?;
+    if ts_secs == 0 {
+        return None;
+    }
+    timestamp_from_unix_secs(ts_secs)
+}
+
+pub fn decode_image_proposed_activates_at(data_hex: &str) -> Option<String> {
+    let clean = data_hex.strip_prefix("0x").unwrap_or(data_hex);
+    let bytes = hex::decode(clean).ok()?;
+    if bytes.len() < 64 {
+        return None;
+    }
+
+    let activates_at_bytes: [u8; 32] = bytes[32..64].try_into().ok()?;
+    let activates_at = u256_to_usize(&activates_at_bytes)? as u64;
+    timestamp_from_unix_secs(activates_at)
+}
+
 fn decode_commit_hash_from_log_data(data_hex: &str) -> Option<String> {
     // ABI-encoded data for ImageProposed: (string commitHash, uint256 activatesAt)
     // Layout: offset(32) + activatesAt(32) + string_length(32) + string_data(padded)
@@ -414,6 +458,26 @@ fn u256_to_usize(bytes: &[u8; 32]) -> Option<usize> {
     let mut arr = [0u8; 8];
     arr.copy_from_slice(&bytes[24..32]);
     Some(u64::from_be_bytes(arr) as usize)
+}
+
+pub fn compare_history_order_desc(a: &HistoryOrderKey, b: &HistoryOrderKey) -> Ordering {
+    match (a.block_number, b.block_number) {
+        (Some(a_block), Some(b_block)) => b_block
+            .cmp(&a_block)
+            .then_with(|| b.log_index.unwrap_or(0).cmp(&a.log_index.unwrap_or(0))),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => b
+            .timestamp
+            .as_deref()
+            .unwrap_or("")
+            .cmp(a.timestamp.as_deref().unwrap_or("")),
+    }
+}
+
+struct OrderedHistoricalBuild {
+    build: HistoricalBuild,
+    order_key: HistoryOrderKey,
 }
 
 /// Fetch blockchain info for ONLY the current image. Fast path for /api/trust-chain.
@@ -508,8 +572,9 @@ async fn get_all_historical_builds(
     let activated_fut = fetch_event_logs(client, rpc_url, contract, IMAGE_ACTIVATED_TOPIC, None);
     let (proposed_logs, activated_logs) = tokio::join!(proposed_fut, activated_fut);
 
-    // Map imageId -> (tx, block)
-    let mut activated_map: HashMap<String, (String, Option<String>)> = HashMap::new();
+    // Map imageId -> (tx, block, timestamp hint)
+    let mut activated_map: HashMap<String, (String, Option<String>, Option<String>)> =
+        HashMap::new();
     for log in &activated_logs {
         let topics = log.get("topics").and_then(|t| t.as_array());
         let tx_hash = log
@@ -520,9 +585,10 @@ async fn get_all_historical_builds(
             .get("blockNumber")
             .and_then(|v| v.as_str())
             .map(String::from);
+        let timestamp_hint = timestamp_from_log_block_timestamp(log);
         if let (Some(topics), Some(tx)) = (topics, tx_hash) {
             if let Some(image_id_val) = topics.get(1).and_then(|v| v.as_str()) {
-                activated_map.insert(image_id_val.to_string(), (tx, block));
+                activated_map.insert(image_id_val.to_string(), (tx, block, timestamp_hint));
             }
         }
     }
@@ -533,8 +599,12 @@ async fn get_all_historical_builds(
         commit_hash: String,
         propose_tx: String,
         propose_block: Option<String>,
+        propose_block_number: Option<u64>,
+        propose_log_index: Option<u64>,
+        propose_timestamp_hint: Option<String>,
         activate_tx: Option<String>,
         activate_block: Option<String>,
+        activate_timestamp_hint: Option<String>,
     }
 
     let mut partials: Vec<PartialEntry> = Vec::new();
@@ -549,6 +619,8 @@ async fn get_all_historical_builds(
             .get("blockNumber")
             .and_then(|v| v.as_str())
             .map(String::from);
+        let block_number = log_hex_field_u64(log, "blockNumber");
+        let log_index = log_hex_field_u64(log, "logIndex");
         let data = log.get("data").and_then(|v| v.as_str()).unwrap_or_default();
 
         if let Some(topics) = topics {
@@ -561,18 +633,24 @@ async fn get_all_historical_builds(
                 continue;
             }
             let commit_hash = decode_commit_hash_from_log_data(data).unwrap_or_default();
-            let (activate_tx, activate_block) = activated_map
+            let propose_timestamp_hint = timestamp_from_log_block_timestamp(log)
+                .or_else(|| decode_image_proposed_activates_at(data));
+            let (activate_tx, activate_block, activate_timestamp_hint) = activated_map
                 .get(&image_id)
-                .map(|(tx, b)| (Some(tx.clone()), b.clone()))
-                .unwrap_or((None, None));
+                .map(|(tx, b, ts)| (Some(tx.clone()), b.clone(), ts.clone()))
+                .unwrap_or((None, None, None));
 
             partials.push(PartialEntry {
                 image_id,
                 commit_hash,
                 propose_tx: tx_hash,
                 propose_block: block_num,
+                propose_block_number: block_number,
+                propose_log_index: log_index,
+                propose_timestamp_hint,
                 activate_tx,
                 activate_block,
+                activate_timestamp_hint,
             });
         }
     }
@@ -586,14 +664,27 @@ async fn get_all_historical_builds(
     });
     let timestamps = join_all(ts_futures).await;
 
-    let mut builds: Vec<HistoricalBuild> = partials
+    let mut ordered_builds: Vec<OrderedHistoricalBuild> = partials
         .into_iter()
         .enumerate()
         .map(|(i, p)| {
-            let propose_timestamp = timestamps.get(i * 2).cloned().flatten();
-            let activate_timestamp = timestamps.get(i * 2 + 1).cloned().flatten();
+            let propose_timestamp = timestamps
+                .get(i * 2)
+                .cloned()
+                .flatten()
+                .or(p.propose_timestamp_hint);
+            let activate_timestamp = timestamps
+                .get(i * 2 + 1)
+                .cloned()
+                .flatten()
+                .or(p.activate_timestamp_hint);
             let is_current = p.image_id == current_image_id;
-            HistoricalBuild {
+            let order_key = HistoryOrderKey {
+                block_number: p.propose_block_number,
+                log_index: p.propose_log_index,
+                timestamp: propose_timestamp.clone(),
+            };
+            let build = HistoricalBuild {
                 image_id: p.image_id,
                 commit_hash: p.commit_hash,
                 propose_tx: p.propose_tx,
@@ -603,17 +694,17 @@ async fn get_all_historical_builds(
                 is_current,
                 commit_message: None,
                 pr_number: None,
-            }
+            };
+
+            OrderedHistoricalBuild { build, order_key }
         })
         .collect();
 
-    // Sort newest-first by propose_timestamp (fall back to insertion order reversed)
-    builds.sort_by(|a, b| {
-        b.propose_timestamp
-            .as_deref()
-            .unwrap_or("")
-            .cmp(a.propose_timestamp.as_deref().unwrap_or(""))
-    });
+    ordered_builds.sort_by(|a, b| compare_history_order_desc(&a.order_key, &b.order_key));
+    let builds: Vec<HistoricalBuild> = ordered_builds
+        .into_iter()
+        .map(|ordered| ordered.build)
+        .collect();
 
     *cache.write().await = Some(CachedEvents {
         fetched_at: Instant::now(),
