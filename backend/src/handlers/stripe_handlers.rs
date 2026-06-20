@@ -1,8 +1,8 @@
 use crate::UserCoreOps;
 use stripe::{
     BillingPortalSession, CheckoutSession, Client, CreateBillingPortalSession,
-    CreateCheckoutSession, CreateCustomer, CreatePaymentIntent, Customer, PaymentIntent,
-    Subscription, UpdateSubscription,
+    CreateCheckoutSession, CreateCustomer, CreatePaymentIntent, Customer, PaymentIntent, Price,
+    Subscription,
 };
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 pub enum SubscriptionType {
@@ -99,6 +99,24 @@ fn pricing_table_config() -> Result<(String, String), (StatusCode, Json<Value>)>
         )
     })?;
     Ok((pricing_table_id, publishable_key))
+}
+
+async fn retrieve_price_currency(client: &Client, price_id: &str) -> Option<stripe::Currency> {
+    let price_id = match price_id.parse() {
+        Ok(price_id) => price_id,
+        Err(_) => {
+            tracing::error!("Invalid Stripe price ID configured: {}", price_id);
+            return None;
+        }
+    };
+
+    match Price::retrieve(client, &price_id, &[]).await {
+        Ok(price) => price.currency,
+        Err(e) => {
+            tracing::error!("Failed to retrieve Stripe price {}: {}", price_id, e);
+            None
+        }
+    }
 }
 
 /// Idempotent subscription entitlement setup. Safe to call multiple times.
@@ -330,7 +348,7 @@ pub async fn create_unified_subscription_checkout(
     );
 
     // Verify user exists in database
-    let _user = state
+    let user = state
         .user_core
         .find_by_id(user_id)
         .map_err(|e| {
@@ -412,6 +430,23 @@ pub async fn create_unified_subscription_checkout(
     let base_price_id = match body.subscription_type {
         SubscriptionType::Hosted => checkout_price_for_plan(body.plan_type.as_deref())?,
     };
+
+    let mut checkout_customer_id = customer_id.clone();
+    if let Some(current_subscription) = existing_subscription.data.first() {
+        if let Some(new_price_currency) = retrieve_price_currency(&client, &base_price_id).await {
+            if new_price_currency != current_subscription.currency {
+                tracing::info!(
+                    "Creating checkout on a temporary customer for cross-currency migration: current_subscription={}, current_currency={:?}, new_currency={:?}",
+                    current_subscription.id,
+                    current_subscription.currency,
+                    new_price_currency
+                );
+                checkout_customer_id =
+                    create_temporary_checkout_customer(&client, user_id, &user.email).await?;
+            }
+        }
+    }
+
     // Build line items
     let line_items = vec![stripe::CreateCheckoutSessionLineItems {
         price: Some(base_price_id),
@@ -426,7 +461,7 @@ pub async fn create_unified_subscription_checkout(
         cancel_url: Some(&cancel_url),
         mode: Some(stripe::CheckoutSessionMode::Subscription),
         line_items: Some(line_items),
-        customer: Some(customer_id.parse().map_err(|_| {
+        customer: Some(checkout_customer_id.parse().map_err(|_| {
             (
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": "Invalid customer ID"})),
@@ -467,6 +502,7 @@ pub async fn create_unified_subscription_checkout(
             "replacing_subscription".to_string(),
             current_subscription.id.to_string(),
         );
+        metadata.insert("replacing_customer".to_string(), customer_id.clone());
         metadata.insert("plan_change".to_string(), "true".to_string());
         metadata.insert("user_id".to_string(), user_id.to_string());
 
@@ -1154,6 +1190,37 @@ async fn create_new_customer(
         })?;
     Ok(customer.id.to_string())
 }
+
+async fn create_temporary_checkout_customer(
+    client: &Client,
+    user_id: i32,
+    email: &str,
+) -> Result<String, (StatusCode, Json<Value>)> {
+    let customer = Customer::create(
+        client,
+        CreateCustomer {
+            email: Some(email),
+            name: Some(&format!("User {}", user_id)),
+            address: None,
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to create temporary checkout customer: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to create Stripe customer: {}", e)})),
+        )
+    })?;
+
+    tracing::info!(
+        "Created temporary Stripe customer {} for checkout",
+        customer.id
+    );
+    Ok(customer.id.to_string())
+}
+
 pub async fn stripe_webhook(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -1306,6 +1373,8 @@ pub async fn stripe_webhook(
                     let client_bg = client.clone();
                     let customer_id_bg = customer_id.clone();
                     let current_subscription_id = subscription.id.clone();
+                    let replacing_subscription_id =
+                        subscription.metadata.get("replacing_subscription").cloned();
                     let stripe_secret_key_bg = stripe_secret_key.clone();
                     tokio::spawn(async move {
                         let list_result = tokio::time::timeout(
@@ -1333,35 +1402,51 @@ pub async fn stripe_webhook(
                             }
                         };
 
-                        for sub_id in existing_subscriptions
+                        let current_subscription_id_string = current_subscription_id.to_string();
+                        let mut subscriptions_to_cancel: Vec<String> = existing_subscriptions
                             .data
                             .iter()
                             .filter(|s| s.id != current_subscription_id)
-                            .map(|s| s.id.clone())
-                        {
+                            .map(|s| s.id.to_string())
+                            .collect();
+
+                        if let Some(replacing_subscription_id) = replacing_subscription_id {
+                            if replacing_subscription_id != current_subscription_id_string
+                                && !subscriptions_to_cancel
+                                    .iter()
+                                    .any(|id| id == &replacing_subscription_id)
+                            {
+                                subscriptions_to_cancel.push(replacing_subscription_id);
+                            }
+                        }
+
+                        let http_client = reqwest::Client::new();
+                        for sub_id_string in subscriptions_to_cancel {
                             tracing::info!(
                                 "Canceling existing subscription immediately: {}",
-                                sub_id
+                                sub_id_string
                             );
-                            let mut metadata = std::collections::HashMap::new();
-                            metadata.insert("plan_change".to_string(), "true".to_string());
-                            let _ = Subscription::update(
-                                &client_bg,
-                                &sub_id,
-                                UpdateSubscription {
-                                    metadata: Some(metadata),
-                                    ..Default::default()
-                                },
-                            )
-                            .await;
-
-                            let sub_id_string = sub_id.to_string();
                             let cancel_url = format!(
                                 "https://api.stripe.com/v1/subscriptions/{}",
                                 sub_id_string
                             );
-                            match reqwest::Client::new()
-                                .delete(cancel_url)
+
+                            if let Err(e) = http_client
+                                .post(&cancel_url)
+                                .bearer_auth(&stripe_secret_key_bg)
+                                .form(&[("metadata[plan_change]", "true")])
+                                .send()
+                                .await
+                            {
+                                tracing::error!(
+                                    "Failed to mark subscription {} as plan_change before canceling: {:?}",
+                                    sub_id_string,
+                                    e
+                                );
+                            }
+
+                            match http_client
+                                .delete(&cancel_url)
                                 .bearer_auth(&stripe_secret_key_bg)
                                 .form(&[("invoice_now", "false"), ("prorate", "false")])
                                 .send()
