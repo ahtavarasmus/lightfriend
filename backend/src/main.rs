@@ -98,6 +98,18 @@ async fn geo_country(headers: HeaderMap) -> AxumJson<serde_json::Value> {
 // This avoids the backend becoming unresponsive during slow Telegram API calls.
 
 pub fn validate_env() {
+    fn env_has_value(var: &str) -> bool {
+        std::env::var(var)
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false)
+    }
+
+    fn require_any_env(vars: &[&str], label: &str) {
+        if !vars.iter().any(|var| env_has_value(var)) {
+            panic!("{} must be set in production environment", label);
+        }
+    }
+
     // Core variables (always required regardless of environment)
     let core_vars = [
         "JWT_SECRET_KEY",
@@ -143,6 +155,21 @@ pub fn validate_env() {
             std::env::var(var)
                 .unwrap_or_else(|_| panic!("{} must be set in production environment", var));
         }
+
+        require_any_env(
+            &[
+                "STRIPE_ASSISTANT_CHECKOUT_PRICE_ID",
+                "STRIPE_ASSISTANT_PLAN_PRICE_ID",
+            ],
+            "STRIPE_ASSISTANT_CHECKOUT_PRICE_ID or STRIPE_ASSISTANT_PLAN_PRICE_ID",
+        );
+        require_any_env(
+            &[
+                "STRIPE_AUTOPILOT_CHECKOUT_PRICE_ID",
+                "STRIPE_AUTOPILOT_PLAN_PRICE_ID",
+            ],
+            "STRIPE_AUTOPILOT_CHECKOUT_PRICE_ID or STRIPE_AUTOPILOT_PLAN_PRICE_ID",
+        );
     }
 
     // Note: The following are truly optional even in production:

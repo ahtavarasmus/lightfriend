@@ -40,9 +40,15 @@ pub struct SubscriptionMigrationStatusResponse {
 }
 
 fn checkout_price_for_plan(plan_type: Option<&str>) -> Result<String, (StatusCode, Json<Value>)> {
-    let env_key = match plan_type {
-        Some("assistant") => "STRIPE_ASSISTANT_CHECKOUT_PRICE_ID",
-        Some("autopilot") | None => "STRIPE_AUTOPILOT_CHECKOUT_PRICE_ID",
+    let env_keys = match plan_type {
+        Some("assistant") => [
+            "STRIPE_ASSISTANT_CHECKOUT_PRICE_ID",
+            "STRIPE_ASSISTANT_PLAN_PRICE_ID",
+        ],
+        Some("autopilot") | None => [
+            "STRIPE_AUTOPILOT_CHECKOUT_PRICE_ID",
+            "STRIPE_AUTOPILOT_PLAN_PRICE_ID",
+        ],
         Some("byot") => {
             return Err((
                 StatusCode::BAD_REQUEST,
@@ -57,13 +63,24 @@ fn checkout_price_for_plan(plan_type: Option<&str>) -> Result<String, (StatusCod
         }
     };
 
-    std::env::var(env_key).map_err(|_| {
-        tracing::error!("{} not found in environment", env_key);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Stripe price is not configured"})),
-        )
-    })
+    env_keys
+        .iter()
+        .find_map(|env_key| {
+            std::env::var(env_key)
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .ok_or_else(|| {
+            tracing::error!(
+                "Neither {} nor {} found in environment",
+                env_keys[0],
+                env_keys[1]
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "This plan is not configured yet. Please contact support."})),
+            )
+        })
 }
 
 fn pricing_table_config() -> Result<(String, String), (StatusCode, Json<Value>)> {

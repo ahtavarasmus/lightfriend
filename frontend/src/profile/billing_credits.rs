@@ -561,7 +561,19 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                         }
                         error.set(Some("No checkout URL returned".to_string()));
                     }
-                    Ok(_) => error.set(Some("Failed to start subscription checkout".to_string())),
+                    Ok(response) => {
+                        let message = response
+                            .json::<Value>()
+                            .await
+                            .ok()
+                            .and_then(|data| {
+                                data.get("error")
+                                    .and_then(|value| value.as_str())
+                                    .map(ToString::to_string)
+                            })
+                            .unwrap_or_else(|| "Failed to start subscription checkout".to_string());
+                        error.set(Some(message));
+                    }
                     Err(e) => error.set(Some(format!("Network error occurred: {:?}", e))),
                 }
                 subscription_checkout_loading.set(None);
@@ -627,7 +639,10 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                 } else if show_current_plan_picker {
                     <div class="usage-projection-card current-plan-card" style="margin-bottom: 16px;">
                         <div class="usage-header">
-                            <h3>{"Current plans"}</h3>
+                            <h3>{"Switch to a current plan"}</h3>
+                        </div>
+                        <div class="billing-note">
+                            {"Your Stripe portal still shows the old plan. Choose a current plan here to replace it."}
                         </div>
                         <div class="plan-switch-buttons">
                             <button
@@ -1135,13 +1150,19 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                     </div>
                 </div>
 
-                // Manage Payments button
+                // Manage billing button
                 if has_plan {
                     <button
                         class="customer-portal-button"
                         onclick={open_customer_portal.clone()}
                     >
-                        {"Change Plan / Manage Payments"}
+                        {
+                            if show_current_plan_picker {
+                                "Manage old plan / payment methods"
+                            } else {
+                                "Manage billing"
+                            }
+                        }
                     </button>
                 }
             </div>
@@ -1157,7 +1178,14 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
 }
 
 .current-plan-card .usage-header {
-    margin-bottom: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.billing-note {
+    color: #a8b3c7;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    margin-bottom: 1rem;
 }
 
 .plan-switch-buttons {
