@@ -1,53 +1,31 @@
 ---
 name: commit-push-pr
-description: Validate code, commit, push, and create PR if needed
+description: Quickly commit, push, and create a PR while leaving validation to GitHub checks
 ---
 
-# Validated Commit, Push, and PR
+# Quick Commit, Push, and PR
 
-This skill ensures code quality, commits, pushes, and creates a PR if one doesn't exist.
+Commit and push local changes quickly, then create a PR if one does not exist. Do not run local formatting, lint, or test commands by default; GitHub Actions runs validation after push.
 
 ## Process
 
-### Step 1: Run Formatting Check
-
-```bash
-cd backend && cargo fmt --check
-```
-
-If this fails, run `cargo fmt` to auto-fix, then re-check.
-
-### Step 2: Run Clippy Lints
-
-```bash
-cd backend && cargo clippy --workspace --all-targets --all-features -- -D warnings
-```
-
-If clippy fails, fix the issues before proceeding. Do NOT commit code with clippy warnings.
-
-### Step 3: Run Tests
-
-```bash
-cd backend && cargo test --workspace
-```
-
-If tests fail, fix the failing tests before proceeding. Do NOT commit code with failing tests.
-
-### Step 4: Check for Changes
+### Step 1: Check for Changes
 
 ```bash
 git status
 ```
 
-Review what will be committed. If there are no changes to commit, skip to Step 8 (PR creation).
+Review what will be committed. If there are no changes to commit, skip to Step 5 (PR check).
 
-### Step 5: Stage Changes
+Use `git diff --stat` or `git diff --cached --stat` when a quick scope check is useful. Do not run full validation unless the user explicitly asks for it.
+
+### Step 2: Stage Changes
 
 ```bash
 git add -A
 ```
 
-### Step 6: Create Commit
+### Step 3: Create Commit
 
 Ask the user for a commit message, or generate one based on the changes.
 
@@ -56,7 +34,7 @@ Ask the user for a commit message, or generate one based on the changes.
 - "Co-Authored-By: Codex"
 - Any AI/Codex attribution
 
-### Step 7: Push to Remote
+### Step 4: Push to Remote
 
 ```bash
 git push origin HEAD
@@ -67,7 +45,7 @@ If push fails due to upstream changes:
 git pull --rebase origin HEAD && git push origin HEAD
 ```
 
-### Step 8: Check for Existing PR
+### Step 5: Check for Existing PR
 
 ```bash
 gh pr list --head $(git branch --show-current) --state open
@@ -75,7 +53,7 @@ gh pr list --head $(git branch --show-current) --state open
 
 If a PR already exists for this branch, inform the user and provide the PR URL. Done.
 
-### Step 9: Create PR (if none exists)
+### Step 6: Create PR (if none exists)
 
 Get the current branch and base branch:
 ```bash
@@ -89,8 +67,7 @@ gh pr create --title "PR title here" --body "$(cat <<'EOF'
 - Brief description of changes
 
 ## Test plan
-- [ ] Tests pass
-- [ ] Lints pass
+- GitHub Actions will run validation after push
 
 EOF
 )"
@@ -100,27 +77,32 @@ EOF
 
 **PR Body**: Include:
 - Summary of changes (2-3 bullet points)
-- Test plan checklist
+- Test plan noting that GitHub Actions will run validation
 
 Do NOT include "Generated with Codex" or similar.
 
-### Step 10: Report Success
+### Step 7: Report Success
 
 Provide the PR URL to the user.
 
 ## Failure Handling
 
-If ANY step fails (fmt, clippy, or tests):
+If staging, commit, push, or PR creation fails:
 1. Stop immediately
 2. Report the failure to the user
-3. Do NOT proceed to commit
+3. Do not continue to later git steps
 4. Help fix the issues if requested
+
+If GitHub checks fail after push, inspect and fix them in a follow-up workflow.
 
 ## Quick Reference
 
 ```bash
-# Full validation
-cd backend && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo test --workspace
+# Quick commit + push
+git status
+git add -A
+git commit -m "message"
+git push origin HEAD
 
 # Check for existing PR
 gh pr list --head $(git branch --show-current) --state open
