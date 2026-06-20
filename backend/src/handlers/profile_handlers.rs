@@ -105,7 +105,7 @@ pub struct ProfileResponse {
     own_twilio_enabled: bool,         // whether phone traffic routes through user's Twilio account
     phone_service_active: bool, // whether phone service is active - can be disabled for security
     llm_provider: Option<String>, // "openai" (default) or "tinfoil" - user's LLM provider preference
-    voice_provider: String,       // "tinfoil" (private) or "openai_realtime" (premium)
+    voice_provider: String,       // "openai_realtime"; Tinfoil voice is temporarily disabled
     auto_create_items: bool, // whether to auto-detect and create trackable items from emails/messages
     system_important_notify: bool, // whether system auto-notifies for important messages
     has_any_connection: bool, // whether user has connected any service (email, bridges)
@@ -272,7 +272,7 @@ pub async fn get_profile(
                 own_twilio_enabled: user.own_twilio_enabled,
                 phone_service_active: user_settings.phone_service_active,
                 llm_provider: user_settings.llm_provider,
-                voice_provider: user_settings.voice_provider,
+                voice_provider: "openai_realtime".to_string(),
                 auto_create_items: user_settings.auto_create_items,
                 system_important_notify: user_settings.system_important_notify,
                 has_any_connection,
@@ -909,7 +909,7 @@ pub async fn patch_profile_field(
             }
             state
                 .user_core
-                .update_voice_provider(user_id, value)
+                .update_voice_provider(user_id, "openai_realtime")
                 .map_err(|e| {
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,

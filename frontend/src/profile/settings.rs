@@ -16,6 +16,11 @@ use yew_router::prelude::*;
 const MAX_NICKNAME_LENGTH: usize = 30;
 const MAX_INFO_LENGTH: usize = 500;
 const BYOT_NUMBER_OPTION: &str = "__byot";
+const DEFAULT_VOICE_PROVIDER: &str = "openai_realtime";
+
+fn normalize_voice_provider(_provider: &str) -> String {
+    DEFAULT_VOICE_PROVIDER.to_string()
+}
 
 // Request for patching individual fields
 #[derive(Serialize)]
@@ -249,13 +254,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let timezone_auto = use_state(|| (*user_profile).timezone_auto.unwrap_or(true));
     let phone_service_active = use_state(|| (*user_profile).phone_service_active.unwrap_or(true));
     let agent_language = use_state(|| (*user_profile).agent_language.clone());
-    let voice_provider = use_state(|| {
-        if (*user_profile).voice_provider.is_empty() {
-            "tinfoil".to_string()
-        } else {
-            (*user_profile).voice_provider.clone()
-        }
-    });
+    let voice_provider = use_state(|| normalize_voice_provider(&(*user_profile).voice_provider));
     let notification_type = use_state(|| {
         (*user_profile)
             .notification_type
@@ -424,11 +423,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 accountability_friend_name_eff.set(name_val.clone());
                 accountability_friend_name_original_eff.set(name_val);
                 agent_language.set(props_profile.agent_language.clone());
-                voice_provider.set(if props_profile.voice_provider.is_empty() {
-                    "tinfoil".to_string()
-                } else {
-                    props_profile.voice_provider.clone()
-                });
+                voice_provider.set(normalize_voice_provider(&props_profile.voice_provider));
                 notification_type.set(props_profile.notification_type.clone());
                 let preferred = props_profile.preferred_number.clone().unwrap_or_default();
                 preferred_sending_number_eff.set(preferred.clone());
@@ -1083,17 +1078,16 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         });
                     }
                     Ok(response) => {
-                        let error_msg = if let Ok(error_json) =
-                            response.json::<serde_json::Value>().await
-                        {
-                            error_json
-                                .get("error")
-                                .and_then(|e| e.as_str())
-                                .unwrap_or("Failed to save")
-                                .to_string()
-                        } else {
-                            "Failed to save".to_string()
-                        };
+                        let error_msg =
+                            if let Ok(error_json) = response.json::<serde_json::Value>().await {
+                                error_json
+                                    .get("error")
+                                    .and_then(|e| e.as_str())
+                                    .unwrap_or("Failed to save")
+                                    .to_string()
+                            } else {
+                                "Failed to save".to_string()
+                            };
                         save_state.set(FieldSaveState::Error(error_msg));
                     }
                     Err(_) => {
@@ -2867,7 +2861,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     <div class="tooltip">
                         <span class="tooltip-icon">{"?"}</span>
                         <span class="tooltip-text">
-                            {"Private uses verifiable Tinfoil voice models. Premium uses OpenAI Realtime for better call quality, but call audio and transcripts are processed by OpenAI."}
+                            {"Voice calls currently use OpenAI Realtime while Tinfoil voice is unavailable. Call audio and transcripts are processed by OpenAI."}
                         </span>
                     </div>
                 </div>
@@ -2877,11 +2871,8 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         value={(*voice_provider).clone()}
                         onchange={on_voice_provider_change.clone()}
                     >
-                        <option value="tinfoil" selected={*voice_provider == "tinfoil"}>
-                            {"Private voice (Tinfoil)"}
-                        </option>
                         <option value="openai_realtime" selected={*voice_provider == "openai_realtime"}>
-                            {"Premium voice (OpenAI Realtime)"}
+                            {"OpenAI Realtime voice"}
                         </option>
                     </select>
                     {render_save_indicator(&*voice_provider_save_state)}

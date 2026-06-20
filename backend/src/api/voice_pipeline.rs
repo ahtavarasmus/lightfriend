@@ -312,17 +312,43 @@ enum VoiceProvider {
     OpenAiRealtime,
 }
 
+fn tinfoil_voice_enabled() -> bool {
+    std::env::var("LIGHTFRIEND_ENABLE_TINFOIL_VOICE")
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes"
+            )
+        })
+        .unwrap_or(false)
+}
+
 fn voice_provider_for_user(state: &Arc<AppState>, user_id: i32) -> VoiceProvider {
     match state.user_core.get_voice_provider(user_id) {
         Ok(provider) if provider == "openai_realtime" => VoiceProvider::OpenAiRealtime,
-        Ok(_) => VoiceProvider::Tinfoil,
+        Ok(provider) if provider == "tinfoil" && tinfoil_voice_enabled() => VoiceProvider::Tinfoil,
+        Ok(provider) if provider == "tinfoil" => {
+            tracing::debug!(
+                "User {} has voice_provider=tinfoil; routing to OpenAI Realtime while Tinfoil voice is disabled",
+                user_id
+            );
+            VoiceProvider::OpenAiRealtime
+        }
+        Ok(provider) => {
+            tracing::warn!(
+                "Unknown voice_provider '{}' for user {}; defaulting to OpenAI Realtime",
+                provider,
+                user_id
+            );
+            VoiceProvider::OpenAiRealtime
+        }
         Err(e) => {
             tracing::warn!(
-                "Failed to load voice_provider for user {}: {}; defaulting to tinfoil",
+                "Failed to load voice_provider for user {}: {}; defaulting to OpenAI Realtime",
                 user_id,
                 e
             );
-            VoiceProvider::Tinfoil
+            VoiceProvider::OpenAiRealtime
         }
     }
 }
@@ -398,12 +424,10 @@ pub async fn voice_incoming(State(state): State<Arc<AppState>>, body: String) ->
         && !openai_realtime_available()
     {
         tracing::error!(
-            "User {} selected OpenAI Realtime voice but OPENAI_API_KEY is not configured",
+            "User {} routed to OpenAI Realtime voice but OPENAI_API_KEY is not configured",
             user.id
         );
-        return twiml_say(
-            "Premium voice is not configured right now. Please switch to private voice or try again later.",
-        );
+        return twiml_say("Voice calling is not configured right now. Please try again later.");
     }
 
     // Build WebSocket URL
@@ -611,7 +635,7 @@ pub async fn voice_web_start(
             )
         })?;
 
-    // Check credits (web calls use voice pricing - no Twilio leg, just Tinfoil)
+    // Check credits (web calls use voice pricing - no Twilio leg)
     if let Err(e) = crate::utils::usage::check_user_credits(&state, &user, "voice", None).await {
         return Err((StatusCode::FORBIDDEN, Json(serde_json::json!({"error": e}))));
     }
@@ -622,7 +646,7 @@ pub async fn voice_web_start(
         return Err((
             StatusCode::SERVICE_UNAVAILABLE,
             Json(serde_json::json!({
-                "error": "Premium voice is not configured right now. Please switch to private voice or try again later."
+                "error": "Voice calling is not configured right now. Please try again later."
             })),
         ));
     }
@@ -838,7 +862,7 @@ async fn handle_web_ws(state: Arc<AppState>, socket: WebSocket, user_id: i32) {
         }
     }
 
-    // Deduct credits (Tinfoil only, no Twilio leg for web calls)
+    // Deduct credits (no Twilio leg for web calls)
     let duration_secs = session.call_start.elapsed().as_secs() as i32;
     tracing::info!(
         "Web call ended for user {}. Duration: {}s",

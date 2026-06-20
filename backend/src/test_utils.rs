@@ -1064,7 +1064,7 @@ pub mod mock_user_core {
                 .unwrap()
                 .get(&user_id)
                 .cloned()
-                .unwrap_or_else(|| "tinfoil".to_string()))
+                .unwrap_or_else(|| "openai_realtime".to_string()))
         }
 
         fn update_phone_service_active(
