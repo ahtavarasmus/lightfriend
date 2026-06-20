@@ -14,6 +14,7 @@ extern "C" {
 struct PricingTableConfig {
     pricing_table_id: String,
     publishable_key: String,
+    customer_session_client_secret: Option<String>,
 }
 
 #[derive(Properties, PartialEq)]
@@ -55,10 +56,13 @@ pub fn stripe_pricing_table(props: &StripePricingTableProps) -> Html {
             move |user_id| {
                 let config = config.clone();
                 let error = error.clone();
-                let _user_id = *user_id;
+                let user_id = *user_id;
                 spawn_local(async move {
                     error.set(None);
-                    match Api::get("/api/stripe/pricing-table-config").send().await {
+                    let endpoint = user_id
+                        .map(|id| format!("/api/stripe/pricing-table-session/{}", id))
+                        .unwrap_or_else(|| "/api/stripe/pricing-table-config".to_string());
+                    match Api::get(&endpoint).send().await {
                         Ok(response) if response.ok() => {
                             match response.json::<PricingTableConfig>().await {
                                 Ok(data) => config.set(Some(data)),
@@ -84,14 +88,37 @@ pub fn stripe_pricing_table(props: &StripePricingTableProps) -> Html {
             {
                 if let Some(config) = (*config).as_ref() {
                     let client_reference_id = props.user_id.map(|id| format!("user_{}", id));
+                    let customer_session_client_secret = config
+                        .customer_session_client_secret
+                        .as_ref()
+                        .filter(|secret| !secret.trim().is_empty());
                     let customer_email = props
                         .customer_email
                         .as_ref()
                         .filter(|email| !email.trim().is_empty())
                         .cloned();
 
-                    match (customer_email.as_ref(), client_reference_id.as_ref()) {
-                        (Some(email), Some(reference_id)) => html! {
+                    match (
+                        customer_session_client_secret,
+                        customer_email.as_ref(),
+                        client_reference_id.as_ref(),
+                    ) {
+                        (Some(client_secret), _, Some(reference_id)) => html! {
+                            <stripe-pricing-table
+                                pricing-table-id={config.pricing_table_id.clone()}
+                                publishable-key={config.publishable_key.clone()}
+                                customer-session-client-secret={client_secret.clone()}
+                                client-reference-id={reference_id.clone()}
+                            />
+                        },
+                        (Some(client_secret), _, None) => html! {
+                            <stripe-pricing-table
+                                pricing-table-id={config.pricing_table_id.clone()}
+                                publishable-key={config.publishable_key.clone()}
+                                customer-session-client-secret={client_secret.clone()}
+                            />
+                        },
+                        (None, Some(email), Some(reference_id)) => html! {
                             <stripe-pricing-table
                                 pricing-table-id={config.pricing_table_id.clone()}
                                 publishable-key={config.publishable_key.clone()}
@@ -99,21 +126,21 @@ pub fn stripe_pricing_table(props: &StripePricingTableProps) -> Html {
                                 client-reference-id={reference_id.clone()}
                             />
                         },
-                        (Some(email), None) => html! {
+                        (None, Some(email), None) => html! {
                             <stripe-pricing-table
                                 pricing-table-id={config.pricing_table_id.clone()}
                                 publishable-key={config.publishable_key.clone()}
                                 customer-email={email.clone()}
                             />
                         },
-                        (None, Some(reference_id)) => html! {
+                        (None, None, Some(reference_id)) => html! {
                             <stripe-pricing-table
                                 pricing-table-id={config.pricing_table_id.clone()}
                                 publishable-key={config.publishable_key.clone()}
                                 client-reference-id={reference_id.clone()}
                             />
                         },
-                        (None, None) => html! {
+                        (None, None, None) => html! {
                             <stripe-pricing-table
                                 pricing-table-id={config.pricing_table_id.clone()}
                                 publishable-key={config.publishable_key.clone()}

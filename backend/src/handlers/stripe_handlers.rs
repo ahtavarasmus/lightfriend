@@ -32,6 +32,13 @@ pub struct SubscriptionCheckoutBody {
     pub plan_type: Option<String>,
 }
 
+#[derive(Serialize)]
+pub struct SubscriptionMigrationStatusResponse {
+    pub show_current_plans: bool,
+    pub has_canceling_subscription: bool,
+    pub has_legacy_subscription: bool,
+}
+
 fn checkout_price_for_plan(plan_type: Option<&str>) -> Result<String, (StatusCode, Json<Value>)> {
     let env_key = match plan_type {
         Some("assistant") => "STRIPE_ASSISTANT_CHECKOUT_PRICE_ID",
@@ -717,6 +724,114 @@ pub async fn create_pricing_table_customer_session(
     })))
 }
 
+pub async fn get_subscription_migration_status(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(user_id): Path<i32>,
+) -> Result<Json<SubscriptionMigrationStatusResponse>, (StatusCode, Json<Value>)> {
+    if auth_user.user_id != user_id && !auth_user.is_admin {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Access denied"})),
+        ));
+    }
+
+    let customer_id = match state.user_repository.get_stripe_customer_id(user_id) {
+        Ok(Some(customer_id)) => customer_id,
+        Ok(None) => {
+            return Ok(Json(SubscriptionMigrationStatusResponse {
+                show_current_plans: false,
+                has_canceling_subscription: false,
+                has_legacy_subscription: false,
+            }));
+        }
+        Err(e) => {
+            tracing::error!("Database error getting Stripe customer ID: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            ));
+        }
+    };
+
+    let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY").map_err(|_| {
+        tracing::error!("STRIPE_SECRET_KEY not found in environment");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Stripe configuration error"})),
+        )
+    })?;
+    let client = Client::new(stripe_secret_key);
+    let customer = customer_id.parse().map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid customer ID"})),
+        )
+    })?;
+
+    let subscriptions = Subscription::list(
+        &client,
+        &stripe::ListSubscriptions {
+            customer: Some(customer),
+            status: Some(stripe::SubscriptionStatusFilter::All),
+            limit: Some(20),
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to list subscriptions for migration status: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to check subscription status"})),
+        )
+    })?;
+
+    let mut has_canceling_subscription = false;
+    let mut has_legacy_subscription = false;
+
+    for subscription in subscriptions.data.iter().filter(|subscription| {
+        matches!(
+            subscription.status,
+            stripe::SubscriptionStatus::Active | stripe::SubscriptionStatus::Trialing
+        )
+    }) {
+        if subscription.cancel_at_period_end {
+            has_canceling_subscription = true;
+        }
+
+        let product_kind = subscription
+            .items
+            .data
+            .first()
+            .and_then(|item| item.price.as_ref())
+            .and_then(|price| price.product.as_ref())
+            .map(|product| match product {
+                stripe::Expandable::Id(id) => crate::utils::country::stripe_product_kind(id),
+                stripe::Expandable::Object(product) => {
+                    crate::utils::country::stripe_product_kind(product.id.as_ref())
+                }
+            })
+            .unwrap_or(stripe_webhook_logic::ProductKind::Unknown);
+
+        let is_current_plan = matches!(
+            product_kind,
+            stripe_webhook_logic::ProductKind::Assistant
+                | stripe_webhook_logic::ProductKind::Autopilot
+        );
+        let is_credit_add_on = product_kind == stripe_webhook_logic::ProductKind::CreditsAddOn;
+        if !is_current_plan && !is_credit_add_on {
+            has_legacy_subscription = true;
+        }
+    }
+
+    Ok(Json(SubscriptionMigrationStatusResponse {
+        show_current_plans: has_canceling_subscription || has_legacy_subscription,
+        has_canceling_subscription,
+        has_legacy_subscription,
+    }))
+}
+
 pub async fn create_customer_portal_session(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -736,7 +851,7 @@ pub async fn create_customer_portal_session(
     // Initialize Stripe client
     let stripe_secret_key =
         std::env::var("STRIPE_SECRET_KEY").expect("STRIPE_SECRET_KEY must be set in environment");
-    let client = Client::new(stripe_secret_key);
+    let client = Client::new(stripe_secret_key.clone());
     tracing::debug!("Stripe client initialized");
     tracing::debug!("JWT token validated successfully");
     // Get Stripe customer ID
@@ -1037,7 +1152,7 @@ pub async fn stripe_webhook(
     // Initialize Stripe client
     let stripe_secret_key =
         std::env::var("STRIPE_SECRET_KEY").expect("STRIPE_SECRET_KEY must be set in environment");
-    let client = Client::new(stripe_secret_key);
+    let client = Client::new(stripe_secret_key.clone());
     // Get the webhook secret from environment
     let webhook_secret = std::env::var("STRIPE_WEBHOOK_SECRET")
         .expect("STRIPE_WEBHOOK_SECRET must be set in environment");
@@ -1174,6 +1289,7 @@ pub async fn stripe_webhook(
                     let client_bg = client.clone();
                     let customer_id_bg = customer_id.clone();
                     let current_subscription_id = subscription.id.clone();
+                    let stripe_secret_key_bg = stripe_secret_key.clone();
                     tokio::spawn(async move {
                         let list_result = tokio::time::timeout(
                             std::time::Duration::from_secs(10),
@@ -1206,19 +1322,58 @@ pub async fn stripe_webhook(
                             .filter(|s| s.id != current_subscription_id)
                             .map(|s| s.id.clone())
                         {
-                            tracing::info!("Canceling existing subscription: {}", sub_id);
+                            tracing::info!(
+                                "Canceling existing subscription immediately: {}",
+                                sub_id
+                            );
                             let mut metadata = std::collections::HashMap::new();
                             metadata.insert("plan_change".to_string(), "true".to_string());
                             let _ = Subscription::update(
                                 &client_bg,
                                 &sub_id,
                                 UpdateSubscription {
-                                    cancel_at_period_end: Some(true),
                                     metadata: Some(metadata),
                                     ..Default::default()
                                 },
                             )
                             .await;
+
+                            let sub_id_string = sub_id.to_string();
+                            let cancel_url = format!(
+                                "https://api.stripe.com/v1/subscriptions/{}",
+                                sub_id_string
+                            );
+                            match reqwest::Client::new()
+                                .delete(cancel_url)
+                                .bearer_auth(&stripe_secret_key_bg)
+                                .form(&[("invoice_now", "false"), ("prorate", "false")])
+                                .send()
+                                .await
+                            {
+                                Ok(response) if response.status().is_success() => {
+                                    tracing::info!(
+                                        "Canceled replaced subscription {} immediately",
+                                        sub_id_string
+                                    );
+                                }
+                                Ok(response) => {
+                                    let status = response.status();
+                                    let body = response.text().await.unwrap_or_default();
+                                    tracing::error!(
+                                        "Failed to cancel replaced subscription {}: status={}, body={}",
+                                        sub_id_string,
+                                        status,
+                                        body
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        "Failed to cancel replaced subscription {}: {:?}",
+                                        sub_id_string,
+                                        e
+                                    );
+                                }
+                            }
                         }
                     });
                 }

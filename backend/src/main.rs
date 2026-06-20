@@ -1142,6 +1142,10 @@ async fn main() {
             "/api/stripe/pricing-table-session/{user_id}",
             get(stripe_handlers::create_pricing_table_customer_session),
         )
+        .route(
+            "/api/stripe/subscription-migration-status/{user_id}",
+            get(stripe_handlers::get_subscription_migration_status),
+        )
         .route("/api/auth/tesla/login", get(tesla_auth::tesla_login))
         .route(
             "/api/auth/tesla/connection",

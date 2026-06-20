@@ -5,6 +5,7 @@ use crate::profile::billing_models::{
 use crate::profile::stripe::StripePricingTable;
 use crate::utils::api::Api;
 use gloo_timers::future::TimeoutFuture;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::spawn_local;
@@ -14,6 +15,13 @@ use yew::prelude::*;
 #[derive(Properties, PartialEq, Clone)]
 pub struct BillingPageProps {
     pub user_profile: UserProfile,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct SubscriptionMigrationStatus {
+    show_current_plans: bool,
+    has_canceling_subscription: bool,
+    has_legacy_subscription: bool,
 }
 
 fn format_activity_type(activity_type: &str) -> &str {
@@ -97,6 +105,8 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
 
     // Recent usage feed state
     let usage_feed = use_state(|| None::<Vec<UsageLogEntry>>);
+    let migration_status = use_state(|| None::<SubscriptionMigrationStatus>);
+    let subscription_checkout_loading = use_state(|| None::<String>);
 
     // Fetch recent usage on mount
     {
@@ -122,6 +132,41 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                 || ()
             },
             (),
+        );
+    }
+
+    {
+        let migration_status = migration_status.clone();
+        let user_id = user_profile.id;
+        let has_plan = user_profile.sub_tier.is_some();
+        use_effect_with_deps(
+            move |_| {
+                let migration_status = migration_status.clone();
+                spawn_local(async move {
+                    if !has_plan {
+                        migration_status.set(None);
+                        return;
+                    }
+
+                    match Api::get(&format!(
+                        "/api/stripe/subscription-migration-status/{}",
+                        user_id
+                    ))
+                    .send()
+                    .await
+                    {
+                        Ok(response) if response.ok() => {
+                            if let Ok(status) = response.json::<SubscriptionMigrationStatus>().await
+                            {
+                                migration_status.set(Some(status));
+                            }
+                        }
+                        Ok(_) | Err(_) => migration_status.set(None),
+                    }
+                });
+                || ()
+            },
+            (user_id, has_plan),
         );
     }
 
@@ -484,6 +529,46 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
         })
     };
 
+    let start_subscription_checkout = {
+        let user_id = user_profile.id;
+        let error = error.clone();
+        let subscription_checkout_loading = subscription_checkout_loading.clone();
+        Callback::from(move |plan_type: String| {
+            let user_id = user_id;
+            let error = error.clone();
+            let subscription_checkout_loading = subscription_checkout_loading.clone();
+            spawn_local(async move {
+                subscription_checkout_loading.set(Some(plan_type.clone()));
+                match Api::post(&format!(
+                    "/api/stripe/unified-subscription-checkout/{}",
+                    user_id
+                ))
+                .header("Content-Type", "application/json")
+                .json(&json!({
+                    "subscription_type": "Hosted",
+                    "plan_type": plan_type,
+                }))
+                .expect("Failed to serialize subscription checkout request")
+                .send()
+                .await
+                {
+                    Ok(response) if response.ok() => {
+                        if let Ok(data) = response.json::<Value>().await {
+                            if let Some(url) = data.get("url").and_then(|value| value.as_str()) {
+                                let _ = web_sys::window().unwrap().location().set_href(url);
+                                return;
+                            }
+                        }
+                        error.set(Some("No checkout URL returned".to_string()));
+                    }
+                    Ok(_) => error.set(Some("Failed to start subscription checkout".to_string())),
+                    Err(e) => error.set(Some(format!("Network error occurred: {:?}", e))),
+                }
+                subscription_checkout_loading.set(None);
+            });
+        })
+    };
+
     // Determine plan display name
     let plan_name = match user_profile.plan_type.as_deref() {
         Some("autopilot") => "Autopilot",
@@ -497,6 +582,11 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
         }
     };
     let has_plan = user_profile.sub_tier.is_some();
+    let show_current_plan_picker = !has_plan
+        || migration_status
+            .as_ref()
+            .map(|status| status.show_current_plans)
+            .unwrap_or(false);
     let uses_own_twilio = user_profile.own_twilio_enabled;
 
     html! {
@@ -533,6 +623,48 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                             <h3>{"Choose a plan"}</h3>
                         </div>
                         <StripePricingTable user_id={Some(user_profile.id)} />
+                    </div>
+                } else if show_current_plan_picker {
+                    <div class="usage-projection-card current-plan-card" style="margin-bottom: 16px;">
+                        <div class="usage-header">
+                            <h3>{"Current plans"}</h3>
+                        </div>
+                        <div class="plan-switch-buttons">
+                            <button
+                                type="button"
+                                class="plan-switch-button"
+                                disabled={(*subscription_checkout_loading).is_some()}
+                                onclick={
+                                    let start_subscription_checkout = start_subscription_checkout.clone();
+                                    Callback::from(move |_| start_subscription_checkout.emit("assistant".to_string()))
+                                }
+                            >
+                                {
+                                    if (*subscription_checkout_loading).as_deref() == Some("assistant") {
+                                        "Opening Assistant..."
+                                    } else {
+                                        "Choose Assistant"
+                                    }
+                                }
+                            </button>
+                            <button
+                                type="button"
+                                class="plan-switch-button primary"
+                                disabled={(*subscription_checkout_loading).is_some()}
+                                onclick={
+                                    let start_subscription_checkout = start_subscription_checkout.clone();
+                                    Callback::from(move |_| start_subscription_checkout.emit("autopilot".to_string()))
+                                }
+                            >
+                                {
+                                    if (*subscription_checkout_loading).as_deref() == Some("autopilot") {
+                                        "Opening Autopilot..."
+                                    } else {
+                                        "Choose Autopilot"
+                                    }
+                                }
+                            </button>
+                        </div>
                     </div>
                 }
 
@@ -1022,6 +1154,50 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
 
 .billing-pricing-table-card .stripe-pricing-table-wrap {
     margin-top: 0.5rem;
+}
+
+.current-plan-card .usage-header {
+    margin-bottom: 0.75rem;
+}
+
+.plan-switch-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.plan-switch-button {
+    min-height: 44px;
+    border-radius: 8px;
+    border: 1px solid rgba(126, 178, 255, 0.35);
+    background: rgba(126, 178, 255, 0.08);
+    color: #dbeafe;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.plan-switch-button.primary {
+    background: linear-gradient(45deg, #1E90FF, #4169E1);
+    border-color: transparent;
+    color: #fff;
+}
+
+.plan-switch-button:hover:not(:disabled) {
+    transform: translateY(-1px);
+    border-color: rgba(126, 178, 255, 0.6);
+}
+
+.plan-switch-button:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
+@media (max-width: 640px) {
+    .plan-switch-buttons {
+        grid-template-columns: 1fr;
+    }
 }
 
 .stripe-pricing-loading,
