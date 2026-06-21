@@ -406,7 +406,7 @@ pub async fn voice_incoming(State(state): State<Arc<AppState>>, body: String) ->
         Ok(Some(u)) => u,
         Ok(None) => {
             tracing::warn!("Voice call from unregistered number");
-            return twiml_say("Sorry, this number is not registered with Lightfriend.");
+            return twiml_reject();
         }
         Err(e) => {
             tracing::error!("DB error looking up caller: {}", e);
@@ -476,6 +476,19 @@ fn twiml_say(message: &str) -> Response {
 </Response>"#,
         xml_escape(message)
     );
+    (
+        axum::http::StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/xml")],
+        twiml,
+    )
+        .into_response()
+}
+
+fn twiml_reject() -> Response {
+    let twiml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Reject reason="rejected" />
+</Response>"#;
     (
         axum::http::StatusCode::OK,
         [(axum::http::header::CONTENT_TYPE, "application/xml")],

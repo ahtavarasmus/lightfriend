@@ -139,6 +139,36 @@ pub async fn validate_twilio_signature(
         .into_owned()
         .collect();
 
+    let url = match std::env::var("SERVER_URL") {
+        Ok(base_url) => {
+            let request_path = parts.uri.path();
+            tracing::info!(
+                "✅ Successfully retrieved SERVER_URL, path: {}",
+                request_path
+            );
+            format!("{}{}", base_url, request_path)
+        }
+        Err(e) => {
+            tracing::error!("❌ Failed to get SERVER_URL: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    // Most callbacks are from Lightfriend-owned numbers and should validate
+    // against the master account token. Validate that first so unknown callers
+    // can reach the voice/SMS handlers and be rejected cleanly instead of
+    // turning into a generic Twilio application error.
+    if let Ok(auth_token) = std::env::var("TWILIO_AUTH_TOKEN") {
+        if verify_twilio_signature(&url, &params, &signature, &auth_token).is_ok() {
+            tracing::info!("✅ Signature validation successful with master token");
+            let request = Request::from_parts(parts, Body::from(params_str));
+            return Ok(next.run(request).await);
+        }
+    }
+
+    // BYOT users with their own credentials receive callbacks signed by their
+    // own Twilio account. Fall back to the caller lookup only after the master
+    // token has failed.
     let from_phone = match params.get("From") {
         Some(phone) => {
             tracing::info!("✅ Found From phone number: {}", phone);
@@ -155,8 +185,8 @@ pub async fn validate_twilio_signature(
             user
         }
         Ok(None) => {
-            tracing::error!("❌ No user found for phone {}", from_phone);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            tracing::warn!("No user found for Twilio From phone {}", from_phone);
+            return Err(StatusCode::UNAUTHORIZED);
         }
         Err(e) => {
             tracing::error!("❌ Failed to query user by phone {}: {}", from_phone, e);
@@ -164,59 +194,17 @@ pub async fn validate_twilio_signature(
         }
     };
 
-    // BYOT users with their own credentials always use their own account.
-    // Everyone else receives callbacks from Lightfriend's Twilio account.
-    let auth_token = if state.user_core.is_byot_user(user.id) {
-        match state.user_repository.get_twilio_credentials(user.id) {
-            Ok((_, token)) => token,
-            Err(_) => return Err(StatusCode::UNAUTHORIZED),
-        }
-    } else {
-        std::env::var("TWILIO_AUTH_TOKEN").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    };
-
-    let url = match std::env::var("SERVER_URL") {
-        Ok(base_url) => {
-            let request_path = parts.uri.path();
-            tracing::info!(
-                "✅ Successfully retrieved SERVER_URL, path: {}",
-                request_path
-            );
-            format!("{}{}", base_url, request_path)
-        }
-        Err(e) => {
-            tracing::error!("❌ Failed to get SERVER_URL: {}", e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
-    };
-
-    // Build the string to sign
-    let mut string_to_sign = url;
-    for (key, value) in params.iter() {
-        string_to_sign.push_str(key);
-        string_to_sign.push_str(value);
+    if !state.user_core.is_byot_user(user.id) {
+        tracing::error!("❌ Signature validation failed");
+        return Err(StatusCode::UNAUTHORIZED);
     }
 
-    // Create HMAC-SHA1
-    let mut mac = match Hmac::<Sha1>::new_from_slice(auth_token.as_bytes()) {
-        Ok(mac) => mac,
-        Err(e) => {
-            tracing::error!("❌ Failed to create HMAC: {}", e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
-    };
+    let (_, auth_token) = state
+        .user_repository
+        .get_twilio_credentials(user.id)
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
-    mac.update(string_to_sign.as_bytes());
-
-    let signature_bytes = match BASE64.decode(signature.as_bytes()) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            tracing::error!("❌ Failed to decode Twilio signature: {}", e);
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-    };
-
-    if mac.verify_slice(&signature_bytes).is_err() {
+    if verify_twilio_signature(&url, &params, &signature, &auth_token).is_err() {
         tracing::error!("❌ Signature validation failed");
         return Err(StatusCode::UNAUTHORIZED);
     }
