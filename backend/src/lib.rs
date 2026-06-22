@@ -164,7 +164,7 @@ pub mod ontology {
     pub mod registry;
 }
 pub mod ai_config;
-pub use ai_config::{AiConfig, AiProvider, ModelPurpose};
+pub use ai_config::{AiChatOptions, AiChatResult, AiConfig, AiProvider, ModelPurpose};
 pub mod blog {
     pub mod content;
     pub mod handlers;

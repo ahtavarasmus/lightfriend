@@ -1,14 +1,26 @@
 //! Centralized AI provider configuration
 //!
-//! Tinfoil is the sole AI provider for all users.
-//! OpenRouter code is kept as dead-code fallback but never selected.
+//! Tinfoil is the primary AI provider for all users.
+//! NEAR AI can be configured as an automatic backup for text LLM calls.
 
 use openai_api_rs::v1::api::OpenAIClient;
+use openai_api_rs::v1::chat_completion;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+const DEFAULT_OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
+const DEFAULT_TINFOIL_BASE_URL: &str = "https://inference.tinfoil.sh/v1";
+const DEFAULT_NEAR_BASE_URL: &str = "https://cloud-api.near.ai/v1";
+const DEFAULT_NEAR_DEFAULT_MODEL: &str = "zai-org/GLM-5.1-FP8";
+const DEFAULT_NEAR_FAST_MODEL: &str = "google/gemma-4-31B-it";
+const TINFOIL_FAILURE_THRESHOLD: u32 = 2;
+const TINFOIL_CIRCUIT_COOLDOWN: Duration = Duration::from_secs(90);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AiProvider {
     OpenRouter,
     Tinfoil,
+    Near,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -19,12 +31,58 @@ pub enum ModelPurpose {
     Voice,
 }
 
+#[derive(Debug, Clone)]
+pub struct AiChatOptions {
+    pub preferred_provider: AiProvider,
+    pub allow_fallback: bool,
+    pub sticky_provider: Option<AiProvider>,
+    pub reasoning_tx: Option<tokio::sync::mpsc::Sender<String>>,
+}
+
+impl Default for AiChatOptions {
+    fn default() -> Self {
+        Self {
+            preferred_provider: AiProvider::Tinfoil,
+            allow_fallback: true,
+            sticky_provider: None,
+            reasoning_tx: None,
+        }
+    }
+}
+
+pub struct AiChatResult {
+    pub response: chat_completion::ChatCompletionResponse,
+    pub provider: AiProvider,
+    pub model: String,
+    pub fallback_from: Option<AiProvider>,
+}
+
+#[derive(Debug, Clone)]
+struct CircuitBreakerConfig {
+    failure_threshold: u32,
+    cooldown: Duration,
+}
+
+#[derive(Debug, Default)]
+struct CircuitBreakerState {
+    tinfoil_failures: u32,
+    tinfoil_open_until: Option<Instant>,
+}
+
 /// Centralized AI configuration
 #[derive(Debug, Clone)]
 pub struct AiConfig {
     // OpenRouter key kept as optional fallback (only needed if OpenRouter is used directly)
     openrouter_api_key: Option<String>,
     tinfoil_api_key: Option<String>,
+    near_api_key: Option<String>,
+    openrouter_base_url: String,
+    tinfoil_base_url: String,
+    near_base_url: String,
+    near_default_model: String,
+    near_fast_model: String,
+    circuit_breaker: Arc<Mutex<CircuitBreakerState>>,
+    circuit_breaker_config: CircuitBreakerConfig,
 }
 
 impl AiConfig {
@@ -33,6 +91,17 @@ impl AiConfig {
         Self {
             openrouter_api_key: Some("test_openrouter_key".to_string()),
             tinfoil_api_key: Some("test_tinfoil_key".to_string()),
+            near_api_key: Some("test_near_key".to_string()),
+            openrouter_base_url: DEFAULT_OPENROUTER_BASE_URL.to_string(),
+            tinfoil_base_url: DEFAULT_TINFOIL_BASE_URL.to_string(),
+            near_base_url: DEFAULT_NEAR_BASE_URL.to_string(),
+            near_default_model: DEFAULT_NEAR_DEFAULT_MODEL.to_string(),
+            near_fast_model: DEFAULT_NEAR_FAST_MODEL.to_string(),
+            circuit_breaker: Arc::new(Mutex::new(CircuitBreakerState::default())),
+            circuit_breaker_config: CircuitBreakerConfig {
+                failure_threshold: TINFOIL_FAILURE_THRESHOLD,
+                cooldown: TINFOIL_CIRCUIT_COOLDOWN,
+            },
         }
     }
 
@@ -41,12 +110,33 @@ impl AiConfig {
 
         let tinfoil_api_key =
             Some(std::env::var("TINFOIL_API_KEY").expect("TINFOIL_API_KEY required"));
+        let near_api_key = std::env::var("NEAR_AI_API_KEY").ok();
+        let near_base_url =
+            std::env::var("NEAR_AI_BASE_URL").unwrap_or_else(|_| DEFAULT_NEAR_BASE_URL.to_string());
+        let near_default_model = std::env::var("NEAR_AI_DEFAULT_MODEL")
+            .unwrap_or_else(|_| DEFAULT_NEAR_DEFAULT_MODEL.to_string());
+        let near_fast_model = std::env::var("NEAR_AI_FAST_MODEL")
+            .unwrap_or_else(|_| DEFAULT_NEAR_FAST_MODEL.to_string());
 
-        tracing::info!("AI config initialized: Tinfoil (primary)");
+        tracing::info!(
+            near_fallback_enabled = near_api_key.is_some(),
+            "AI config initialized: Tinfoil primary, NEAR backup"
+        );
 
         Self {
             openrouter_api_key,
             tinfoil_api_key,
+            near_api_key,
+            openrouter_base_url: DEFAULT_OPENROUTER_BASE_URL.to_string(),
+            tinfoil_base_url: DEFAULT_TINFOIL_BASE_URL.to_string(),
+            near_base_url,
+            near_default_model,
+            near_fast_model,
+            circuit_breaker: Arc::new(Mutex::new(CircuitBreakerState::default())),
+            circuit_breaker_config: CircuitBreakerConfig {
+                failure_threshold: TINFOIL_FAILURE_THRESHOLD,
+                cooldown: TINFOIL_CIRCUIT_COOLDOWN,
+            },
         }
     }
 
@@ -59,8 +149,9 @@ impl AiConfig {
     /// Get the endpoint URL for a provider
     pub fn endpoint(&self, provider: AiProvider) -> &str {
         match provider {
-            AiProvider::OpenRouter => "https://openrouter.ai/api/v1",
-            AiProvider::Tinfoil => "https://inference.tinfoil.sh/v1",
+            AiProvider::OpenRouter => &self.openrouter_base_url,
+            AiProvider::Tinfoil => &self.tinfoil_base_url,
+            AiProvider::Near => &self.near_base_url,
         }
     }
 
@@ -75,6 +166,10 @@ impl AiConfig {
                 .tinfoil_api_key
                 .as_ref()
                 .expect("Tinfoil API key not configured"),
+            AiProvider::Near => self
+                .near_api_key
+                .as_ref()
+                .expect("NEAR_AI_API_KEY not set but NEAR provider requested"),
         }
     }
 
@@ -83,9 +178,11 @@ impl AiConfig {
         match (provider, purpose) {
             (AiProvider::OpenRouter, ModelPurpose::Default) => "openai/gpt-4o-2024-11-20",
             (AiProvider::Tinfoil, ModelPurpose::Default) => "kimi-k2-6",
+            (AiProvider::Near, ModelPurpose::Default) => &self.near_default_model,
             // Voice: fast non-reasoning model for low-latency responses
             (AiProvider::Tinfoil, ModelPurpose::Voice) => "gemma4-31b",
             (AiProvider::OpenRouter, ModelPurpose::Voice) => "openai/gpt-4o-2024-11-20",
+            (AiProvider::Near, ModelPurpose::Voice) => &self.near_fast_model,
         }
     }
 
@@ -98,6 +195,249 @@ impl AiConfig {
             .with_endpoint(self.endpoint(provider))
             .with_api_key(self.api_key(provider))
             .build()
+    }
+
+    pub fn provider_name(provider: AiProvider) -> &'static str {
+        match provider {
+            AiProvider::OpenRouter => "openrouter",
+            AiProvider::Tinfoil => "tinfoil",
+            AiProvider::Near => "near",
+        }
+    }
+
+    fn provider_configured(&self, provider: AiProvider) -> bool {
+        match provider {
+            AiProvider::OpenRouter => self.openrouter_api_key.is_some(),
+            AiProvider::Tinfoil => self.tinfoil_api_key.is_some(),
+            AiProvider::Near => self.near_api_key.is_some(),
+        }
+    }
+
+    fn is_tinfoil_circuit_open(&self) -> bool {
+        let mut state = match self.circuit_breaker.lock() {
+            Ok(state) => state,
+            Err(_) => return false,
+        };
+
+        match state.tinfoil_open_until {
+            Some(until) if Instant::now() < until => true,
+            Some(_) => {
+                state.tinfoil_open_until = None;
+                state.tinfoil_failures = 0;
+                false
+            }
+            None => false,
+        }
+    }
+
+    fn record_provider_success(&self, provider: AiProvider) {
+        if provider != AiProvider::Tinfoil {
+            return;
+        }
+        if let Ok(mut state) = self.circuit_breaker.lock() {
+            state.tinfoil_failures = 0;
+            state.tinfoil_open_until = None;
+        }
+    }
+
+    fn record_provider_failure(&self, provider: AiProvider, failure_category: &str) {
+        if provider != AiProvider::Tinfoil {
+            return;
+        }
+        if let Ok(mut state) = self.circuit_breaker.lock() {
+            state.tinfoil_failures = state.tinfoil_failures.saturating_add(1);
+            if state.tinfoil_failures >= self.circuit_breaker_config.failure_threshold {
+                let open_until = Instant::now() + self.circuit_breaker_config.cooldown;
+                state.tinfoil_open_until = Some(open_until);
+                tracing::warn!(
+                    provider = Self::provider_name(provider),
+                    failure_category,
+                    failures = state.tinfoil_failures,
+                    cooldown_secs = self.circuit_breaker_config.cooldown.as_secs(),
+                    "AI provider circuit opened"
+                );
+            }
+        }
+    }
+
+    fn provider_attempts(
+        &self,
+        preferred_provider: AiProvider,
+        sticky_provider: Option<AiProvider>,
+        allow_fallback: bool,
+    ) -> Vec<AiProvider> {
+        if let Some(provider) = sticky_provider {
+            return if self.provider_configured(provider) {
+                vec![provider]
+            } else {
+                vec![]
+            };
+        }
+
+        if preferred_provider != AiProvider::Tinfoil || !allow_fallback {
+            return if self.provider_configured(preferred_provider) {
+                vec![preferred_provider]
+            } else {
+                vec![]
+            };
+        }
+
+        let near_configured = self.provider_configured(AiProvider::Near);
+        if near_configured && self.is_tinfoil_circuit_open() {
+            return vec![AiProvider::Near];
+        }
+
+        let mut providers = vec![AiProvider::Tinfoil];
+        if near_configured {
+            providers.push(AiProvider::Near);
+        }
+        providers
+    }
+
+    fn failure_category(error: &openai_api_rs::v1::error::APIError) -> &'static str {
+        let lower = format!("{:?}", error).to_lowercase();
+        if lower.contains("timeout") || lower.contains("timed out") {
+            "timeout"
+        } else if lower.contains("429") {
+            "rate_limited"
+        } else if lower.contains("500")
+            || lower.contains("502")
+            || lower.contains("503")
+            || lower.contains("504")
+        {
+            "server_error"
+        } else if lower.contains("provider error") {
+            "provider_error_body"
+        } else if lower.contains("sse assembly")
+            || lower.contains("streaming error")
+            || lower.contains("no data")
+            || lower.contains("failed to read streaming")
+        {
+            "stream_error"
+        } else if lower.contains("failed to parse") || lower.contains("deserialize") {
+            "malformed_response"
+        } else if lower.contains("connect") || lower.contains("dns") || lower.contains("reqwest") {
+            "transport_error"
+        } else {
+            "provider_error"
+        }
+    }
+
+    fn fallback_eligible(error: &openai_api_rs::v1::error::APIError) -> bool {
+        matches!(
+            Self::failure_category(error),
+            "timeout"
+                | "rate_limited"
+                | "server_error"
+                | "provider_error_body"
+                | "stream_error"
+                | "malformed_response"
+                | "transport_error"
+                | "provider_error"
+        )
+    }
+
+    pub async fn chat_completion_with_fallback(
+        &self,
+        usage_repo: Option<&Arc<crate::repositories::llm_usage_repository::LlmUsageRepository>>,
+        user_id: i32,
+        purpose: ModelPurpose,
+        callsite: &str,
+        request_template: &chat_completion::ChatCompletionRequest,
+        options: AiChatOptions,
+    ) -> Result<AiChatResult, openai_api_rs::v1::error::APIError> {
+        let providers = self.provider_attempts(
+            options.preferred_provider,
+            options.sticky_provider,
+            options.allow_fallback,
+        );
+
+        if providers.is_empty() {
+            return Err(openai_api_rs::v1::error::APIError::CustomError {
+                message: "No configured AI providers available".to_string(),
+            });
+        }
+
+        let mut fallback_from: Option<AiProvider> = None;
+        let mut last_error: Option<openai_api_rs::v1::error::APIError> = None;
+
+        for (idx, provider) in providers.iter().copied().enumerate() {
+            let model = self.model(provider, purpose).to_string();
+            let mut request = request_template.clone();
+            request.model = model.clone();
+
+            let result = self
+                .chat_completion_streaming_with_attempts(
+                    provider,
+                    &request,
+                    options.reasoning_tx.clone(),
+                    1,
+                )
+                .await;
+
+            match result {
+                Ok(response) => {
+                    self.record_provider_success(provider);
+                    if let Some(repo) = usage_repo {
+                        log_llm_usage(
+                            repo,
+                            user_id,
+                            Self::provider_name(provider),
+                            &model,
+                            callsite,
+                            &response,
+                        );
+                    }
+                    if let Some(from) = fallback_from {
+                        tracing::warn!(
+                            user_id,
+                            callsite,
+                            fallback_from = Self::provider_name(from),
+                            fallback_to = Self::provider_name(provider),
+                            model,
+                            "AI provider fallback succeeded"
+                        );
+                    }
+                    return Ok(AiChatResult {
+                        response,
+                        provider,
+                        model,
+                        fallback_from,
+                    });
+                }
+                Err(err) => {
+                    let category = Self::failure_category(&err);
+                    if Self::fallback_eligible(&err) {
+                        self.record_provider_failure(provider, category);
+                    }
+
+                    let can_fallback = idx + 1 < providers.len() && provider == AiProvider::Tinfoil;
+                    if can_fallback && Self::fallback_eligible(&err) {
+                        let next = providers[idx + 1];
+                        tracing::warn!(
+                            user_id,
+                            callsite,
+                            fallback_from = Self::provider_name(provider),
+                            fallback_to = Self::provider_name(next),
+                            failure_category = category,
+                            error = ?err,
+                            "AI provider fallback triggered"
+                        );
+                        fallback_from = Some(provider);
+                        last_error = Some(err);
+                        continue;
+                    }
+
+                    return Err(err);
+                }
+            }
+        }
+
+        Err(
+            last_error.unwrap_or_else(|| openai_api_rs::v1::error::APIError::CustomError {
+                message: "AI provider fallback exhausted".to_string(),
+            }),
+        )
     }
 
     /// Sanitize message content for Tinfoil API.
@@ -150,6 +490,19 @@ impl AiConfig {
         openai_api_rs::v1::chat_completion::ChatCompletionResponse,
         openai_api_rs::v1::error::APIError,
     > {
+        self.chat_completion_with_attempts(provider, request, 3)
+            .await
+    }
+
+    async fn chat_completion_with_attempts(
+        &self,
+        provider: AiProvider,
+        request: &openai_api_rs::v1::chat_completion::ChatCompletionRequest,
+        max_attempts: u32,
+    ) -> Result<
+        openai_api_rs::v1::chat_completion::ChatCompletionResponse,
+        openai_api_rs::v1::error::APIError,
+    > {
         let url = format!("{}/chat/completions", self.endpoint(provider));
         let api_key = self.api_key(provider);
         let use_streaming = provider == AiProvider::Tinfoil;
@@ -162,7 +515,7 @@ impl AiConfig {
             .unwrap_or_else(|_| reqwest::Client::new());
 
         let mut last_error = String::new();
-        for attempt in 1..=3u32 {
+        for attempt in 1..=max_attempts {
             // For Tinfoil: serialize to Value and inject stream:true
             let response = if use_streaming {
                 let mut body = serde_json::to_value(request).map_err(|e| {
@@ -211,10 +564,11 @@ impl AiConfig {
                     Ok(chat_response) => return Ok(chat_response),
                     Err(e) => {
                         last_error = format!("SSE assembly error: {}", e);
-                        if attempt < 3 {
+                        if attempt < max_attempts {
                             tracing::warn!(
-                                "chat_completion streaming attempt {}/3 failed: {}",
+                                "chat_completion streaming attempt {}/{} failed: {}",
                                 attempt,
+                                max_attempts,
                                 last_error
                             );
                             tokio::time::sleep(tokio::time::Duration::from_millis(
@@ -235,10 +589,11 @@ impl AiConfig {
 
             if !status.is_success() {
                 last_error = format!("{}: {}", status, text);
-                if attempt < 3 {
+                if attempt < max_attempts {
                     tracing::warn!(
-                        "chat_completion attempt {}/3 failed: {}",
+                        "chat_completion attempt {}/{} failed: {}",
                         attempt,
+                        max_attempts,
                         last_error
                     );
                     tokio::time::sleep(tokio::time::Duration::from_millis(500 * attempt as u64))
@@ -262,10 +617,11 @@ impl AiConfig {
                         .and_then(|t| t.as_str())
                         .unwrap_or("unknown");
                     last_error = format!("Provider error ({}): {}", err_type, msg);
-                    if attempt < 3 {
+                    if attempt < max_attempts {
                         tracing::warn!(
-                            "chat_completion attempt {}/3 got error body: {}",
+                            "chat_completion attempt {}/{} got error body: {}",
                             attempt,
+                            max_attempts,
                             last_error
                         );
                         tokio::time::sleep(tokio::time::Duration::from_millis(
@@ -299,7 +655,7 @@ impl AiConfig {
 
         // All retries exhausted
         Err(openai_api_rs::v1::error::APIError::CustomError {
-            message: format!("All 3 attempts failed: {}", last_error),
+            message: format!("All {} attempts failed: {}", max_attempts, last_error),
         })
     }
 
@@ -538,11 +894,35 @@ impl AiConfig {
         openai_api_rs::v1::chat_completion::ChatCompletionResponse,
         openai_api_rs::v1::error::APIError,
     > {
+        self.chat_completion_streaming_with_attempts(provider, request, reasoning_tx, 3)
+            .await
+    }
+
+    async fn chat_completion_streaming_with_attempts(
+        &self,
+        provider: AiProvider,
+        request: &openai_api_rs::v1::chat_completion::ChatCompletionRequest,
+        reasoning_tx: Option<tokio::sync::mpsc::Sender<String>>,
+        max_attempts: u32,
+    ) -> Result<
+        openai_api_rs::v1::chat_completion::ChatCompletionResponse,
+        openai_api_rs::v1::error::APIError,
+    > {
         // Fast path: no reasoning channel -> reuse existing method unchanged
         let reasoning_tx = match reasoning_tx {
             Some(tx) => tx,
-            None => return self.chat_completion(provider, request).await,
+            None => {
+                return self
+                    .chat_completion_with_attempts(provider, request, max_attempts)
+                    .await
+            }
         };
+
+        if provider != AiProvider::Tinfoil {
+            return self
+                .chat_completion_with_attempts(provider, request, max_attempts)
+                .await;
+        }
 
         use futures::StreamExt;
 
@@ -555,7 +935,7 @@ impl AiConfig {
             .unwrap_or_else(|_| reqwest::Client::new());
 
         let mut last_error = String::new();
-        for attempt in 1..=3u32 {
+        for attempt in 1..=max_attempts {
             let mut body = serde_json::to_value(request).map_err(|e| {
                 openai_api_rs::v1::error::APIError::CustomError {
                     message: format!("Failed to serialize request: {}", e),
@@ -580,10 +960,11 @@ impl AiConfig {
             if !status.is_success() {
                 let text = response.text().await.unwrap_or_default();
                 last_error = format!("{}: {}", status, text);
-                if attempt < 3 {
+                if attempt < max_attempts {
                     tracing::warn!(
-                        "chat_completion_streaming attempt {}/3 failed: {}",
+                        "chat_completion_streaming attempt {}/{} failed: {}",
                         attempt,
+                        max_attempts,
                         last_error
                     );
                     tokio::time::sleep(tokio::time::Duration::from_millis(500 * attempt as u64))
@@ -754,10 +1135,11 @@ impl AiConfig {
 
             if let Some(err) = stream_error {
                 last_error = err;
-                if attempt < 3 {
+                if attempt < max_attempts {
                     tracing::warn!(
-                        "chat_completion_streaming attempt {}/3 failed: {}",
+                        "chat_completion_streaming attempt {}/{} failed: {}",
                         attempt,
+                        max_attempts,
                         last_error
                     );
                     tokio::time::sleep(tokio::time::Duration::from_millis(500 * attempt as u64))
@@ -771,8 +1153,12 @@ impl AiConfig {
 
             if !has_data {
                 last_error = "No data received from streaming response".to_string();
-                if attempt < 3 {
-                    tracing::warn!("chat_completion_streaming attempt {}/3: no data", attempt,);
+                if attempt < max_attempts {
+                    tracing::warn!(
+                        "chat_completion_streaming attempt {}/{}: no data",
+                        attempt,
+                        max_attempts
+                    );
                     tokio::time::sleep(tokio::time::Duration::from_millis(500 * attempt as u64))
                         .await;
                     continue;
@@ -857,7 +1243,7 @@ impl AiConfig {
         }
 
         Err(openai_api_rs::v1::error::APIError::CustomError {
-            message: format!("All 3 attempts failed: {}", last_error),
+            message: format!("All {} attempts failed: {}", max_attempts, last_error),
         })
     }
 }

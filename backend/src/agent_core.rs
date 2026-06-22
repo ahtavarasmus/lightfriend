@@ -208,8 +208,6 @@ pub enum ToolDispatchResult {
 /// These are specific to the SMS/WebChat pipeline where the full OpenAI completion
 /// context is available. Voice passes `None`.
 pub struct ToolDispatchExtras<'a> {
-    pub client: &'a openai_api_rs::v1::api::OpenAIClient,
-    pub model: &'a str,
     pub tools: &'a Vec<chat_completion::Tool>,
     pub completion_messages: &'a Vec<chat_completion::ChatCompletionMessage>,
     pub assistant_content: Option<&'a str>,
@@ -275,8 +273,6 @@ pub async fn dispatch_tool(
         user_given_info,
         current_time,
         skip_sms: extras.as_ref().map(|e| e.skip_sms).unwrap_or(false),
-        client: extras.as_ref().map(|e| e.client),
-        model: extras.as_ref().map(|e| e.model),
         tools: extras.as_ref().map(|e| e.tools),
         completion_messages: extras.as_ref().map(|e| e.completion_messages),
         assistant_content: extras.as_ref().and_then(|e| e.assistant_content),

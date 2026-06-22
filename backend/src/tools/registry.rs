@@ -23,8 +23,6 @@ pub struct ToolContext<'a> {
     /// Whether to skip Twilio SMS (true when request came from web dashboard)
     pub skip_sms: bool,
     // Fields needed by create_item which requires the full completion context
-    pub client: Option<&'a openai_api_rs::v1::api::OpenAIClient>,
-    pub model: Option<&'a str>,
     pub tools: Option<&'a Vec<chat_completion::Tool>>,
     pub completion_messages: Option<&'a Vec<chat_completion::ChatCompletionMessage>>,
     pub assistant_content: Option<&'a str>,

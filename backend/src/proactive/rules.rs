@@ -984,33 +984,24 @@ pub(crate) async fn call_llm_condition(
     };
 
     // Use fast non-reasoning model for rule evaluation (no need for kimi-k2-5 reasoning)
-    let eval_model = state
-        .ai_config
-        .model(ctx.provider, crate::ModelPurpose::Voice)
-        .to_string();
-
-    let request = chat_completion::ChatCompletionRequest::new(eval_model.clone(), messages)
+    let request = chat_completion::ChatCompletionRequest::new(String::new(), messages)
         .tools(vec![tool])
         .tool_choice(chat_completion::ToolChoiceType::Required)
         .temperature(0.0);
 
     let result = state
         .ai_config
-        .chat_completion(ctx.provider, &request)
+        .chat_completion_with_fallback(
+            Some(&state.llm_usage_repository),
+            rule.user_id,
+            crate::ModelPurpose::Voice,
+            "rule_eval",
+            &request,
+            crate::AiChatOptions::default(),
+        )
         .await
-        .map_err(|e| format!("LLM call failed: {}", e))?;
-
-    crate::ai_config::log_llm_usage(
-        &state.llm_usage_repository,
-        rule.user_id,
-        match ctx.provider {
-            crate::AiProvider::Tinfoil => "tinfoil",
-            crate::AiProvider::OpenRouter => "openrouter",
-        },
-        &eval_model,
-        "rule_eval",
-        &result,
-    );
+        .map_err(|e| format!("LLM call failed: {}", e))?
+        .response;
 
     let choice = result.choices.first().ok_or("No choices in LLM response")?;
 
@@ -1143,8 +1134,6 @@ async fn execute_flow_action(
                     user_given_info: "",
                     current_time: now,
                     skip_sms: false,
-                    client: None,
-                    model: None,
                     tools: None,
                     completion_messages: None,
                     assistant_content: None,

@@ -9,12 +9,11 @@ use std::sync::Arc;
 
 use chrono::{FixedOffset, Offset, TimeZone, Utc};
 use chrono_tz::Tz;
-use openai_api_rs::v1::api::OpenAIClient;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionMessage};
 
 use crate::models::user_models::{User, UserSettings};
 use crate::pg_models::PgUserInfo;
-use crate::{AiProvider, AppState, ModelPurpose, UserCoreOps};
+use crate::{AppState, ModelPurpose, UserCoreOps};
 
 // ---------------------------------------------------------------------------
 // Error
@@ -96,9 +95,7 @@ pub struct AgentContext {
     pub state: Arc<AppState>,
     pub user: User,
     pub user_id: i32,
-    pub provider: AiProvider,
-    pub client: OpenAIClient,
-    pub model: String,
+    pub model_purpose: ModelPurpose,
     pub current_time_unix: i32,
 
     // Opt-in via .with_user_context()
@@ -227,27 +224,7 @@ impl ContextBuilder {
         };
         let user_id = user.id;
 
-        // 2. LLM provider + client + model (always)
-        let llm_pref = self
-            .state
-            .user_core
-            .get_llm_provider(user_id)
-            .unwrap_or(None);
-        let provider = self
-            .state
-            .ai_config
-            .provider_for_user_with_preference(llm_pref.as_deref());
-        let client = self
-            .state
-            .ai_config
-            .create_client(provider)
-            .map_err(|e| ContextError::AiClient(e.to_string()))?;
-        let model = self
-            .state
-            .ai_config
-            .model(provider, self.model_purpose)
-            .to_string();
-
+        // 2. Always-present request metadata
         let current_time_unix = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -376,9 +353,7 @@ impl ContextBuilder {
             state: self.state,
             user,
             user_id,
-            provider,
-            client,
-            model,
+            model_purpose: self.model_purpose,
             current_time_unix,
             user_settings,
             user_info,

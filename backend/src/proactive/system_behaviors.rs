@@ -436,34 +436,24 @@ pub async fn run_urgency_classification(
         },
     };
 
-    let classification_model = state
-        .ai_config
-        .model(ctx.provider, crate::ModelPurpose::Voice)
-        .to_string();
-
-    let request =
-        chat_completion::ChatCompletionRequest::new(classification_model.clone(), messages)
-            .tools(vec![tool])
-            .tool_choice(chat_completion::ToolChoiceType::Required)
-            .temperature(0.0);
+    let request = chat_completion::ChatCompletionRequest::new(String::new(), messages)
+        .tools(vec![tool])
+        .tool_choice(chat_completion::ToolChoiceType::Required)
+        .temperature(0.0);
 
     let result = state
         .ai_config
-        .chat_completion(ctx.provider, &request)
+        .chat_completion_with_fallback(
+            Some(&state.llm_usage_repository),
+            user_id,
+            crate::ModelPurpose::Voice,
+            "urgency_classification",
+            &request,
+            crate::AiChatOptions::default(),
+        )
         .await
-        .map_err(|e| format!("Urgency classification LLM call failed: {}", e))?;
-
-    crate::ai_config::log_llm_usage(
-        &state.llm_usage_repository,
-        user_id,
-        match ctx.provider {
-            crate::AiProvider::Tinfoil => "tinfoil",
-            crate::AiProvider::OpenRouter => "openrouter",
-        },
-        &classification_model,
-        "urgency_classification",
-        &result,
-    );
+        .map_err(|e| format!("Urgency classification LLM call failed: {}", e))?
+        .response;
 
     let choice = result.choices.first().ok_or("No choices in LLM response")?;
 
@@ -781,7 +771,6 @@ fn detect_user_waiting(
 async fn commitment_gate(
     state: &Arc<AppState>,
     user_id: i32,
-    ctx: &crate::context::AgentContext,
     content: &str,
     sender_name: &str,
     platform: &str,
@@ -831,11 +820,6 @@ async fn commitment_gate(
         },
     };
 
-    let gate_model = state
-        .ai_config
-        .model(ctx.provider, crate::ModelPurpose::Voice)
-        .to_string();
-
     let messages = vec![
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
@@ -853,28 +837,24 @@ async fn commitment_gate(
         },
     ];
 
-    let request = chat_completion::ChatCompletionRequest::new(gate_model.clone(), messages)
+    let request = chat_completion::ChatCompletionRequest::new(String::new(), messages)
         .tools(vec![tool])
         .tool_choice(chat_completion::ToolChoiceType::Required)
         .temperature(0.0);
 
     let result = state
         .ai_config
-        .chat_completion(ctx.provider, &request)
+        .chat_completion_with_fallback(
+            Some(&state.llm_usage_repository),
+            user_id,
+            crate::ModelPurpose::Voice,
+            "commitment_gate",
+            &request,
+            crate::AiChatOptions::default(),
+        )
         .await
-        .map_err(|e| format!("Commitment gate LLM call failed: {}", e))?;
-
-    crate::ai_config::log_llm_usage(
-        &state.llm_usage_repository,
-        user_id,
-        match ctx.provider {
-            crate::AiProvider::Tinfoil => "tinfoil",
-            crate::AiProvider::OpenRouter => "openrouter",
-        },
-        &gate_model,
-        "commitment_gate",
-        &result,
-    );
+        .map_err(|e| format!("Commitment gate LLM call failed: {}", e))?
+        .response;
 
     let choice = result
         .choices
@@ -965,7 +945,7 @@ pub async fn run_commitment_detection(
         return Ok(());
     }
     let (gate_relevant, gate_raw) =
-        match commitment_gate(state, user_id, &ctx, &content, sender_name, platform).await {
+        match commitment_gate(state, user_id, &content, sender_name, platform).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(
@@ -1242,11 +1222,6 @@ pub async fn run_commitment_detection(
     // text in enum fields, omitting required fields. Pass 1 already filtered
     // out small talk, so we only pay the bigger model on signal-bearing
     // messages.
-    let classification_model = state
-        .ai_config
-        .model(ctx.provider, crate::ModelPurpose::Default)
-        .to_string();
-
     let messages = vec![
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
@@ -1264,29 +1239,24 @@ pub async fn run_commitment_detection(
         },
     ];
 
-    let request =
-        chat_completion::ChatCompletionRequest::new(classification_model.clone(), messages)
-            .tools(vec![tool])
-            .tool_choice(chat_completion::ToolChoiceType::Required)
-            .temperature(0.0);
+    let request = chat_completion::ChatCompletionRequest::new(String::new(), messages)
+        .tools(vec![tool])
+        .tool_choice(chat_completion::ToolChoiceType::Required)
+        .temperature(0.0);
 
     let result = state
         .ai_config
-        .chat_completion(ctx.provider, &request)
+        .chat_completion_with_fallback(
+            Some(&state.llm_usage_repository),
+            user_id,
+            crate::ModelPurpose::Default,
+            "commitment_detection",
+            &request,
+            crate::AiChatOptions::default(),
+        )
         .await
-        .map_err(|e| format!("Commitment detection LLM call failed: {}", e))?;
-
-    crate::ai_config::log_llm_usage(
-        &state.llm_usage_repository,
-        user_id,
-        match ctx.provider {
-            crate::AiProvider::Tinfoil => "tinfoil",
-            crate::AiProvider::OpenRouter => "openrouter",
-        },
-        &classification_model,
-        "commitment_detection",
-        &result,
-    );
+        .map_err(|e| format!("Commitment detection LLM call failed: {}", e))?
+        .response;
 
     // Build the gate JSON value once - reused across every envelope write.
     let gate_json = serde_json::from_str::<serde_json::Value>(&gate_raw)
@@ -2120,18 +2090,6 @@ pub async fn check_outgoing_event_resolution(
         .collect();
     let events_text = event_list.join("\n");
 
-    // Build AgentContext
-    let ctx = match ContextBuilder::for_user(state, user_id).build().await {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!(
-                "Failed to build context for outgoing event resolution: {}",
-                e
-            );
-            return;
-        }
-    };
-
     let system_prompt = format!(
         "You are checking if the user's outgoing message indicates a tracked event is ALREADY DONE.\n\
         \n\
@@ -2202,30 +2160,29 @@ pub async fn check_outgoing_event_resolution(
         },
     ];
 
-    let request = chat_completion::ChatCompletionRequest::new(ctx.model.clone(), messages)
+    let request = chat_completion::ChatCompletionRequest::new(String::new(), messages)
         .tools(vec![tool])
         .tool_choice(chat_completion::ToolChoiceType::Required)
         .temperature(0.0);
 
-    let result = match ctx.client.chat_completion(request).await {
-        Ok(r) => r,
+    let result = match state
+        .ai_config
+        .chat_completion_with_fallback(
+            Some(&state.llm_usage_repository),
+            user_id,
+            crate::ModelPurpose::Default,
+            "outgoing_event_resolution",
+            &request,
+            crate::AiChatOptions::default(),
+        )
+        .await
+    {
+        Ok(r) => r.response,
         Err(e) => {
             tracing::warn!("Outgoing event resolution LLM call failed: {}", e);
             return;
         }
     };
-
-    crate::ai_config::log_llm_usage(
-        &state.llm_usage_repository,
-        user_id,
-        match ctx.provider {
-            crate::AiProvider::Tinfoil => "tinfoil",
-            crate::AiProvider::OpenRouter => "openrouter",
-        },
-        &ctx.model,
-        "outgoing_event_resolution",
-        &result,
-    );
 
     let choice = match result.choices.first() {
         Some(c) => c,

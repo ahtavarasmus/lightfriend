@@ -1,7 +1,7 @@
 use crate::repositories::user_repository::LogUsageParams;
 use crate::AppState;
 use crate::UserCoreOps;
-use crate::{AiProvider, ModelPurpose};
+use crate::{AiChatOptions, AiChatResult, AiProvider, ModelPurpose};
 use axum::{extract::Form, extract::State, http::StatusCode, Json};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,6 @@ thread_local! {
 use openai_api_rs::v1::chat_completion;
 
 mod assembly;
-
 mod early_flow;
 mod status;
 
@@ -46,74 +45,40 @@ fn log_tool_error(
     );
 }
 
-/// LLM call with retry logic, used by the agentic loop.
+/// LLM call through the central AI gateway, used by the agentic loop.
 #[allow(clippy::too_many_arguments)]
-async fn llm_call_with_retry(
+async fn llm_call_with_gateway(
     state: &Arc<AppState>,
-    provider: AiProvider,
-    model: &str,
+    purpose: ModelPurpose,
     messages: &[chat_completion::ChatCompletionMessage],
     tools: &[chat_completion::Tool],
     reasoning_tx: &Option<tokio::sync::mpsc::Sender<String>>,
-    options: &mut ProcessSmsOptions,
-    max_retries: u32,
     user_id: i32,
-) -> Result<chat_completion::ChatCompletionResponse, String> {
-    let mut last_error = String::new();
+    sticky_provider: Option<AiProvider>,
+) -> Result<AiChatResult, String> {
+    let request = chat_completion::ChatCompletionRequest::new(String::new(), messages.to_vec())
+        .tools(tools.to_vec())
+        .tool_choice(chat_completion::ToolChoiceType::Auto);
 
-    for attempt in 1..=max_retries {
-        let request =
-            chat_completion::ChatCompletionRequest::new(model.to_string(), messages.to_vec())
-                .tools(tools.to_vec())
-                .tool_choice(chat_completion::ToolChoiceType::Auto);
-
-        match state
-            .ai_config
-            .chat_completion_streaming(provider, &request, reasoning_tx.clone())
-            .await
-        {
-            Ok(result) => {
-                let provider_str = match provider {
-                    AiProvider::Tinfoil => "tinfoil",
-                    AiProvider::OpenRouter => "openrouter",
-                };
-                crate::ai_config::log_llm_usage(
-                    &state.llm_usage_repository,
-                    user_id,
-                    provider_str,
-                    model,
-                    "chat_main",
-                    &result,
-                );
-                return Ok(result);
-            }
-            Err(e) => {
-                last_error = format!("{:?}", e);
-                tracing::warn!(
-                    "Chat completion attempt {}/{} failed: {:?}",
-                    attempt,
-                    max_retries,
-                    e
-                );
-                if attempt < max_retries {
-                    options.emit_status(ChatStatus::Retrying {
-                        attempt: attempt + 1,
-                        max: max_retries,
-                        error: last_error.clone(),
-                    });
-                    tokio::time::sleep(tokio::time::Duration::from_millis(500 * attempt as u64))
-                        .await;
-                }
-            }
-        }
-    }
-
-    tracing::error!(
-        "Failed to get chat completion after {} attempts: {}",
-        max_retries,
-        last_error
-    );
-    Err(format!("Failed to get chat completion: {}", last_error))
+    state
+        .ai_config
+        .chat_completion_with_fallback(
+            Some(&state.llm_usage_repository),
+            user_id,
+            purpose,
+            "chat_main",
+            &request,
+            AiChatOptions {
+                reasoning_tx: reasoning_tx.clone(),
+                sticky_provider,
+                ..AiChatOptions::default()
+            },
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to get chat completion through AI gateway: {:?}", e);
+            format!("Failed to get chat completion: {:?}", e)
+        })
 }
 
 // =============================================================================
@@ -398,13 +363,12 @@ impl SmsResponse {
     pub async fn new(
         raw: String,
         state: &Arc<AppState>,
-        provider: crate::AiProvider,
-        model: &str,
         user_id: i32,
+        sticky_provider: Option<crate::AiProvider>,
     ) -> Self {
         let content = if raw.chars().count() > Self::MAX_LENGTH {
             // Try to condense with LLM first, fall back to truncation
-            condense_response(state, provider, &raw, Self::MAX_LENGTH, model, user_id)
+            condense_response(state, &raw, Self::MAX_LENGTH, user_id, sticky_provider)
                 .await
                 .unwrap_or_else(|_| truncate_nicely(&raw, Self::MAX_LENGTH))
         } else {
@@ -493,11 +457,10 @@ fn truncate_nicely(text: &str, max_chars: usize) -> String {
 /// Ask LLM to condense a response to fit within max_chars
 async fn condense_response(
     state: &Arc<AppState>,
-    provider: crate::AiProvider,
     original: &str,
     max_chars: usize,
-    model: &str,
     user_id: i32,
+    sticky_provider: Option<crate::AiProvider>,
 ) -> Result<String, String> {
     use openai_api_rs::v1::chat_completion::{
         ChatCompletionMessage, ChatCompletionRequest, Content, MessageRole,
@@ -511,7 +474,7 @@ async fn condense_response(
     );
 
     let req = ChatCompletionRequest::new(
-        model.to_string(),
+        String::new(),
         vec![ChatCompletionMessage {
             role: MessageRole::user,
             content: Content::Text(prompt),
@@ -521,21 +484,23 @@ async fn condense_response(
         }],
     );
 
-    match state.ai_config.chat_completion(provider, &req).await {
-        Ok(response) => {
-            let provider_str = match provider {
-                crate::AiProvider::Tinfoil => "tinfoil",
-                crate::AiProvider::OpenRouter => "openrouter",
-            };
-            crate::ai_config::log_llm_usage(
-                &state.llm_usage_repository,
-                user_id,
-                provider_str,
-                model,
-                "condense_sms",
-                &response,
-            );
-            if let Some(choice) = response.choices.first() {
+    match state
+        .ai_config
+        .chat_completion_with_fallback(
+            Some(&state.llm_usage_repository),
+            user_id,
+            crate::ModelPurpose::Default,
+            "condense_sms",
+            &req,
+            crate::AiChatOptions {
+                sticky_provider,
+                ..crate::AiChatOptions::default()
+            },
+        )
+        .await
+    {
+        Ok(result) => {
+            if let Some(choice) = result.response.choices.first() {
                 if let Some(content) = &choice.message.content {
                     let condensed = content.trim().to_string();
                     // If still too long, truncate nicely
@@ -717,9 +682,8 @@ pub async fn process_sms(
     let image_url = agent_input.image_url;
     let tools = agent_input.tools;
     let completion_messages = agent_input.completion_messages;
-
-    let provider = ctx.provider;
-    let model = ctx.model.clone();
+    let mut active_provider = AiProvider::Tinfoil;
+    let mut sticky_provider: Option<AiProvider> = None;
 
     // Bridge channel: forward raw reasoning strings as ChatStatus::Reasoning events.
     // Only created for the web chat SSE path (when status_tx exists).
@@ -734,16 +698,6 @@ pub async fn process_sms(
     let mut loop_messages = completion_messages.clone();
 
     const MAX_ROUNDS: u32 = 5;
-    // Provider-error retries per LLM call. Bumped from 3 to 5 because
-    // Tinfoil/OpenRouter show enough transient flakiness that 3
-    // attempts (total ~4.5s of backoff) often gives up too early —
-    // the user sees "Provider error" and no reply. 5 attempts buys
-    // another ~3.5s of backoff (4th wait = 2s, 5th wait = 2.5s at the
-    // 500ms * attempt schedule) which is usually enough to ride out a
-    // blip. Still capped so a sustained outage fails fast instead of
-    // hanging the user for a minute.
-    const MAX_RETRIES: u32 = 5;
-
     let mut final_response = String::new();
 
     'agentic: for round in 0..MAX_ROUNDS {
@@ -756,20 +710,24 @@ pub async fn process_sms(
                 mock_response
             } else {
                 options.emit_status(ChatStatus::Thinking);
-                match llm_call_with_retry(
+                match llm_call_with_gateway(
                     state,
-                    ctx.provider,
-                    &model,
+                    ctx.model_purpose,
                     &loop_messages,
                     &tools,
                     &reasoning_tx,
-                    &mut options,
-                    MAX_RETRIES,
                     user.id,
+                    sticky_provider,
                 )
                 .await
                 {
-                    Ok(r) => r,
+                    Ok(r) => {
+                        active_provider = r.provider;
+                        if r.fallback_from.is_some() || sticky_provider.is_some() {
+                            sticky_provider = Some(r.provider);
+                        }
+                        r.response
+                    }
                     Err(log_msg) => {
                         return SmsResult::SystemError { log_msg }.into_response();
                     }
@@ -777,20 +735,24 @@ pub async fn process_sms(
             }
         } else {
             options.emit_status(ChatStatus::Thinking);
-            match llm_call_with_retry(
+            match llm_call_with_gateway(
                 state,
-                ctx.provider,
-                &model,
+                ctx.model_purpose,
                 &loop_messages,
                 &tools,
                 &reasoning_tx,
-                &mut options,
-                MAX_RETRIES,
                 user.id,
+                sticky_provider,
             )
             .await
             {
-                Ok(r) => r,
+                Ok(r) => {
+                    active_provider = r.provider;
+                    if r.fallback_from.is_some() || sticky_provider.is_some() {
+                        sticky_provider = Some(r.provider);
+                    }
+                    r.response
+                }
                 Err(log_msg) => {
                     return SmsResult::SystemError { log_msg }.into_response();
                 }
@@ -922,8 +884,6 @@ pub async fn process_sms(
 
                     // Dispatch via shared agent_core
                     let extras = crate::agent_core::ToolDispatchExtras {
-                        client: &ctx.client,
-                        model: &model,
                         tools: &tools,
                         completion_messages: &loop_messages,
                         assistant_content: result.choices[0].message.content.as_deref(),
@@ -1144,21 +1104,23 @@ pub async fn process_sms(
                     tool_call_id: None,
                 });
 
-                match llm_call_with_retry(
+                match llm_call_with_gateway(
                     state,
-                    ctx.provider,
-                    &model,
+                    ctx.model_purpose,
                     &loop_messages,
                     &tools,
                     &reasoning_tx,
-                    &mut options,
-                    MAX_RETRIES,
                     user.id,
+                    sticky_provider,
                 )
                 .await
                 {
                     Ok(r) => {
-                        if let Some(text) = &r.choices[0].message.content {
+                        active_provider = r.provider;
+                        if r.fallback_from.is_some() || sticky_provider.is_some() {
+                            sticky_provider = Some(r.provider);
+                        }
+                        if let Some(text) = &r.response.choices[0].message.content {
                             let retry_verified =
                                 crate::utils::id_verifier::verify(text, &valid_ids);
                             // Remove the correction messages for next iteration
@@ -1203,7 +1165,12 @@ pub async fn process_sms(
     // Ensure response is within SMS character limit (truncate text BEFORE adding media)
     let final_response = if !fail {
         // For successful responses, use LLM condensing if needed
-        SmsResponse::new(final_response, state, provider, &model, user.id)
+        let condense_sticky_provider = if active_provider == AiProvider::Near {
+            Some(active_provider)
+        } else {
+            sticky_provider
+        };
+        SmsResponse::new(final_response, state, user.id, condense_sticky_provider)
             .await
             .into_inner()
     } else {
