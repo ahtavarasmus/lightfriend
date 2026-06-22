@@ -1,6 +1,4 @@
-use crate::context::ContextBuilder;
 use crate::repositories::user_repository::LogUsageParams;
-use crate::tool_call_utils::utils::ChatMessage;
 use crate::AppState;
 use crate::UserCoreOps;
 use crate::{AiProvider, ModelPurpose};
@@ -17,6 +15,8 @@ thread_local! {
 }
 
 use openai_api_rs::v1::chat_completion;
+
+mod assembly;
 
 mod early_flow;
 
@@ -680,58 +680,16 @@ pub async fn process_sms(
         return response;
     }
 
-    // Log media information for admin user
-    if user.id == 1 {
-        if let (Some(num_media), Some(media_url), Some(content_type)) = (
-            payload.num_media.as_ref(),
-            payload.media_url0.as_ref(),
-            payload.media_content_type0.as_ref(),
-        ) {
-            tracing::debug!("Media information:");
-            tracing::debug!("  Number of media items: {}", num_media);
-            tracing::debug!("  Media URL: {}", media_url);
-            tracing::debug!("  Content type: {}", content_type);
-        }
-    }
-
-    let current_time = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i32;
-
-    // Store user's message in history
-    let user_message = crate::pg_models::NewPgMessageHistory {
-        user_id: user.id,
-        role: "user".to_string(),
-        encrypted_content: payload.body.clone(),
-        tool_name: None,
-        tool_call_id: None,
-        tool_calls_json: None,
-        created_at: current_time,
-        conversation_id: "".to_string(),
-    };
-
-    if let Err(e) = state.user_repository.create_message_history(&user_message) {
-        tracing::error!("Failed to store user message in history: {}", e);
-    }
-
-    // Build agent context (settings, timezone, contacts, LLM client, tools)
-    let wants_history = !payload.body.to_lowercase().starts_with("forget");
-    let model_purpose = if options.fast_mode {
-        ModelPurpose::Voice
-    } else {
-        ModelPurpose::Default
-    };
-    let mut builder = ContextBuilder::for_resolved_user(state, user.clone())
-        .with_model_purpose(model_purpose)
-        .with_user_context()
-        .with_tools()
-        .with_mcp_tools();
-    if wants_history {
-        builder = builder.with_history();
-    }
-    let ctx = match builder.build().await {
-        Ok(ctx) => ctx,
+    let agent_input = match assembly::build_sms_agent_input(
+        state,
+        &user,
+        &payload,
+        options.skip_twilio_send,
+        options.fast_mode,
+    )
+    .await
+    {
+        Ok(input) => input,
         Err(e) => {
             tracing::error!("Failed to build agent context: {}", e);
             return SmsResult::SystemError {
@@ -740,166 +698,14 @@ pub async fn process_sms(
             .into_response();
         }
     };
-
-    let user_given_info = ctx.user_given_info.as_deref().unwrap_or("");
-
-    // Build system prompt via shared agent_core
-    let mode = if options.skip_twilio_send {
-        crate::agent_core::ChannelMode::WebChat
-    } else {
-        crate::agent_core::ChannelMode::Sms
-    };
-    let system_prompt_text = crate::agent_core::build_system_prompt(&ctx, mode);
-
-    // Start with the system message
-    let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
-        role: "system".to_string(),
-        content: chat_completion::Content::Text(system_prompt_text),
-        tool_calls: None,
-        tool_call_id: None,
-    }];
-
-    // Process the message body to remove "forget" if it exists at the start
-    let processed_body = if payload.body.to_lowercase().starts_with("forget") {
-        payload
-            .body
-            .trim_start_matches(|c: char| c.is_alphabetic())
-            .trim()
-            .to_string()
-    } else {
-        payload.body.clone()
-    };
-
-    // Delete media if present after processing
-    if let (Some(num_media), Some(media_url), Some(_)) = (
-        payload.num_media.as_ref(),
-        payload.media_url0.as_ref(),
-        payload.media_content_type0.as_ref(),
-    ) {
-        if num_media != "0" {
-            // Extract message SID and media SID from URL
-            // URL format: .../Messages/{message_sid}/Media/{media_sid}
-            if let (Some(msg_part), Some(media_sid)) = (
-                media_url.split("/Messages/").nth(1),
-                media_url.split("/Media/").nth(1),
-            ) {
-                if let Some(message_sid) = msg_part.split("/Media/").next() {
-                    tracing::debug!(
-                        "Attempting to delete media {} from message {}",
-                        media_sid,
-                        message_sid
-                    );
-                    match state
-                        .twilio_message_service
-                        .delete_message_media(&user, message_sid, media_sid)
-                        .await
-                    {
-                        Ok(_) => tracing::debug!("Successfully deleted media: {}", media_sid),
-                        Err(e) => tracing::error!("Failed to delete media {}: {}", media_sid, e),
-                    }
-                }
-            }
-        }
-    }
-
-    // Add conversation history from context builder (already filtered and converted)
-    if let Some(ref history) = ctx.conversation_history {
-        for msg in history {
-            let role = match msg.role {
-                chat_completion::MessageRole::user => "user",
-                chat_completion::MessageRole::assistant => "assistant",
-                chat_completion::MessageRole::system => "system",
-                _ => "user",
-            };
-            chat_messages.push(ChatMessage {
-                role: role.to_string(),
-                content: msg.content.clone(),
-                tool_calls: None,
-                tool_call_id: None,
-            });
-        }
-    }
+    let ctx = agent_input.ctx;
+    let user_given_info = agent_input.user_given_info;
+    let image_url = agent_input.image_url;
+    let tools = agent_input.tools;
+    let completion_messages = agent_input.completion_messages;
 
     let provider = ctx.provider;
-
-    // Handle image if present
-    let mut image_url = None;
-
-    if let (Some(num_media), Some(media_url), Some(content_type)) = (
-        payload.num_media.as_ref(),
-        payload.media_url0.as_ref(),
-        payload.media_content_type0.as_ref(),
-    ) {
-        if num_media != "0" && content_type.starts_with("image/") {
-            image_url = Some(media_url.clone());
-
-            tracing::debug!("setting image_url var to: {:#?}", image_url);
-
-            // Build content parts for vision: text (if any) + image
-            let mut content_parts = vec![];
-
-            if !processed_body.trim().is_empty() {
-                content_parts.push(chat_completion::ImageUrl {
-                    r#type: chat_completion::ContentType::text,
-                    text: Some(processed_body.clone()),
-                    image_url: None,
-                });
-            }
-
-            content_parts.push(chat_completion::ImageUrl {
-                r#type: chat_completion::ContentType::image_url,
-                text: None,
-                image_url: Some(chat_completion::ImageUrlType {
-                    url: media_url.clone(),
-                }),
-            });
-
-            chat_messages.push(ChatMessage {
-                role: "user".to_string(),
-                content: chat_completion::Content::ImageUrl(content_parts),
-                tool_calls: None,
-                tool_call_id: None,
-            });
-        } else {
-            // Add regular text message if no image
-            chat_messages.push(ChatMessage {
-                role: "user".to_string(),
-                content: chat_completion::Content::Text(processed_body),
-                tool_calls: None,
-                tool_call_id: None,
-            });
-        }
-    } else {
-        // Add regular text message if no media
-        chat_messages.push(ChatMessage {
-            role: "user".to_string(),
-            content: chat_completion::Content::Text(processed_body),
-            tool_calls: None,
-            tool_call_id: None,
-        });
-    }
-
-    // Tools via shared agent_core (includes registry + ontology + MCP)
-    let tools = crate::agent_core::build_tools(state, user.id, true).await;
     let model = ctx.model.clone();
-
-    // Convert ChatMessage vec into ChatCompletionMessage vec
-    let completion_messages: Vec<chat_completion::ChatCompletionMessage> = chat_messages
-        .clone()
-        .into_iter()
-        .map(|msg| chat_completion::ChatCompletionMessage {
-            role: match msg.role.as_str() {
-                "user" => chat_completion::MessageRole::user,
-                "assistant" => chat_completion::MessageRole::assistant,
-                "system" => chat_completion::MessageRole::system,
-                _ => chat_completion::MessageRole::user,
-            },
-            content: msg.content.clone(),
-            name: None,
-            tool_calls: msg.tool_calls.clone(),
-            tool_call_id: msg.tool_call_id.clone(),
-        })
-        .collect();
 
     // Bridge channel: forward raw reasoning strings as ChatStatus::Reasoning events.
     // Only created for the web chat SSE path (when status_tx exists).
@@ -1129,7 +935,7 @@ pub async fn process_sms(
                         name,
                         arguments,
                         &tool_call_id,
-                        user_given_info,
+                        &user_given_info,
                         current_time,
                         Some(extras),
                     )
