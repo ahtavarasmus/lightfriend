@@ -295,19 +295,42 @@ pub enum ChatStatus {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageChannel {
+    Sms,
+    WebChat,
+}
+
+impl Default for MessageChannel {
+    fn default() -> Self {
+        Self::Sms
+    }
+}
+
+impl MessageChannel {
+    fn sends_sms(self) -> bool {
+        matches!(self, Self::Sms)
+    }
+
+    fn agent_mode(self) -> crate::agent_core::ChannelMode {
+        match self {
+            Self::Sms => crate::agent_core::ChannelMode::Sms,
+            Self::WebChat => crate::agent_core::ChannelMode::WebChat,
+        }
+    }
+}
+
 /// Options for process_sms to control test behavior
 #[derive(Default)]
 pub struct ProcessSmsOptions {
-    /// Skip actual Twilio SMS sending
-    pub skip_twilio_send: bool,
+    /// Channel/origin for this message.
+    pub channel: MessageChannel,
     /// Mock LLM response to use instead of calling real LLM API
     pub mock_llm_response: Option<openai_api_rs::v1::chat_completion::ChatCompletionResponse>,
     /// Optional channel for streaming status updates to callers (e.g. SSE endpoint)
     pub status_tx: Option<tokio::sync::mpsc::Sender<ChatStatus>>,
     /// Mock tool responses: when a tool name matches a key, return the value instead of executing.
     pub mock_tool_responses: Option<std::collections::HashMap<String, String>>,
-    /// Use fast non-reasoning model instead of the default reasoning model
-    pub fast_mode: bool,
 }
 
 impl ProcessSmsOptions {
@@ -319,22 +342,20 @@ impl ProcessSmsOptions {
     /// Create options for web chat (skip Twilio sending)
     pub fn web_chat() -> Self {
         Self {
-            skip_twilio_send: true,
+            channel: MessageChannel::WebChat,
             mock_llm_response: None,
             status_tx: None,
             mock_tool_responses: None,
-            fast_mode: false,
         }
     }
 
     /// Create options for web chat with status streaming
-    pub fn web_chat_streaming(tx: tokio::sync::mpsc::Sender<ChatStatus>, fast_mode: bool) -> Self {
+    pub fn web_chat_streaming(tx: tokio::sync::mpsc::Sender<ChatStatus>) -> Self {
         Self {
-            skip_twilio_send: true,
+            channel: MessageChannel::WebChat,
             mock_llm_response: None,
             status_tx: Some(tx),
             mock_tool_responses: None,
-            fast_mode,
         }
     }
 
@@ -343,11 +364,10 @@ impl ProcessSmsOptions {
         mock_response: openai_api_rs::v1::chat_completion::ChatCompletionResponse,
     ) -> Self {
         Self {
-            skip_twilio_send: true,
+            channel: MessageChannel::WebChat,
             mock_llm_response: Some(mock_response),
             status_tx: None,
             mock_tool_responses: None,
-            fast_mode: false,
         }
     }
 
@@ -673,7 +693,7 @@ pub async fn process_sms(
         state,
         &user,
         &payload.body,
-        options.skip_twilio_send,
+        options.channel,
         &start_time,
     )
     .await
@@ -681,24 +701,17 @@ pub async fn process_sms(
         return response;
     }
 
-    let agent_input = match assembly::build_sms_agent_input(
-        state,
-        &user,
-        &payload,
-        options.skip_twilio_send,
-        options.fast_mode,
-    )
-    .await
-    {
-        Ok(input) => input,
-        Err(e) => {
-            tracing::error!("Failed to build agent context: {}", e);
-            return SmsResult::SystemError {
-                log_msg: format!("Failed to build agent context: {}", e),
+    let agent_input =
+        match assembly::build_sms_agent_input(state, &user, &payload, options.channel).await {
+            Ok(input) => input,
+            Err(e) => {
+                tracing::error!("Failed to build agent context: {}", e);
+                return SmsResult::SystemError {
+                    log_msg: format!("Failed to build agent context: {}", e),
+                }
+                .into_response();
             }
-            .into_response();
-        }
-    };
+        };
     let ctx = agent_input.ctx;
     let user_given_info = agent_input.user_given_info;
     let image_url = agent_input.image_url;
@@ -916,7 +929,7 @@ pub async fn process_sms(
                         assistant_content: result.choices[0].message.content.as_deref(),
                         tool_call: Some(tool_call),
                         image_url: image_url.as_deref(),
-                        skip_sms: options.skip_twilio_send,
+                        skip_sms: !options.channel.sends_sms(),
                     };
                     let dispatch_result = crate::agent_core::dispatch_tool(
                         state,
@@ -1245,8 +1258,8 @@ pub async fn process_sms(
         tracing::error!("Failed to store assistant message in history: {}", e);
     }
 
-    // If skipping Twilio send (test mode), still deduct credits but skip actual send
-    if options.skip_twilio_send {
+    // If this came from web chat, return the response without sending an SMS.
+    if !options.channel.sends_sms() {
         // Log the usage without sending the message
         if let Err(e) = state.user_repository.log_usage(LogUsageParams {
             user_id: user.id,

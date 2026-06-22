@@ -1,4 +1,4 @@
-use super::{SmsProcessResponse, SmsResult};
+use super::{MessageChannel, SmsProcessResponse, SmsResult};
 use crate::models::user_models::User;
 use crate::repositories::user_repository::LogUsageParams;
 use crate::AppState;
@@ -45,10 +45,10 @@ fn send_early_reply_if_needed(
     state: &Arc<AppState>,
     user: &User,
     reply: &str,
-    skip_twilio_send: bool,
+    channel: MessageChannel,
     failure_context: &'static str,
 ) {
-    if skip_twilio_send {
+    if !channel.sends_sms() {
         return;
     }
 
@@ -136,14 +136,14 @@ async fn handle_commitment_reply(
     state: &Arc<AppState>,
     user: &User,
     body: &str,
-    skip_twilio_send: bool,
+    channel: MessageChannel,
 ) -> Option<SmsProcessResponse> {
     let reply = crate::proactive::commitment_replies::try_handle_reply(state, user, body).await?;
     send_early_reply_if_needed(
         state,
         user,
         &reply,
-        skip_twilio_send,
+        channel,
         "commitment-reply confirmation",
     );
     Some(SmsResult::Success { response: reply }.into_response())
@@ -153,16 +153,10 @@ async fn handle_alert_feedback_reply(
     state: &Arc<AppState>,
     user: &User,
     body: &str,
-    skip_twilio_send: bool,
+    channel: MessageChannel,
 ) -> Option<SmsProcessResponse> {
     let reply = crate::proactive::alert_feedback::try_handle_reply(state, user, body).await?;
-    send_early_reply_if_needed(
-        state,
-        user,
-        &reply,
-        skip_twilio_send,
-        "alert-feedback confirmation",
-    );
+    send_early_reply_if_needed(state, user, &reply, channel, "alert-feedback confirmation");
     Some(SmsResult::Success { response: reply }.into_response())
 }
 
@@ -170,7 +164,7 @@ async fn handle_cancel_reply(
     state: &Arc<AppState>,
     user: &User,
     body: &str,
-    skip_twilio_send: bool,
+    channel: MessageChannel,
     start_time: &std::time::Instant,
 ) -> Option<SmsProcessResponse> {
     if body.trim().to_lowercase() != "c" {
@@ -185,7 +179,7 @@ async fn handle_cancel_reply(
                 "Couldn't find a message to cancel".to_string()
             };
 
-            if !skip_twilio_send {
+            if channel.sends_sms() {
                 send_cancel_reply_in_background(
                     state,
                     user,
@@ -217,18 +211,18 @@ pub(super) async fn handle_sms_early_response(
     state: &Arc<AppState>,
     user: &User,
     body: &str,
-    skip_twilio_send: bool,
+    channel: MessageChannel,
     start_time: &std::time::Instant,
 ) -> Option<SmsProcessResponse> {
     // Commitment replies get priority over alert feedback because both use
     // short numeric replies and commitment prompts have their own pending state.
-    if let Some(response) = handle_commitment_reply(state, user, body, skip_twilio_send).await {
+    if let Some(response) = handle_commitment_reply(state, user, body, channel).await {
         return Some(response);
     }
 
-    if let Some(response) = handle_alert_feedback_reply(state, user, body, skip_twilio_send).await {
+    if let Some(response) = handle_alert_feedback_reply(state, user, body, channel).await {
         return Some(response);
     }
 
-    handle_cancel_reply(state, user, body, skip_twilio_send, start_time).await
+    handle_cancel_reply(state, user, body, channel, start_time).await
 }

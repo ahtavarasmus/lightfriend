@@ -11,7 +11,7 @@
 //! - Network access to Tinfoil API
 
 use backend::api::twilio_sms::{
-    process_sms, ProcessSmsOptions, TwilioResponse, TwilioWebhookPayload,
+    process_sms, MessageChannel, ProcessSmsOptions, TwilioResponse, TwilioWebhookPayload,
 };
 use backend::models::user_models::User;
 use backend::test_utils::{create_test_state, create_test_user, set_plan_type, TestUserParams};
@@ -74,11 +74,10 @@ async fn send_message(state: &Arc<AppState>, user: &User, body: &str) -> TwilioR
     };
 
     let options = ProcessSmsOptions {
-        skip_twilio_send: true,
+        channel: MessageChannel::WebChat,
         mock_llm_response: None,
         status_tx: None,
         mock_tool_responses: None,
-        fast_mode: false,
     };
 
     let (_status, _headers, axum::Json(response)) =
@@ -108,11 +107,10 @@ async fn send_message_with_mocks(
     };
 
     let options = ProcessSmsOptions {
-        skip_twilio_send: true,
+        channel: MessageChannel::WebChat,
         mock_llm_response: None,
         status_tx: None,
         mock_tool_responses: Some(mocks),
-        fast_mode: false,
     };
 
     let (_status, _headers, axum::Json(response)) =

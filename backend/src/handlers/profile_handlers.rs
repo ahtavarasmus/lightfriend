@@ -1767,8 +1767,6 @@ const WEB_CHAT_COST_US: f32 = 0.5; // 0.5 messages for US/CA (uses credits_left 
 #[derive(Deserialize)]
 pub struct WebChatRequest {
     pub message: String,
-    #[serde(default)]
-    pub fast_mode: bool,
 }
 
 /// Media result from AI tool calls (YouTube, etc.)
@@ -2093,7 +2091,7 @@ pub async fn web_chat_stream(
             crate::api::twilio_sms::process_sms(
                 &state_clone,
                 mock_payload,
-                ProcessSmsOptions::web_chat_streaming(status_tx, request.fast_mode),
+                ProcessSmsOptions::web_chat_streaming(status_tx),
             )
             .await
         });

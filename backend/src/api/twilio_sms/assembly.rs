@@ -1,8 +1,8 @@
-use super::TwilioWebhookPayload;
+use super::{MessageChannel, TwilioWebhookPayload};
 use crate::context::{AgentContext, ContextBuilder, ContextError};
 use crate::models::user_models::User;
 use crate::tool_call_utils::utils::ChatMessage;
-use crate::{AppState, ModelPurpose};
+use crate::AppState;
 use openai_api_rs::v1::chat_completion;
 use std::sync::Arc;
 
@@ -18,15 +18,14 @@ pub(super) async fn build_sms_agent_input(
     state: &Arc<AppState>,
     user: &User,
     payload: &TwilioWebhookPayload,
-    skip_twilio_send: bool,
-    fast_mode: bool,
+    channel: MessageChannel,
 ) -> Result<SmsAgentInput, ContextError> {
     log_admin_media_info(user, payload);
     persist_incoming_message(state, user, payload);
 
-    let ctx = build_agent_context(state, user, payload, fast_mode).await?;
+    let ctx = build_agent_context(state, user, payload).await?;
     let user_given_info = ctx.user_given_info.clone().unwrap_or_default();
-    let mut chat_messages = build_initial_messages(&ctx, skip_twilio_send);
+    let mut chat_messages = build_initial_messages(&ctx, channel);
     let processed_body = strip_forget_prefix(&payload.body);
     delete_incoming_media_if_present(state, user, payload).await;
 
@@ -88,32 +87,17 @@ async fn build_agent_context(
     state: &Arc<AppState>,
     user: &User,
     payload: &TwilioWebhookPayload,
-    fast_mode: bool,
 ) -> Result<AgentContext, ContextError> {
     let wants_history = !payload.body.to_lowercase().starts_with("forget");
-    let model_purpose = if fast_mode {
-        ModelPurpose::Voice
-    } else {
-        ModelPurpose::Default
-    };
-    let mut builder = ContextBuilder::for_resolved_user(state, user.clone())
-        .with_model_purpose(model_purpose)
-        .with_user_context()
-        .with_tools()
-        .with_mcp_tools();
+    let mut builder = ContextBuilder::for_resolved_user(state, user.clone()).with_user_context();
     if wants_history {
         builder = builder.with_history();
     }
     builder.build().await
 }
 
-fn build_initial_messages(ctx: &AgentContext, skip_twilio_send: bool) -> Vec<ChatMessage> {
-    let mode = if skip_twilio_send {
-        crate::agent_core::ChannelMode::WebChat
-    } else {
-        crate::agent_core::ChannelMode::Sms
-    };
-    let system_prompt_text = crate::agent_core::build_system_prompt(ctx, mode);
+fn build_initial_messages(ctx: &AgentContext, channel: MessageChannel) -> Vec<ChatMessage> {
+    let system_prompt_text = crate::agent_core::build_system_prompt(ctx, channel.agent_mode());
 
     vec![ChatMessage {
         role: "system".to_string(),

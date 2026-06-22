@@ -224,12 +224,6 @@ const CHAT_STYLES: &str = r#"
     padding: 0.15rem 0;
     font-size: 0.8rem;
 }
-.chat-loading-actions .quick-btn {
-    color: #FFD54F;
-}
-.chat-loading-actions .quick-btn:hover {
-    text-decoration: underline;
-}
 .chat-loading-actions .stop-btn {
     color: #999;
 }
@@ -438,7 +432,6 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
     let chat_loading = use_state(|| false);
     let chat_status = use_state(|| "...".to_string()); // Status text shown during loading
     let chat_error = use_state(|| None::<String>);
-    let fast_mode = use_state(|| false);
     let active_es: UseStateHandle<Option<web_sys::EventSource>> = use_state(|| None);
     let chat_input_ref = use_node_ref();
 
@@ -580,7 +573,6 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
         let on_item_created = props.on_item_created.clone();
         let on_preview_close = props.on_preview_close.clone();
         let chat_input_ref = chat_input_ref.clone();
-        let fast_mode = fast_mode.clone();
         let active_es = active_es.clone();
 
         Callback::from(move |_| {
@@ -608,7 +600,6 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
             let on_item_cleared = on_item_cleared.clone();
             let on_item_created = on_item_created.clone();
             let chat_input_ref = chat_input_ref.clone();
-            let fast_mode = fast_mode.clone();
             let active_es = active_es.clone();
 
             // Set user message and clear previous reply (only for regular chat, not item editing)
@@ -692,12 +683,10 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             return;
                         }
                     } else {
-                        let fast_param = if *fast_mode { "&fast_mode=true" } else { "" };
                         format!(
-                            "{}/api/chat/web-stream?message={}{}",
+                            "{}/api/chat/web-stream?message={}",
                             crate::config::get_backend_url(),
-                            encoded_msg,
-                            fast_param
+                            encoded_msg
                         )
                     };
 
@@ -776,7 +765,6 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                     let chat_input_ref_msg = chat_input_ref_sse.clone();
                     let es_ref = es.clone();
                     let active_es_msg = active_es.clone();
-                    let fast_mode_msg = fast_mode.clone();
 
                     let onmessage = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
                         if let Some(data_str) = event.data().as_string() {
@@ -866,7 +854,6 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                         }
                                         es_ref.close();
                                         active_es_msg.set(None);
-                                        fast_mode_msg.set(false);
                                     }
                                     "error" => {
                                         let msg = data["message"]
@@ -889,7 +876,6 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                         }
                                         es_ref.close();
                                         active_es_msg.set(None);
-                                        fast_mode_msg.set(false);
                                     }
                                     _ => {}
                                 }
@@ -1226,41 +1212,6 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
         html! { <div class="chat-suggestions">{for chips}</div> }
     };
 
-    let quick_click = {
-        let fast_mode = fast_mode.clone();
-        let active_es = active_es.clone();
-        let chat_loading = chat_loading.clone();
-        let chat_input = chat_input.clone();
-        let chat_user_msg = chat_user_msg.clone();
-        let chat_bot_reply = chat_bot_reply.clone();
-        Callback::from(move |_: MouseEvent| {
-            if let Some(es) = (*active_es).as_ref() {
-                es.close();
-            }
-            active_es.set(None);
-            chat_loading.set(false);
-            chat_bot_reply.set(None);
-            fast_mode.set(true);
-            // Restore the user's message so the next render's on_send can read it
-            if let Some(msg) = (*chat_user_msg).clone() {
-                chat_input.set(msg);
-            }
-            // Click the send button after Yew re-renders with the new state
-            gloo_timers::callback::Timeout::new(100, move || {
-                use wasm_bindgen::JsCast;
-                if let Some(window) = web_sys::window() {
-                    if let Some(doc) = window.document() {
-                        if let Some(btn) = doc.query_selector(".chat-btn.send").ok().flatten() {
-                            if let Some(el) = btn.dyn_ref::<web_sys::HtmlElement>() {
-                                el.click();
-                            }
-                        }
-                    }
-                }
-            })
-            .forget();
-        })
-    };
     let stop_click = {
         let active_es = active_es.clone();
         let chat_loading = chat_loading.clone();
@@ -1291,9 +1242,6 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                 <>
                                     <div class="chat-msg assistant loading"><span class="chat-thinking-dot"></span>{&status_text}</div>
                                     <div class="chat-loading-actions">
-                                        if !*fast_mode {
-                                            <button class="quick-btn" onclick={quick_click.clone()}><i class="fa-solid fa-bolt"></i>{" Quick response"}</button>
-                                        }
                                         <button class="stop-btn" onclick={stop_click.clone()}>{"Stop"}</button>
                                     </div>
                                 </>
@@ -1306,9 +1254,6 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                     <div class="chat-msg user">{user_msg}</div>
                                     <div class="chat-msg assistant loading"><span class="chat-thinking-dot"></span>{&status_text}</div>
                                     <div class="chat-loading-actions">
-                                        if !*fast_mode {
-                                            <button class="quick-btn" onclick={quick_click.clone()}><i class="fa-solid fa-bolt"></i>{" Quick response"}</button>
-                                        }
                                         <button class="stop-btn" onclick={stop_click.clone()}>{"Stop"}</button>
                                     </div>
                                 </>
@@ -1329,9 +1274,6 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                                 <>
                                     <div class="chat-msg assistant loading"><span class="chat-thinking-dot"></span>{&status_text}</div>
                                     <div class="chat-loading-actions">
-                                        if !*fast_mode {
-                                            <button class="quick-btn" onclick={quick_click.clone()}><i class="fa-solid fa-bolt"></i>{" Quick response"}</button>
-                                        }
                                         <button class="stop-btn" onclick={stop_click.clone()}>{"Stop"}</button>
                                     </div>
                                 </>

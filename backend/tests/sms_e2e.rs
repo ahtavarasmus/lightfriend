@@ -13,7 +13,9 @@
 //! - Pre-send check: just verifies credits > 0 for SMS events
 
 use axum::http::StatusCode;
-use backend::api::twilio_sms::{process_sms, ChatStatus, ProcessSmsOptions, TwilioWebhookPayload};
+use backend::api::twilio_sms::{
+    process_sms, ChatStatus, MessageChannel, ProcessSmsOptions, TwilioWebhookPayload,
+};
 use backend::test_utils::{
     assert_charged, assert_no_content_leak, assert_not_charged, assert_sms_deliverable,
     create_test_state, create_test_user, deactivate_phone_service, get_total_credits,
@@ -110,7 +112,7 @@ fn test_germany_user_params_has_correct_phone_format() {
 #[serial]
 fn test_process_sms_options_default_is_production() {
     let options = ProcessSmsOptions::default();
-    assert!(!options.skip_twilio_send);
+    assert_eq!(options.channel, MessageChannel::Sms);
     assert!(options.mock_llm_response.is_none());
 }
 
@@ -118,7 +120,7 @@ fn test_process_sms_options_default_is_production() {
 #[serial]
 fn test_process_sms_options_web_chat_skips_twilio() {
     let options = ProcessSmsOptions::web_chat();
-    assert!(options.skip_twilio_send);
+    assert_eq!(options.channel, MessageChannel::WebChat);
     assert!(options.mock_llm_response.is_none());
 }
 
@@ -127,7 +129,7 @@ fn test_process_sms_options_web_chat_skips_twilio() {
 fn test_process_sms_options_test_with_mock() {
     let mock = MockLlmResponse::with_direct_response("Test");
     let options = ProcessSmsOptions::test_with_mock(mock.to_response());
-    assert!(options.skip_twilio_send);
+    assert_eq!(options.channel, MessageChannel::WebChat);
     assert!(options.mock_llm_response.is_some());
 }
 
@@ -1252,7 +1254,7 @@ async fn test_process_sms_web_chat_streaming_emits_tool_call_status() {
     };
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(4);
-    let mut options = ProcessSmsOptions::web_chat_streaming(tx, false);
+    let mut options = ProcessSmsOptions::web_chat_streaming(tx);
     options.mock_llm_response = Some(mock_set_reminder_tool_call().to_response());
     options.mock_tool_responses = Some(HashMap::from([(
         "set_reminder".to_string(),
