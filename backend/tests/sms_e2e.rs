@@ -13,7 +13,7 @@
 //! - Pre-send check: just verifies credits > 0 for SMS events
 
 use axum::http::StatusCode;
-use backend::api::twilio_sms::{process_sms, ProcessSmsOptions, TwilioWebhookPayload};
+use backend::api::twilio_sms::{process_sms, ChatStatus, ProcessSmsOptions, TwilioWebhookPayload};
 use backend::test_utils::{
     assert_charged, assert_no_content_leak, assert_not_charged, assert_sms_deliverable,
     create_test_state, create_test_user, deactivate_phone_service, get_total_credits,
@@ -21,7 +21,30 @@ use backend::test_utils::{
 };
 use backend::utils::usage::deduct_from_twilio_price;
 use backend::UserCoreOps;
+use openai_api_rs::v1::chat_completion;
 use serial_test::serial;
+use std::collections::HashMap;
+
+fn mock_set_reminder_tool_call() -> MockLlmResponse {
+    MockLlmResponse {
+        content: None,
+        tool_calls: Some(vec![chat_completion::ToolCall {
+            id: "call_test_set_reminder".to_string(),
+            r#type: "function".to_string(),
+            function: chat_completion::ToolCallFunction {
+                name: Some("set_reminder".to_string()),
+                arguments: Some(
+                    serde_json::json!({
+                        "title": "stretch",
+                        "datetime": "2026-06-22T09:00:00+03:00"
+                    })
+                    .to_string(),
+                ),
+            },
+        }]),
+        is_text_response: false,
+    }
+}
 
 #[test]
 #[serial]
@@ -1132,6 +1155,163 @@ async fn test_process_sms_error_message_does_not_leak_content() {
         !response.message.contains("secret"),
         "Error message should not contain user content"
     );
+}
+
+// ============================================================
+// process_sms Refactor Guard Tests
+// ============================================================
+// These tests lock down observable orchestration behavior that should survive
+// splitting process_sms into smaller services.
+
+#[tokio::test]
+#[serial]
+async fn test_process_sms_terminal_tool_response_is_final_response() {
+    let state = create_test_state();
+    let params = TestUserParams::us_user(10.0, 5.0);
+    let user = create_test_user(&state, &params);
+
+    let payload = TwilioWebhookPayload {
+        from: user.phone_number.clone(),
+        to: "+18005551234".to_string(),
+        body: "Remind me to stretch at 9 AM".to_string(),
+        message_sid: "SM_guard_terminal_tool".to_string(),
+        num_media: None,
+        media_url0: None,
+        media_content_type0: None,
+    };
+
+    let mut options =
+        ProcessSmsOptions::test_with_mock(mock_set_reminder_tool_call().to_response());
+    options.mock_tool_responses = Some(HashMap::from([(
+        "set_reminder".to_string(),
+        "Reminder set for 9:00 AM.".to_string(),
+    )]));
+
+    let (status, _headers, response) = process_sms(&state, payload, options).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(response.message, "Reminder set for 9:00 AM.");
+    assert_eq!(response.created_item_id, None);
+}
+
+#[tokio::test]
+#[serial]
+async fn test_process_sms_preserves_media_results_from_tool_answers() {
+    let state = create_test_state();
+    let params = TestUserParams::us_user(10.0, 5.0);
+    let user = create_test_user(&state, &params);
+
+    let payload = TwilioWebhookPayload {
+        from: user.phone_number.clone(),
+        to: "+18005551234".to_string(),
+        body: "Send me the file".to_string(),
+        message_sid: "SM_guard_media_results".to_string(),
+        num_media: None,
+        media_url0: None,
+        media_content_type0: None,
+    };
+
+    let tool_answer = concat!(
+        "Here is the file.",
+        "\n\n[MEDIA_RESULTS]",
+        "{\"files\":[{\"filename\":\"report.pdf\",\"media_url\":\"https://example.test/report.pdf\"}]}",
+        "[/MEDIA_RESULTS]"
+    );
+
+    let mut options =
+        ProcessSmsOptions::test_with_mock(mock_set_reminder_tool_call().to_response());
+    options.mock_tool_responses = Some(HashMap::from([(
+        "set_reminder".to_string(),
+        tool_answer.to_string(),
+    )]));
+
+    let (status, _headers, response) = process_sms(&state, payload, options).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(response.message.contains("Here is the file."));
+    assert!(response.message.contains("[MEDIA_RESULTS]"));
+    assert!(response.message.contains("https://example.test/report.pdf"));
+    assert!(response.message.contains("[/MEDIA_RESULTS]"));
+}
+
+#[tokio::test]
+#[serial]
+async fn test_process_sms_web_chat_streaming_emits_tool_call_status() {
+    let state = create_test_state();
+    let params = TestUserParams::us_user(10.0, 5.0);
+    let user = create_test_user(&state, &params);
+
+    let payload = TwilioWebhookPayload {
+        from: user.phone_number.clone(),
+        to: "+18005551234".to_string(),
+        body: "Remind me to stretch at 9 AM".to_string(),
+        message_sid: "SM_guard_streaming_status".to_string(),
+        num_media: None,
+        media_url0: None,
+        media_content_type0: None,
+    };
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+    let mut options = ProcessSmsOptions::web_chat_streaming(tx, false);
+    options.mock_llm_response = Some(mock_set_reminder_tool_call().to_response());
+    options.mock_tool_responses = Some(HashMap::from([(
+        "set_reminder".to_string(),
+        "Reminder set for 9:00 AM.".to_string(),
+    )]));
+
+    let (status, _headers, response) = process_sms(&state, payload, options).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(response.message, "Reminder set for 9:00 AM.");
+
+    let mut saw_tool_call = false;
+    while let Ok(event) = rx.try_recv() {
+        if let ChatStatus::ToolCall { name } = event {
+            saw_tool_call = name == "set_reminder";
+        }
+    }
+
+    assert!(saw_tool_call, "expected set_reminder tool status");
+}
+
+#[tokio::test]
+#[serial]
+async fn test_process_sms_persists_user_and_assistant_messages() {
+    let state = create_test_state();
+    let params = TestUserParams::us_user(10.0, 5.0);
+    let user = create_test_user(&state, &params);
+
+    let payload = TwilioWebhookPayload {
+        from: user.phone_number.clone(),
+        to: "+18005551234".to_string(),
+        body: "Remember that I prefer concise replies".to_string(),
+        message_sid: "SM_guard_history".to_string(),
+        num_media: None,
+        media_url0: None,
+        media_content_type0: None,
+    };
+
+    let mock = MockLlmResponse::with_direct_response("Got it. I will keep replies concise.");
+    let options = ProcessSmsOptions::test_with_mock(mock.to_response());
+
+    let (status, _headers, response) = process_sms(&state, payload, options).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(response.message, "Got it. I will keep replies concise.");
+
+    let history = state
+        .user_repository
+        .get_conversation_history(user.id)
+        .expect("conversation history should load");
+
+    assert!(history.iter().any(|message| {
+        message.role == "user"
+            && message.encrypted_content == "Remember that I prefer concise replies"
+    }));
+    assert!(history.iter().any(|message| {
+        message.role == "assistant"
+            && message.encrypted_content == "Got it. I will keep replies concise."
+    }));
 }
 
 // ============================================================
