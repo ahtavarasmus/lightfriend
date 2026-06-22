@@ -14,7 +14,7 @@ pub fn privacy_policy() -> Html {
     html! {
         <div class="legal-content privacy-policy">
             <h1>{"Privacy Policy"}</h1>
-            <p class="last-updated">{"Last updated: May 1, 2026"}</p>
+            <p class="last-updated">{"Last updated: June 23, 2026"}</p>
 
             <section>
                 <h2>{"1. Overview"}</h2>
@@ -80,6 +80,7 @@ pub fn privacy_policy() -> Html {
                     <li><strong>{"AWS (Amazon Web Services, Inc. - US): "}</strong>{"Provides the Nitro Enclave sealed environment and hosting infrastructure. Isolation depends on Amazon's hardware and software."}</li>
                     <li><strong>{"Marlin (Marlin Protocol - decentralized): "}</strong>{"Key custody. Runs inside its own enclave. Open source."}</li>
                     <li><strong>{"Tinfoil (Tinfoil, Inc. - US): "}</strong>{"AI inference inside sealed environments with cryptographic attestation."}</li>
+                    <li><strong>{"NEAR AI (Jasnah Inc., d/b/a NEAR AI - US): "}</strong>{"Backup AI inference provider used when Tinfoil is unavailable or fails, so the Service can continue responding."}</li>
                     <li><strong>{"Twilio (Twilio, Inc. - US) and Sinch (Sinch AB - Sweden): "}</strong>{"SMS and voice delivery to your registered phone number. Message content is designed to be deleted from these providers after delivery. These providers act solely as carriers to transmit messages between you and the Service."}</li>
                     <li><strong>{"Stripe (Stripe, Inc. - US): "}</strong>{"Payment processing. We do not store credit card numbers. All payment data is handled by Stripe in accordance with PCI DSS standards."}</li>
                 </ul>
@@ -99,7 +100,7 @@ pub fn privacy_policy() -> Html {
                 <h2>{"9. AI Processing and Transparency"}</h2>
                 <p>{"Lightfriend uses artificial intelligence systems to process your messages and generate responses, summaries, and suggested actions. In accordance with the EU AI Act:"}</p>
                 <ul>
-                    <li>{"AI processing is performed by third-party large language models accessed through Tinfoil's sealed inference environment."}</li>
+                    <li>{"AI processing is performed by third-party large language models. Tinfoil is our primary AI inference provider. If Tinfoil is unavailable or fails, requests may be processed by NEAR AI as a backup provider to keep the Service available."}</li>
                     <li>{"AI-generated content is produced automatically. It may be inaccurate, incomplete, or inappropriate."}</li>
                     <li>{"No automated decision with legal or similarly significant effects is made without your involvement. All AI outputs are recommendations - you decide whether and how to act on them."}</li>
                     <li>{"Lightfriend does not review or endorse AI-generated content."}</li>
