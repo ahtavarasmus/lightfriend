@@ -16,6 +16,7 @@ thread_local! {
 
 use openai_api_rs::v1::chat_completion;
 
+mod agent_loop;
 mod assembly;
 mod early_flow;
 mod status;
@@ -25,24 +26,6 @@ mod tool_error_messages {
     /// Generic error shown to users when a tool fails
     pub const INTERNAL_ERROR: &str =
         "Sorry, we encountered an issue processing your request. Our team has been notified.";
-}
-
-/// Log a tool call error without exposing user content (privacy-safe)
-fn log_tool_error(
-    user_id: i32,
-    tool_name: &str,
-    category: &str,
-    error_type: &str,
-    error_msg: &str,
-) {
-    tracing::error!(
-        user_id = user_id,
-        tool_name = tool_name,
-        error_category = category,
-        error_type = error_type,
-        "Tool execution failed: {}",
-        error_msg
-    );
 }
 
 /// LLM call through the central AI gateway, used by the agentic loop.
@@ -105,6 +88,11 @@ pub enum SmsResult {
     SystemError { log_msg: String },
     /// Cancel command received - don't charge
     Cancelled { message: String },
+    /// A tool produced a fully-formed HTTP response.
+    RawResponse {
+        response: TwilioResponse,
+        status: StatusCode,
+    },
 }
 
 impl SmsResult {
@@ -147,6 +135,7 @@ impl SmsResult {
                     created_item_id: None,
                 }),
             ),
+            SmsResult::RawResponse { response, status } => (status, headers, axum::Json(response)),
         }
     }
 
@@ -308,9 +297,7 @@ impl ProcessSmsOptions {
     pub fn web_chat() -> Self {
         Self {
             channel: MessageChannel::WebChat,
-            mock_llm_response: None,
-            status_tx: None,
-            mock_tool_responses: None,
+            ..Self::default()
         }
     }
 
@@ -318,9 +305,8 @@ impl ProcessSmsOptions {
     pub fn web_chat_streaming(tx: tokio::sync::mpsc::Sender<ChatStatus>) -> Self {
         Self {
             channel: MessageChannel::WebChat,
-            mock_llm_response: None,
             status_tx: Some(tx),
-            mock_tool_responses: None,
+            ..Self::default()
         }
     }
 
@@ -331,8 +317,7 @@ impl ProcessSmsOptions {
         Self {
             channel: MessageChannel::WebChat,
             mock_llm_response: Some(mock_response),
-            status_tx: None,
-            mock_tool_responses: None,
+            ..Self::default()
         }
     }
 
@@ -682,345 +667,41 @@ pub async fn process_sms(
     let image_url = agent_input.image_url;
     let tools = agent_input.tools;
     let completion_messages = agent_input.completion_messages;
-    let mut active_provider = AiProvider::Tinfoil;
-    let mut sticky_provider: Option<AiProvider> = None;
 
     // Bridge channel: forward raw reasoning strings as ChatStatus::Reasoning events.
     // Only created for the web chat SSE path (when status_tx exists).
     let reasoning_tx = status::spawn_reasoning_bridge(options.status_tx.as_ref());
 
-    // Terminal tools: produce final response, break the loop without going back to LLM
-    let terminal_tools = ["set_reminder"];
+    let mut mock_llm_response = options.mock_llm_response.take();
+    let mock_tool_responses = options.mock_tool_responses.take();
+    let agent_loop_output = match agent_loop::run_agent_loop(agent_loop::AgentLoopInput {
+        state,
+        user: &user,
+        model_purpose: ctx.model_purpose,
+        user_given_info: &user_given_info,
+        image_url: image_url.as_deref(),
+        tools: &tools,
+        completion_messages,
+        channel: options.channel,
+        reasoning_tx: &reasoning_tx,
+        status_tx: options.status_tx.as_ref(),
+        mock_llm_response: &mut mock_llm_response,
+        mock_tool_responses: &mock_tool_responses,
+        current_time: ctx.current_time_unix,
+    })
+    .await
+    {
+        Ok(output) => output,
+        Err(result) => return result.into_response(),
+    };
 
-    let mut fail = false;
-    let mut tool_answers: HashMap<String, String> = HashMap::new();
-    let mut created_item_id: Option<i32> = None;
-    let mut loop_messages = completion_messages.clone();
-
-    const MAX_ROUNDS: u32 = 5;
-    let mut final_response = String::new();
-
-    'agentic: for round in 0..MAX_ROUNDS {
-        tracing::debug!("Agentic loop round {}/{}", round + 1, MAX_ROUNDS);
-
-        // Use mock response if provided (for testing, first round only)
-        let result = if round == 0 {
-            if let Some(mock_response) = options.mock_llm_response.take() {
-                tracing::debug!("Using mock LLM response for testing");
-                mock_response
-            } else {
-                options.emit_status(ChatStatus::Thinking);
-                match llm_call_with_gateway(
-                    state,
-                    ctx.model_purpose,
-                    &loop_messages,
-                    &tools,
-                    &reasoning_tx,
-                    user.id,
-                    sticky_provider,
-                )
-                .await
-                {
-                    Ok(r) => {
-                        active_provider = r.provider;
-                        if r.fallback_from.is_some() || sticky_provider.is_some() {
-                            sticky_provider = Some(r.provider);
-                        }
-                        r.response
-                    }
-                    Err(log_msg) => {
-                        return SmsResult::SystemError { log_msg }.into_response();
-                    }
-                }
-            }
-        } else {
-            options.emit_status(ChatStatus::Thinking);
-            match llm_call_with_gateway(
-                state,
-                ctx.model_purpose,
-                &loop_messages,
-                &tools,
-                &reasoning_tx,
-                user.id,
-                sticky_provider,
-            )
-            .await
-            {
-                Ok(r) => {
-                    active_provider = r.provider;
-                    if r.fallback_from.is_some() || sticky_provider.is_some() {
-                        sticky_provider = Some(r.provider);
-                    }
-                    r.response
-                }
-                Err(log_msg) => {
-                    return SmsResult::SystemError { log_msg }.into_response();
-                }
-            }
-        };
-
-        match result.choices[0].finish_reason {
-            None | Some(chat_completion::FinishReason::stop) => {
-                tracing::debug!("Model provided direct response (no tool calls)");
-                final_response = result.choices[0]
-                    .message
-                    .content
-                    .clone()
-                    .unwrap_or_default();
-                break 'agentic;
-            }
-            Some(chat_completion::FinishReason::length) => {
-                fail = true;
-                final_response = "I apologize, but my response was too long. Could you please ask your question in a more specific way? (you were not charged for this message)".to_string();
-                break 'agentic;
-            }
-            Some(chat_completion::FinishReason::content_filter) => {
-                fail = true;
-                final_response = "I apologize, but I cannot provide an answer to that question due to content restrictions. (you were not charged for this message)".to_string();
-                break 'agentic;
-            }
-            Some(chat_completion::FinishReason::null) => {
-                fail = true;
-                final_response = "I apologize, but something went wrong while processing your request. (you were not charged for this message)".to_string();
-                break 'agentic;
-            }
-            Some(chat_completion::FinishReason::tool_calls) => {
-                tracing::debug!("Model requested tool calls (round {})", round + 1);
-
-                let tool_calls = match result.choices[0].message.tool_calls.as_ref() {
-                    Some(calls) => {
-                        tracing::debug!("Found {} tool call(s) in response", calls.len());
-                        calls
-                    }
-                    None => {
-                        tracing::error!(
-                            "No tool calls found in response despite tool_calls finish reason"
-                        );
-                        return SmsResult::SystemError {
-                            log_msg:
-                                "No tool calls found in response despite tool_calls finish reason"
-                                    .to_string(),
-                        }
-                        .into_response();
-                    }
-                };
-
-                // Add assistant message with tool calls to loop messages
-                loop_messages.push(chat_completion::ChatCompletionMessage {
-                    role: chat_completion::MessageRole::assistant,
-                    content: chat_completion::Content::Text(
-                        result.choices[0]
-                            .message
-                            .content
-                            .clone()
-                            .unwrap_or_default(),
-                    ),
-                    name: None,
-                    tool_calls: result.choices[0].message.tool_calls.clone(),
-                    tool_call_id: None,
-                });
-
-                let mut round_answers: HashMap<String, String> = HashMap::new();
-
-                for tool_call in tool_calls {
-                    let tool_call_id = tool_call.id.clone();
-                    tracing::debug!(
-                        "Processing tool call: {:?} with id: {:?}",
-                        tool_call,
-                        tool_call_id
-                    );
-                    let name = match &tool_call.function.name {
-                        Some(n) => {
-                            tracing::debug!("Tool call function name: {}", n);
-                            options.emit_status(ChatStatus::ToolCall { name: n.clone() });
-                            n
-                        }
-                        None => {
-                            log_tool_error(
-                                user.id,
-                                "unknown",
-                                "llm_malformed",
-                                "missing_function_name",
-                                "Tool call missing function name",
-                            );
-                            return SmsResult::SystemError {
-                                log_msg: "Tool call missing function name".to_string(),
-                            }
-                            .into_response();
-                        }
-                    };
-
-                    let arguments = match &tool_call.function.arguments {
-                        Some(args) => args,
-                        None => {
-                            log_tool_error(
-                                user.id,
-                                name,
-                                "llm_malformed",
-                                "missing_arguments",
-                                "Tool call missing arguments",
-                            );
-                            return SmsResult::SystemError {
-                                log_msg: format!("Tool call {} missing arguments", name),
-                            }
-                            .into_response();
-                        }
-                    };
-
-                    // Mock tool responses for testing
-                    if let Some(ref mock_map) = options.mock_tool_responses {
-                        if let Some(mock_result) = mock_map.get(name) {
-                            tracing::debug!("Using mock response for tool: {}", name);
-                            round_answers.insert(tool_call_id.clone(), mock_result.clone());
-
-                            if terminal_tools.contains(&name.as_str()) {
-                                final_response = mock_result.clone();
-                                tool_answers.extend(round_answers);
-                                break 'agentic;
-                            }
-                            continue;
-                        }
-                    }
-
-                    // Dispatch via shared agent_core
-                    let extras = crate::agent_core::ToolDispatchExtras {
-                        tools: &tools,
-                        completion_messages: &loop_messages,
-                        assistant_content: result.choices[0].message.content.as_deref(),
-                        tool_call: Some(tool_call),
-                        image_url: image_url.as_deref(),
-                        skip_sms: !options.channel.sends_sms(),
-                    };
-                    let dispatch_result = crate::agent_core::dispatch_tool(
-                        state,
-                        &user,
-                        name,
-                        arguments,
-                        &tool_call_id,
-                        &user_given_info,
-                        current_time,
-                        Some(extras),
-                    )
-                    .await;
-
-                    match dispatch_result {
-                        crate::agent_core::ToolDispatchResult::Answer(answer) => {
-                            if terminal_tools.contains(&name.as_str()) {
-                                final_response = answer.clone();
-                                round_answers.insert(tool_call_id, answer);
-                                tool_answers.extend(round_answers);
-                                break 'agentic;
-                            }
-                            round_answers.insert(tool_call_id, answer);
-                        }
-                        crate::agent_core::ToolDispatchResult::AnswerWithTask {
-                            answer,
-                            task_id,
-                        } => {
-                            created_item_id = Some(task_id);
-                            final_response = answer.clone();
-                            round_answers.insert(tool_call_id, answer);
-                            tool_answers.extend(round_answers);
-                            break 'agentic;
-                        }
-                        crate::agent_core::ToolDispatchResult::EarlyReturn { response, status } => {
-                            let headers = [(axum::http::header::CONTENT_TYPE, "application/json")];
-                            return (status, headers, Json(response));
-                        }
-                        crate::agent_core::ToolDispatchResult::SubscriptionRequired(msg) => {
-                            tracing::info!(
-                                "Attempted to use subscription-only tool {} without proper subscription",
-                                name
-                            );
-                            round_answers.insert(tool_call_id, msg);
-                        }
-                        crate::agent_core::ToolDispatchResult::Unknown(msg) => {
-                            tracing::error!("Unknown tool called: {}", name);
-                            return (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                Json(TwilioResponse {
-                                    message: msg,
-                                    created_item_id: None,
-                                }),
-                            );
-                        }
-                        crate::agent_core::ToolDispatchResult::Error(e) => {
-                            log_tool_error(user.id, name, "execution", "handler_error", &e);
-                            let user_facing_msg = if e.contains("plan")
-                                || e.contains("feature")
-                                || e.contains("upgrade")
-                                || e.contains("Autopilot")
-                            {
-                                e
-                            } else {
-                                tool_error_messages::INTERNAL_ERROR.to_string()
-                            };
-                            round_answers.insert(tool_call_id, user_facing_msg.clone());
-                            if terminal_tools.contains(&name.as_str()) {
-                                final_response = user_facing_msg;
-                                tool_answers.extend(round_answers);
-                                break 'agentic;
-                            }
-                        }
-                    }
-                }
-
-                // Store tool responses in history and add to loop messages
-                let hist_time = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i32;
-
-                for tool_call in tool_calls {
-                    let answer = round_answers
-                        .get(&tool_call.id)
-                        .cloned()
-                        .unwrap_or_default();
-
-                    // Store in history
-                    let tool_message = crate::pg_models::NewPgMessageHistory {
-                        user_id: user.id,
-                        role: "tool".to_string(),
-                        encrypted_content: answer.clone(),
-                        tool_name: tool_call.function.name.clone(),
-                        tool_call_id: Some(tool_call.id.clone()),
-                        tool_calls_json: None,
-                        created_at: hist_time + 1,
-                        conversation_id: "".to_string(),
-                    };
-                    if let Err(e) = state.user_repository.create_message_history(&tool_message) {
-                        tracing::error!("Failed to store tool response in history: {}", e);
-                    }
-
-                    // Add to loop messages for next round
-                    loop_messages.push(chat_completion::ChatCompletionMessage {
-                        role: chat_completion::MessageRole::tool,
-                        content: chat_completion::Content::Text(answer),
-                        name: None,
-                        tool_calls: None,
-                        tool_call_id: Some(tool_call.id.clone()),
-                    });
-                }
-
-                tool_answers.extend(round_answers);
-                // Loop continues to next round
-            }
-        }
-    }
-
-    // If loop exhausted without a final response, use last tool answer
-    if final_response.is_empty() && !tool_answers.is_empty() {
-        tracing::warn!(
-            "Agentic loop exhausted {} rounds without terminal tool",
-            MAX_ROUNDS
-        );
-        final_response = tool_answers.values().last().cloned().unwrap_or_else(|| {
-            "I was unable to complete your request. Please try again.".to_string()
-        });
-    } else if final_response.is_empty() {
-        final_response = "I was unable to process your request. Please try again.".to_string();
-    }
+    let mut active_provider = agent_loop_output.active_provider;
+    let mut sticky_provider = agent_loop_output.sticky_provider;
+    let final_response = agent_loop_output.final_response;
+    let fail = agent_loop_output.fail;
+    let tool_answers = agent_loop_output.tool_answers;
+    let mut loop_messages = agent_loop_output.loop_messages;
+    let created_item_id = agent_loop_output.created_item_id;
 
     // Extract any [MEDIA_RESULTS] from tool answers and append to response
     // This ensures media results are passed through even if AI doesn't include them
