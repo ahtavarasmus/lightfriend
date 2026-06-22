@@ -19,6 +19,7 @@ use openai_api_rs::v1::chat_completion;
 mod assembly;
 
 mod early_flow;
+mod status;
 
 /// Error messages for tool call failures - privacy-safe, user-facing
 mod tool_error_messages {
@@ -709,19 +710,7 @@ pub async fn process_sms(
 
     // Bridge channel: forward raw reasoning strings as ChatStatus::Reasoning events.
     // Only created for the web chat SSE path (when status_tx exists).
-    let reasoning_tx: Option<tokio::sync::mpsc::Sender<String>> =
-        if let Some(ref status_tx) = options.status_tx {
-            let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(32);
-            let status_tx = status_tx.clone();
-            tokio::spawn(async move {
-                while let Some(snippet) = rx.recv().await {
-                    let _ = status_tx.send(ChatStatus::Reasoning { snippet }).await;
-                }
-            });
-            Some(tx)
-        } else {
-            None
-        };
+    let reasoning_tx = status::spawn_reasoning_bridge(options.status_tx.as_ref());
 
     // Terminal tools: produce final response, break the loop without going back to LLM
     let terminal_tools = ["set_reminder"];
