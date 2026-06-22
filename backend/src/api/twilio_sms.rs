@@ -249,16 +249,11 @@ pub enum ChatStatus {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MessageChannel {
+    #[default]
     Sms,
     WebChat,
-}
-
-impl Default for MessageChannel {
-    fn default() -> Self {
-        Self::Sms
-    }
 }
 
 impl MessageChannel {
