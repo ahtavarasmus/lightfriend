@@ -42,7 +42,7 @@ pub(super) async fn run_agent_loop(
     let mut fail = false;
     let mut tool_answers: HashMap<String, String> = HashMap::new();
     let mut created_item_id: Option<i32> = None;
-    let mut loop_messages = input.completion_messages;
+    let mut loop_messages = std::mem::take(&mut input.completion_messages);
     let mut final_response = String::new();
 
     'agentic: for round in 0..MAX_ROUNDS {
