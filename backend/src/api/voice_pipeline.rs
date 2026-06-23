@@ -1253,6 +1253,7 @@ struct OpenAiRealtimeInit {
     tools: Vec<serde_json::Value>,
     user: crate::models::user_models::User,
     user_given_info: String,
+    voice: String,
 }
 
 struct OpenAiReaderSession {
@@ -1265,8 +1266,23 @@ fn openai_realtime_model() -> String {
     std::env::var("OPENAI_REALTIME_MODEL").unwrap_or_else(|_| "gpt-realtime-2".to_string())
 }
 
-fn openai_realtime_voice() -> String {
-    std::env::var("OPENAI_REALTIME_VOICE").unwrap_or_else(|_| "marin".to_string())
+const OPENAI_REALTIME_VOICES: &[&str] = &[
+    "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar",
+];
+const DEFAULT_OPENAI_REALTIME_VOICE: &str = "marin";
+
+fn normalize_openai_realtime_voice(voice: &str) -> String {
+    if OPENAI_REALTIME_VOICES.contains(&voice) {
+        voice.to_string()
+    } else {
+        DEFAULT_OPENAI_REALTIME_VOICE.to_string()
+    }
+}
+
+fn default_openai_realtime_voice() -> String {
+    std::env::var("OPENAI_REALTIME_VOICE")
+        .map(|voice| normalize_openai_realtime_voice(&voice))
+        .unwrap_or_else(|_| DEFAULT_OPENAI_REALTIME_VOICE.to_string())
 }
 
 fn openai_realtime_reasoning_effort() -> String {
@@ -1329,12 +1345,18 @@ async fn init_openai_realtime(
         .collect();
 
     let user_given_info = ctx.user_given_info.clone().unwrap_or_default();
+    let voice = ctx
+        .user_settings
+        .as_ref()
+        .map(|settings| normalize_openai_realtime_voice(&settings.openai_realtime_voice))
+        .unwrap_or_else(default_openai_realtime_voice);
 
     Ok(OpenAiRealtimeInit {
         instructions,
         tools,
         user: ctx.user.clone(),
         user_given_info,
+        voice,
     })
 }
 
@@ -1374,7 +1396,7 @@ fn openai_session_update(
                 },
                 "output": {
                     "format": output_format,
-                    "voice": openai_realtime_voice()
+                    "voice": init.voice.clone()
                 }
             },
             "reasoning": {

@@ -58,6 +58,7 @@ pub struct UserProfile {
     pub phone_service_active: Option<bool>,
     pub llm_provider: Option<String>,
     pub voice_provider: String,
+    pub openai_realtime_voice: String,
     pub auto_create_items: Option<bool>,
     pub system_important_notify: Option<bool>,
     pub has_any_connection: bool,

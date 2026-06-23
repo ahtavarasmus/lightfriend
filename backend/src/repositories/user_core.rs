@@ -14,6 +14,9 @@ use diesel::sql_types::BigInt;
 use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+const DEFAULT_VOICE_PROVIDER: &str = "openai_realtime";
+const DEFAULT_OPENAI_REALTIME_VOICE: &str = "marin";
+
 /// Hash a magic token with SHA-256 so that only the digest is stored in the database,
 /// not the raw token that appears in the email link.
 fn hash_magic_token(token: &str) -> String {
@@ -122,6 +125,7 @@ pub trait UserCoreOps: Send + Sync {
     fn get_llm_provider(&self, user_id: i32) -> Result<Option<String>, DieselError>;
     fn update_voice_provider(&self, user_id: i32, provider: &str) -> Result<(), DieselError>;
     fn get_voice_provider(&self, user_id: i32) -> Result<String, DieselError>;
+    fn update_openai_realtime_voice(&self, user_id: i32, voice: &str) -> Result<(), DieselError>;
 
     // Phone service
     fn update_phone_service_active(&self, user_id: i32, active: bool) -> Result<(), DieselError>;
@@ -521,6 +525,8 @@ impl UserCoreOps for UserCore {
                     sub_country: None,
                     critical_enabled: Some("sms".to_string()),
                     notify_about_calls: true,
+                    voice_provider: DEFAULT_VOICE_PROVIDER.to_string(),
+                    openai_realtime_voice: DEFAULT_OPENAI_REALTIME_VOICE.to_string(),
                 };
 
                 diesel::insert_into(user_settings::table)
@@ -664,6 +670,8 @@ impl UserCoreOps for UserCore {
                 sub_country: None,
                 critical_enabled: Some("sms".to_string()),
                 notify_about_calls: true,
+                voice_provider: DEFAULT_VOICE_PROVIDER.to_string(),
+                openai_realtime_voice: DEFAULT_OPENAI_REALTIME_VOICE.to_string(),
             };
 
             diesel::insert_into(user_settings::table)
@@ -964,6 +972,15 @@ impl UserCoreOps for UserCore {
         Ok(result)
     }
 
+    fn update_openai_realtime_voice(&self, user_id: i32, voice: &str) -> Result<(), DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        self.ensure_user_settings_exist(user_id)?;
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set(user_settings::openai_realtime_voice.eq(voice))
+            .execute(&mut pg_conn)?;
+        Ok(())
+    }
+
     fn update_notification_type(
         &self,
         user_id: i32,
@@ -1072,6 +1089,8 @@ impl UserCoreOps for UserCore {
                     sub_country: None,
                     critical_enabled: Some("sms".to_string()),
                     notify_about_calls: true,
+                    voice_provider: DEFAULT_VOICE_PROVIDER.to_string(),
+                    openai_realtime_voice: DEFAULT_OPENAI_REALTIME_VOICE.to_string(),
                 };
                 diesel::insert_into(user_settings::table)
                     .values(&new_settings)

@@ -17,9 +17,33 @@ const MAX_NICKNAME_LENGTH: usize = 30;
 const MAX_INFO_LENGTH: usize = 500;
 const BYOT_NUMBER_OPTION: &str = "__byot";
 const DEFAULT_VOICE_PROVIDER: &str = "openai_realtime";
+const DEFAULT_OPENAI_REALTIME_VOICE: &str = "marin";
+const OPENAI_REALTIME_VOICE_OPTIONS: &[(&str, &str)] = &[
+    ("marin", "Marin - natural, balanced, clear (recommended)"),
+    ("cedar", "Cedar - deepest, warm, grounded (recommended)"),
+    ("alloy", "Alloy - neutral, even, midrange"),
+    ("ash", "Ash - lower, calm, clear"),
+    ("ballad", "Ballad - expressive, measured, warm"),
+    ("coral", "Coral - bright, friendly, lively"),
+    ("echo", "Echo - lower, crisp, direct"),
+    ("sage", "Sage - soft, thoughtful, relaxed"),
+    ("shimmer", "Shimmer - light, upbeat, airy"),
+    ("verse", "Verse - smooth, conversational, polished"),
+];
 
 fn normalize_voice_provider(_provider: &str) -> String {
     DEFAULT_VOICE_PROVIDER.to_string()
+}
+
+fn normalize_openai_realtime_voice(voice: &str) -> String {
+    if OPENAI_REALTIME_VOICE_OPTIONS
+        .iter()
+        .any(|(value, _)| *value == voice)
+    {
+        voice.to_string()
+    } else {
+        DEFAULT_OPENAI_REALTIME_VOICE.to_string()
+    }
 }
 
 // Request for patching individual fields
@@ -255,6 +279,8 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let phone_service_active = use_state(|| (*user_profile).phone_service_active.unwrap_or(true));
     let agent_language = use_state(|| (*user_profile).agent_language.clone());
     let voice_provider = use_state(|| normalize_voice_provider(&(*user_profile).voice_provider));
+    let openai_realtime_voice =
+        use_state(|| normalize_openai_realtime_voice(&(*user_profile).openai_realtime_voice));
     let notification_type = use_state(|| {
         (*user_profile)
             .notification_type
@@ -326,6 +352,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let phone_service_active_save_state = use_state(|| FieldSaveState::Idle);
     let agent_language_save_state = use_state(|| FieldSaveState::Idle);
     let voice_provider_save_state = use_state(|| FieldSaveState::Idle);
+    let openai_realtime_voice_save_state = use_state(|| FieldSaveState::Idle);
     let notification_type_save_state = use_state(|| FieldSaveState::Idle);
     let feature_updates_save_state = use_state(|| FieldSaveState::Idle);
     let auto_create_items_save_state = use_state(|| FieldSaveState::Idle);
@@ -376,6 +403,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let user_profile_state = user_profile.clone();
         let agent_language = agent_language.clone();
         let voice_provider = voice_provider.clone();
+        let openai_realtime_voice = openai_realtime_voice.clone();
         let notification_type = notification_type.clone();
         let preferred_sending_number_eff = preferred_sending_number.clone();
         let selected_lightfriend_number_eff = selected_lightfriend_number.clone();
@@ -424,6 +452,9 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 accountability_friend_name_original_eff.set(name_val);
                 agent_language.set(props_profile.agent_language.clone());
                 voice_provider.set(normalize_voice_provider(&props_profile.voice_provider));
+                openai_realtime_voice.set(normalize_openai_realtime_voice(
+                    &props_profile.openai_realtime_voice,
+                ));
                 notification_type.set(props_profile.notification_type.clone());
                 let preferred = props_profile.preferred_number.clone().unwrap_or_default();
                 preferred_sending_number_eff.set(preferred.clone());
@@ -1087,6 +1118,62 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     .to_string()
                             } else {
                                 "Failed to save".to_string()
+                            };
+                        save_state.set(FieldSaveState::Error(error_msg));
+                    }
+                    Err(_) => {
+                        save_state.set(FieldSaveState::Error("Network error".to_string()));
+                    }
+                }
+            });
+        })
+    };
+
+    let on_openai_realtime_voice_change = {
+        let openai_realtime_voice = openai_realtime_voice.clone();
+        let save_state = openai_realtime_voice_save_state.clone();
+        let user_profile = user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |e: Event| {
+            let select_el: HtmlSelectElement = e.target_unchecked_into();
+            let new_val = normalize_openai_realtime_voice(&select_el.value());
+            openai_realtime_voice.set(new_val.clone());
+            let save_state = save_state.clone();
+            let user_profile = user_profile.clone();
+            let on_profile_update = on_profile_update.clone();
+            save_state.set(FieldSaveState::Saving);
+            spawn_local(async move {
+                let request = PatchFieldRequest {
+                    field: "openai_realtime_voice".to_string(),
+                    value: serde_json::Value::String(new_val.clone()),
+                };
+                match Api::patch("/api/profile/field")
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    Ok(response) if response.ok() => {
+                        let mut profile = (*user_profile).clone();
+                        profile.openai_realtime_voice = new_val;
+                        on_profile_update.emit(profile);
+                        save_state.set(FieldSaveState::Success);
+                        let save_state_clone = save_state.clone();
+                        spawn_local(async move {
+                            gloo_timers::future::TimeoutFuture::new(3_000).await;
+                            save_state_clone.set(FieldSaveState::Idle);
+                        });
+                    }
+                    Ok(response) => {
+                        let error_msg =
+                            if let Ok(error_json) = response.json::<serde_json::Value>().await {
+                                error_json
+                                    .get("error")
+                                    .and_then(|e| e.as_str())
+                                    .unwrap_or("Failed to save voice")
+                                    .to_string()
+                            } else {
+                                "Failed to save voice".to_string()
                             };
                         save_state.set(FieldSaveState::Error(error_msg));
                     }
@@ -2878,6 +2965,35 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     {render_save_indicator(&*voice_provider_save_state)}
                 </div>
             </div>
+
+            {if *voice_provider == DEFAULT_VOICE_PROVIDER {
+                html! {
+                    <div class="profile-field">
+                        <div class="field-label-group">
+                            <span class="field-label">{"Voice"}</span>
+                        </div>
+                        <div class="field-input-container">
+                            <select
+                                class="profile-input"
+                                value={(*openai_realtime_voice).clone()}
+                                onchange={on_openai_realtime_voice_change.clone()}
+                            >
+                                {for OPENAI_REALTIME_VOICE_OPTIONS.iter().map(|(value, label)| html! {
+                                    <option
+                                        value={(*value).to_string()}
+                                        selected={(*openai_realtime_voice).as_str() == *value}
+                                    >
+                                        {*label}
+                                    </option>
+                                })}
+                            </select>
+                            {render_save_indicator(&*openai_realtime_voice_save_state)}
+                        </div>
+                    </div>
+                }
+            } else {
+                html! {}
+            }}
 
             // Notification Type field
             <div class="profile-field">

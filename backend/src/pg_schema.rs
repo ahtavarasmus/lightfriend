@@ -276,6 +276,7 @@ diesel::table! {
         auto_track_items_system -> Bool,
         auto_confirm_tracked_items -> Bool,
         voice_provider -> Text,
+        openai_realtime_voice -> Text,
     }
 }
 

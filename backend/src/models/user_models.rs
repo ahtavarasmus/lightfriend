@@ -79,6 +79,7 @@ pub struct UserSettings {
     pub auto_track_items_system: bool,
     pub auto_confirm_tracked_items: bool,
     pub voice_provider: String,
+    pub openai_realtime_voice: String,
 }
 
 #[derive(Insertable)]
@@ -92,6 +93,8 @@ pub struct NewUserSettings {
     pub sub_country: Option<String>,
     pub critical_enabled: Option<String>,
     pub notify_about_calls: bool,
+    pub voice_provider: String,
+    pub openai_realtime_voice: String,
 }
 
 #[derive(Queryable, Selectable, Debug, Clone)]

@@ -749,6 +749,7 @@ pub mod mock_user_core {
         pub phone_service_active: Mutex<HashMap<i32, bool>>,
         pub llm_provider: Mutex<HashMap<i32, String>>,
         pub voice_provider: Mutex<HashMap<i32, String>>,
+        pub openai_realtime_voice: Mutex<HashMap<i32, String>>,
 
         // Error injection
         pub find_by_id_error: Mutex<Option<DieselError>>,
@@ -774,6 +775,7 @@ pub mod mock_user_core {
                 phone_service_active: Mutex::new(HashMap::new()),
                 llm_provider: Mutex::new(HashMap::new()),
                 voice_provider: Mutex::new(HashMap::new()),
+                openai_realtime_voice: Mutex::new(HashMap::new()),
                 find_by_id_error: Mutex::new(None),
                 find_by_phone_error: Mutex::new(None),
             }
@@ -1065,6 +1067,18 @@ pub mod mock_user_core {
                 .get(&user_id)
                 .cloned()
                 .unwrap_or_else(|| "openai_realtime".to_string()))
+        }
+
+        fn update_openai_realtime_voice(
+            &self,
+            user_id: i32,
+            voice: &str,
+        ) -> Result<(), DieselError> {
+            self.openai_realtime_voice
+                .lock()
+                .unwrap()
+                .insert(user_id, voice.to_string());
+            Ok(())
         }
 
         fn update_phone_service_active(
