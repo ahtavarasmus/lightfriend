@@ -821,6 +821,15 @@ pub async fn get_valid_tesla_access_token(
 // Get partner authentication token (for app-level operations like registration)
 // Uses client_credentials grant instead of authorization_code
 pub async fn get_partner_access_token() -> Result<String, Box<dyn std::error::Error>> {
+    let audience_url = std::env::var("TESLA_API_BASE")
+        .unwrap_or_else(|_| "https://fleet-api.prd.eu.vn.cloud.tesla.com".to_string());
+
+    get_partner_access_token_for_audience(&audience_url).await
+}
+
+pub async fn get_partner_access_token_for_audience(
+    audience_url: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
     info!("Requesting Tesla partner authentication token");
 
     let http_client = reqwest::ClientBuilder::new()
@@ -832,8 +841,6 @@ pub async fn get_partner_access_token() -> Result<String, Box<dyn std::error::Er
         .unwrap_or_else(|_| "default-tesla-client-id-for-testing".to_string());
     let client_secret = std::env::var("TESLA_CLIENT_SECRET")
         .unwrap_or_else(|_| "default-tesla-secret-for-testing".to_string());
-    let audience_url = std::env::var("TESLA_API_BASE")
-        .unwrap_or_else(|_| "https://fleet-api.prd.eu.vn.cloud.tesla.com".to_string());
 
     // Partner token uses client_credentials grant (no user authorization)
     let token_params = [
@@ -844,7 +851,7 @@ pub async fn get_partner_access_token() -> Result<String, Box<dyn std::error::Er
             "scope",
             "openid vehicle_device_data vehicle_cmds vehicle_charging_cmds",
         ),
-        ("audience", &audience_url),
+        ("audience", audience_url),
     ];
 
     let token_response = http_client
@@ -866,7 +873,10 @@ pub async fn get_partner_access_token() -> Result<String, Box<dyn std::error::Er
         .ok_or("No access token in partner token response")?
         .to_string();
 
-    info!("Successfully obtained Tesla partner authentication token");
+    info!(
+        "Successfully obtained Tesla partner authentication token for audience {}",
+        audience_url
+    );
     Ok(access_token)
 }
 
@@ -920,16 +930,12 @@ pub async fn get_virtual_key_link(
     // Get domain from environment variable and strip protocol
     // Use TESLA_REDIRECT_URL for the virtual key pairing link (e.g., lightfriend.app)
     // This should be the domain registered with Tesla for key pairing
-    let domain = std::env::var("TESLA_REDIRECT_URL")
+    let domain_url = std::env::var("TESLA_REDIRECT_URL")
         .or_else(|_| std::env::var("SERVER_URL"))
         .or_else(|_| std::env::var("SERVER_URL_OAUTH"))
         .unwrap_or_else(|_| "localhost:3000".to_string());
 
-    // Remove protocol (https:// or http://) if present
-    let domain = domain
-        .trim_start_matches("https://")
-        .trim_start_matches("http://")
-        .to_string();
+    let domain = crate::api::tesla::normalize_tesla_partner_domain(&domain_url);
 
     // Generate the Tesla virtual key pairing link
     // Add VIN parameter if provided for vehicle-specific pairing

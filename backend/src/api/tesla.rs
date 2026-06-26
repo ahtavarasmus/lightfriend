@@ -164,23 +164,19 @@ impl TeslaClient {
     // Register the app in the current region (required by Tesla)
     // This requires a partner authentication token, not a user token
     pub async fn register_in_region(&self) -> Result<bool, Box<dyn Error>> {
-        use crate::handlers::tesla_auth::get_partner_access_token;
+        use crate::handlers::tesla_auth::get_partner_access_token_for_audience;
 
-        // Get partner token (app-level authentication)
-        let partner_token = get_partner_access_token().await?;
+        // Get partner token (app-level authentication). The token audience must
+        // match the region being registered.
+        let partner_token = get_partner_access_token_for_audience(&self.base_url).await?;
 
         // Get domain from environment variable and strip protocol
         // Use TESLA_REDIRECT_URL for registration (must match the domain used in virtual key pairing)
-        let domain = std::env::var("TESLA_REDIRECT_URL")
+        let domain_url = std::env::var("TESLA_REDIRECT_URL")
             .or_else(|_| std::env::var("SERVER_URL"))
             .or_else(|_| std::env::var("SERVER_URL_OAUTH"))
             .unwrap_or_else(|_| "localhost:3000".to_string());
-
-        // Remove protocol (https:// or http://) if present
-        let domain = domain
-            .trim_start_matches("https://")
-            .trim_start_matches("http://")
-            .to_string();
+        let domain = normalize_tesla_partner_domain(&domain_url);
 
         let url = format!("{}/api/1/partner_accounts", self.base_url);
 
@@ -189,6 +185,8 @@ impl TeslaClient {
             self.base_url,
             domain
         );
+
+        self.refresh_public_key_cache(&partner_token, &domain).await;
 
         // Tesla requires domain in the request body
         let body = serde_json::json!({
@@ -218,6 +216,50 @@ impl TeslaClient {
         } else {
             tracing::error!("Failed to register app: {}", response_text);
             Err(format!("Registration failed: {}", response_text).into())
+        }
+    }
+
+    async fn refresh_public_key_cache(&self, partner_token: &str, domain: &str) {
+        let url = format!(
+            "{}/api/1/partner_accounts/public_key?domain={}",
+            self.base_url,
+            urlencoding::encode(domain)
+        );
+
+        match self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", partner_token))
+            .send()
+            .await
+        {
+            Ok(response) => {
+                let status = response.status();
+                let body = response.text().await.unwrap_or_default();
+                if status.is_success() {
+                    tracing::info!(
+                        "Tesla partner public key cache refreshed in {} for domain {}",
+                        self.base_url,
+                        domain
+                    );
+                } else {
+                    tracing::warn!(
+                        "Tesla partner public key refresh endpoint returned {} in {} for domain {}: {}",
+                        status,
+                        self.base_url,
+                        domain,
+                        truncate_for_log(&body, 400)
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Tesla partner public key refresh request failed in {} for domain {}: {}",
+                    self.base_url,
+                    domain,
+                    e
+                );
+            }
         }
     }
 
@@ -972,5 +1014,27 @@ impl TeslaClient {
                 }
             }
         }
+    }
+}
+
+pub fn normalize_tesla_partner_domain(url_or_domain: &str) -> String {
+    url_or_domain
+        .trim()
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_end_matches('/')
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .to_string()
+}
+
+fn truncate_for_log(value: &str, max_chars: usize) -> String {
+    let mut iter = value.chars();
+    let truncated: String = iter.by_ref().take(max_chars).collect();
+    if iter.next().is_some() {
+        format!("{}...", truncated)
+    } else {
+        truncated
     }
 }

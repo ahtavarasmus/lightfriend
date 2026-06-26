@@ -7,6 +7,36 @@ use backend::{
 use std::time::Duration;
 
 // ============================================================
+// Pure Function Tests: Tesla partner domain normalization
+// ============================================================
+
+#[test]
+fn test_normalize_tesla_partner_domain_from_https_url() {
+    assert_eq!(
+        backend::api::tesla::normalize_tesla_partner_domain("https://lightfriend.ai/"),
+        "lightfriend.ai"
+    );
+}
+
+#[test]
+fn test_normalize_tesla_partner_domain_strips_path() {
+    assert_eq!(
+        backend::api::tesla::normalize_tesla_partner_domain(
+            "https://lightfriend.ai/api/auth/tesla/callback"
+        ),
+        "lightfriend.ai"
+    );
+}
+
+#[test]
+fn test_normalize_tesla_partner_domain_preserves_port() {
+    assert_eq!(
+        backend::api::tesla::normalize_tesla_partner_domain("http://localhost:3000/"),
+        "localhost:3000"
+    );
+}
+
+// ============================================================
 // Pure Function Tests: should_wake_vehicle
 // ============================================================
 
