@@ -439,7 +439,7 @@ pub async fn process_sms(
     [(axum::http::HeaderName, &'static str); 1],
     axum::Json<TwilioResponse>,
 ) {
-    let start_time = std::time::Instant::now(); // Track processing time
+    let start_time = std::time::Instant::now();
     let user = match early_flow::resolve_sms_user(state, &payload.from) {
         Ok(user) => user,
         Err(result) => return result.into_response(),
@@ -467,22 +467,22 @@ pub async fn process_sms(
         return response;
     }
 
-    let agent_input =
-        match assembly::build_sms_agent_input(state, &user, &payload, options.channel).await {
-            Ok(input) => input,
-            Err(e) => {
-                tracing::error!("Failed to build agent context: {}", e);
-                return SmsResult::SystemError {
-                    log_msg: format!("Failed to build agent context: {}", e),
-                }
-                .into_response();
+    let assembly::SmsAgentInput {
+        ctx: agent_ctx,
+        user_given_info,
+        image_url,
+        tools,
+        completion_messages,
+    } = match assembly::build_sms_agent_input(state, &user, &payload, options.channel).await {
+        Ok(input) => input,
+        Err(e) => {
+            tracing::error!("Failed to build agent context: {}", e);
+            return SmsResult::SystemError {
+                log_msg: format!("Failed to build agent context: {}", e),
             }
-        };
-    let ctx = agent_input.ctx;
-    let user_given_info = agent_input.user_given_info;
-    let image_url = agent_input.image_url;
-    let tools = agent_input.tools;
-    let completion_messages = agent_input.completion_messages;
+            .into_response();
+        }
+    };
 
     // Bridge channel: forward raw reasoning strings as ChatStatus::Reasoning events.
     // Only created for the web chat SSE path (when status_tx exists).
@@ -493,7 +493,7 @@ pub async fn process_sms(
     let agent_loop_output = match agent_loop::run_agent_loop(agent_loop::AgentLoopInput {
         state,
         user: &user,
-        model_purpose: ctx.model_purpose,
+        model_purpose: agent_ctx.model_purpose,
         user_given_info: &user_given_info,
         image_url: image_url.as_deref(),
         tools: &tools,
@@ -503,7 +503,7 @@ pub async fn process_sms(
         status_tx: options.status_tx.as_ref(),
         mock_llm_response: &mut mock_llm_response,
         mock_tool_responses: &mock_tool_responses,
-        current_time: ctx.current_time_unix,
+        current_time: agent_ctx.current_time_unix,
     })
     .await
     {
@@ -515,7 +515,7 @@ pub async fn process_sms(
     let finalized_response = finalize::finalize_sms_response(finalize::FinalizeSmsResponseInput {
         state,
         user_id: user.id,
-        model_purpose: ctx.model_purpose,
+        model_purpose: agent_ctx.model_purpose,
         tools: &tools,
         loop_messages: agent_loop_output.loop_messages,
         tool_answers: &agent_loop_output.tool_answers,
@@ -528,7 +528,7 @@ pub async fn process_sms(
     })
     .await;
 
-    let processing_time_secs = start_time.elapsed().as_secs(); // Calculate processing time
+    let processing_time_secs = start_time.elapsed().as_secs();
 
     delivery::deliver_sms_response(delivery::DeliverSmsResponseInput {
         state,
