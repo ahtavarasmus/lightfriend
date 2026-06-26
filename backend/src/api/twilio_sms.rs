@@ -1,23 +1,16 @@
-use crate::repositories::user_repository::LogUsageParams;
 use crate::AppState;
 use crate::UserCoreOps;
 use crate::{AiChatOptions, AiChatResult, AiProvider, ModelPurpose};
 use axum::{extract::Form, extract::State, http::StatusCode, Json};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
-use std::collections::HashMap;
 use std::sync::Arc;
-
-// Thread-local storage for media SID mapping
-thread_local! {
-    static MEDIA_SID_MAP: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
-}
 
 use openai_api_rs::v1::chat_completion;
 
 mod agent_loop;
 mod assembly;
+mod delivery;
 mod early_flow;
 mod finalize;
 mod status;
@@ -534,174 +527,18 @@ pub async fn process_sms(
         status_tx: options.status_tx.as_ref(),
     })
     .await;
-    let final_response_with_notice = finalized_response.response_for_delivery;
-    let history_for_storage = finalized_response.history_for_storage;
 
     let processing_time_secs = start_time.elapsed().as_secs(); // Calculate processing time
 
-    if let Err(e) = state.user_repository.delete_old_message_history(user.id) {
-        tracing::error!("Failed to clean up old message history: {}", e);
-    }
-
-    let current_time = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i32;
-
-    // History storage uses the verifier's `history` version (tag
-    // markers preserved, no footer, un-truncated). Next turn the LLM
-    // will see its own correctly-cited prior turn and keep citing
-    // ids — if we stored `final_response_with_notice` instead, the
-    // stripped view would train the model to drop citations.
-    let assistant_message = crate::pg_models::NewPgMessageHistory {
-        user_id: user.id,
-        role: "assistant".to_string(),
-        encrypted_content: history_for_storage.clone(),
-        tool_name: None,
-        tool_call_id: None,
-        tool_calls_json: None,
-        created_at: current_time,
-        conversation_id: "".to_string(),
-    };
-
-    // Store messages in history
-    if let Err(e) = state
-        .user_repository
-        .create_message_history(&assistant_message)
-    {
-        tracing::error!("Failed to store assistant message in history: {}", e);
-    }
-
-    // If this came from web chat, return the response without sending an SMS.
-    if !options.channel.sends_sms() {
-        // Log the usage without sending the message
-        if let Err(e) = state.user_repository.log_usage(LogUsageParams {
-            user_id: user.id,
-            sid: None,
-            activity_type: "sms_test".to_string(),
-            credits: None,
-            time_consumed: Some(processing_time_secs as i32),
-            success: None,
-            reason: None,
-            status: None,
-            recharge_threshold_timestamp: None,
-            zero_credits_timestamp: None,
-        }) {
-            tracing::error!("Failed to log test SMS usage: {}", e);
-        }
-
-        // SMS credits deducted at Twilio status callback
-
-        return (
-            StatusCode::OK,
-            [(axum::http::header::CONTENT_TYPE, "application/json")],
-            axum::Json(TwilioResponse {
-                message: final_response_with_notice,
-                created_item_id,
-            }),
-        );
-    }
-
-    // Extract filenames from the response and look up their media SIDs
-    let mut media_sids = Vec::new();
-    let clean_response = final_response_with_notice
-        .lines()
-        .filter_map(|line| {
-            // Look for lines that contain filenames from the media map
-            MEDIA_SID_MAP.with(|map| {
-                let map = map.borrow();
-                for (filename, media_sid) in map.iter() {
-                    if line.contains(filename) {
-                        media_sids.push(media_sid.clone());
-                        return None; // Remove the line containing the filename
-                    }
-                }
-                Some(line.to_string())
-            })
-        })
-        .collect::<Vec<String>>()
-        .join("\n");
-
-    let media_sid = media_sids.first();
-    let state_clone = state.clone();
-    let msg_sid = payload.message_sid.clone();
-    let user_clone = user.clone();
-
-    tracing::debug!("going into deleting the incoming message handler");
-    tokio::spawn(async move {
-        if let Err(e) = state_clone
-            .twilio_message_service
-            .delete_message_with_retry(&user_clone, &msg_sid)
-            .await
-        {
-            tracing::error!("Failed to delete incoming message {}: {}", msg_sid, e);
-        }
-    });
-
-    // Send the actual message if not in test mode
-    let media_ref = media_sid.map(|s| crate::channels::traits::MediaRef::Url(s.clone()));
-    match state
-        .channel_router
-        .send_to_user(&user, &clean_response, media_ref)
-        .await
-    {
-        Ok(message_sid) => {
-            let message_sid = message_sid.into_inner();
-            // Log the SMS usage metadata and store message history
-
-            // Log usage
-            if let Err(e) = state.user_repository.log_usage(LogUsageParams {
-                user_id: user.id,
-                sid: Some(message_sid.clone()),
-                activity_type: "sms".to_string(),
-                credits: None,
-                time_consumed: Some(processing_time_secs as i32),
-                success: None,
-                reason: None,
-                status: None,
-                recharge_threshold_timestamp: None,
-                zero_credits_timestamp: None,
-            }) {
-                tracing::error!("Failed to log SMS usage: {}", e);
-            }
-
-            // SMS credits deducted at Twilio status callback
-
-            (
-                StatusCode::OK,
-                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                axum::Json(TwilioResponse {
-                    message: "Message sent successfully".to_string(),
-                    created_item_id: None,
-                }),
-            )
-        }
-        Err(e) => {
-            tracing::error!("Failed to send conversation message: {}", e);
-            // Log the failed attempt with error message in status
-            let error_status = format!("failed to send: {}", e);
-            if let Err(log_err) = state.user_repository.log_usage(LogUsageParams {
-                user_id: user.id,
-                sid: None,
-                activity_type: "sms".to_string(),
-                credits: None,
-                time_consumed: Some(processing_time_secs as i32),
-                success: Some(false),
-                reason: None,
-                status: Some(error_status),
-                recharge_threshold_timestamp: None,
-                zero_credits_timestamp: None,
-            }) {
-                tracing::error!("Failed to log SMS usage after send error: {}", log_err);
-            }
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                axum::Json(TwilioResponse {
-                    message: "Failed to send message".to_string(),
-                    created_item_id: None,
-                }),
-            )
-        }
-    }
+    delivery::deliver_sms_response(delivery::DeliverSmsResponseInput {
+        state,
+        user: &user,
+        payload: &payload,
+        channel: options.channel,
+        response_for_delivery: finalized_response.response_for_delivery,
+        history_for_storage: finalized_response.history_for_storage,
+        created_item_id,
+        processing_time_secs,
+    })
+    .await
 }
