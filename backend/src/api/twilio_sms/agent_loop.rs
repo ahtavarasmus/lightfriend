@@ -1,4 +1,6 @@
-use super::{llm_call_with_gateway, tool_error_messages, ChatStatus, MessageChannel, SmsResult};
+use super::{
+    llm_call_with_gateway, status, tool_error_messages, ChatStatus, MessageChannel, SmsResult,
+};
 use crate::models::user_models::User;
 use crate::{AiProvider, AppState, ModelPurpose};
 use openai_api_rs::v1::chat_completion;
@@ -140,7 +142,10 @@ pub(super) async fn run_agent_loop(
                     let name = match &tool_call.function.name {
                         Some(n) => {
                             tracing::debug!("Tool call function name: {}", n);
-                            emit_status(input.status_tx, ChatStatus::ToolCall { name: n.clone() });
+                            status::emit_status(
+                                input.status_tx,
+                                ChatStatus::ToolCall { name: n.clone() },
+                            );
                             n
                         }
                         None => {
@@ -335,7 +340,7 @@ async fn call_llm_round(
     loop_messages: &[chat_completion::ChatCompletionMessage],
     sticky_provider: Option<AiProvider>,
 ) -> Result<crate::AiChatResult, SmsResult> {
-    emit_status(input.status_tx, ChatStatus::Thinking);
+    status::emit_status(input.status_tx, ChatStatus::Thinking);
     llm_call_with_gateway(
         input.state,
         input.model_purpose,
@@ -357,12 +362,6 @@ fn apply_provider_result(
     *active_provider = result.provider;
     if result.fallback_from.is_some() || sticky_provider.is_some() {
         *sticky_provider = Some(result.provider);
-    }
-}
-
-fn emit_status(status_tx: Option<&tokio::sync::mpsc::Sender<ChatStatus>>, status: ChatStatus) {
-    if let Some(tx) = status_tx {
-        let _ = tx.try_send(status);
     }
 }
 

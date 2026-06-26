@@ -19,6 +19,7 @@ use openai_api_rs::v1::chat_completion;
 mod agent_loop;
 mod assembly;
 mod early_flow;
+mod finalize;
 mod status;
 
 /// Error messages for tool call failures - privacy-safe, user-facing
@@ -315,185 +316,12 @@ impl ProcessSmsOptions {
             ..Self::default()
         }
     }
-
-    /// Send a status update (no-op if no channel configured)
-    fn emit_status(&self, status: ChatStatus) {
-        if let Some(tx) = &self.status_tx {
-            let _ = tx.try_send(status);
-        }
-    }
-}
-
-// =============================================================================
-// SmsResponse - Centralizes SMS length enforcement
-// =============================================================================
-
-/// Wrapper for SMS response content that enforces the 480 character limit.
-/// All SMS responses should go through this struct to ensure proper length handling.
-pub struct SmsResponse {
-    content: String,
-}
-
-impl SmsResponse {
-    /// Maximum SMS response length in characters
-    pub const MAX_LENGTH: usize = 480;
-
-    /// Create a new SMS response, automatically condensing with LLM if needed.
-    /// Use this for normal responses where we want intelligent condensing.
-    pub async fn new(
-        raw: String,
-        state: &Arc<AppState>,
-        user_id: i32,
-        sticky_provider: Option<crate::AiProvider>,
-    ) -> Self {
-        let content = if raw.chars().count() > Self::MAX_LENGTH {
-            // Try to condense with LLM first, fall back to truncation
-            condense_response(state, &raw, Self::MAX_LENGTH, user_id, sticky_provider)
-                .await
-                .unwrap_or_else(|_| truncate_nicely(&raw, Self::MAX_LENGTH))
-        } else {
-            raw
-        };
-        Self { content }
-    }
-
-    /// Create a response with simple truncation (no LLM condensing).
-    /// Use this for error messages or when LLM is not available.
-    pub fn truncated(raw: String) -> Self {
-        let content = if raw.chars().count() > Self::MAX_LENGTH {
-            truncate_nicely(&raw, Self::MAX_LENGTH)
-        } else {
-            raw
-        };
-        Self { content }
-    }
-
-    /// Create a response that's already known to be within limits.
-    /// Panics in debug mode if content exceeds limit.
-    pub fn from_static(content: &'static str) -> Self {
-        debug_assert!(
-            content.chars().count() <= Self::MAX_LENGTH,
-            "Static response exceeds SMS limit: {} chars",
-            content.chars().count()
-        );
-        Self {
-            content: content.to_string(),
-        }
-    }
-
-    /// Get the content as a String
-    pub fn into_inner(self) -> String {
-        self.content
-    }
-
-    /// Get a reference to the content
-    pub fn as_str(&self) -> &str {
-        &self.content
-    }
 }
 
 /// Get the model to use based on provider and purpose.
 /// Uses centralized AiConfig from AppState.
 pub fn get_model(state: &Arc<AppState>, provider: AiProvider, purpose: ModelPurpose) -> String {
     state.ai_config.model(provider, purpose).to_string()
-}
-
-/// Truncate a string nicely at word boundaries, adding "..." if truncated
-fn truncate_nicely(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        return text.to_string();
-    }
-
-    // Leave room for "..."
-    let target_len = max_chars.saturating_sub(3);
-
-    // Find a good break point (end of sentence or word)
-    let chars: Vec<char> = text.chars().collect();
-    let mut break_point = target_len;
-
-    // Try to find end of sentence within last 50 chars
-    for i in (target_len.saturating_sub(50)..=target_len).rev() {
-        if i < chars.len() && (chars[i] == '.' || chars[i] == '!' || chars[i] == '?') {
-            // Check if next char is space or end
-            if i + 1 >= chars.len() || chars[i + 1].is_whitespace() {
-                break_point = i + 1;
-                return chars[..break_point].iter().collect();
-            }
-        }
-    }
-
-    // Otherwise find last space
-    for i in (0..=target_len).rev() {
-        if i < chars.len() && chars[i].is_whitespace() {
-            break_point = i;
-            break;
-        }
-    }
-
-    let truncated: String = chars[..break_point].iter().collect();
-    format!("{}...", truncated.trim_end())
-}
-
-/// Ask LLM to condense a response to fit within max_chars
-async fn condense_response(
-    state: &Arc<AppState>,
-    original: &str,
-    max_chars: usize,
-    user_id: i32,
-    sticky_provider: Option<crate::AiProvider>,
-) -> Result<String, String> {
-    use openai_api_rs::v1::chat_completion::{
-        ChatCompletionMessage, ChatCompletionRequest, Content, MessageRole,
-    };
-
-    let prompt = format!(
-        "Condense the following message to fit within {} characters while preserving the key information. \
-        Keep it natural and conversational. Do NOT use markdown, bullets, or special formatting. \
-        Just output the condensed message, nothing else.\n\nOriginal message:\n{}",
-        max_chars, original
-    );
-
-    let req = ChatCompletionRequest::new(
-        String::new(),
-        vec![ChatCompletionMessage {
-            role: MessageRole::user,
-            content: Content::Text(prompt),
-            name: None,
-            tool_calls: None,
-            tool_call_id: None,
-        }],
-    );
-
-    match state
-        .ai_config
-        .chat_completion_with_fallback(
-            Some(&state.llm_usage_repository),
-            user_id,
-            crate::ModelPurpose::Default,
-            "condense_sms",
-            &req,
-            crate::AiChatOptions {
-                sticky_provider,
-                ..crate::AiChatOptions::default()
-            },
-        )
-        .await
-    {
-        Ok(result) => {
-            if let Some(choice) = result.response.choices.first() {
-                if let Some(content) = &choice.message.content {
-                    let condensed = content.trim().to_string();
-                    // If still too long, truncate nicely
-                    if condensed.chars().count() > max_chars {
-                        return Ok(truncate_nicely(&condensed, max_chars));
-                    }
-                    return Ok(condensed);
-                }
-            }
-            Err("No response from condensing".to_string())
-        }
-        Err(e) => Err(format!("Failed to condense: {}", e)),
-    }
 }
 
 /// Handler for TextBee SMS provider (alternative to Twilio)
@@ -690,181 +518,24 @@ pub async fn process_sms(
         Err(result) => return result.into_response(),
     };
 
-    let mut active_provider = agent_loop_output.active_provider;
-    let mut sticky_provider = agent_loop_output.sticky_provider;
-    let final_response = agent_loop_output.final_response;
-    let fail = agent_loop_output.fail;
-    let tool_answers = agent_loop_output.tool_answers;
-    let mut loop_messages = agent_loop_output.loop_messages;
     let created_item_id = agent_loop_output.created_item_id;
-
-    // Extract any [MEDIA_RESULTS] from tool answers and append to response
-    // This ensures media results are passed through even if AI doesn't include them
-    let mut media_results_tag = String::new();
-    for tool_answer in tool_answers.values() {
-        tracing::debug!(
-            "Checking tool answer for media (first 200 chars): {}",
-            &tool_answer.chars().take(200).collect::<String>()
-        );
-        if let Some(start) = tool_answer.find("[MEDIA_RESULTS]") {
-            if let Some(end) = tool_answer.find("[/MEDIA_RESULTS]") {
-                media_results_tag = tool_answer[start..end + 16].to_string();
-                tracing::debug!(
-                    "Found media results tag, length: {}",
-                    media_results_tag.len()
-                );
-                break;
-            }
-        }
-    }
-
-    // id-verifier: drop any line where the model cited an ontology
-    // [id=N] that doesn't match a row returned by any tool call in
-    // this turn. Runs BEFORE truncation so the user-visible footer
-    // (appended when anything is dropped) participates in the SMS
-    // length budget. Runs only on success paths — failure messages
-    // are canned strings without ids.
-    //
-    // Returns two parallel versions:
-    //   - `user_facing`: what to send over SMS. `[id=N]` markers
-    //     stripped, footer appended if any line was dropped.
-    //   - `history`: what to store in conversation history. `[id=N]`
-    //     markers PRESERVED so the LLM sees its own correctly-
-    //     formatted prior turn next time and keeps citing ids. If we
-    //     stored the stripped version, the model would quickly "learn"
-    //     from its own history that citations are optional and drop
-    //     them — which would defeat the verifier on the next turn.
-    //
-    // `history_for_storage` is used later when we build
-    // `assistant_message`. It falls back to `final_response` on the
-    // failure path (no verification ran, so history == user_facing).
-    let (final_response, history_for_storage) = if !fail {
-        let valid_ids = crate::utils::id_verifier::collect_tool_result_ids(&loop_messages);
-        let mut verified = crate::utils::id_verifier::verify(&final_response, &valid_ids);
-
-        // If the verifier stripped hallucinated content or detected the
-        // LLM ignored citations entirely, retry with a correction hint.
-        // Up to 3 retries. If it still fails, silently drop the bad lines.
-        if verified.dropped_line || verified.missing_citations {
-            for retry in 1..=5 {
-                let error_msg = if verified.missing_citations {
-                    "id-verifier detected missing citations"
-                } else {
-                    "id-verifier stripped hallucinated citation"
-                };
-                tracing::info!("{}, retry {}/5", error_msg, retry);
-                options.emit_status(ChatStatus::Retrying {
-                    attempt: retry,
-                    max: 5,
-                    error: error_msg.to_string(),
-                });
-
-                let correction = if verified.missing_citations {
-                    "Your response did not include [id=N] citations for the items you mentioned. Rewrite your answer and include [id=N] from the tool results on each line that references a specific message, event, or person."
-                } else {
-                    "Your previous response contained fabricated information that was automatically detected and rejected. Rewrite your answer based strictly on what the tools actually returned. Do not make anything up."
-                };
-
-                loop_messages.push(chat_completion::ChatCompletionMessage {
-                    role: chat_completion::MessageRole::assistant,
-                    content: chat_completion::Content::Text(final_response.clone()),
-                    name: None,
-                    tool_calls: None,
-                    tool_call_id: None,
-                });
-                loop_messages.push(chat_completion::ChatCompletionMessage {
-                    role: chat_completion::MessageRole::system,
-                    content: chat_completion::Content::Text(correction.to_string()),
-                    name: None,
-                    tool_calls: None,
-                    tool_call_id: None,
-                });
-
-                match llm_call_with_gateway(
-                    state,
-                    ctx.model_purpose,
-                    &loop_messages,
-                    &tools,
-                    &reasoning_tx,
-                    user.id,
-                    sticky_provider,
-                )
-                .await
-                {
-                    Ok(r) => {
-                        active_provider = r.provider;
-                        if r.fallback_from.is_some() || sticky_provider.is_some() {
-                            sticky_provider = Some(r.provider);
-                        }
-                        if let Some(text) = &r.response.choices[0].message.content {
-                            let retry_verified =
-                                crate::utils::id_verifier::verify(text, &valid_ids);
-                            // Remove the correction messages for next iteration
-                            loop_messages.pop();
-                            loop_messages.pop();
-                            if !retry_verified.dropped_line && !retry_verified.missing_citations {
-                                verified = retry_verified;
-                                break;
-                            }
-                            verified = retry_verified;
-                        } else {
-                            loop_messages.pop();
-                            loop_messages.pop();
-                            break;
-                        }
-                    }
-                    Err(_) => {
-                        loop_messages.pop();
-                        loop_messages.pop();
-                        break;
-                    }
-                }
-            }
-
-            // After retries, if still dropping lines or missing citations,
-            // silently strip without the footer
-            if verified.dropped_line || verified.missing_citations {
-                tracing::info!("Id verifier still flagging after 5 retries, silently dropping");
-                verified.user_facing = verified
-                    .user_facing
-                    .replace(crate::utils::id_verifier::STRIPPED_FOOTER, "")
-                    .trim_end()
-                    .to_string();
-            }
-        }
-
-        (verified.user_facing, verified.history)
-    } else {
-        (final_response.clone(), final_response)
-    };
-
-    // Ensure response is within SMS character limit (truncate text BEFORE adding media)
-    let final_response = if !fail {
-        // For successful responses, use LLM condensing if needed
-        let condense_sticky_provider = if active_provider == AiProvider::Near {
-            Some(active_provider)
-        } else {
-            sticky_provider
-        };
-        SmsResponse::new(final_response, state, user.id, condense_sticky_provider)
-            .await
-            .into_inner()
-    } else {
-        // For failure messages, just truncate (they're already short)
-        SmsResponse::truncated(final_response).into_inner()
-    };
-
-    // Append media results AFTER truncating (so they don't get cut off)
-    // This ensures the [MEDIA_RESULTS] JSON is always complete for web chat parsing
-    let final_response = if !media_results_tag.is_empty() {
-        tracing::debug!("Appending media results to final response (after truncation)");
-        format!("{}\n\n{}", final_response, media_results_tag)
-    } else {
-        tracing::debug!("No media results tag found in tool answers");
-        final_response
-    };
-
-    let final_response_with_notice = final_response.clone();
+    let finalized_response = finalize::finalize_sms_response(finalize::FinalizeSmsResponseInput {
+        state,
+        user_id: user.id,
+        model_purpose: ctx.model_purpose,
+        tools: &tools,
+        loop_messages: agent_loop_output.loop_messages,
+        tool_answers: &agent_loop_output.tool_answers,
+        final_response: agent_loop_output.final_response,
+        fail: agent_loop_output.fail,
+        active_provider: agent_loop_output.active_provider,
+        sticky_provider: agent_loop_output.sticky_provider,
+        reasoning_tx: &reasoning_tx,
+        status_tx: options.status_tx.as_ref(),
+    })
+    .await;
+    let final_response_with_notice = finalized_response.response_for_delivery;
+    let history_for_storage = finalized_response.history_for_storage;
 
     let processing_time_secs = start_time.elapsed().as_secs(); // Calculate processing time
 
