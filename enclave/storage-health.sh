@@ -11,7 +11,29 @@ MIN_FREE_KB="${MIN_FREE_KB:-262144}"          # 256 MiB
 MIN_FREE_INODES="${MIN_FREE_INODES:-1024}"
 HISTORY_FILE="${STORAGE_HEALTH_HISTORY_FILE:-/tmp/storage-health-history.log}"
 MAX_HISTORY_BYTES="${STORAGE_MAX_HISTORY_BYTES:-1048576}"
-PATHS="/ /tmp /var/lib/postgresql /var/log /data/seed /var/lib/tuwunel /var/lib/tuwunel-backup /var/lib/lightfriend-reserve /app"
+SNAPSHOT_FILE="${STORAGE_HEALTH_SNAPSHOT_FILE:-/tmp/storage-health-snapshot.tsv}"
+TOP_DIR_LINES="${STORAGE_HEALTH_TOP_DIR_LINES:-80}"
+TOP_FILE_LINES="${STORAGE_HEALTH_TOP_FILE_LINES:-40}"
+LARGE_FILE_MIN_KB="${STORAGE_HEALTH_LARGE_FILE_MIN_KB:-1024}"
+GROWTH_REPORT_MIN_KB="${STORAGE_HEALTH_GROWTH_REPORT_MIN_KB:-10240}"
+
+WATCH_PATHS=(
+    /
+    /tmp
+    /var
+    /var/lib
+    /var/lib/postgresql
+    /var/lib/tuwunel
+    /var/lib/tuwunel-backup
+    /var/lib/lightfriend-reserve
+    /var/log
+    /data
+    /data/seed
+    /app
+    /app/data
+    /app/uploads
+    /app/matrix_store
+)
 
 rotate_history_if_needed() {
     if [ -f "$HISTORY_FILE" ] && [ "$(stat -c%s "$HISTORY_FILE" 2>/dev/null || echo 0)" -gt "$MAX_HISTORY_BYTES" ]; then
@@ -19,15 +41,136 @@ rotate_history_if_needed() {
     fi
 }
 
+discover_mount_roots() {
+    df -P 2>/dev/null | awk 'NR > 1 {print $6}' | while IFS= read -r mount; do
+        [ -d "$mount" ] || continue
+        case "$mount" in
+            /dev|/dev/*|/proc|/proc/*|/sys|/sys/*)
+                continue
+                ;;
+        esac
+        printf '%s\n' "$mount"
+    done | sort -u
+}
+
+discover_check_paths() {
+    {
+        for path in "${WATCH_PATHS[@]}"; do
+            printf '%s\n' "$path"
+        done
+        discover_mount_roots
+    } | sort -u
+}
+
+print_known_path_df() {
+    local existing=()
+
+    for path in "${WATCH_PATHS[@]}"; do
+        if [ -e "$path" ]; then
+            existing+=("$path")
+        fi
+    done
+
+    if [ "${#existing[@]}" -gt 0 ]; then
+        df -h "${existing[@]}" 2>/dev/null || true
+        df -i "${existing[@]}" 2>/dev/null || true
+    fi
+}
+
+du_depth_for_mount() {
+    local mount="$1"
+    if [ "$mount" = "/" ]; then
+        echo 3
+    else
+        echo 2
+    fi
+}
+
+print_largest_dirs_by_filesystem() {
+    while IFS= read -r mount; do
+        local depth
+        depth="$(du_depth_for_mount "$mount")"
+        echo "--- largest dirs on ${mount} filesystem (du -xhd${depth}) ---"
+        du -xh -d "$depth" "$mount" 2>/dev/null | sort -h | tail -n "$TOP_DIR_LINES" || true
+    done < <(discover_mount_roots)
+}
+
+print_largest_files_by_filesystem() {
+    while IFS= read -r mount; do
+        echo "--- largest files on ${mount} filesystem (> ${LARGE_FILE_MIN_KB} KiB) ---"
+        find "$mount" -xdev -type f -size +"${LARGE_FILE_MIN_KB}"k -printf '%s %p\n' 2>/dev/null \
+            | sort -n | tail -n "$TOP_FILE_LINES" || true
+    done < <(discover_mount_roots)
+}
+
+collect_size_snapshot() {
+    {
+        while IFS= read -r mount; do
+            du -x -k -d "$(du_depth_for_mount "$mount")" "$mount" 2>/dev/null || true
+        done < <(discover_mount_roots)
+
+        for path in /var /var/lib /data /app /tmp; do
+            [ -d "$path" ] || continue
+            du -x -k -d 2 "$path" 2>/dev/null || true
+        done
+    } | awk '
+        {
+            size = $1
+            $1 = ""
+            sub(/^ /, "")
+            path = $0
+            sizes[path] = size
+        }
+        END {
+            for (path in sizes) {
+                print path "\t" sizes[path]
+            }
+        }
+    ' | sort
+}
+
+print_growth_since_last_snapshot() {
+    local tmp_snapshot
+    tmp_snapshot="${SNAPSHOT_FILE}.$$"
+
+    collect_size_snapshot > "$tmp_snapshot" 2>/dev/null || true
+
+    echo "--- growth since previous storage snapshot (>= ${GROWTH_REPORT_MIN_KB} KiB) ---"
+    if [ -s "$SNAPSHOT_FILE" ] && [ -s "$tmp_snapshot" ]; then
+        awk -F '\t' -v min_kb="$GROWTH_REPORT_MIN_KB" '
+            FNR == NR {
+                previous[$1] = $2
+                next
+            }
+            {
+                old = (($1 in previous) ? previous[$1] : 0)
+                delta = $2 - old
+                if (delta >= min_kb) {
+                    print delta "\t" $2 "\t" old "\t" $1
+                }
+            }
+        ' "$SNAPSHOT_FILE" "$tmp_snapshot" \
+            | sort -nr \
+            | head -30 \
+            | awk -F '\t' '{printf "%+10d KiB now=%d KiB was=%d KiB %s\n", $1, $2, $3, $4}' || true
+    else
+        echo "no previous snapshot"
+    fi
+
+    mv "$tmp_snapshot" "$SNAPSHOT_FILE" 2>/dev/null || rm -f "$tmp_snapshot"
+}
+
 print_report() {
     echo "=== Storage Health $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
-    echo "--- df -h ---"
-    df -h ${PATHS} 2>/dev/null || df -h 2>/dev/null || echo "df unavailable"
-    echo "--- df -i ---"
-    df -i ${PATHS} 2>/dev/null || df -i 2>/dev/null || echo "df -i unavailable"
-    echo "--- top writable dirs ---"
-    du -xh -d 2 /tmp /var/log /data/seed /var/lib/postgresql /var/lib/tuwunel /var/lib/tuwunel-backup /var/lib/lightfriend-reserve /app/data /app/uploads /app/matrix_store 2>/dev/null \
-        | sort -h | tail -40 || true
+    echo "--- df -hT all filesystems ---"
+    df -hT 2>/dev/null || df -h 2>/dev/null || echo "df unavailable"
+    echo "--- df -i all filesystems ---"
+    df -i 2>/dev/null || echo "df -i unavailable"
+    echo "--- watched path df ---"
+    print_known_path_df
+    print_largest_dirs_by_filesystem
+    print_largest_files_by_filesystem
+    print_growth_since_last_snapshot
     echo "--- tuwunel BackupEngine dir ---"
     if [ -d /var/lib/tuwunel-backup ]; then
         du -sh /var/lib/tuwunel-backup 2>/dev/null || true
@@ -74,9 +217,9 @@ check_storage() {
     local rc=0
     rotate_history_if_needed
     print_report >> "$HISTORY_FILE" 2>&1
-    for path in /tmp /var/lib/postgresql /var/log /data/seed /var/lib/tuwunel-backup; do
+    while IFS= read -r path; do
         check_path "$path" || rc=1
-    done
+    done < <(discover_check_paths)
     return "$rc"
 }
 
