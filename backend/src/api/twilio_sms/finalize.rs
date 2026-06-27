@@ -259,11 +259,12 @@ fn truncate_nicely(text: &str, max_chars: usize) -> String {
     let mut break_point = target_len;
 
     for i in (target_len.saturating_sub(50)..=target_len).rev() {
-        if i < chars.len() && (chars[i] == '.' || chars[i] == '!' || chars[i] == '?') {
-            if i + 1 >= chars.len() || chars[i + 1].is_whitespace() {
-                break_point = i + 1;
-                return chars[..break_point].iter().collect();
-            }
+        if i < chars.len()
+            && (chars[i] == '.' || chars[i] == '!' || chars[i] == '?')
+            && (i + 1 >= chars.len() || chars[i + 1].is_whitespace())
+        {
+            break_point = i + 1;
+            return chars[..break_point].iter().collect();
         }
     }
 
