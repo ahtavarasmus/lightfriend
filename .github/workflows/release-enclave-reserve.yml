@@ -1,0 +1,109 @@
+name: Release Enclave Disk Reserve
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance_id:
+        description: 'Optional EC2 instance id. Leave empty to use /lightfriend/instance-id.'
+        required: false
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  release-reserve:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Trigger reserve release
+        env:
+          INPUT_INSTANCE_ID: ${{ github.event.inputs.instance_id }}
+        run: |
+          set -euo pipefail
+
+          INSTANCE_ID="$INPUT_INSTANCE_ID"
+          if [ -z "$INSTANCE_ID" ]; then
+            INSTANCE_ID=$(aws ssm get-parameter --name /lightfriend/instance-id \
+              --query 'Parameter.Value' --output text)
+          fi
+
+          cleanup_request() {
+            if [ -n "${INSTANCE_ID:-}" ]; then
+              aws ssm send-command \
+                --instance-ids "$INSTANCE_ID" \
+                --document-name "AWS-RunShellScript" \
+                --parameters 'commands=["rm -f /opt/lightfriend/seed/reserve-release-request.json"]' \
+                --timeout-seconds 30 >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup_request EXIT
+
+          STATE=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo "unknown")
+          if [ "$STATE" != "running" ]; then
+            echo "FATAL: instance $INSTANCE_ID is not running (state: $STATE)"
+            exit 1
+          fi
+
+          REQUEST=$(jq -n \
+            --arg action "release-rootfs-reserve" \
+            --arg run_id "${{ github.run_id }}" \
+            --arg requested_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{action:$action, github_run_id:$run_id, requested_at:$requested_at}')
+          REQUEST_B64=$(printf '%s' "$REQUEST" | base64 -w0)
+
+          echo "Writing reserve release request to $INSTANCE_ID"
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters commands=["mkdir -p /opt/lightfriend/seed && echo $REQUEST_B64 | base64 -d > /opt/lightfriend/seed/reserve-release-request.json"] \
+            --timeout-seconds 30 \
+            --query 'Command.CommandId' --output text)
+
+          for i in $(seq 1 12); do
+            STATUS=$(aws ssm get-command-invocation --command-id "$CMD_ID" \
+              --instance-id "$INSTANCE_ID" --query 'Status' --output text 2>/dev/null || echo "Pending")
+            case "$STATUS" in
+              Success) break ;;
+              Failed|Cancelled|TimedOut)
+                echo "FATAL: SSM command ended with $STATUS"
+                exit 1
+                ;;
+            esac
+            sleep 5
+          done
+
+          echo "Reserve release request written. Waiting for enclave watcher..."
+          sleep 15
+
+          echo "Reserve diagnostic:"
+          DIAG_CMD=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["timeout 90 socat - VSOCK-CONNECT:16:9008 2>&1 | sed -n '\''/--- rootfs reserve status ---/,/--- memory health ---/p'\''"]' \
+            --timeout-seconds 120 \
+            --query 'Command.CommandId' --output text)
+
+          for i in $(seq 1 24); do
+            DIAG_STATUS=$(aws ssm get-command-invocation --command-id "$DIAG_CMD" \
+              --instance-id "$INSTANCE_ID" --query 'Status' --output text 2>/dev/null || echo "Pending")
+            case "$DIAG_STATUS" in
+              Success) break ;;
+              Failed|Cancelled|TimedOut)
+                echo "WARN: diagnostic command ended with $DIAG_STATUS"
+                exit 0
+                ;;
+            esac
+            sleep 5
+          done
+
+          aws ssm get-command-invocation --command-id "$DIAG_CMD" \
+            --instance-id "$INSTANCE_ID" \
+            --query 'StandardOutputContent' --output text

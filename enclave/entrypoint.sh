@@ -118,6 +118,59 @@ export SKIP_BACKEND="${SKIP_BACKEND:-false}"
 export RESTORE_MODE="${RESTORE_MODE:-none}"
 export TESLA_HTTP_PROXY_URL="${TESLA_HTTP_PROXY_URL:-https://localhost:4443}"
 
+rootfs_avail_mb() {
+    df -Pm / 2>/dev/null | awk 'NR==2 {print $4 + 0}' || echo 0
+}
+
+ensure_rootfs_reserve() {
+    local reserve_file="${LIGHTFRIEND_ROOTFS_RESERVE_FILE:-/var/lib/lightfriend-reserve/rootfs-reserve.bin}"
+    local reserve_mb="${LIGHTFRIEND_ROOTFS_RESERVE_MB:-256}"
+    local min_free_after_mb="${LIGHTFRIEND_ROOTFS_RESERVE_MIN_FREE_AFTER_MB:-256}"
+
+    case "$reserve_mb" in
+        ''|*[!0-9]*)
+            echo "  WARNING: invalid LIGHTFRIEND_ROOTFS_RESERVE_MB=${reserve_mb}; skipping reserve"
+            return 0
+            ;;
+    esac
+    case "$min_free_after_mb" in
+        ''|*[!0-9]*)
+            echo "  WARNING: invalid LIGHTFRIEND_ROOTFS_RESERVE_MIN_FREE_AFTER_MB=${min_free_after_mb}; using 256"
+            min_free_after_mb=256
+            ;;
+    esac
+
+    if [ "$reserve_mb" -eq 0 ]; then
+        echo "  Manual rootfs reserve disabled"
+        return 0
+    fi
+
+    if [ -e "$reserve_file" ]; then
+        echo "  Manual rootfs reserve already exists: $(du -h "$reserve_file" 2>/dev/null | awk '{print $1}' || echo unknown)"
+        return 0
+    fi
+
+    local avail_mb
+    avail_mb="$(rootfs_avail_mb)"
+    [ -n "$avail_mb" ] || avail_mb=0
+
+    local required_mb=$((reserve_mb + min_free_after_mb))
+    if [ "$avail_mb" -lt "$required_mb" ]; then
+        echo "  WARNING: skipping ${reserve_mb}MiB rootfs reserve; only ${avail_mb}MiB free, need ${required_mb}MiB"
+        return 0
+    fi
+
+    echo "  Creating ${reserve_mb}MiB manual rootfs reserve at ${reserve_file}"
+    mkdir -p "$(dirname "$reserve_file")"
+    if dd if=/dev/zero of="$reserve_file" bs=1M count="$reserve_mb" status=none; then
+        chmod 600 "$reserve_file"
+        echo "  Manual rootfs reserve created; rootfs available now $(rootfs_avail_mb)MiB"
+    else
+        echo "  WARNING: failed to create manual rootfs reserve"
+        rm -f "$reserve_file" 2>/dev/null || true
+    fi
+}
+
 # ── 0b2. Fetch Tesla private key from host seed server ──────────────────────
 # The key is served by the host's HTTP seed server (port 9080) after being
 # downloaded from S3. Without it, the Tesla proxy (and vehicle commands) won't work.
@@ -648,6 +701,8 @@ REOF
             TOTAL_FILES=$(find "$RESTORE_DIR" -type f 2>/dev/null | wc -l)
             TOTAL_SIZE=$(du -sh "$RESTORE_DIR" 2>/dev/null | awk '{print $1}' || echo '0')
             echo "  === TUWUNEL RESTORE END (OK: $TOTAL_FILES files, $TOTAL_SIZE) ==="
+            echo "  Removing temporary BackupEngine restore directory..."
+            rm -rf "$TUWUNEL_BACKUP_DIR" || true
         else
             # Old format or no BackupEngine dir - tuwunel will start fresh
             echo "  [DEBUG] No BackupEngine dir found (old backup format)"
@@ -1457,6 +1512,10 @@ fi
 
 # Enable PostgreSQL autostart and run the startup orchestrator in background
 sed -i 's/\[program:postgresql\]/[program:postgresql]/' /etc/supervisor/conf.d/lightfriend.conf
+
+echo ""
+echo "[STEP reserve] Ensuring manual rootfs reserve..."
+ensure_rootfs_reserve
 
 echo ""
 echo "[STEP FINAL] Launching supervisord with startup script: ${STARTUP_SCRIPT}"

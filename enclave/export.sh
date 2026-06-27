@@ -7,9 +7,9 @@ set -uxo pipefail
 # every command, with -o pipefail we catch pipeline failures in critical paths.
 
 # Full encrypted export of all data stores from running enclave.
-# Produces a single .tar.gz.enc file in /data/seed/.
+# Produces a single .tar.gz.enc file in /tmp/ and uploads it directly.
 # set -x enables command tracing so every line is logged for debugging.
-# All plaintext stays in /tmp/ (enclave ephemeral space).
+# All archive/encrypted backup artifacts stay in /tmp/ (enclave ephemeral space).
 # The export NEVER produces a partial or unverified backup.
 
 # Load non-secret env vars persisted by entrypoint.sh. BACKUP_ENCRYPTION_KEY
@@ -28,12 +28,13 @@ TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
 BACKUP_NAME="lightfriend-full-backup-${TIMESTAMP}"
 STAGING="/tmp/backup-staging/${BACKUP_NAME}"
 ARCHIVE="/tmp/${BACKUP_NAME}.tar.gz"
-ENCRYPTED="/data/seed/${BACKUP_NAME}.tar.gz.enc"
+ENCRYPTED="/tmp/${BACKUP_NAME}.tar.gz.enc"
 STATUS_FILE="/data/seed/export-status.json"
+TUWUNEL_BACKUP_DIR="/var/lib/tuwunel-backup"
 
 # Cleanup function - remove staging artifacts
 cleanup() {
-    rm -rf /tmp/backup-staging /tmp/verify.tar.gz "${ARCHIVE}" 2>/dev/null || true
+    rm -rf /tmp/backup-staging /tmp/verify.tar.gz "${ARCHIVE}" "${ENCRYPTED}" 2>/dev/null || true
     # Clean matrix snapshot dirs created during Phase A
     rm -rf "${STAGING}/matrix-store-snapshot" 2>/dev/null || true
 }
@@ -120,7 +121,6 @@ done
 # Create Tuwunel backup via built-in RocksDB BackupEngine (SIGUSR2 trigger)
 # This is the only safe way to backup a live RocksDB - tuwunel holds the DB
 # handle and calls DisableFileDeletions + GetLiveFiles internally.
-TUWUNEL_BACKUP_DIR="/var/lib/tuwunel-backup"
 echo "  === TUWUNEL BACKUP START ==="
 echo "  [DEBUG] COMMAND CHECK: pgrep=$(which pgrep 2>&1) kill=$(which kill 2>&1) grep=$(which grep 2>&1) find=$(which find 2>&1)"
 echo "  [DEBUG] tuwunel source DB path: /var/lib/tuwunel"
@@ -151,8 +151,13 @@ fi
 echo "  [DEBUG] Tuwunel PID: $TUWUNEL_PID"
 echo "  [DEBUG] Tuwunel process info: $(ps -p $TUWUNEL_PID -o pid,rss,etime,args 2>/dev/null | tail -1 || echo 'ps failed')"
 
-# Ensure backup dir exists (tuwunel creates it on first backup, but it may not exist yet)
-mkdir -p "$TUWUNEL_BACKUP_DIR"
+# Start from a fresh BackupEngine directory. The export packs this directory
+# into tuwunel_data.tar and removes it after verification, so any pre-existing
+# content here is stale retry debris rather than persistent app state.
+rm -rf "$TUWUNEL_BACKUP_DIR" \
+    || abort "Failed to clear stale Tuwunel backup dir" "dump-tuwunel"
+mkdir -p "$TUWUNEL_BACKUP_DIR" \
+    || abort "Failed to create Tuwunel backup dir" "dump-tuwunel"
 
 # Record backup dir state before signal
 BEFORE_COUNT=$(find "$TUWUNEL_BACKUP_DIR" -type f | wc -l)
@@ -336,6 +341,10 @@ for tar_path in \
     echo "  ${tar_name}: ${tar_size} bytes, integrity OK"
 done
 
+echo "  Removing temporary Tuwunel BackupEngine directory after verified tar..."
+rm -rf "$TUWUNEL_BACKUP_DIR" \
+    || abort "Failed to remove temporary Tuwunel backup dir" "cleanup-tuwunel-backup"
+
 # Cross-validate user count: during deploy-time export, maintenance mode should
 # block writes to the app database, so user count should remain stable.
 POST_DUMP_COUNT=$(psql -h localhost -U postgres -d lightfriend_db -t -A \
@@ -515,13 +524,11 @@ fi
 echo "Phase E complete."
 
 # ── Cleanup: remove local encrypted file after successful upload ─────────────
-# Without this, each hourly backup leaves a ~33MB file in /data/seed/ inside
-# the enclave. After ~30 hours the enclave's filesystem fills up and future
-# exports fail with "error writing output file" during encryption.
 echo "Cleaning up local encrypted file..."
 rm -f "${ENCRYPTED}" 2>/dev/null || true
 # Also clean any old export artifacts left by previous runs
 find /data/seed -name 'lightfriend-full-backup-*.tar.gz.enc' -mmin +60 -delete 2>/dev/null || true
+find /tmp -maxdepth 1 -name 'lightfriend-full-backup-*.tar.gz.enc' -mmin +60 -delete 2>/dev/null || true
 
 # ── Write local success status ────────────────────────────────────────────────
 

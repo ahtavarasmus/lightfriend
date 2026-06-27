@@ -12,8 +12,10 @@
 set -uo pipefail
 
 POLL_URL="http://127.0.0.1:9080/export-request.json"
+RESERVE_RELEASE_URL="http://127.0.0.1:9080/reserve-release-request.json"
 POLL_INTERVAL=5
 LAST_PROCESSED=""
+LAST_RESERVE_PROCESSED=""
 LAST_RUN_LOG="/tmp/export-watcher-last-run.log"
 MAX_LAST_RUN_BYTES=1048576
 
@@ -36,6 +38,16 @@ cap_last_run_log() {
 }
 
 while true; do
+    RESERVE_REQUEST=$(curl -sf --max-time 5 "${RESERVE_RELEASE_URL}" 2>/dev/null || true)
+    if [ -n "${RESERVE_REQUEST}" ] && [ "${RESERVE_REQUEST}" != "${LAST_RESERVE_PROCESSED}" ] && echo "${RESERVE_REQUEST}" | jq -e '.action == "release-rootfs-reserve"' >/dev/null 2>&1; then
+        TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        echo "export-watcher: manual rootfs reserve release request at ${TIMESTAMP}"
+        /app/release-reserve.sh "${TIMESTAMP}" 2>&1 | tee -a "$LAST_RUN_LOG"
+        cap_last_run_log
+        LAST_RESERVE_PROCESSED="${RESERVE_REQUEST}"
+        echo "export-watcher: reserve release handled"
+    fi
+
     REQUEST=$(curl -sf --max-time 5 "${POLL_URL}" 2>/dev/null || true)
 
     if [ -n "${REQUEST}" ] && [ "${REQUEST}" != "${LAST_PROCESSED}" ] && echo "${REQUEST}" | jq -e '.action == "export"' >/dev/null 2>&1; then

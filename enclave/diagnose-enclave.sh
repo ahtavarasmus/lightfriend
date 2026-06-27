@@ -168,6 +168,18 @@ else
 fi
 echo ""
 
+echo "--- rootfs reserve status ---"
+if [ -e /var/lib/lightfriend-reserve/rootfs-reserve.bin ]; then
+    ls -lh /var/lib/lightfriend-reserve/rootfs-reserve.bin 2>/dev/null || true
+    du -h /var/lib/lightfriend-reserve/rootfs-reserve.bin 2>/dev/null || true
+else
+    echo "  reserve released or not present"
+fi
+if [ -f /data/seed/reserve-release-status.json ]; then
+    cat /data/seed/reserve-release-status.json 2>/dev/null || true
+fi
+echo ""
+
 echo "--- memory health ---"
 if [ -x /app/memory-health.sh ]; then
     /app/memory-health.sh report 2>&1

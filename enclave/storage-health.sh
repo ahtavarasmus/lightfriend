@@ -11,7 +11,7 @@ MIN_FREE_KB="${MIN_FREE_KB:-262144}"          # 256 MiB
 MIN_FREE_INODES="${MIN_FREE_INODES:-1024}"
 HISTORY_FILE="${STORAGE_HEALTH_HISTORY_FILE:-/tmp/storage-health-history.log}"
 MAX_HISTORY_BYTES="${STORAGE_MAX_HISTORY_BYTES:-1048576}"
-PATHS="/ /tmp /var/lib/postgresql /var/log /data/seed /var/lib/tuwunel /app"
+PATHS="/ /tmp /var/lib/postgresql /var/log /data/seed /var/lib/tuwunel /var/lib/tuwunel-backup /var/lib/lightfriend-reserve /app"
 
 rotate_history_if_needed() {
     if [ -f "$HISTORY_FILE" ] && [ "$(stat -c%s "$HISTORY_FILE" 2>/dev/null || echo 0)" -gt "$MAX_HISTORY_BYTES" ]; then
@@ -26,8 +26,22 @@ print_report() {
     echo "--- df -i ---"
     df -i ${PATHS} 2>/dev/null || df -i 2>/dev/null || echo "df -i unavailable"
     echo "--- top writable dirs ---"
-    du -xh -d 2 /tmp /var/log /data/seed /var/lib/postgresql /var/lib/tuwunel /app/data /app/uploads /app/matrix_store 2>/dev/null \
+    du -xh -d 2 /tmp /var/log /data/seed /var/lib/postgresql /var/lib/tuwunel /var/lib/tuwunel-backup /var/lib/lightfriend-reserve /app/data /app/uploads /app/matrix_store 2>/dev/null \
         | sort -h | tail -40 || true
+    echo "--- tuwunel BackupEngine dir ---"
+    if [ -d /var/lib/tuwunel-backup ]; then
+        du -sh /var/lib/tuwunel-backup 2>/dev/null || true
+        find /var/lib/tuwunel-backup -maxdepth 2 -type f -printf '%s %p\n' 2>/dev/null | sort -n | tail -20 || true
+    else
+        echo "not present"
+    fi
+    echo "--- manual rootfs reserve ---"
+    if [ -e /var/lib/lightfriend-reserve/rootfs-reserve.bin ]; then
+        ls -lh /var/lib/lightfriend-reserve/rootfs-reserve.bin 2>/dev/null || true
+        du -h /var/lib/lightfriend-reserve/rootfs-reserve.bin 2>/dev/null || true
+    else
+        echo "released or not present"
+    fi
     echo "--- large supervisor logs ---"
     find /var/log/supervisor -type f -size +1M -printf '%s %p\n' 2>/dev/null | sort -n | tail -20 || true
     echo "--- local backup artifacts ---"
@@ -60,7 +74,7 @@ check_storage() {
     local rc=0
     rotate_history_if_needed
     print_report >> "$HISTORY_FILE" 2>&1
-    for path in /tmp /var/lib/postgresql /var/log /data/seed; do
+    for path in /tmp /var/lib/postgresql /var/log /data/seed /var/lib/tuwunel-backup; do
         check_path "$path" || rc=1
     done
     return "$rc"
@@ -70,8 +84,18 @@ cleanup_storage() {
     echo "=== Storage Cleanup $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 
     rm -rf /tmp/backup-staging /tmp/verify.tar.gz /tmp/lightfriend-full-backup-*.tar.gz 2>/dev/null || true
+    find /tmp -maxdepth 1 -name 'lightfriend-full-backup-*.tar.gz.enc' -mmin +30 -delete 2>/dev/null || true
     rm -rf /tmp/backup-restore 2>/dev/null || true
     find /data/seed -name 'lightfriend-full-backup-*.tar.gz.enc' -mmin +30 -delete 2>/dev/null || true
+
+    if [ -d /var/lib/tuwunel-backup ]; then
+        if pgrep -f '/app/export.sh' >/dev/null 2>&1; then
+            echo "Skipping /var/lib/tuwunel-backup cleanup while export.sh is running"
+        else
+            echo "Removing stale /var/lib/tuwunel-backup"
+            rm -rf /var/lib/tuwunel-backup 2>/dev/null || true
+        fi
+    fi
 
     # The tunnel and bridge logs can grow quickly during scans/outages. Keep
     # recent logs, but cap any single supervisor log to the last 1 MiB.
