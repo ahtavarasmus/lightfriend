@@ -1146,6 +1146,43 @@ if [ -n "$BUCKET" ] && aws s3 ls "s3://$BUCKET/config/.env" 2>/dev/null; then
     INSTANCE_ID=$(curl -sf -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
     VERIFY="/opt/lightfriend/verify-result.json"
 
+    stage_tesla_key_from_s3() {
+        local label="$1"
+        local s3_key="s3://$BUCKET/config/tesla_private_key.pem"
+        local private_key="/opt/lightfriend/seed/tesla_private_key.pem"
+        local public_key="/opt/lightfriend/seed/tesla_public_key.pem"
+        # Non-secret public-key hash for the canonical Tesla command key.
+        # Rotate only intentionally; changing this invalidates virtual-key pairings.
+        local pinned_hash="86df69542e2573e07be6a6096e53bddfa807d0e30547ee1822addb86f620594c"
+
+        echo "=== Staging Tesla key ($label) ==="
+        if ! aws s3 ls "$s3_key" >/dev/null 2>&1; then
+            echo "FATAL: canonical Tesla private key missing at $s3_key"
+            return 1
+        fi
+        if ! aws s3 cp "$s3_key" "$private_key"; then
+            echo "FATAL: failed to download canonical Tesla private key"
+            return 1
+        fi
+        chmod 600 "$private_key"
+
+        if ! openssl pkey -in "$private_key" -pubout -out "$public_key" >/dev/null 2>&1; then
+            echo "FATAL: failed to derive Tesla public key from canonical private key"
+            rm -f "$public_key"
+            return 1
+        fi
+
+        local actual_hash
+        actual_hash="$(sha256sum "$public_key" | awk '{print $1}')"
+        chmod 644 "$public_key"
+        if [ "$actual_hash" != "$pinned_hash" ]; then
+            echo "FATAL: Tesla public key hash changed. expected=$pinned_hash actual=$actual_hash"
+            echo "       Refusing deploy because this would invalidate virtual-key pairings."
+            return 1
+        fi
+        echo "Tesla public key hash matches pinned value: $actual_hash"
+    }
+
     # ── Phase 1: Pre-warm ─────────────────────────────────────────────────
     echo "=== Phase 1: Pre-warming (download CI-built EIF) ==="
 
@@ -1153,11 +1190,13 @@ if [ -n "$BUCKET" ] && aws s3 ls "s3://$BUCKET/config/.env" 2>/dev/null; then
     aws s3 cp "s3://$BUCKET/config/.env" /opt/lightfriend/.env
     chmod 600 /opt/lightfriend/.env
 
-    # Download Tesla private key (for vehicle command signing proxy)
-    if aws s3 ls "s3://$BUCKET/config/tesla_private_key.pem" 2>/dev/null; then
-        aws s3 cp "s3://$BUCKET/config/tesla_private_key.pem" /opt/lightfriend/seed/tesla_private_key.pem
-        chmod 600 /opt/lightfriend/seed/tesla_private_key.pem
-        echo "Tesla private key downloaded to seed directory"
+    # Download and fingerprint Tesla private key (for vehicle command signing proxy).
+    # Missing/mismatched canonical key is a deploy failure: generating a new public
+    # key would invalidate all virtual-key pairings.
+    if ! stage_tesla_key_from_s3 "pre-warm"; then
+        echo "{\"status\": \"TESLA_KEY_STAGE_FAILED\", \"instance_id\": \"$INSTANCE_ID\"}" | \
+            aws s3 cp - "s3://$BUCKET/deploy/pre-warm-$INSTANCE_ID.json"
+        exit 1
     fi
 
     EIF_MANIFEST_KEY="deploy/eif-$INSTANCE_ID.json"
@@ -1266,10 +1305,11 @@ EOF
     aws s3 cp "s3://$BUCKET/config/.env" /opt/lightfriend/.env
     chmod 600 /opt/lightfriend/.env
 
-    # Re-download Tesla private key
-    if aws s3 ls "s3://$BUCKET/config/tesla_private_key.pem" 2>/dev/null; then
-        aws s3 cp "s3://$BUCKET/config/tesla_private_key.pem" /opt/lightfriend/seed/tesla_private_key.pem
-        chmod 600 /opt/lightfriend/seed/tesla_private_key.pem
+    # Re-download and fingerprint Tesla private key immediately before launch.
+    if ! stage_tesla_key_from_s3 "pre-launch"; then
+        echo "{\"status\": \"TESLA_KEY_STAGE_FAILED\", \"instance_id\": \"$INSTANCE_ID\"}" | \
+            aws s3 cp - "s3://$BUCKET/deploy/verify-$INSTANCE_ID.json"
+        exit 1
     fi
 
     if [ "$RESTORE_TYPE" = "seed" ]; then

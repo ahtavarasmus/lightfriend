@@ -1736,7 +1736,10 @@ async fn main() {
         }
         Err(e) => {
             tracing::error!("Failed to initialize Tesla keys: {}", e);
-            tracing::warn!("Tesla integration will not be available");
+            if is_prod {
+                panic!("Tesla key initialization failed in production: {}", e);
+            }
+            tracing::warn!("Tesla integration will not be available in development");
         }
     }
 

@@ -40,6 +40,14 @@ pub fn generate_or_load_keys() -> Result<(String, String), Box<dyn Error>> {
         return Ok((private_pem, public_pem));
     }
 
+    if !allow_ephemeral_tesla_key() {
+        return Err(format!(
+            "Tesla private key is missing at {}; refusing to generate an ephemeral production key",
+            PRIVATE_KEY_PATH
+        )
+        .into());
+    }
+
     warn!(
         "No Tesla private key on disk — generating fresh keypair. \
          Any vehicles currently paired with Lightfriend will need to re-pair. \
@@ -67,6 +75,13 @@ pub fn generate_or_load_keys() -> Result<(String, String), Box<dyn Error>> {
     info!("Public key: {}", PUBLIC_KEY_PATH);
 
     Ok((private_pem.to_string(), public_pem))
+}
+
+fn allow_ephemeral_tesla_key() -> bool {
+    std::env::var("ALLOW_EPHEMERAL_TESLA_KEY").is_ok_and(|value| value == "true")
+        || std::env::var("ENVIRONMENT")
+            .map(|value| value == "development")
+            .unwrap_or(true)
 }
 
 // Get the public key (used for serving via API endpoint)

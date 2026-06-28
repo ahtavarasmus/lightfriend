@@ -174,16 +174,39 @@ ensure_rootfs_reserve() {
 # ── 0b2. Fetch Tesla private key from host seed server ──────────────────────
 # The key is served by the host's HTTP seed server (port 9080) after being
 # downloaded from S3. Without it, the Tesla proxy (and vehicle commands) won't work.
+TESLA_KEY_BRIDGE_PID=""
+if [ -e /dev/vsock ]; then
+    socat TCP-LISTEN:9080,reuseaddr,fork VSOCK-CONNECT:3:9080 &
+    TESLA_KEY_BRIDGE_PID=$!
+    sleep 0.3
+fi
+
+TESLA_KEY_REQUIRED=false
+if [ -e /dev/vsock ] && [ "${ENVIRONMENT:-development}" != "development" ]; then
+    TESLA_KEY_REQUIRED=true
+fi
+
 if [ ! -f /app/tesla_private_key.pem ]; then
     echo "Fetching Tesla private key from host seed server..."
     if curl -sf --max-time 10 http://127.0.0.1:9080/tesla_private_key.pem -o /app/tesla_private_key.pem 2>/dev/null; then
         chmod 600 /app/tesla_private_key.pem
         echo "  Tesla private key fetched successfully"
     else
-        echo "  Tesla private key not available (Tesla integration will be disabled)"
+        echo "  Tesla private key not available"
         rm -f /app/tesla_private_key.pem
     fi
 fi
+
+if [ "$TESLA_KEY_REQUIRED" = "true" ]; then
+    if [ ! -f /app/tesla_private_key.pem ]; then
+        echo "  FATAL: Tesla private key is required in production; refusing to boot without canonical key"
+        exit 1
+    fi
+fi
+
+if [ -n "$TESLA_KEY_BRIDGE_PID" ]; then
+    kill "$TESLA_KEY_BRIDGE_PID" 2>/dev/null && wait "$TESLA_KEY_BRIDGE_PID" 2>/dev/null
+fi || true
 
 # ── 0b3. Generate Tesla proxy TLS certs (self-signed, localhost only) ────────
 if [ ! -f /etc/tesla-proxy-tls/cert.pem ]; then
