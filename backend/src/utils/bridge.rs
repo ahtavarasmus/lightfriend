@@ -86,6 +86,16 @@ fn bump_skipped_duplicate(service: &str) {
     counter.fetch_add(1, Ordering::Relaxed);
 }
 
+fn should_cleanup_tuwunel_media(msgtype: &MessageType) -> bool {
+    matches!(
+        msgtype,
+        MessageType::Image(_)
+            | MessageType::Video(_)
+            | MessageType::File(_)
+            | MessageType::Audio(_)
+    )
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BridgeRoom {
     pub room_id: String,
@@ -1856,6 +1866,18 @@ pub async fn handle_bridge_redaction(
         _ => return,
     };
 
+    if crate::utils::tuwunel_event_cleanup::is_tuwunel_admin_redaction_reason(
+        ev.content.reason.as_deref(),
+    ) {
+        tracing::info!(
+            user_id,
+            room_id = %room.room_id(),
+            redacted_event_id,
+            "Ignoring Tuwunel admin cleanup redaction; ontology row remains canonical"
+        );
+        return;
+    }
+
     match state
         .ontology_repository
         .delete_message_by_matrix_event_id(user_id, &redacted_event_id)
@@ -2372,6 +2394,9 @@ pub async fn handle_bridge_message(
         );
     }
 
+    let cleanup_tuwunel_media = should_cleanup_tuwunel_media(&event.content.msgtype);
+    let cleanup_matrix_event_id = event.event_id.to_string();
+
     // Extract message content and estimate message size for bandwidth tracking
     let (content, bytes_estimate) = match event.content.msgtype {
         MessageType::Text(ref t) => (t.body.clone(), t.body.len() as i32),
@@ -2532,6 +2557,7 @@ pub async fn handle_bridge_message(
     };
     let state_clone = state.clone();
     let stored_service = service.clone();
+    let cleanup_room_id = current_room_id.clone();
     tokio::spawn(async move {
         match state_clone.ontology_repository.insert_message(&msg) {
             Ok((created, is_new)) => {
@@ -2540,6 +2566,14 @@ pub async fn handle_bridge_message(
                     return;
                 }
                 bump_stored(&stored_service);
+                crate::utils::tuwunel_event_cleanup::enqueue_processed_bridge_event(
+                    user_id,
+                    &stored_service,
+                    &cleanup_room_id,
+                    &cleanup_matrix_event_id,
+                    created.id,
+                    cleanup_tuwunel_media,
+                );
                 let mut snapshot = serde_json::json!({
                     "message_id": created.id,
                     "platform": msg.platform,
