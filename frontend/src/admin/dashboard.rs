@@ -261,6 +261,11 @@ struct UserInfo {
     has_twilio_credentials: bool,
 }
 
+fn sort_users_by_id_desc(mut users: Vec<UserInfo>) -> Vec<UserInfo> {
+    users.sort_by(|a, b| b.id.cmp(&a.id));
+    users
+}
+
 #[derive(Clone, Debug)]
 struct DeleteModalState {
     show: bool,
@@ -504,7 +509,7 @@ pub fn admin_dashboard() -> Html {
                         if response.ok() {
                             match response.json::<Vec<UserInfo>>().await {
                                 Ok(data) => {
-                                    users.set(data);
+                                    users.set(sort_users_by_id_desc(data));
                                 }
                                 Err(_) => {
                                     error.set(Some("Failed to parse users data".to_string()));
@@ -1913,7 +1918,7 @@ pub fn admin_dashboard() -> Html {
                                                                                                             .await
                                                                                                         {
                                                                                                             if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
-                                                                                                                users.set(updated_users);
+                                                                                                                users.set(sort_users_by_id_desc(updated_users));
                                                                                                             }
                                                                                                         }
                                                                                                     } else {
@@ -1952,7 +1957,7 @@ pub fn admin_dashboard() -> Html {
                                                                                                             .await
                                                                                                         {
                                                                                                             if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
-                                                                                                                users.set(updated_users);
+                                                                                                                users.set(sort_users_by_id_desc(updated_users));
                                                                                                             }
                                                                                                         }
                                                                                                     } else {
@@ -1992,7 +1997,7 @@ pub fn admin_dashboard() -> Html {
                                                                                                             .await
                                                                                                         {
                                                                                                             if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
-                                                                                                                users.set(updated_users);
+                                                                                                                users.set(sort_users_by_id_desc(updated_users));
                                                                                                             }
                                                                                                         }
                                                                                                     } else {
@@ -2031,7 +2036,7 @@ pub fn admin_dashboard() -> Html {
                                                                                                             .await
                                                                                                         {
                                                                                                             if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
-                                                                                                                users.set(updated_users);
+                                                                                                                users.set(sort_users_by_id_desc(updated_users));
                                                                                                             }
                                                                                                         }
                                                                                                     } else {
@@ -2076,7 +2081,7 @@ pub fn admin_dashboard() -> Html {
                                                                                                             .await
                                                                                                         {
                                                                                                             if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
-                                                                                                                users.set(updated_users);
+                                                                                                                users.set(sort_users_by_id_desc(updated_users));
 
                                                                                                             }
                                                                                                         }
@@ -2129,7 +2134,7 @@ pub fn admin_dashboard() -> Html {
                                                                                                             .await
                                                                                                         {
                                                                                                             if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
-                                                                                                                users.set(updated_users);
+                                                                                                                users.set(sort_users_by_id_desc(updated_users));
                                                                                                             }
                                                                                                         }
                                                                                                     } else {
