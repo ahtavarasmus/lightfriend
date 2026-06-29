@@ -2567,6 +2567,7 @@ pub async fn handle_bridge_message(
                 }
                 bump_stored(&stored_service);
                 crate::utils::tuwunel_event_cleanup::enqueue_processed_bridge_event(
+                    &state_clone,
                     user_id,
                     &stored_service,
                     &cleanup_room_id,
