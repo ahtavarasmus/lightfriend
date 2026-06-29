@@ -46,7 +46,7 @@ fn product_classification_handles_new_legacy_and_credit_products() {
             ProductKind::Assistant,
             SubscriptionAge::AtOrAfterLegacyCutoff
         ),
-        Some(PlanType::Assistant)
+        Some(PlanType::Autopilot)
     );
     assert_eq!(
         plan_type_for_product(
@@ -118,7 +118,7 @@ fn canceled_subscription_update_never_regrants_access() {
             false,
             false
         ),
-        SubscriptionUpsertDecision::IgnoreInactiveSubscription
+        SubscriptionUpsertDecision::RevokeInactiveSubscription
     );
 }
 

@@ -158,13 +158,6 @@ pub fn validate_env() {
 
         require_any_env(
             &[
-                "STRIPE_ASSISTANT_CHECKOUT_PRICE_ID",
-                "STRIPE_ASSISTANT_PLAN_PRICE_ID",
-            ],
-            "STRIPE_ASSISTANT_CHECKOUT_PRICE_ID or STRIPE_ASSISTANT_PLAN_PRICE_ID",
-        );
-        require_any_env(
-            &[
                 "STRIPE_AUTOPILOT_CHECKOUT_PRICE_ID",
                 "STRIPE_AUTOPILOT_PLAN_PRICE_ID",
             ],

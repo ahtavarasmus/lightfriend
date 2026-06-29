@@ -59,7 +59,8 @@ fn legacy_product_cutoff_ts() -> i64 {
 
 /// Determine plan type from a Stripe product ID.
 ///
-/// Unknown pre-cutoff subscription products are treated as legacy Autopilot
+/// Assistant products are treated as legacy Autopilot subscriptions. Unknown
+/// pre-cutoff subscription products are also treated as legacy Autopilot
 /// subscriptions so existing customers keep access while their current Stripe
 /// subscription remains active. Unknown post-cutoff products are rejected by
 /// returning `None` instead of silently granting a plan.

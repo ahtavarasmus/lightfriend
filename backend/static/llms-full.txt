@@ -49,16 +49,15 @@ Lightfriend is a practical solution for phone addiction: it decouples essential 
 
 ## Pricing
 
-### Assistant Plan - $19/month (US/CA) or €29/month (EU/international)
+### Autopilot - one experience, three billing timelines
+- $80/month, $210 every 3 months, or $420/year
+- 7-day free trial on every billing timeline
 - SMS chat interface with AI assistant
 - Voice calling interface
 - Web search, weather
 - Connected app access (WhatsApp, Telegram, Signal, email)
 - Scheduled digests
 - MCP server support for custom integrations
-
-### Autopilot Plan - $29/month (US/CA) or €49/month (EU/international)
-- Everything in Assistant plan
 - 24/7 critical message monitoring with instant SMS alerts
 - Custom automation rules (WHEN/IF/THEN)
 - Priority support

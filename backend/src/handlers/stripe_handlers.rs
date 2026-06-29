@@ -28,7 +28,7 @@ pub struct BuyCreditsRequest {
 #[derive(Deserialize)]
 pub struct SubscriptionCheckoutBody {
     pub subscription_type: SubscriptionType,
-    /// "assistant" or "autopilot"
+    /// "autopilot"; "assistant" is accepted as a legacy alias.
     pub plan_type: Option<String>,
 }
 
@@ -41,11 +41,7 @@ pub struct SubscriptionMigrationStatusResponse {
 
 fn checkout_price_for_plan(plan_type: Option<&str>) -> Result<String, (StatusCode, Json<Value>)> {
     let env_keys = match plan_type {
-        Some("assistant") => [
-            "STRIPE_ASSISTANT_CHECKOUT_PRICE_ID",
-            "STRIPE_ASSISTANT_PLAN_PRICE_ID",
-        ],
-        Some("autopilot") | None => [
+        Some("assistant") | Some("autopilot") | None => [
             "STRIPE_AUTOPILOT_CHECKOUT_PRICE_ID",
             "STRIPE_AUTOPILOT_PLAN_PRICE_ID",
         ],
@@ -119,6 +115,76 @@ async fn retrieve_price_currency(client: &Client, price_id: &str) -> Option<stri
     }
 }
 
+fn product_kind_from_subscription(
+    subscription: &Subscription,
+) -> stripe_webhook_logic::ProductKind {
+    subscription
+        .items
+        .data
+        .first()
+        .and_then(|item| item.price.as_ref())
+        .and_then(|price| price.product.as_ref())
+        .map(|product| match product {
+            stripe::Expandable::Id(id) => crate::utils::country::stripe_product_kind(id),
+            stripe::Expandable::Object(product) => {
+                crate::utils::country::stripe_product_kind(product.id.as_ref())
+            }
+        })
+        .unwrap_or(stripe_webhook_logic::ProductKind::Unknown)
+}
+
+fn subscription_snapshot(
+    subscription: &Subscription,
+    is_deleted_subscription: bool,
+) -> stripe_webhook_logic::ActiveSubscriptionSnapshot {
+    stripe_webhook_logic::ActiveSubscriptionSnapshot {
+        is_deleted_subscription,
+        product_kind: product_kind_from_subscription(subscription),
+        subscription_age: crate::utils::country::subscription_age_for_legacy_cutoff(Some(
+            subscription.created,
+        )),
+    }
+}
+
+fn clear_subscription_entitlement(state: &Arc<AppState>, user_id: i32) {
+    tracing::info!("No active plan subscriptions remaining, clearing subscription info");
+    if let Err(e) = state.user_repository.set_subscription_tier(user_id, None) {
+        tracing::error!("Failed to clear subscription tier: {}", e);
+    }
+    if let Err(e) = state.user_core.update_sub_country(user_id, None) {
+        tracing::error!("Failed to clear subscription country: {}", e);
+    }
+    if let Err(e) = state.user_repository.update_plan_type(user_id, None) {
+        tracing::error!("Failed to clear plan_type: {}", e);
+    }
+    if let Err(e) = state.user_repository.clear_included_usage_window(user_id) {
+        tracing::error!("Failed to clear included usage window: {}", e);
+    }
+    if let Err(e) = state.user_core.update_next_billing_date(user_id, 0) {
+        tracing::error!("Failed to clear next billing date: {}", e);
+    }
+}
+
+fn keep_subscription_plan(
+    state: &Arc<AppState>,
+    user_id: i32,
+    remaining_plan: stripe_webhook_logic::PlanType,
+) {
+    tracing::info!("User still has active subscription, keeping tier 2");
+    if let Err(e) = state
+        .user_repository
+        .set_subscription_tier(user_id, Some("tier 2"))
+    {
+        tracing::error!("Failed to update subscription tier: {}", e);
+    }
+    if let Err(e) = state
+        .user_repository
+        .update_plan_type(user_id, Some(remaining_plan.as_str()))
+    {
+        tracing::error!("Failed to update plan_type: {}", e);
+    }
+}
+
 /// Idempotent subscription entitlement setup. Safe to call multiple times.
 /// Stripe webhooks update access and Stripe renewal metadata only; Lightfriend
 /// grants included usage through its own monthly usage windows.
@@ -130,8 +196,9 @@ async fn setup_user_subscription(
     current_period_end: i64,
     _phone_country: Option<&str>,
 ) -> Result<(), String> {
-    // Set plan_type based on product ID. Unknown legacy products only map to
-    // Autopilot while their pre-cutoff Stripe subscription remains active.
+    // Set plan_type based on product ID. Assistant is a legacy Autopilot alias,
+    // and unknown legacy products only map to Autopilot while their pre-cutoff
+    // Stripe subscription remains active.
     let plan_type =
         crate::utils::country::plan_type_from_product(product_id, Some(subscription_created))
             .ok_or_else(|| {
@@ -403,8 +470,8 @@ pub async fn create_unified_subscription_checkout(
             ))
         }
     };
-    // Check for existing active subscription
-    let existing_subscription = stripe::Subscription::list(
+    // Check for existing active or trialing subscription.
+    let existing_subscriptions = stripe::Subscription::list(
         &client,
         &stripe::ListSubscriptions {
             customer: Some(customer_id.parse().map_err(|_| {
@@ -413,8 +480,8 @@ pub async fn create_unified_subscription_checkout(
                     Json(json!({"error": "Invalid customer ID"})),
                 )
             })?),
-            status: Some(stripe::SubscriptionStatusFilter::Active),
-            limit: Some(1),
+            status: Some(stripe::SubscriptionStatusFilter::All),
+            limit: Some(20),
             ..Default::default()
         },
     )
@@ -426,13 +493,19 @@ pub async fn create_unified_subscription_checkout(
             Json(json!({"error": "Failed to check existing subscriptions"})),
         )
     })?;
+    let current_subscription = existing_subscriptions.data.iter().find(|subscription| {
+        matches!(
+            subscription.status,
+            stripe::SubscriptionStatus::Active | stripe::SubscriptionStatus::Trialing
+        )
+    });
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
     let base_price_id = match body.subscription_type {
         SubscriptionType::Hosted => checkout_price_for_plan(body.plan_type.as_deref())?,
     };
 
     let mut checkout_customer_id = customer_id.clone();
-    if let Some(current_subscription) = existing_subscription.data.first() {
+    if let Some(current_subscription) = current_subscription {
         if let Some(new_price_currency) = retrieve_price_currency(&client, &base_price_id).await {
             if new_price_currency != current_subscription.currency {
                 tracing::info!(
@@ -493,7 +566,7 @@ pub async fn create_unified_subscription_checkout(
     };
     // Handle metadata for plan changes
     let success_url1 = format!("{}/?subscription=changed", domain_url);
-    if let Some(current_subscription) = existing_subscription.data.first() {
+    if let Some(current_subscription) = current_subscription {
         tracing::debug!("Found existing subscription: {}", current_subscription.id);
 
         // Create metadata to track the subscription change
@@ -545,7 +618,7 @@ pub async fn create_unified_subscription_checkout(
 pub struct GuestCheckoutBody {
     pub subscription_type: SubscriptionType,
     pub selected_country: String,
-    /// "assistant" or "autopilot"
+    /// "autopilot"; "assistant" is accepted as a legacy alias.
     pub plan_type: Option<String>,
 }
 
@@ -593,9 +666,7 @@ pub async fn create_guest_checkout(
         body.selected_country.clone(),
     );
     metadata.insert("is_guest_checkout".to_string(), "true".to_string());
-    if let Some(ref plan_type) = body.plan_type {
-        metadata.insert("plan_type".to_string(), plan_type.clone());
-    }
+    metadata.insert("plan_type".to_string(), "autopilot".to_string());
 
     // Subscription data
     let sub_data = stripe::CreateCheckoutSessionSubscriptionData {
@@ -1006,7 +1077,7 @@ pub async fn create_checkout_session(
     let is_us_ca = matches!(detected_country.as_deref(), Some("US") | Some("CA"));
 
     if !is_us_ca {
-        // Only hosted-credit plans (assistant, autopilot) can buy more credits; BYOT cannot
+        // Only hosted-credit plans can buy more credits; BYOT cannot.
         if !crate::utils::plan_features::uses_hosted_credits(user.plan_type.as_deref()) {
             tracing::info!(
                 "User {} attempted to buy credits but plan_type={:?} does not use hosted credits",
@@ -1351,6 +1422,82 @@ pub async fn stripe_webhook(
                         );
                         return Ok(StatusCode::OK);
                     }
+                    stripe_webhook_logic::SubscriptionUpsertDecision::RevokeInactiveSubscription => {
+                        tracing::info!(
+                            "Revoking inactive subscription {} with status {} if no active subscriptions remain",
+                            subscription.id,
+                            subscription.status.as_str()
+                        );
+
+                        let user = match state
+                            .user_repository
+                            .find_by_stripe_customer_id(customer_id.as_str())
+                        {
+                            Ok(Some(user)) => user,
+                            Ok(None) => {
+                                tracing::warn!(
+                                    "Inactive subscription update received for unknown customer {}, skipping",
+                                    customer_id
+                                );
+                                return Ok(StatusCode::OK);
+                            }
+                            Err(e) => {
+                                tracing::error!("Error finding user by customer ID: {}", e);
+                                return Err((
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    Json(json!({"error": "Database error"})),
+                                ));
+                            }
+                        };
+
+                        let subscriptions = Subscription::list(
+                            &client,
+                            &stripe::ListSubscriptions {
+                                customer: Some(customer_id.clone()),
+                                status: Some(stripe::SubscriptionStatusFilter::All),
+                                limit: Some(20),
+                                ..Default::default()
+                            },
+                        )
+                        .await
+                        .map_err(|e| {
+                            tracing::error!("Failed to list subscriptions: {}", e);
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({"error": "Failed to check existing subscriptions"})),
+                            )
+                        })?;
+
+                        let active_subscription_snapshots: Vec<_> = subscriptions
+                            .data
+                            .iter()
+                            .filter(|active_subscription| {
+                                matches!(
+                                    active_subscription.status,
+                                    stripe::SubscriptionStatus::Active
+                                        | stripe::SubscriptionStatus::Trialing
+                                )
+                            })
+                            .map(|active_subscription| {
+                                subscription_snapshot(active_subscription, false)
+                            })
+                            .collect();
+
+                        match stripe_webhook_logic::decide_subscription_delete(
+                            false,
+                            &active_subscription_snapshots,
+                        ) {
+                            stripe_webhook_logic::SubscriptionDeletedDecision::IgnorePlanChangeDelete => {}
+                            stripe_webhook_logic::SubscriptionDeletedDecision::ClearSubscription => {
+                                clear_subscription_entitlement(&state, user.id);
+                            }
+                            stripe_webhook_logic::SubscriptionDeletedDecision::KeepPlan(remaining_plan) => {
+                                keep_subscription_plan(&state, user.id, remaining_plan);
+                            }
+                        }
+
+                        return Ok(StatusCode::OK);
+                    }
                     stripe_webhook_logic::SubscriptionUpsertDecision::IgnorePlanChangeUpdate => {
                         tracing::info!(
                             "Skipping subscription update as it's part of a plan change"
@@ -1383,7 +1530,7 @@ pub async fn stripe_webhook(
                                 &client_bg,
                                 &stripe::ListSubscriptions {
                                     customer: Some(customer_id_bg),
-                                    status: Some(stripe::SubscriptionStatusFilter::Active),
+                                    status: Some(stripe::SubscriptionStatusFilter::All),
                                     ..Default::default()
                                 },
                             ),
@@ -1406,6 +1553,13 @@ pub async fn stripe_webhook(
                         let mut subscriptions_to_cancel: Vec<String> = existing_subscriptions
                             .data
                             .iter()
+                            .filter(|s| {
+                                matches!(
+                                    s.status,
+                                    stripe::SubscriptionStatus::Active
+                                        | stripe::SubscriptionStatus::Trialing
+                                )
+                            })
                             .filter(|s| s.id != current_subscription_id)
                             .map(|s| s.id.to_string())
                             .collect();
@@ -1590,7 +1744,8 @@ pub async fn stripe_webhook(
                         &client,
                         &stripe::ListSubscriptions {
                             customer: Some(customer_id.clone()),
-                            status: Some(stripe::SubscriptionStatusFilter::Active),
+                            status: Some(stripe::SubscriptionStatusFilter::All),
+                            limit: Some(20),
                             ..Default::default()
                         },
                     )
@@ -1605,33 +1760,18 @@ pub async fn stripe_webhook(
                     let active_subscription_snapshots: Vec<_> = active_subscriptions
                         .data
                         .iter()
+                        .filter(|active_subscription| {
+                            matches!(
+                                active_subscription.status,
+                                stripe::SubscriptionStatus::Active
+                                    | stripe::SubscriptionStatus::Trialing
+                            )
+                        })
                         .map(|active_subscription| {
-                            let product_kind = active_subscription
-                                .items
-                                .data
-                                .first()
-                                .and_then(|item| item.price.as_ref())
-                                .and_then(|price| price.product.as_ref())
-                                .map(|product| match product {
-                                    stripe::Expandable::Id(id) => {
-                                        crate::utils::country::stripe_product_kind(id)
-                                    }
-                                    stripe::Expandable::Object(product) => {
-                                        crate::utils::country::stripe_product_kind(
-                                            product.id.as_ref(),
-                                        )
-                                    }
-                                })
-                                .unwrap_or(stripe_webhook_logic::ProductKind::Unknown);
-
-                            stripe_webhook_logic::ActiveSubscriptionSnapshot {
-                                is_deleted_subscription: active_subscription.id == subscription.id,
-                                product_kind,
-                                subscription_age:
-                                    crate::utils::country::subscription_age_for_legacy_cutoff(Some(
-                                        active_subscription.created,
-                                    )),
-                            }
+                            subscription_snapshot(
+                                active_subscription,
+                                active_subscription.id == subscription.id,
+                            )
                         })
                         .collect();
 
@@ -1646,44 +1786,10 @@ pub async fn stripe_webhook(
                             return Ok(StatusCode::OK);
                         }
                         stripe_webhook_logic::SubscriptionDeletedDecision::ClearSubscription => {
-                        // No active subscriptions left, clear entitlement,
-                        // included usage, and Stripe billing date.
-                        tracing::info!(
-                            "No active plan subscriptions remaining, clearing subscription info"
-                        );
-                        if let Err(e) = state.user_repository.set_subscription_tier(user.id, None) {
-                            tracing::error!("Failed to clear subscription tier: {}", e);
-                        }
-                        if let Err(e) = state.user_core.update_sub_country(user.id, None) {
-                            tracing::error!("Failed to clear subscription country: {}", e);
-                        }
-                        // Clear plan_type
-                        if let Err(e) = state.user_repository.update_plan_type(user.id, None) {
-                            tracing::error!("Failed to clear plan_type: {}", e);
-                        }
-                        if let Err(e) = state.user_repository.clear_included_usage_window(user.id) {
-                            tracing::error!("Failed to clear included usage window: {}", e);
-                        }
-                        // Clear next billing date
-                        if let Err(e) = state.user_core.update_next_billing_date(user.id, 0) {
-                            tracing::error!("Failed to clear next billing date: {}", e);
-                        }
+                            clear_subscription_entitlement(&state, user.id);
                         }
                         stripe_webhook_logic::SubscriptionDeletedDecision::KeepPlan(remaining_plan) => {
-                            // Always tier 2 for any active subscription
-                            tracing::info!("User still has active subscription, keeping tier 2");
-                            if let Err(e) = state
-                                .user_repository
-                                .set_subscription_tier(user.id, Some("tier 2"))
-                            {
-                                tracing::error!("Failed to update subscription tier: {}", e);
-                            }
-                            if let Err(e) = state
-                                .user_repository
-                                .update_plan_type(user.id, Some(remaining_plan.as_str()))
-                            {
-                                tracing::error!("Failed to update plan_type: {}", e);
-                            }
+                            keep_subscription_plan(&state, user.id, remaining_plan);
                         }
                     }
                 }

@@ -31,7 +31,7 @@ pub struct User {
     pub refresh_token_hash: Option<String>,     // hash of the currently active refresh token
     pub refresh_token_compromised: bool,        // set if an invalidated refresh token is reused
     pub magic_token_expires_at: Option<i32>,    // expiry for magic link token
-    pub plan_type: Option<String>,              // "assistant" or "autopilot"
+    pub plan_type: Option<String>,              // "autopilot"; "assistant" is legacy
     pub own_twilio_enabled: bool,               // route phone traffic through user's Twilio account
     pub matrix_e2ee_enabled: bool,              // whether E2EE is enabled for Matrix messaging
     /// Override for SMS provider routing. NULL = country-based routing

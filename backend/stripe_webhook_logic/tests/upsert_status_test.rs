@@ -29,7 +29,7 @@ fn inactive_subscription_updates_never_regrant_access() {
     ] {
         assert_eq!(
             decide_subscription_upsert(SubscriptionUpsertEvent::Updated, status, false, false),
-            SubscriptionUpsertDecision::IgnoreInactiveSubscription
+            SubscriptionUpsertDecision::RevokeInactiveSubscription
         );
     }
 }

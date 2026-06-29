@@ -1,0 +1,2 @@
+-- Irreversible data migration. Assistant is now a legacy alias for Autopilot,
+-- so rolling this back should not downgrade subscribers.

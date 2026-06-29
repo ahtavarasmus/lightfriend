@@ -33,7 +33,7 @@ pub fn plan_type_for_product(
     subscription_age: SubscriptionAge,
 ) -> Option<PlanType> {
     match product_kind {
-        ProductKind::Assistant => Some(PlanType::Assistant),
+        ProductKind::Assistant => Some(PlanType::Autopilot),
         ProductKind::Autopilot => Some(PlanType::Autopilot),
         ProductKind::CreditsAddOn => None,
         ProductKind::Unknown if subscription_age == SubscriptionAge::PreLegacyCutoff => {
@@ -79,6 +79,7 @@ pub fn subscription_allows_access(status: SubscriptionStatus) -> bool {
 pub enum SubscriptionUpsertDecision {
     ApplySubscription,
     IgnoreInactiveSubscription,
+    RevokeInactiveSubscription,
     IgnorePlanChangeUpdate,
     IgnoreCancelAtPeriodEndUpdate,
 }
@@ -89,14 +90,16 @@ pub fn decide_subscription_upsert(
     is_plan_change: bool,
     cancel_at_period_end: bool,
 ) -> SubscriptionUpsertDecision {
-    if !subscription_allows_access(status) {
-        return SubscriptionUpsertDecision::IgnoreInactiveSubscription;
-    }
-
     match event {
-        SubscriptionUpsertEvent::Created => SubscriptionUpsertDecision::ApplySubscription,
+        SubscriptionUpsertEvent::Created if subscription_allows_access(status) => {
+            SubscriptionUpsertDecision::ApplySubscription
+        }
+        SubscriptionUpsertEvent::Created => SubscriptionUpsertDecision::IgnoreInactiveSubscription,
         SubscriptionUpsertEvent::Updated if is_plan_change => {
             SubscriptionUpsertDecision::IgnorePlanChangeUpdate
+        }
+        SubscriptionUpsertEvent::Updated if !subscription_allows_access(status) => {
+            SubscriptionUpsertDecision::RevokeInactiveSubscription
         }
         SubscriptionUpsertEvent::Updated if cancel_at_period_end => {
             SubscriptionUpsertDecision::IgnoreCancelAtPeriodEndUpdate
@@ -211,7 +214,7 @@ mod proofs {
         let plan = plan_type_for_product(product_kind, subscription_age);
 
         match product_kind {
-            ProductKind::Assistant => assert_eq!(plan, Some(PlanType::Assistant)),
+            ProductKind::Assistant => assert_eq!(plan, Some(PlanType::Autopilot)),
             ProductKind::Autopilot => assert_eq!(plan, Some(PlanType::Autopilot)),
             ProductKind::CreditsAddOn => assert_eq!(plan, None),
             ProductKind::Unknown if subscription_age == SubscriptionAge::PreLegacyCutoff => {
@@ -280,10 +283,14 @@ mod proofs {
             status,
             SubscriptionStatus::Active | SubscriptionStatus::Trialing
         ) {
-            assert_eq!(
-                decision,
-                SubscriptionUpsertDecision::IgnoreInactiveSubscription
-            );
+            if is_plan_change {
+                assert_eq!(decision, SubscriptionUpsertDecision::IgnorePlanChangeUpdate);
+            } else {
+                assert_eq!(
+                    decision,
+                    SubscriptionUpsertDecision::RevokeInactiveSubscription
+                );
+            }
         } else if is_plan_change {
             assert_eq!(decision, SubscriptionUpsertDecision::IgnorePlanChangeUpdate);
         } else if cancel_at_period_end {

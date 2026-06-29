@@ -1283,7 +1283,10 @@ enum Card {
 pub fn rule_builder(props: &RuleBuilderProps) -> Html {
     let is_editing = props.editing_rule.is_some();
     let editing_rule_id = props.editing_rule.as_ref().map(|r| r.id);
-    let is_autopilot = props.plan_type.as_deref() == Some("autopilot");
+    let is_autopilot = matches!(
+        props.plan_type.as_deref(),
+        Some("assistant") | Some("autopilot")
+    );
 
     // Track whether user has actually interacted with the form (for edit mode close confirmation)
     let user_touched_form = use_state(|| false);

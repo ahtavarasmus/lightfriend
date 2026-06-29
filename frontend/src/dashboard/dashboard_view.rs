@@ -1525,12 +1525,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     // Mode detection
     let has_auto = matches!(
         props.user_profile.plan_type.as_deref(),
-        Some("autopilot") | Some("byot")
+        Some("assistant") | Some("autopilot") | Some("byot")
     );
     let is_setup_mode = !*has_any_bridge && !*has_email && !props.user_profile.has_any_connection;
 
     // BYOT plan setup detection
-    let is_byot = props.user_profile.plan_type.as_deref() == Some("byot");
+    let is_byot = props.user_profile.own_twilio_enabled;
     let byot_has_creds =
         props.user_profile.twilio_sid.is_some() && props.user_profile.twilio_token.is_some();
     let byot_number = props.user_profile.preferred_number.clone();
@@ -1728,12 +1728,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                 } else {
                     // ---- Running mode ----
 
-                    // Assistant plan note
+                    // Subscription note
                     if !has_auto {
                         <div class="assistant-plan-note">
-                            {"Monitoring is not automatic on the Assistant plan. Ask your assistant when you want to check messages or send replies. "}
+                            {"Monitoring becomes automatic with an active Autopilot subscription. Ask your assistant when you want to check messages or send replies. "}
                             <button type="button" class="link-button" onclick={open_customer_portal.clone()}>
-                                {"Upgrade to Autopilot"}
+                                {"View billing"}
                             </button>
                         </div>
                     }

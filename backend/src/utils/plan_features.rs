@@ -6,7 +6,7 @@
 /// Does this plan include automatic LLM processing of incoming messages?
 /// (message monitoring, critical filtering, auto item creation)
 pub fn has_auto_features(plan_type: Option<&str>) -> bool {
-    matches!(plan_type, Some("autopilot"))
+    matches!(plan_type, Some("assistant") | Some("autopilot"))
 }
 
 /// Does this plan use hosted messaging credits?

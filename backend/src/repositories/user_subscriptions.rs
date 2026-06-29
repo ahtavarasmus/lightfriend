@@ -176,7 +176,7 @@ impl crate::repositories::user_repository::UserRepository {
         Ok(())
     }
 
-    /// Update the user's plan type ("assistant", "autopilot", or None)
+    /// Update the user's plan type ("autopilot", legacy "assistant", or None)
     pub fn update_plan_type(
         &self,
         user_id: i32,

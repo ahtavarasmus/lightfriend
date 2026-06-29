@@ -106,7 +106,6 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
     // Recent usage feed state
     let usage_feed = use_state(|| None::<Vec<UsageLogEntry>>);
     let migration_status = use_state(|| None::<SubscriptionMigrationStatus>);
-    let subscription_checkout_loading = use_state(|| None::<String>);
 
     // Fetch recent usage on mount
     {
@@ -529,62 +528,9 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
         })
     };
 
-    let start_subscription_checkout = {
-        let user_id = user_profile.id;
-        let error = error.clone();
-        let subscription_checkout_loading = subscription_checkout_loading.clone();
-        Callback::from(move |plan_type: String| {
-            let user_id = user_id;
-            let error = error.clone();
-            let subscription_checkout_loading = subscription_checkout_loading.clone();
-            spawn_local(async move {
-                subscription_checkout_loading.set(Some(plan_type.clone()));
-                match Api::post(&format!(
-                    "/api/stripe/unified-subscription-checkout/{}",
-                    user_id
-                ))
-                .header("Content-Type", "application/json")
-                .json(&json!({
-                    "subscription_type": "Hosted",
-                    "plan_type": plan_type,
-                }))
-                .expect("Failed to serialize subscription checkout request")
-                .send()
-                .await
-                {
-                    Ok(response) if response.ok() => {
-                        if let Ok(data) = response.json::<Value>().await {
-                            if let Some(url) = data.get("url").and_then(|value| value.as_str()) {
-                                let _ = web_sys::window().unwrap().location().set_href(url);
-                                return;
-                            }
-                        }
-                        error.set(Some("No checkout URL returned".to_string()));
-                    }
-                    Ok(response) => {
-                        let message = response
-                            .json::<Value>()
-                            .await
-                            .ok()
-                            .and_then(|data| {
-                                data.get("error")
-                                    .and_then(|value| value.as_str())
-                                    .map(ToString::to_string)
-                            })
-                            .unwrap_or_else(|| "Failed to start subscription checkout".to_string());
-                        error.set(Some(message));
-                    }
-                    Err(e) => error.set(Some(format!("Network error occurred: {:?}", e))),
-                }
-                subscription_checkout_loading.set(None);
-            });
-        })
-    };
-
     // Determine plan display name
     let plan_name = match user_profile.plan_type.as_deref() {
-        Some("autopilot") => "Autopilot",
-        Some("assistant") => "Assistant",
+        Some("assistant") | Some("autopilot") => "Autopilot",
         _ => {
             if user_profile.sub_tier.is_some() {
                 "Active"
@@ -642,44 +588,9 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                             <h3>{"Switch to a current plan"}</h3>
                         </div>
                         <div class="billing-note">
-                            {"Your Stripe portal still shows the old plan. Choose a current plan here to replace it."}
+                            {"Your Stripe portal still shows an old plan. Choose a current billing timeline here to replace it."}
                         </div>
-                        <div class="plan-switch-buttons">
-                            <button
-                                type="button"
-                                class="plan-switch-button"
-                                disabled={(*subscription_checkout_loading).is_some()}
-                                onclick={
-                                    let start_subscription_checkout = start_subscription_checkout.clone();
-                                    Callback::from(move |_| start_subscription_checkout.emit("assistant".to_string()))
-                                }
-                            >
-                                {
-                                    if (*subscription_checkout_loading).as_deref() == Some("assistant") {
-                                        "Opening Assistant..."
-                                    } else {
-                                        "Choose Assistant"
-                                    }
-                                }
-                            </button>
-                            <button
-                                type="button"
-                                class="plan-switch-button primary"
-                                disabled={(*subscription_checkout_loading).is_some()}
-                                onclick={
-                                    let start_subscription_checkout = start_subscription_checkout.clone();
-                                    Callback::from(move |_| start_subscription_checkout.emit("autopilot".to_string()))
-                                }
-                            >
-                                {
-                                    if (*subscription_checkout_loading).as_deref() == Some("autopilot") {
-                                        "Opening Autopilot..."
-                                    } else {
-                                        "Choose Autopilot"
-                                    }
-                                }
-                            </button>
-                        </div>
+                        <StripePricingTable user_id={Some(user_profile.id)} />
                     </div>
                 }
 

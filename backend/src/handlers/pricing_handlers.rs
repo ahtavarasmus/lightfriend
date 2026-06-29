@@ -413,7 +413,7 @@ pub struct DashboardCreditsResponse {
     pub is_notification_only: bool,
     /// Whether this country has local numbers (can receive inbound calls)
     pub has_local_numbers: bool,
-    /// User's plan type: "assistant", "autopilot", or "byot"
+    /// User's plan type: "autopilot", "byot", or legacy "assistant"
     pub plan_type: Option<String>,
     /// Included usage info for the current Lightfriend usage window.
     pub monthly: Option<CreditEquivalents>,
@@ -609,7 +609,7 @@ pub async fn get_dashboard_credits(
 /// Response for usage projection - all values in NOTIFICATION UNITS (not currency)
 #[derive(Serialize)]
 pub struct UsageProjectionResponse {
-    /// User's plan type: "assistant", "autopilot", or "byot"
+    /// User's plan type: "autopilot", "byot", or legacy "assistant"
     pub plan_type: Option<String>,
     /// Plan capacity in notifications per month
     pub plan_capacity: i32,

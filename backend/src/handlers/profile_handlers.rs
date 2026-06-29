@@ -114,7 +114,7 @@ pub struct ProfileResponse {
     estimated_monitoring_cost: f32,
     location: Option<String>,
     nearby_places: Option<String>,
-    plan_type: Option<String>,    // "assistant" or "autopilot"
+    plan_type: Option<String>,    // "autopilot"; "assistant" is legacy
     own_twilio_enabled: bool,     // whether phone traffic routes through user's Twilio account
     phone_service_active: bool,   // whether phone service is active - can be disabled for security
     llm_provider: Option<String>, // "openai" (default) or "tinfoil" - user's LLM provider preference

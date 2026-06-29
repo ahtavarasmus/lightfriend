@@ -39,7 +39,7 @@ Lightfriend is designed for people who want to break free from phone addiction. 
 ## Docs
 
 - [How It Works](https://lightfriend.ai/faq): FAQ covering features, setup, privacy, and compatible phones
-- [Pricing](https://lightfriend.ai/pricing): Plans from $19/month (Assistant) and $29/month (Autopilot)
+- [Pricing](https://lightfriend.ai/pricing): Autopilot costs $80/month, $210 every 3 months, or $420/year with a 7-day free trial
 - [Verifiably Private](https://lightfriend.ai/trustless): Full explanation of the hardware attestation and trust chain
 - [Live Trust Chain](https://lightfriend.ai/trust-chain): Real-time verification of the running enclave
 - [Supported Countries](https://lightfriend.ai/supported-countries): 40+ countries with local or notification-only numbers

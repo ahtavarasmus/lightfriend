@@ -258,6 +258,7 @@ struct UserInfo {
     sub_tier: Option<String>,
     credits_left: f32,
     plan_type: Option<String>,
+    own_twilio_enabled: bool,
     has_twilio_credentials: bool,
 }
 
@@ -1834,18 +1835,22 @@ pub fn admin_dashboard() -> Html {
                                                                             "plan-badge",
                                                                             match user.plan_type.as_deref() {
                                                                                 Some("byot") => "byot",
-                                                                                Some("autopilot") => "autopilot",
-                                                                                Some("assistant") => "assistant",
+                                                                                Some("assistant") | Some("autopilot") => "autopilot",
                                                                                 _ => "none"
                                                                             }
                                                                         )}>
-                                                                            {user.plan_type.clone().unwrap_or_else(|| "None".to_string()).to_uppercase()}
+                                                                            {
+                                                                                match user.plan_type.as_deref() {
+                                                                                    Some("assistant") => "AUTOPILOT".to_string(),
+                                                                                    _ => user.plan_type.clone().unwrap_or_else(|| "None".to_string()).to_uppercase(),
+                                                                                }
+                                                                            }
                                                                         </span>
                                                                     </td>
                                                                     <td>
                                                                         {
                                                                             // Only show Twilio status for BYOT users
-                                                                            if user.plan_type.as_deref() == Some("byot") {
+                                                                            if user.own_twilio_enabled {
                                                                                 html! {
                                                                                     <span class={classes!(
                                                                                         "status-badge",
@@ -2113,11 +2118,11 @@ pub fn admin_dashboard() -> Html {
                                                                                     Callback::from(move |_| {
                                                                                         let users = users.clone();
                                                                                         let error = error.clone();
-                                                                                        // Cycle: None -> byot -> autopilot -> assistant -> None
+                                                                                        // Cycle: None -> autopilot -> None. BYOT routing is controlled by own_twilio_enabled.
                                                                                         let new_plan = match current_plan.as_deref() {
-                                                                                            None => "byot",
+                                                                                            None => "autopilot",
                                                                                             Some("byot") => "autopilot",
-                                                                                            Some("autopilot") => "assistant",
+                                                                                            Some("autopilot") => "none",
                                                                                             Some("assistant") | _ => "none",
                                                                                         };
 
@@ -2151,11 +2156,11 @@ pub fn admin_dashboard() -> Html {
                                                                                 class="iq-button plan-type"
                                                                             >
                                                                                 {match user.plan_type.as_deref() {
-                                                                                    None => "Set BYOT",
+                                                                                    None => "Set Autopilot",
                                                                                     Some("byot") => "Set Autopilot",
-                                                                                    Some("autopilot") => "Set Assistant",
+                                                                                    Some("autopilot") => "Remove Plan",
                                                                                     Some("assistant") => "Remove Plan",
-                                                                                    _ => "Set BYOT"
+                                                                                    _ => "Set Autopilot"
                                                                                 }}
                                                                             </button>
 

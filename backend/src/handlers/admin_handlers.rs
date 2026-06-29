@@ -638,13 +638,14 @@ pub async fn update_subscription_tier(
     })))
 }
 
-/// Update a user's plan type (monitor, digest, byot, or none)
+/// Update a user's plan type. Assistant is accepted as a legacy Autopilot alias.
 pub async fn update_plan_type(
     State(state): State<Arc<AppState>>,
     axum::extract::Path((user_id, plan_type)): axum::extract::Path<(i32, String)>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let plan_type = match plan_type.as_str() {
         "none" => None,
+        "assistant" => Some("autopilot"),
         other => Some(other),
     };
 

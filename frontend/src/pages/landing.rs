@@ -138,8 +138,8 @@ pub fn landing() -> Html {
             "What can Lightfriend actually do?",
             html! {
                 <>
-                    <p>{"Both plans include the smart assistant and all connected tools as context: WhatsApp, Telegram, Signal, email, web search, image understanding, Tesla, MCP integrations, and more."}</p>
-                    <p>{"Assistant is for asking questions, sending messages, checking context, and getting help when you reach out. Autopilot adds proactive AI features: automatic critical notifications, smart digests, and custom rules that watch for what matters without you asking first."}</p>
+                    <p>{"Lightfriend includes the smart assistant and all connected tools as context: WhatsApp, Telegram, Signal, email, web search, image understanding, Tesla, MCP integrations, and more."}</p>
+                    <p>{"Autopilot adds the proactive layer: automatic critical notifications, smart digests, and custom rules that watch for what matters without you asking first."}</p>
                 </>
             },
         ),
@@ -147,7 +147,7 @@ pub fn landing() -> Html {
             "How much usage is included?",
             html! {
                 <>
-                    <p>{"Both plans include $25/month in messaging credits for SMS and voice delivery. The cap is mainly there to prevent abuse and runaway spam. For normal use - asking questions when needed and receiving updates through the day on Autopilot - it should be more than enough."}</p>
+                    <p>{"Every billing timeline includes $25/month in messaging credits for SMS and voice delivery. The cap is mainly there to prevent abuse and runaway spam. For normal use - asking questions when needed and receiving updates through the day on Autopilot - it should be more than enough."}</p>
                     <p>{"Actual usage depends on Twilio delivery costs in your country. US and Canada SMS is usually around 1.5 cents per message. Europe is often around 15-30 cents per message, and some countries can be closer to $1 depending on destination and carrier fees."}</p>
                     <p>
                         {"You can check current costs on Twilio's "}
@@ -474,7 +474,7 @@ pub fn landing() -> Html {
             </section>
             <section id="plans" class="landing-pricing-section scroll-animate">
                 <div class="section-intro">
-                    <h2>{"Choose your plan"}</h2>
+                    <h2>{"Choose your billing timeline"}</h2>
                 </div>
                 <StripePricingTable />
             </section>
