@@ -1568,6 +1568,10 @@ async fn main() {
         .route(
             "/api/internal/sms-failures/digest/send",
             post(handlers::health_handlers::sms_failures_digest_send),
+        )
+        .route(
+            "/api/internal/tesla/register-partner",
+            post(tesla_auth::register_tesla_partner),
         );
 
     let app = Router::new()
@@ -1704,38 +1708,32 @@ async fn main() {
                 "Public key will be served at /.well-known/appspecific/com.tesla.3p.public-key.pem"
             );
 
-            // Register app in all Tesla regions (EU, NA, AP) for proxy to work globally
+            // Register app in all Tesla regions (EU, NA, AP) for proxy to work globally.
+            // During blue-green key rotation, Tesla can only fetch the old live public key
+            // until the new instance is switched in, so deployment also runs this after
+            // cutover via the internal maintenance endpoint.
             tracing::info!("Registering app in all Tesla Fleet API regions...");
-            let regions = vec![
-                ("EU", "https://fleet-api.prd.eu.vn.cloud.tesla.com", true),
-                ("NA", "https://fleet-api.prd.na.vn.cloud.tesla.com", true),
-                ("AP", "https://fleet-api.prd.ap.vn.cloud.tesla.com", false),
-            ];
-
-            let mut required_registration_failures = Vec::new();
-            for (name, url, required) in regions {
-                let client = api::tesla::TeslaClient::new_with_region(url);
-                match client.register_in_region().await {
-                    Ok(_) => tracing::info!("✓ Registered in {} region", name),
-                    Err(e) => {
-                        tracing::error!(
-                            "Failed to register Tesla partner in {} region: {}. \
-                             This means Tesla still has the previous public key cached \
-                             and virtual-key pairing will fail. Check that TESLA_REDIRECT_URL \
-                             matches the allowed origin in the Tesla developer dashboard.",
-                            name,
-                            e
-                        );
-                        if required {
-                            required_registration_failures.push(name);
-                        }
-                    }
+            let registration_report = api::tesla::register_partner_in_regions().await;
+            for region in &registration_report.regions {
+                if region.success {
+                    tracing::info!("✓ Registered in {} region", region.name);
+                } else {
+                    tracing::error!(
+                        "Failed to register Tesla partner in {} region: {}. \
+                         This means Tesla may still have the previous public key cached \
+                         and virtual-key pairing will fail until registration is refreshed.",
+                        region.name,
+                        region.error.as_deref().unwrap_or("unknown error")
+                    );
                 }
             }
 
-            if is_prod && !required_registration_failures.is_empty() {
-                panic!(
-                    "Tesla partner registration failed in required regions: {:?}",
+            let required_registration_failures = registration_report.required_failure_names();
+            if !required_registration_failures.is_empty() {
+                tracing::warn!(
+                    "Tesla partner registration failed in required regions during startup: {:?}. \
+                     Production deploys retry this after cutover, when the public key endpoint \
+                     is served by the new enclave.",
                     required_registration_failures
                 );
             }

@@ -2,7 +2,7 @@ use crate::handlers::auth_middleware::AuthUser;
 use crate::UserCoreOps;
 use axum::{
     extract::{Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
         Json, Redirect,
@@ -897,6 +897,38 @@ pub async fn serve_tesla_public_key() -> Result<(StatusCode, String), (StatusCod
                 format!("Failed to retrieve public key: {}", e),
             ))
         }
+    }
+}
+
+pub async fn register_tesla_partner(
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if !crate::handlers::maintenance_handlers::check_secret(&headers) {
+        return Err((StatusCode::FORBIDDEN, Json(json!({"error": "forbidden"}))));
+    }
+
+    info!("Refreshing Tesla partner registration from internal endpoint");
+    let report = crate::api::tesla::register_partner_in_regions().await;
+    let required_failures = report.required_failure_names();
+
+    if required_failures.is_empty() {
+        Ok(Json(json!({
+            "status": "registered",
+            "report": report,
+        })))
+    } else {
+        error!(
+            "Tesla partner registration failed in required regions: {:?}",
+            required_failures
+        );
+        Err((
+            StatusCode::BAD_GATEWAY,
+            Json(json!({
+                "error": "tesla_partner_registration_failed",
+                "required_failures": required_failures,
+                "report": report,
+            })),
+        ))
     }
 }
 

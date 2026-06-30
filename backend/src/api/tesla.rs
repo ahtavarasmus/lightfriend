@@ -59,6 +59,31 @@ pub struct VehiclesResponse {
     pub response: Vec<TeslaVehicle>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct TeslaPartnerRegistrationResult {
+    pub name: &'static str,
+    pub base_url: &'static str,
+    pub required: bool,
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TeslaPartnerRegistrationReport {
+    pub regions: Vec<TeslaPartnerRegistrationResult>,
+}
+
+impl TeslaPartnerRegistrationReport {
+    pub fn required_failure_names(&self) -> Vec<String> {
+        self.regions
+            .iter()
+            .filter(|result| result.required && !result.success)
+            .map(|result| result.name.to_string())
+            .collect()
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct VehicleDataResponse {
     pub response: TeslaVehicle,
@@ -1015,6 +1040,37 @@ impl TeslaClient {
             }
         }
     }
+}
+
+pub async fn register_partner_in_regions() -> TeslaPartnerRegistrationReport {
+    let regions = [
+        ("EU", "https://fleet-api.prd.eu.vn.cloud.tesla.com", true),
+        ("NA", "https://fleet-api.prd.na.vn.cloud.tesla.com", true),
+        ("AP", "https://fleet-api.prd.ap.vn.cloud.tesla.com", false),
+    ];
+
+    let mut results = Vec::with_capacity(regions.len());
+    for (name, base_url, required) in regions {
+        let client = TeslaClient::new_with_region(base_url);
+        match client.register_in_region().await {
+            Ok(_) => results.push(TeslaPartnerRegistrationResult {
+                name,
+                base_url,
+                required,
+                success: true,
+                error: None,
+            }),
+            Err(e) => results.push(TeslaPartnerRegistrationResult {
+                name,
+                base_url,
+                required,
+                success: false,
+                error: Some(e.to_string()),
+            }),
+        }
+    }
+
+    TeslaPartnerRegistrationReport { regions: results }
 }
 
 pub fn normalize_tesla_partner_domain(url_or_domain: &str) -> String {

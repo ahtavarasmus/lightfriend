@@ -831,6 +831,7 @@ jobs:
       # Now stop old cloudflared so Cloudflare routes all traffic to new,
       # then terminate old instance.
       - name: Switch to new instance
+        id: switch
         if: steps.health.outputs.healthy == 'true'
         env:
           AWS_DEFAULT_REGION: us-east-1
@@ -864,6 +865,7 @@ jobs:
           aws ssm put-parameter --name /lightfriend/instance-id \
             --value "$NEW_INSTANCE" --type String --overwrite
           echo "SSM updated to $NEW_INSTANCE"
+          echo "switched=true" >> $GITHUB_OUTPUT
 
           # Brief grace period then terminate old
           sleep 15
@@ -876,7 +878,7 @@ jobs:
             aws s3 cp - "s3://$S3_BUCKET/deploy/deploy-state.json"
 
           cat <<EOF | aws s3 cp - "s3://$S3_BUCKET/deploy/logs/deploy-${{ github.run_id }}.json"
-          {"deploy_id":"${{ github.run_id }}","commit_sha":"${{ github.sha }}","completed_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","outcome":"SUCCESS","old_instance":"$OLD_INSTANCE","new_instance":"$NEW_INSTANCE","eif_key":"${{ needs.build-eif.outputs.eif_key }}","eif_sha256":"${{ needs.build-eif.outputs.eif_sha256 }}","pcr0":"${{ needs.build-eif.outputs.pcr0 }}","pcr1":"${{ needs.build-eif.outputs.pcr1 }}","pcr2":"${{ needs.build-eif.outputs.pcr2 }}"}
+          {"deploy_id":"${{ github.run_id }}","commit_sha":"${{ github.sha }}","completed_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","outcome":"SWITCHED","old_instance":"$OLD_INSTANCE","new_instance":"$NEW_INSTANCE","eif_key":"${{ needs.build-eif.outputs.eif_key }}","eif_sha256":"${{ needs.build-eif.outputs.eif_sha256 }}","pcr0":"${{ needs.build-eif.outputs.pcr0 }}","pcr1":"${{ needs.build-eif.outputs.pcr1 }}","pcr2":"${{ needs.build-eif.outputs.pcr2 }}"}
           EOF
 
           aws s3 rm "s3://$S3_BUCKET/deploy/verify-$NEW_INSTANCE.json" 2>/dev/null || true
@@ -884,12 +886,99 @@ jobs:
           aws s3 rm "s3://$S3_BUCKET/deploy/eif-$NEW_INSTANCE.json" 2>/dev/null || true
           aws s3 rm "s3://$S3_BUCKET/deploy/restore-$NEW_INSTANCE.json" 2>/dev/null || true
 
+          echo "## Traffic Switch Complete" >> $GITHUB_STEP_SUMMARY
+
+      # ── Step 9: Refresh Tesla partner registration after public cutover ──
+      # Tesla fetches /.well-known/appspecific/com.tesla.3p.public-key.pem from
+      # the public domain, so a rotated key can only be registered after the new
+      # enclave is serving lightfriend.ai.
+      - name: Refresh Tesla partner registration
+        if: steps.switch.outputs.switched == 'true'
+        run: |
+          S3_BUCKET="${{ steps.infra.outputs.s3_bucket }}"
+          TMP_PUBLIC="$(mktemp)"
+          TMP_BODY="$(mktemp)"
+          TMP_ERR="$(mktemp)"
+          trap 'rm -f "$TMP_PUBLIC" "$TMP_BODY" "$TMP_ERR"' EXIT
+
+          EXPECTED_PUBLIC_HASH=$(grep -E 'local pinned_hash=' terraform/modules/compute/user_data.sh | head -1 | sed -E 's/.*"([0-9a-f]+)".*/\1/')
+          if [ -z "$EXPECTED_PUBLIC_HASH" ]; then
+            echo "FATAL: could not read pinned Tesla public key hash from terraform/modules/compute/user_data.sh"
+            exit 1
+          fi
+
+          PUBLIC_KEY_MATCH=false
+          for attempt in $(seq 1 24); do
+            echo "Checking public Tesla key endpoint (attempt $attempt/24)..."
+            if curl -fsS --max-time 10 \
+              https://lightfriend.ai/.well-known/appspecific/com.tesla.3p.public-key.pem \
+              -o "$TMP_PUBLIC"; then
+              LIVE_PUBLIC_HASH=$(sha256sum "$TMP_PUBLIC" | awk '{print $1}')
+              echo "public key hash: $LIVE_PUBLIC_HASH"
+              if [ "$LIVE_PUBLIC_HASH" = "$EXPECTED_PUBLIC_HASH" ]; then
+                PUBLIC_KEY_MATCH=true
+                break
+              fi
+              echo "Waiting for public endpoint to serve pinned Tesla key..."
+            fi
+            sleep 5
+          done
+
+          if [ "$PUBLIC_KEY_MATCH" != "true" ]; then
+            echo "FATAL: public Tesla key endpoint did not serve pinned hash $EXPECTED_PUBLIC_HASH"
+            exit 1
+          fi
+
+          CONFIG=$(aws s3 cp "s3://$S3_BUCKET/config/.env" - 2>/dev/null || true)
+          MAINTENANCE_SECRET=$(printf '%s\n' "$CONFIG" | grep '^MAINTENANCE_SECRET=' | tail -1 | cut -d= -f2- | tr -d '\r')
+          if [ -z "$MAINTENANCE_SECRET" ]; then
+            echo "FATAL: MAINTENANCE_SECRET not found in s3://$S3_BUCKET/config/.env"
+            exit 1
+          fi
+
+          REGISTERED=false
+          for attempt in $(seq 1 6); do
+            echo "Refreshing Tesla partner registration (attempt $attempt/6)..."
+            HTTP_CODE=$(curl -sS --max-time 260 \
+              -o "$TMP_BODY" \
+              -w "%{http_code}" \
+              -X POST \
+              -H "X-Maintenance-Secret: $MAINTENANCE_SECRET" \
+              https://lightfriend.ai/api/internal/tesla/register-partner \
+              2>"$TMP_ERR" || true)
+            [ -n "$HTTP_CODE" ] || HTTP_CODE="000"
+            echo "HTTP $HTTP_CODE"
+            if [ -s "$TMP_ERR" ]; then
+              cat "$TMP_ERR"
+            fi
+            if [ -s "$TMP_BODY" ]; then
+              jq . "$TMP_BODY" || cat "$TMP_BODY"
+            fi
+            if [ "$HTTP_CODE" = "200" ]; then
+              REGISTERED=true
+              break
+            fi
+            sleep 15
+          done
+
+          if [ "$REGISTERED" != "true" ]; then
+            echo "FATAL: Tesla partner registration did not succeed after cutover"
+            exit 1
+          fi
+
+          NEW_INSTANCE="${{ steps.launch.outputs.new_instance }}"
+          OLD_INSTANCE="${{ steps.infra.outputs.old_instance }}"
+          cat <<EOF | aws s3 cp - "s3://$S3_BUCKET/deploy/logs/deploy-${{ github.run_id }}.json"
+          {"deploy_id":"${{ github.run_id }}","commit_sha":"${{ github.sha }}","completed_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","outcome":"SUCCESS","old_instance":"$OLD_INSTANCE","new_instance":"$NEW_INSTANCE","eif_key":"${{ needs.build-eif.outputs.eif_key }}","eif_sha256":"${{ needs.build-eif.outputs.eif_sha256 }}","pcr0":"${{ needs.build-eif.outputs.pcr0 }}","pcr1":"${{ needs.build-eif.outputs.pcr1 }}","pcr2":"${{ needs.build-eif.outputs.pcr2 }}","tesla_partner_registration":"refreshed"}
+          EOF
+
           echo "## Deploy Complete" >> $GITHUB_STEP_SUMMARY
+          echo "- Tesla partner registration refreshed" >> $GITHUB_STEP_SUMMARY
 
       # ── Rollback: terminate new instance, old stays live ──
-      # Triggers on failure AND cancellation to prevent orphaned EC2 instances
+      # Triggers on failure/cancellation before traffic switches to the new instance.
       - name: Rollback on failure
-        if: (failure() || cancelled()) && steps.launch.outputs.new_instance != ''
+        if: (failure() || cancelled()) && steps.launch.outputs.new_instance != '' && steps.switch.outputs.switched != 'true'
         env:
           AWS_DEFAULT_REGION: us-east-1
           CONTRACT_ADDRESS: ${{ secrets.MARLIN_KMS_CONTRACT_ADDRESS }}
