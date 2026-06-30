@@ -270,6 +270,28 @@ pub fn matches_trigger(
         return false;
     }
 
+    let is_group_message = entity_type.eq_ignore_ascii_case("Message")
+        && entity_snapshot
+            .get("is_group")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+    if is_group_message {
+        let room_id = entity_snapshot
+            .get("room_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if config.group_mode.is_none() || config.resolved_room_id.as_deref() != Some(room_id) {
+            return false;
+        }
+        if entity_snapshot
+            .get("is_outgoing")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            return false;
+        }
+    }
+
     // Resolved-identity sender match (preferred over name filter when
     // present). This is the authoritative check set at rule-save time when
     // the user picks from the autocomplete — deterministic, no fuzzy, no

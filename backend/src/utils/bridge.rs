@@ -206,6 +206,35 @@ fn is_group_room(service: &str, member_localparts: &[String]) -> bool {
         > 1
 }
 
+async fn whatsapp_room_muted(state: &Arc<AppState>, matrix_user_id: &str, room_id: &str) -> bool {
+    let Some(repo) = state.whatsapp_bridge_repository.as_ref() else {
+        return false;
+    };
+    let repo = Arc::clone(repo);
+    let matrix_user_id = matrix_user_id.to_string();
+    let room_id = room_id.to_string();
+    let room_id_for_lookup = room_id.clone();
+    match tokio::task::spawn_blocking(move || {
+        repo.is_room_muted(&matrix_user_id, &room_id_for_lookup)
+    })
+    .await
+    {
+        Ok(Ok(muted)) => muted,
+        Ok(Err(e)) => {
+            tracing::warn!("WhatsApp mute lookup failed for room {}: {}", room_id, e);
+            false
+        }
+        Err(e) => {
+            tracing::warn!(
+                "WhatsApp mute lookup task failed for room {}: {}",
+                room_id,
+                e
+            );
+            false
+        }
+    }
+}
+
 pub fn remove_bridge_suffix(chat_name: &str) -> String {
     let trimmed = chat_name.trim();
     let lower = trimmed.to_lowercase();
@@ -1935,10 +1964,8 @@ pub async fn handle_bridge_message(
         return;
     }
 
-    if room.user_defined_notification_mode().await == Some(RoomNotificationMode::Mute) {
-        tracing::info!("Skipping message from a muted room");
-        return;
-    }
+    let matrix_room_muted =
+        room.user_defined_notification_mode().await == Some(RoomNotificationMode::Mute);
 
     // Check message age using pure function
     const HALF_HOUR_MS: u64 = 30 * 60 * 1000;
@@ -2257,15 +2284,17 @@ pub async fn handle_bridge_message(
                         "is_group": is_group,
                         "is_outgoing": true,
                     });
-                    crate::proactive::rules::emit_ontology_change(
-                        &state_clone,
-                        user_id,
-                        "Message",
-                        created.id as i32,
-                        "created",
-                        snapshot,
-                    )
-                    .await;
+                    if !matrix_room_muted {
+                        crate::proactive::rules::emit_ontology_change(
+                            &state_clone,
+                            user_id,
+                            "Message",
+                            created.id as i32,
+                            "created",
+                            snapshot,
+                        )
+                        .await;
+                    }
 
                     // Auto-resolve: user replied, so clear pending digests and resolve urgency
                     let now = msg.created_at;
@@ -2302,11 +2331,26 @@ pub async fn handle_bridge_message(
         return;
     }
 
+    let current_room_id = room.room_id().to_string();
+    let is_group = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
+        Ok(members) => {
+            let member_localparts: Vec<String> = members
+                .iter()
+                .map(|member| member.user_id().localpart().to_string())
+                .collect();
+            is_group_room(&service, &member_localparts)
+        }
+        Err(_) => false,
+    };
+    let attention_muted = matrix_room_muted
+        || (service == "whatsapp"
+            && whatsapp_room_muted(&state, &client_user_id, &current_room_id).await);
+
     // Pending reply watch: if the user armed one for this room, SMS them
     // the first inbound message from the recipient and clear the watch.
     // Runs before the tier-2/auto-features gates because the user has
     // already paid for SMS and explicitly asked to be told.
-    {
+    if !attention_muted && !is_group {
         let watch_content = match &event.content.msgtype {
             MessageType::Text(t) => t.body.clone(),
             MessageType::Notice(n) => n.body.clone(),
@@ -2318,10 +2362,9 @@ pub async fn handle_bridge_message(
             MessageType::Location(_) => "[location]".to_string(),
             _ => String::new(),
         };
-        let room_id_for_watch = room.room_id().to_string();
         match state
             .pending_reply_watches_repository
-            .find_active_bridge(user_id, &room_id_for_watch)
+            .find_active_bridge(user_id, &current_room_id)
         {
             Ok(Some(watch)) => {
                 let body = if watch_content.is_empty() {
@@ -2348,7 +2391,7 @@ pub async fn handle_bridge_message(
                                 "REPLY_WATCH fired+cleared bridge watch id={} user={} room={}",
                                 watch.id,
                                 user_id,
-                                room_id_for_watch
+                                current_room_id
                             );
                         }
                     }
@@ -2364,7 +2407,7 @@ pub async fn handle_bridge_message(
             Err(e) => tracing::warn!(
                 "REPLY_WATCH lookup failed user={} room={}: {}",
                 user_id,
-                room_id_for_watch,
+                current_room_id,
                 e
             ),
         }
@@ -2452,7 +2495,6 @@ pub async fn handle_bridge_message(
     }
 
     let chat_name = remove_bridge_suffix(room_name.as_str());
-    let current_room_id = room.room_id().to_string();
 
     // Skip WhatsApp "Status Broadcast" (the disappearing-stories pseudo-chat
     // mautrix-whatsapp creates for status@broadcast). Every status post from
@@ -2470,18 +2512,6 @@ pub async fn handle_bridge_message(
 
     // Detect call event notices from mautrix bridges (e.g. "Incoming call", "Missed call")
     let is_call_event = is_call_event_message(&content);
-
-    // Check if this is a group chat (same heuristic as get_service_rooms)
-    let is_group = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
-        Ok(members) => {
-            let member_localparts: Vec<String> = members
-                .iter()
-                .map(|member| member.user_id().localpart().to_string())
-                .collect();
-            is_group_room(&service, &member_localparts)
-        }
-        Err(_) => false,
-    };
 
     // Ontology Person lookup (for person_id on the message)
     let matching_person = state
@@ -2591,7 +2621,7 @@ pub async fn handle_bridge_message(
                 if let Some(pid) = person_id {
                     snapshot["person_id"] = serde_json::json!(pid);
                 }
-                if has_auto_features {
+                if has_auto_features && !attention_muted {
                     let entity_type = if is_call_event { "Call" } else { "Message" };
                     crate::proactive::rules::emit_ontology_change(
                         &state_clone,
@@ -2604,9 +2634,11 @@ pub async fn handle_bridge_message(
                     .await;
                 } else {
                     tracing::debug!(
-                        "Stored bridge message {} for user {} without emitting auto-feature ontology change",
+                        "Stored bridge message {} for user {} without emitting ontology change (auto_features={}, attention_muted={})",
                         created.id,
-                        user_id
+                        user_id,
+                        has_auto_features,
+                        attention_muted
                     );
                 }
             }

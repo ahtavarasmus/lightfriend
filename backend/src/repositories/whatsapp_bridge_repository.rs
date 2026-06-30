@@ -11,7 +11,7 @@
 use crate::PgDbPool;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
-use diesel::sql_types::Text;
+use diesel::sql_types::{BigInt, Text};
 
 #[derive(Debug, Clone)]
 pub struct WhatsAppContact {
@@ -75,6 +75,20 @@ struct JidRow {
 struct PortalMxidRow {
     #[diesel(sql_type = diesel::sql_types::Nullable<Text>)]
     mxid: Option<String>,
+}
+
+#[derive(diesel::QueryableByName, Debug)]
+struct PortalChatRow {
+    #[diesel(sql_type = Text)]
+    id: String,
+    #[diesel(sql_type = Text)]
+    receiver: String,
+}
+
+#[derive(diesel::QueryableByName, Debug)]
+struct MuteEndTimeRow {
+    #[diesel(sql_type = diesel::sql_types::Nullable<BigInt>)]
+    mute_end_time: Option<i64>,
 }
 
 /// Unified search result: either a DM contact or a group portal.
@@ -369,6 +383,61 @@ impl WhatsAppBridgeRepository {
         Ok(rows.into_iter().next().and_then(|r| r.mxid))
     }
 
+    pub fn is_room_muted(&self, matrix_user_id: &str, room_id: &str) -> Result<bool, DieselError> {
+        let mut conn = self
+            .pool
+            .get()
+            .expect("Failed to get whatsapp_db connection");
+        let portals: Vec<PortalChatRow> = diesel::sql_query(
+            "SELECT id, receiver FROM portal \
+             WHERE bridge_id = 'whatsapp' AND mxid = $1 \
+             LIMIT 1",
+        )
+        .bind::<Text, _>(room_id)
+        .load(&mut conn)?;
+        let Some(portal) = portals.into_iter().next() else {
+            return Ok(false);
+        };
+
+        let PortalChatRow {
+            id: chat_id,
+            receiver,
+        } = portal;
+        let mut login_id = receiver;
+        drop(conn);
+        if login_id.is_empty() {
+            let Some(fallback) = self.get_login_phone_for_matrix_user(matrix_user_id)? else {
+                return Ok(false);
+            };
+            login_id = fallback;
+        }
+
+        let mut conn = self
+            .pool
+            .get()
+            .expect("Failed to get whatsapp_db connection");
+        let rows: Vec<MuteEndTimeRow> = diesel::sql_query(
+            "SELECT mute_end_time FROM whatsapp_history_sync_conversation \
+             WHERE bridge_id = 'whatsapp' \
+               AND user_login_id = $1 \
+               AND chat_jid = $2 \
+             LIMIT 1",
+        )
+        .bind::<Text, _>(&login_id)
+        .bind::<Text, _>(&chat_id)
+        .load(&mut conn)?;
+        let mute_end_time = rows
+            .into_iter()
+            .next()
+            .and_then(|r| r.mute_end_time)
+            .unwrap_or(0);
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        Ok(whatsapp_mute_is_active(mute_end_time, now_secs))
+    }
+
     /// Convenience: resolve the login phone for a Matrix user, then fetch
     /// contacts. Falls back to fetching all contacts if user lookup fails
     /// (safe in single-user enclave).
@@ -415,6 +484,18 @@ impl WhatsAppBridgeRepository {
         );
         Ok(contacts)
     }
+}
+
+pub fn whatsapp_mute_is_active(mute_end_time: i64, now_secs: i64) -> bool {
+    if mute_end_time < 0 {
+        return true;
+    }
+    let mute_end_secs = if mute_end_time > 10_000_000_000 {
+        mute_end_time / 1000
+    } else {
+        mute_end_time
+    };
+    mute_end_secs > now_secs
 }
 
 fn row_to_contact(row: ContactRow) -> WhatsAppContact {
