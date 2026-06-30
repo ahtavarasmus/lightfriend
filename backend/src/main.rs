@@ -1707,24 +1707,37 @@ async fn main() {
             // Register app in all Tesla regions (EU, NA, AP) for proxy to work globally
             tracing::info!("Registering app in all Tesla Fleet API regions...");
             let regions = vec![
-                ("EU", "https://fleet-api.prd.eu.vn.cloud.tesla.com"),
-                ("NA", "https://fleet-api.prd.na.vn.cloud.tesla.com"),
-                ("AP", "https://fleet-api.prd.ap.vn.cloud.tesla.com"),
+                ("EU", "https://fleet-api.prd.eu.vn.cloud.tesla.com", true),
+                ("NA", "https://fleet-api.prd.na.vn.cloud.tesla.com", true),
+                ("AP", "https://fleet-api.prd.ap.vn.cloud.tesla.com", false),
             ];
 
-            for (name, url) in regions {
+            let mut required_registration_failures = Vec::new();
+            for (name, url, required) in regions {
                 let client = api::tesla::TeslaClient::new_with_region(url);
                 match client.register_in_region().await {
                     Ok(_) => tracing::info!("✓ Registered in {} region", name),
-                    Err(e) => tracing::error!(
-                        "Failed to register Tesla partner in {} region: {}. \
-                         This means Tesla still has the previous public key cached \
-                         and virtual-key pairing will fail. Check that TESLA_REDIRECT_URL \
-                         matches the allowed origin in the Tesla developer dashboard.",
-                        name,
-                        e
-                    ),
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to register Tesla partner in {} region: {}. \
+                             This means Tesla still has the previous public key cached \
+                             and virtual-key pairing will fail. Check that TESLA_REDIRECT_URL \
+                             matches the allowed origin in the Tesla developer dashboard.",
+                            name,
+                            e
+                        );
+                        if required {
+                            required_registration_failures.push(name);
+                        }
+                    }
                 }
+            }
+
+            if is_prod && !required_registration_failures.is_empty() {
+                panic!(
+                    "Tesla partner registration failed in required regions: {:?}",
+                    required_registration_failures
+                );
             }
         }
         Err(e) => {

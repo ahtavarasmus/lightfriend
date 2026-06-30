@@ -1153,7 +1153,7 @@ if [ -n "$BUCKET" ] && aws s3 ls "s3://$BUCKET/config/.env" 2>/dev/null; then
         local public_key="/opt/lightfriend/seed/tesla_public_key.pem"
         # Non-secret public-key hash for the canonical Tesla command key.
         # Rotate only intentionally; changing this invalidates virtual-key pairings.
-        local pinned_hash="86df69542e2573e07be6a6096e53bddfa807d0e30547ee1822addb86f620594c"
+        local pinned_hash="1922832b0e061eeec929f2166b29ae0db2f35e1c05f2faf4e49d8f665d790e38"
 
         echo "=== Staging Tesla key ($label) ==="
         if ! aws s3 ls "$s3_key" >/dev/null 2>&1; then
