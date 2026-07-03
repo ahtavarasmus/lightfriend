@@ -124,8 +124,9 @@ rootfs_avail_mb() {
 
 ensure_rootfs_reserve() {
     local reserve_file="${LIGHTFRIEND_ROOTFS_RESERVE_FILE:-/var/lib/lightfriend-reserve/rootfs-reserve.bin}"
-    local reserve_mb="${LIGHTFRIEND_ROOTFS_RESERVE_MB:-256}"
-    local min_free_after_mb="${LIGHTFRIEND_ROOTFS_RESERVE_MIN_FREE_AFTER_MB:-256}"
+    local reserve_mb="${LIGHTFRIEND_ROOTFS_RESERVE_MB:-300}"
+    local min_free_after_mb="${LIGHTFRIEND_ROOTFS_RESERVE_MIN_FREE_AFTER_MB:-128}"
+    local min_reserve_mb="${LIGHTFRIEND_ROOTFS_RESERVE_MIN_MB:-128}"
 
     case "$reserve_mb" in
         ''|*[!0-9]*)
@@ -135,8 +136,14 @@ ensure_rootfs_reserve() {
     esac
     case "$min_free_after_mb" in
         ''|*[!0-9]*)
-            echo "  WARNING: invalid LIGHTFRIEND_ROOTFS_RESERVE_MIN_FREE_AFTER_MB=${min_free_after_mb}; using 256"
-            min_free_after_mb=256
+            echo "  WARNING: invalid LIGHTFRIEND_ROOTFS_RESERVE_MIN_FREE_AFTER_MB=${min_free_after_mb}; using 128"
+            min_free_after_mb=128
+            ;;
+    esac
+    case "$min_reserve_mb" in
+        ''|*[!0-9]*)
+            echo "  WARNING: invalid LIGHTFRIEND_ROOTFS_RESERVE_MIN_MB=${min_reserve_mb}; using 128"
+            min_reserve_mb=128
             ;;
     esac
 
@@ -145,8 +152,42 @@ ensure_rootfs_reserve() {
         return 0
     fi
 
+    if [ "$min_reserve_mb" -gt "$reserve_mb" ]; then
+        min_reserve_mb="$reserve_mb"
+    fi
+
     if [ -e "$reserve_file" ]; then
-        echo "  Manual rootfs reserve already exists: $(du -h "$reserve_file" 2>/dev/null | awk '{print $1}' || echo unknown)"
+        local existing_mb
+        existing_mb="$(du -m "$reserve_file" 2>/dev/null | awk '{print $1 + 0}' || echo 0)"
+        [ -n "$existing_mb" ] || existing_mb=0
+
+        if [ "$existing_mb" -ge "$reserve_mb" ]; then
+            echo "  Manual rootfs reserve already exists: $(du -h "$reserve_file" 2>/dev/null | awk '{print $1}' || echo unknown)"
+            return 0
+        fi
+
+        local avail_mb
+        avail_mb="$(rootfs_avail_mb)"
+        [ -n "$avail_mb" ] || avail_mb=0
+
+        local max_grow_mb=$((avail_mb - min_free_after_mb))
+        if [ "$max_grow_mb" -le 0 ]; then
+            echo "  Manual rootfs reserve already exists at ${existing_mb}MiB; skipping growth to ${reserve_mb}MiB because only ${avail_mb}MiB is free"
+            return 0
+        fi
+
+        local grow_mb=$((reserve_mb - existing_mb))
+        if [ "$grow_mb" -gt "$max_grow_mb" ]; then
+            grow_mb="$max_grow_mb"
+        fi
+
+        echo "  Growing manual rootfs reserve by ${grow_mb}MiB toward ${reserve_mb}MiB at ${reserve_file}"
+        if dd if=/dev/zero of="$reserve_file" bs=1M count="$grow_mb" oflag=append conv=notrunc status=none; then
+            chmod 600 "$reserve_file"
+            echo "  Manual rootfs reserve size now $(du -h "$reserve_file" 2>/dev/null | awk '{print $1}' || echo unknown); rootfs available $(rootfs_avail_mb)MiB"
+        else
+            echo "  WARNING: failed to grow manual rootfs reserve"
+        fi
         return 0
     fi
 
@@ -154,15 +195,24 @@ ensure_rootfs_reserve() {
     avail_mb="$(rootfs_avail_mb)"
     [ -n "$avail_mb" ] || avail_mb=0
 
-    local required_mb=$((reserve_mb + min_free_after_mb))
-    if [ "$avail_mb" -lt "$required_mb" ]; then
-        echo "  WARNING: skipping ${reserve_mb}MiB rootfs reserve; only ${avail_mb}MiB free, need ${required_mb}MiB"
+    local create_mb="$reserve_mb"
+    local max_create_mb=$((avail_mb - min_free_after_mb))
+    if [ "$max_create_mb" -lt "$create_mb" ]; then
+        create_mb="$max_create_mb"
+    fi
+
+    if [ "$create_mb" -lt "$min_reserve_mb" ]; then
+        echo "  WARNING: skipping rootfs reserve; only ${avail_mb}MiB free, need at least $((min_reserve_mb + min_free_after_mb))MiB for a ${min_reserve_mb}MiB reserve"
         return 0
     fi
 
-    echo "  Creating ${reserve_mb}MiB manual rootfs reserve at ${reserve_file}"
+    if [ "$create_mb" -lt "$reserve_mb" ]; then
+        echo "  Creating reduced ${create_mb}MiB manual rootfs reserve at ${reserve_file} (target ${reserve_mb}MiB; ${avail_mb}MiB free)"
+    else
+        echo "  Creating ${create_mb}MiB manual rootfs reserve at ${reserve_file}"
+    fi
     mkdir -p "$(dirname "$reserve_file")"
-    if dd if=/dev/zero of="$reserve_file" bs=1M count="$reserve_mb" status=none; then
+    if dd if=/dev/zero of="$reserve_file" bs=1M count="$create_mb" status=none; then
         chmod 600 "$reserve_file"
         echo "  Manual rootfs reserve created; rootfs available now $(rootfs_avail_mb)MiB"
     else

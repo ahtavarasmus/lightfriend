@@ -24,7 +24,8 @@ use tracing::Level;
 use api::{twilio_sms, voice_pipeline};
 use backend::{
     api, blog, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState, LlmUsageRepository,
-    TotpRepository, UserCore, UserCoreOps, UserRepository, WebauthnRepository,
+    TotpRepository, TuwunelCleanupRepository, UserCore, UserCoreOps, UserRepository,
+    WebauthnRepository,
 };
 use handlers::{
     admin_handlers, attestation_handlers, auth_handlers, billing_handlers, bridge_auth_common,
@@ -354,6 +355,7 @@ async fn main() {
         Arc::new(backend::WebhookTokensRepository::new(pg_pool.clone()));
     let llm_usage_repository = Arc::new(LlmUsageRepository::new(pg_pool.clone()));
     let bandwidth_repository = Arc::new(backend::BandwidthRepository::new(pg_pool.clone()));
+    let tuwunel_cleanup_repository = Arc::new(TuwunelCleanupRepository::new(pg_pool.clone()));
     let ontology_repository = Arc::new(backend::OntologyRepository::new(pg_pool.clone()));
     let commitment_repository = Arc::new(backend::CommitmentRepository::new(pg_pool.clone()));
 
@@ -595,6 +597,7 @@ async fn main() {
         webauthn_verify_limiter: DashMap::new(),
         llm_usage_repository,
         bandwidth_repository,
+        tuwunel_cleanup_repository,
         ontology_repository,
         commitment_repository,
         whatsapp_bridge_repository,

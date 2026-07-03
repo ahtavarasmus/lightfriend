@@ -1,0 +1,4 @@
+-- Irreversible data purge.
+--
+-- Rows deleted by the up migration cannot be recreated by a down migration.
+-- Restore from a backup if this migration needs to be undone.

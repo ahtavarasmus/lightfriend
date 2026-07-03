@@ -541,6 +541,30 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    tuwunel_cleanup_events (id) {
+        id -> Int4,
+        user_id -> Int4,
+        ontology_message_id -> Int8,
+        service -> Text,
+        room_id -> Text,
+        event_id -> Text,
+        delete_media -> Bool,
+        commands_expected -> Int4,
+        commands_accepted -> Int4,
+        attempt_count -> Int4,
+        status -> Text,
+        last_command_kind -> Nullable<Text>,
+        last_admin_room_id -> Nullable<Text>,
+        last_admin_command_event_id -> Nullable<Text>,
+        last_error -> Nullable<Text>,
+        enqueued_at -> Int4,
+        last_attempted_at -> Nullable<Int4>,
+        completed_at -> Nullable<Int4>,
+        updated_at -> Int4,
+    }
+}
+
 // Commitment detection signal tables (migration 35)
 
 diesel::table! {
@@ -658,6 +682,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     ont_rules,
     llm_usage_logs,
     bridge_bandwidth_logs,
+    tuwunel_cleanup_events,
     commitment_sender_rules,
     commitment_label_embeddings,
     commitment_prompts,

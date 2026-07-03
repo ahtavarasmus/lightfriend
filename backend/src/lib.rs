@@ -138,6 +138,7 @@ pub mod repositories {
     pub mod signup_repository_impl;
     pub mod telegram_bridge_repository;
     pub mod totp_repository;
+    pub mod tuwunel_cleanup_repository;
     pub mod twilio_status_repository;
     pub mod twilio_status_repository_impl;
     pub mod user_core;
@@ -193,6 +194,7 @@ pub use repositories::pending_reply_watches_repository::PendingReplyWatchesRepos
 pub use repositories::provider_routes_repository::ProviderRoutesRepository;
 pub use repositories::telegram_bridge_repository::{TelegramBridgeRepository, TelegramContact};
 pub use repositories::totp_repository::TotpRepository;
+pub use repositories::tuwunel_cleanup_repository::TuwunelCleanupRepository;
 pub use repositories::user_core::{UserCore, UserCoreOps};
 pub use repositories::user_repository::UserRepository;
 pub use repositories::webauthn_repository::WebauthnRepository;
@@ -309,6 +311,7 @@ pub struct AppState {
         DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     pub llm_usage_repository: Arc<LlmUsageRepository>,
     pub bandwidth_repository: Arc<BandwidthRepository>,
+    pub tuwunel_cleanup_repository: Arc<TuwunelCleanupRepository>,
     pub ontology_repository: Arc<OntologyRepository>,
     pub commitment_repository: Arc<CommitmentRepository>,
     /// Optional: read-only access to mautrix-whatsapp's PostgreSQL database.

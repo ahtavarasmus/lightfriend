@@ -91,6 +91,7 @@ pub fn create_test_pg_pool() -> crate::PgDbPool {
             "TRUNCATE ont_links, ont_changelog, ont_channels, ont_person_edits, ont_persons, ont_messages, ont_events, ont_rules CASCADE",
         )
         .execute(&mut conn);
+        let _ = diesel::sql_query("TRUNCATE tuwunel_cleanup_events CASCADE").execute(&mut conn);
     }
 
     pool
@@ -152,6 +153,11 @@ pub fn create_test_state() -> Arc<crate::AppState> {
     );
     let bandwidth_repository = Arc::new(
         crate::repositories::bandwidth_repository::BandwidthRepository::new(pg_pool.clone()),
+    );
+    let tuwunel_cleanup_repository = Arc::new(
+        crate::repositories::tuwunel_cleanup_repository::TuwunelCleanupRepository::new(
+            pg_pool.clone(),
+        ),
     );
     let ontology_repository = Arc::new(
         crate::repositories::ontology_repository::OntologyRepository::new(pg_pool.clone()),
@@ -216,6 +222,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         webauthn_verify_limiter: DashMap::new(),
         llm_usage_repository,
         bandwidth_repository,
+        tuwunel_cleanup_repository,
         ontology_repository,
         commitment_repository,
         whatsapp_bridge_repository: None,

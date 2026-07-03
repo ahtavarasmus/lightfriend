@@ -315,6 +315,10 @@ pub fn cascade_delete_user_data(pg_pool: &PgDbPool, user_id: i32) -> Result<()> 
         diesel::delete(refund_info::table.filter(refund_info::user_id.eq(user_id)))
             .execute(conn)?;
         diesel::delete(tesla::table.filter(tesla::user_id.eq(user_id))).execute(conn)?;
+        diesel::delete(
+            tuwunel_cleanup_events::table.filter(tuwunel_cleanup_events::user_id.eq(user_id)),
+        )
+        .execute(conn)?;
         diesel::delete(usage_logs::table.filter(usage_logs::user_id.eq(user_id))).execute(conn)?;
         diesel::delete(user_info::table.filter(user_info::user_id.eq(user_id))).execute(conn)?;
         diesel::delete(user_secrets::table.filter(user_secrets::user_id.eq(user_id)))

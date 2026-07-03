@@ -83,8 +83,9 @@ pub fn enqueue_processed_bridge_event(
         attempt: 1,
     };
 
-    match tx.try_send(job) {
+    match tx.try_send(job.clone()) {
         Ok(()) => {
+            record_cleanup_enqueued(state, &job);
             tracing::info!(
                 user_id,
                 service,
@@ -158,6 +159,129 @@ pub fn is_command_safe_event_id(event_id: &str) -> bool {
             .any(|c| c.is_control() || c.is_whitespace())
 }
 
+fn record_cleanup_enqueued(state: &Arc<AppState>, job: &EventCleanupJob) {
+    if let Err(e) = state.tuwunel_cleanup_repository.record_enqueued(
+        job.user_id,
+        job.ontology_message_id,
+        &job.service,
+        &job.room_id,
+        &job.event_id,
+        job.delete_media,
+    ) {
+        tracing::warn!(
+            user_id = job.user_id,
+            ontology_message_id = job.ontology_message_id,
+            service = %job.service,
+            room_id = %job.room_id,
+            event_id = %job.event_id,
+            error = %e,
+            "Failed to record Tuwunel cleanup enqueue instrumentation"
+        );
+    }
+}
+
+fn record_cleanup_attempt(state: &Arc<AppState>, job: &EventCleanupJob) {
+    if let Err(e) = state
+        .tuwunel_cleanup_repository
+        .record_attempt(&job.event_id, job.attempt)
+    {
+        tracing::warn!(
+            user_id = job.user_id,
+            ontology_message_id = job.ontology_message_id,
+            service = %job.service,
+            room_id = %job.room_id,
+            event_id = %job.event_id,
+            attempt = job.attempt,
+            error = %e,
+            "Failed to record Tuwunel cleanup attempt instrumentation"
+        );
+    }
+}
+
+fn record_cleanup_command_accepted(
+    state: &Arc<AppState>,
+    job: &EventCleanupJob,
+    sent_command: &SentAdminCommand,
+) {
+    if let Err(e) = state.tuwunel_cleanup_repository.record_command_accepted(
+        &job.event_id,
+        sent_command.kind,
+        &sent_command.admin_room_id,
+        &sent_command.admin_command_event_id,
+    ) {
+        tracing::warn!(
+            user_id = job.user_id,
+            ontology_message_id = job.ontology_message_id,
+            service = %job.service,
+            room_id = %job.room_id,
+            event_id = %job.event_id,
+            cleanup_command_kind = sent_command.kind,
+            admin_room_id = %sent_command.admin_room_id,
+            admin_command_event_id = %sent_command.admin_command_event_id,
+            error = %e,
+            "Failed to record Tuwunel cleanup accepted-command instrumentation"
+        );
+    }
+}
+
+fn record_cleanup_retrying(state: &Arc<AppState>, job: &EventCleanupJob, error: &str) {
+    if let Err(e) =
+        state
+            .tuwunel_cleanup_repository
+            .record_retrying(&job.event_id, job.attempt, error)
+    {
+        tracing::warn!(
+            user_id = job.user_id,
+            ontology_message_id = job.ontology_message_id,
+            service = %job.service,
+            room_id = %job.room_id,
+            event_id = %job.event_id,
+            attempt = job.attempt,
+            error = %e,
+            cleanup_error = %error,
+            "Failed to record Tuwunel cleanup retry instrumentation"
+        );
+    }
+}
+
+fn record_cleanup_exhausted(state: &Arc<AppState>, job: &EventCleanupJob, error: &str) {
+    if let Err(e) =
+        state
+            .tuwunel_cleanup_repository
+            .record_exhausted(&job.event_id, job.attempt, error)
+    {
+        tracing::warn!(
+            user_id = job.user_id,
+            ontology_message_id = job.ontology_message_id,
+            service = %job.service,
+            room_id = %job.room_id,
+            event_id = %job.event_id,
+            attempt = job.attempt,
+            error = %e,
+            cleanup_error = %error,
+            "Failed to record Tuwunel cleanup exhausted instrumentation"
+        );
+    }
+}
+
+fn record_cleanup_succeeded(state: &Arc<AppState>, job: &EventCleanupJob) {
+    if let Err(e) = state
+        .tuwunel_cleanup_repository
+        .record_succeeded(&job.event_id)
+    {
+        tracing::warn!(
+            user_id = job.user_id,
+            ontology_message_id = job.ontology_message_id,
+            service = %job.service,
+            room_id = %job.room_id,
+            event_id = %job.event_id,
+            attempt = job.attempt,
+            error = %e,
+            "Failed to record Tuwunel cleanup success instrumentation"
+        );
+    }
+}
+
 async fn event_cleanup_worker(
     mut rx: mpsc::Receiver<EventCleanupJob>,
     tx: mpsc::Sender<EventCleanupJob>,
@@ -165,9 +289,12 @@ async fn event_cleanup_worker(
 ) {
     while let Some(job) = rx.recv().await {
         let config = EventCleanupConfig::from_env();
+        record_cleanup_enqueued(&state, &job);
+        record_cleanup_attempt(&state, &job);
 
         match send_cleanup_commands(&state, &config, &job).await {
             Ok(sent_commands) => {
+                record_cleanup_succeeded(&state, &job);
                 for sent_command in &sent_commands {
                     tracing::info!(
                         user_id = job.user_id,
@@ -200,6 +327,7 @@ async fn event_cleanup_worker(
             }
             Err(e) => {
                 if job.attempt >= config.max_attempts {
+                    record_cleanup_exhausted(&state, &job, &e.to_string());
                     tracing::warn!(
                         user_id = job.user_id,
                         ontology_message_id = job.ontology_message_id,
@@ -217,6 +345,7 @@ async fn event_cleanup_worker(
                 let delay = retry_delay(job.attempt);
                 let mut retry_job = job.clone();
                 retry_job.attempt = retry_job.attempt.saturating_add(1);
+                record_cleanup_retrying(&state, &job, &e.to_string());
                 tracing::warn!(
                     user_id = job.user_id,
                     ontology_message_id = job.ontology_message_id,
@@ -270,30 +399,30 @@ async fn send_cleanup_commands(
     let target = resolve_admin_command_target(state, config, job).await?;
 
     if job.delete_media {
-        sent_commands.push(
-            send_admin_room_command(
-                config,
-                &target,
-                job,
-                "media_delete_by_event",
-                &build_delete_media_by_event_command(&job.event_id),
-            )
-            .await
-            .map_err(|e| anyhow!("media delete-by-event command failed: {}", e))?,
-        );
-    }
-
-    sent_commands.push(
-        send_admin_room_command(
+        let sent_command = send_admin_room_command(
             config,
             &target,
             job,
-            "redact_event",
-            &build_redact_event_command(&job.event_id),
+            "media_delete_by_event",
+            &build_delete_media_by_event_command(&job.event_id),
         )
         .await
-        .map_err(|e| anyhow!("redact-event command failed: {}", e))?,
-    );
+        .map_err(|e| anyhow!("media delete-by-event command failed: {}", e))?;
+        record_cleanup_command_accepted(state, job, &sent_command);
+        sent_commands.push(sent_command);
+    }
+
+    let sent_command = send_admin_room_command(
+        config,
+        &target,
+        job,
+        "redact_event",
+        &build_redact_event_command(&job.event_id),
+    )
+    .await
+    .map_err(|e| anyhow!("redact-event command failed: {}", e))?;
+    record_cleanup_command_accepted(state, job, &sent_command);
+    sent_commands.push(sent_command);
 
     Ok(sent_commands)
 }

@@ -160,6 +160,83 @@ print_growth_since_last_snapshot() {
     mv "$tmp_snapshot" "$SNAPSHOT_FILE" 2>/dev/null || rm -f "$tmp_snapshot"
 }
 
+print_rootfs_backup_headroom() {
+    echo "--- rootfs backup headroom ---"
+
+    local reserve_file
+    reserve_file="${LIGHTFRIEND_ROOTFS_RESERVE_FILE:-/var/lib/lightfriend-reserve/rootfs-reserve.bin}"
+
+    local root_avail_kib tmp_avail_kib reserve_bytes reserve_kib projected_kib
+    root_avail_kib=$(df -Pk / 2>/dev/null | awk 'NR==2 {print $4 + 0}')
+    tmp_avail_kib=$(df -Pk /tmp 2>/dev/null | awk 'NR==2 {print $4 + 0}')
+    [ -n "$root_avail_kib" ] || root_avail_kib=0
+    [ -n "$tmp_avail_kib" ] || tmp_avail_kib=0
+    reserve_bytes=0
+
+    if [ -e "$reserve_file" ]; then
+        reserve_bytes=$(stat -c%s "$reserve_file" 2>/dev/null || echo 0)
+    fi
+
+    reserve_kib=$(((reserve_bytes + 1023) / 1024))
+    projected_kib=$((root_avail_kib + reserve_kib))
+
+    printf "root_avail_kib=%d root_avail_mib=%.1f\n" "$root_avail_kib" "$(awk -v kb="$root_avail_kib" 'BEGIN {print kb / 1024}')"
+    printf "tmp_avail_kib=%d tmp_avail_mib=%.1f\n" "$tmp_avail_kib" "$(awk -v kb="$tmp_avail_kib" 'BEGIN {print kb / 1024}')"
+    printf "reserve_file=%s reserve_bytes=%d reserve_mib=%.1f\n" "$reserve_file" "$reserve_bytes" "$(awk -v b="$reserve_bytes" 'BEGIN {print b / 1048576}')"
+    printf "projected_root_avail_after_release_kib=%d projected_root_avail_after_release_mib=%.1f\n" "$projected_kib" "$(awk -v kb="$projected_kib" 'BEGIN {print kb / 1024}')"
+    echo "note: final encrypted backup uses /tmp, but Tuwunel BackupEngine uses rootfs at /var/lib/tuwunel-backup"
+}
+
+print_tuwunel_detailed_breakdown() {
+    echo "--- tuwunel detailed storage ---"
+    if [ ! -d /var/lib/tuwunel ]; then
+        echo "not present"
+        return 0
+    fi
+
+    du -sh /var/lib/tuwunel /var/lib/tuwunel/media 2>/dev/null || true
+
+    echo "--- tuwunel file type buckets ---"
+    find /var/lib/tuwunel -xdev -type f -printf '%s %p\n' 2>/dev/null \
+        | awk '
+            function add(kind, size) {
+                count[kind] += 1
+                bytes[kind] += size
+            }
+            {
+                size = $1
+                $1 = ""
+                sub(/^ /, "")
+                path = $0
+
+                if (path ~ /\/media\//) {
+                    add("media", size)
+                } else if (path ~ /\.sst$/) {
+                    add("rocksdb_sst", size)
+                } else if (path ~ /\/(LOG|LOG\.old|MANIFEST-)/ || path ~ /\/OPTIONS-/) {
+                    add("rocksdb_meta_logs", size)
+                } else {
+                    add("other", size)
+                }
+            }
+            END {
+                for (kind in count) {
+                    printf "%s count=%d bytes=%d mib=%.1f\n", kind, count[kind], bytes[kind], bytes[kind] / 1048576
+                }
+            }
+        ' | sort || true
+
+    echo "--- tuwunel top dirs (du -xhd2) ---"
+    du -xh -d 2 /var/lib/tuwunel 2>/dev/null | sort -h | tail -60 || true
+
+    echo "--- tuwunel top files ---"
+    find /var/lib/tuwunel -xdev -type f -printf '%s %p\n' 2>/dev/null | sort -n | tail -60 || true
+
+    echo "--- tuwunel config storage/admin knobs ---"
+    grep -E '^(database_path|database_backup_path|database_backups_to_keep|rocksdb_direct_io|allow_legacy_media|freeze_legacy_media|allow_federation|admin_signal_execute)' \
+        /etc/tuwunel/tuwunel.toml 2>/dev/null || true
+}
+
 print_report() {
     echo "=== Storage Health $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
     echo "--- df -hT all filesystems ---"
@@ -168,8 +245,10 @@ print_report() {
     df -i 2>/dev/null || echo "df -i unavailable"
     echo "--- watched path df ---"
     print_known_path_df
+    print_rootfs_backup_headroom
     print_largest_dirs_by_filesystem
     print_largest_files_by_filesystem
+    print_tuwunel_detailed_breakdown
     print_growth_since_last_snapshot
     echo "--- tuwunel BackupEngine dir ---"
     if [ -d /var/lib/tuwunel-backup ]; then

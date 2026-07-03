@@ -91,6 +91,96 @@ grep -HnE "panicked at|thread '[^']*' panicked|stack backtrace:|fatal runtime er
     2>/dev/null | tail -80 | sanitize_backend_log || echo "  none found"
 echo ""
 
+echo "--- Tuwunel cleanup instrumentation across backend logs ---"
+TUWUNEL_CLEANUP_LOG_LINES=$(grep -hEi "Tuwunel event cleanup|Tuwunel cleanup admin command|cleanup_command_kind|media_delete_by_event|redact_event|cleanup instrumentation|cleanup exhausted|cleanup failed" \
+    /var/log/supervisor/lightfriend.log /var/log/supervisor/lightfriend.log.1 /var/log/supervisor/lightfriend.log.2 \
+    /var/log/supervisor/lightfriend-err.log /var/log/supervisor/lightfriend-err.log.1 /var/log/supervisor/lightfriend-err.log.2 \
+    2>/dev/null | tail -120 || true)
+if [ -n "$TUWUNEL_CLEANUP_LOG_LINES" ]; then
+    printf '%s\n' "$TUWUNEL_CLEANUP_LOG_LINES" | sanitize_backend_log
+else
+    echo "  none found"
+fi
+echo ""
+
+echo "--- Tuwunel cleanup audit table ---"
+if command -v psql >/dev/null 2>&1 && [ -n "${PG_DATABASE_URL:-}" ]; then
+    TUWUNEL_CLEANUP_SQL='
+        SELECT status,
+               count(*) AS rows,
+               COALESCE(sum(commands_expected), 0) AS commands_expected,
+               COALESCE(sum(commands_accepted), 0) AS commands_accepted,
+               to_char(to_timestamp(max(updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS last_updated
+          FROM tuwunel_cleanup_events
+         GROUP BY status
+         ORDER BY status;
+
+        SELECT id,
+               user_id,
+               service,
+               delete_media,
+               commands_expected,
+               commands_accepted,
+               attempt_count,
+               status,
+               to_char(to_timestamp(updated_at), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS updated_at,
+               left(coalesce(last_error, '\'''\''), 240) AS last_error
+          FROM tuwunel_cleanup_events
+         ORDER BY updated_at DESC
+         LIMIT 20;
+    '
+    if ! psql "$PG_DATABASE_URL" -v ON_ERROR_STOP=1 -c "$TUWUNEL_CLEANUP_SQL" 2>&1 | sanitize_backend_log; then
+        echo "  audit table unavailable or query failed"
+    fi
+else
+    echo "  psql or PG_DATABASE_URL unavailable"
+fi
+echo ""
+
+echo "--- Postgres storage and ontology retention ---"
+if command -v psql >/dev/null 2>&1 && [ -n "${PG_DATABASE_URL:-}" ]; then
+    POSTGRES_STORAGE_SQL='
+        SELECT schemaname || '\''.'\'' || relname AS relation,
+               pg_size_pretty(pg_total_relation_size(format('\''%I.%I'\'', schemaname, relname)::regclass)) AS total_size,
+               pg_size_pretty(pg_relation_size(format('\''%I.%I'\'', schemaname, relname)::regclass)) AS heap_size,
+               pg_size_pretty(pg_indexes_size(format('\''%I.%I'\'', schemaname, relname)::regclass)) AS index_size,
+               n_live_tup,
+               n_dead_tup
+          FROM pg_stat_user_tables
+         ORDER BY pg_total_relation_size(format('\''%I.%I'\'', schemaname, relname)::regclass) DESC
+         LIMIT 20;
+
+        WITH bounds AS (
+            SELECT EXTRACT(EPOCH FROM NOW())::INT4 - (30 * 24 * 60 * 60) AS cutoff
+        )
+        SELECT count(*) AS total_rows,
+               count(*) FILTER (WHERE created_at < cutoff) AS older_than_30d,
+               count(*) FILTER (WHERE created_at >= cutoff) AS last_30d,
+               pg_size_pretty(pg_total_relation_size('\''ont_messages'\'')) AS ont_messages_total_size,
+               to_char(to_timestamp(min(created_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS oldest_message,
+               to_char(to_timestamp(max(created_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS newest_message
+          FROM ont_messages, bounds;
+
+        WITH bounds AS (
+            SELECT EXTRACT(EPOCH FROM NOW())::INT4 - (30 * 24 * 60 * 60) AS cutoff
+        )
+        SELECT platform,
+               count(*) AS total_rows,
+               count(*) FILTER (WHERE created_at < cutoff) AS older_than_30d,
+               count(*) FILTER (WHERE created_at >= cutoff) AS last_30d
+          FROM ont_messages, bounds
+         GROUP BY platform
+         ORDER BY total_rows DESC
+         LIMIT 20;
+    '
+    if ! psql "$PG_DATABASE_URL" -v ON_ERROR_STOP=1 -c "$POSTGRES_STORAGE_SQL" 2>&1 | sanitize_backend_log; then
+        echo "  postgres storage query unavailable or failed"
+    fi
+else
+    echo "  psql or PG_DATABASE_URL unavailable"
+fi
+echo ""
+
 echo "--- supervisord restart events for lightfriend (last 50) ---"
 grep -E "lightfriend.*(entered|exited|terminated|killed|spawned|fatal|backoff|ABNORMAL)" \
     /var/log/supervisor/supervisord.log /var/log/supervisor/supervisord.log.1 /var/log/supervisor/supervisord.log.2 \
