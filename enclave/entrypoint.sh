@@ -757,29 +757,13 @@ REOF
         echo "  [DEBUG] tuwunel tar size: $(stat -c%s tuwunel/tuwunel_data.tar 2>/dev/null || echo unknown) bytes"
         echo "  [DEBUG] tuwunel tar contents: $(tar tf tuwunel/tuwunel_data.tar 2>/dev/null | head -5)"
 
-        # Extract the BackupEngine backup dir to /tmp so restore does not
-        # duplicate the RocksDB store on the small rootfs.
-        TUWUNEL_BACKUP_DIR="/tmp/tuwunel-backup-restore"
-        rm -rf /var/lib/tuwunel-backup "$TUWUNEL_BACKUP_DIR"
-        mkdir -p "$TUWUNEL_BACKUP_DIR" \
-            || restore_abort "Failed to create temporary tuwunel restore dir" "restore-tuwunel"
+        # Extract the BackupEngine backup dir
+        rm -rf /var/lib/tuwunel-backup
+        tar xf tuwunel/tuwunel_data.tar -C / \
+            || restore_abort "Failed to extract tuwunel backup tar" "restore-tuwunel"
 
-        TUWUNEL_TAR_LIST=$(tar tf tuwunel/tuwunel_data.tar) \
-            || restore_abort "Failed to list tuwunel backup tar" "restore-tuwunel"
-        if [[ "$TUWUNEL_TAR_LIST" == *"var/lib/tuwunel-backup/"* ]]; then
-            tar xf tuwunel/tuwunel_data.tar -C "$TUWUNEL_BACKUP_DIR" --strip-components=3 var/lib/tuwunel-backup \
-                || restore_abort "Failed to extract tuwunel backup tar" "restore-tuwunel"
-        elif [[ "$TUWUNEL_TAR_LIST" == *"tmp/tuwunel-backup/"* ]]; then
-            tar xf tuwunel/tuwunel_data.tar -C "$TUWUNEL_BACKUP_DIR" --strip-components=2 tmp/tuwunel-backup \
-                || restore_abort "Failed to extract tuwunel backup tar" "restore-tuwunel"
-        elif [[ "$TUWUNEL_TAR_LIST" == *"tuwunel-backup/"* ]]; then
-            tar xf tuwunel/tuwunel_data.tar -C "$TUWUNEL_BACKUP_DIR" --strip-components=1 tuwunel-backup \
-                || restore_abort "Failed to extract tuwunel backup tar" "restore-tuwunel"
-        else
-            restore_abort "No BackupEngine directory found in tuwunel tar" "restore-tuwunel"
-        fi
-
-        if [ -d "$TUWUNEL_BACKUP_DIR/shared_checksum" ]; then
+        TUWUNEL_BACKUP_DIR="/var/lib/tuwunel-backup"
+        if [ -d "$TUWUNEL_BACKUP_DIR" ] && [ -d "$TUWUNEL_BACKUP_DIR/shared_checksum" ]; then
             # New BackupEngine format - restore using tuwunel_restore binary
             echo "  [DEBUG] BackupEngine format detected, running tuwunel_restore..."
             RESTORE_DIR="/var/lib/tuwunel"
@@ -791,7 +775,7 @@ REOF
             TOTAL_SIZE=$(du -sh "$RESTORE_DIR" 2>/dev/null | awk '{print $1}' || echo '0')
             echo "  === TUWUNEL RESTORE END (OK: $TOTAL_FILES files, $TOTAL_SIZE) ==="
             echo "  Removing temporary BackupEngine restore directory..."
-            rm -rf "$TUWUNEL_BACKUP_DIR" /var/lib/tuwunel-backup || true
+            rm -rf "$TUWUNEL_BACKUP_DIR" || true
         else
             # Old format or no BackupEngine dir - tuwunel will start fresh
             echo "  [DEBUG] No BackupEngine dir found (old backup format)"
@@ -1360,11 +1344,9 @@ echo "  OPTIONS files: $(find /var/lib/tuwunel -name 'OPTIONS-*' 2>/dev/null)"
 echo "  top-level listing:"
 ls -la /var/lib/tuwunel/ 2>/dev/null | head -25
 echo "  permissions: $(stat -c '%U:%G %a' /var/lib/tuwunel 2>/dev/null || echo 'stat failed')"
-TUWUNEL_CONFIG_BACKUP_DIR=$(awk -F '"' '/^[[:space:]]*database_backup_path[[:space:]]*=/{print $2; exit}' /etc/tuwunel/tuwunel.toml 2>/dev/null || true)
-TUWUNEL_CONFIG_BACKUP_DIR="${TUWUNEL_CONFIG_BACKUP_DIR:-/var/lib/tuwunel-backup}"
-echo "[DEBUG] ${TUWUNEL_CONFIG_BACKUP_DIR} (backup dir for BackupEngine):"
-echo "  exists: $([ -d "$TUWUNEL_CONFIG_BACKUP_DIR" ] && echo yes || echo no)"
-echo "  file count: $(find "$TUWUNEL_CONFIG_BACKUP_DIR" -type f 2>/dev/null | wc -l)"
+echo "[DEBUG] /var/lib/tuwunel-backup (backup dir for BackupEngine):"
+echo "  exists: $([ -d /var/lib/tuwunel-backup ] && echo yes || echo no)"
+echo "  file count: $(find /var/lib/tuwunel-backup -type f 2>/dev/null | wc -l)"
 
 echo "Starting Tuwunel..."
 supervisorctl start tuwunel

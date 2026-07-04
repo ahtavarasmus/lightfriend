@@ -25,7 +25,6 @@ WATCH_PATHS=(
     /var/lib/postgresql
     /var/lib/tuwunel
     /var/lib/tuwunel-backup
-    /tmp/tuwunel-backup
     /var/lib/lightfriend-reserve
     /var/log
     /data
@@ -185,7 +184,7 @@ print_rootfs_backup_headroom() {
     printf "tmp_avail_kib=%d tmp_avail_mib=%.1f\n" "$tmp_avail_kib" "$(awk -v kb="$tmp_avail_kib" 'BEGIN {print kb / 1024}')"
     printf "reserve_file=%s reserve_bytes=%d reserve_mib=%.1f\n" "$reserve_file" "$reserve_bytes" "$(awk -v b="$reserve_bytes" 'BEGIN {print b / 1048576}')"
     printf "projected_root_avail_after_release_kib=%d projected_root_avail_after_release_mib=%.1f\n" "$projected_kib" "$(awk -v kb="$projected_kib" 'BEGIN {print kb / 1024}')"
-    echo "note: final encrypted backup uses /tmp; Tuwunel BackupEngine should use /tmp/tuwunel-backup"
+    echo "note: final encrypted backup uses /tmp, but Tuwunel BackupEngine uses rootfs at /var/lib/tuwunel-backup"
 }
 
 print_tuwunel_detailed_breakdown() {
@@ -251,16 +250,13 @@ print_report() {
     print_largest_files_by_filesystem
     print_tuwunel_detailed_breakdown
     print_growth_since_last_snapshot
-    echo "--- tuwunel BackupEngine dirs ---"
-    for backup_dir in /tmp/tuwunel-backup /var/lib/tuwunel-backup; do
-        echo "$backup_dir:"
-        if [ -d "$backup_dir" ]; then
-            du -sh "$backup_dir" 2>/dev/null || true
-            find "$backup_dir" -maxdepth 2 -type f -printf '%s %p\n' 2>/dev/null | sort -n | tail -20 || true
-        else
-            echo "not present"
-        fi
-    done
+    echo "--- tuwunel BackupEngine dir ---"
+    if [ -d /var/lib/tuwunel-backup ]; then
+        du -sh /var/lib/tuwunel-backup 2>/dev/null || true
+        find /var/lib/tuwunel-backup -maxdepth 2 -type f -printf '%s %p\n' 2>/dev/null | sort -n | tail -20 || true
+    else
+        echo "not present"
+    fi
     echo "--- manual rootfs reserve ---"
     if [ -e /var/lib/lightfriend-reserve/rootfs-reserve.bin ]; then
         ls -lh /var/lib/lightfriend-reserve/rootfs-reserve.bin 2>/dev/null || true
@@ -314,15 +310,14 @@ cleanup_storage() {
     rm -rf /tmp/backup-restore 2>/dev/null || true
     find /data/seed -name 'lightfriend-full-backup-*.tar.gz.enc' -mmin +30 -delete 2>/dev/null || true
 
-    for backup_dir in /tmp/tuwunel-backup /tmp/tuwunel-backup-restore /var/lib/tuwunel-backup; do
-        [ -d "$backup_dir" ] || continue
+    if [ -d /var/lib/tuwunel-backup ]; then
         if pgrep -f '/app/export.sh' >/dev/null 2>&1; then
-            echo "Skipping $backup_dir cleanup while export.sh is running"
+            echo "Skipping /var/lib/tuwunel-backup cleanup while export.sh is running"
         else
-            echo "Removing stale $backup_dir"
-            rm -rf "$backup_dir" 2>/dev/null || true
+            echo "Removing stale /var/lib/tuwunel-backup"
+            rm -rf /var/lib/tuwunel-backup 2>/dev/null || true
         fi
-    done
+    fi
 
     # The tunnel and bridge logs can grow quickly during scans/outages. Keep
     # recent logs, but cap any single supervisor log to the last 1 MiB.
