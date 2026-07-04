@@ -30,13 +30,18 @@ STAGING="/tmp/backup-staging/${BACKUP_NAME}"
 ARCHIVE="/tmp/${BACKUP_NAME}.tar.gz"
 ENCRYPTED="/tmp/${BACKUP_NAME}.tar.gz.enc"
 STATUS_FILE="/data/seed/export-status.json"
-TUWUNEL_BACKUP_DIR="/var/lib/tuwunel-backup"
+CONFIG_TUWUNEL_BACKUP_DIR=$(awk -F '"' '/^[[:space:]]*database_backup_path[[:space:]]*=/{print $2; exit}' /etc/tuwunel/tuwunel.toml 2>/dev/null || true)
+TUWUNEL_BACKUP_DIR="${TUWUNEL_BACKUP_DIR:-${CONFIG_TUWUNEL_BACKUP_DIR:-/var/lib/tuwunel-backup}}"
+TUWUNEL_CANONICAL_BACKUP_DIR="var/lib/tuwunel-backup"
 
 # Cleanup function - remove staging artifacts
 cleanup() {
     rm -rf /tmp/backup-staging /tmp/verify.tar.gz "${ARCHIVE}" "${ENCRYPTED}" 2>/dev/null || true
     # Clean matrix snapshot dirs created during Phase A
     rm -rf "${STAGING}/matrix-store-snapshot" 2>/dev/null || true
+    # BackupEngine scratch can be nearly as large as /var/lib/tuwunel.
+    # Always clear it after an export attempt so retries do not inherit debris.
+    rm -rf "$TUWUNEL_BACKUP_DIR" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -130,7 +135,7 @@ echo "  [DEBUG] tuwunel source DB SST files: $(find /var/lib/tuwunel -name '*.ss
 echo "  [DEBUG] tuwunel source CURRENT: $(cat /var/lib/tuwunel/CURRENT 2>/dev/null || echo 'NOT FOUND')"
 echo "  [DEBUG] tuwunel source IDENTITY: $(cat /var/lib/tuwunel/IDENTITY 2>/dev/null || echo 'NOT FOUND')"
 echo "  [DEBUG] tuwunel backup dir path: $TUWUNEL_BACKUP_DIR"
-echo "  [DEBUG] tuwunel backup dir exists: $([ -d $TUWUNEL_BACKUP_DIR ] && echo yes || echo no)"
+echo "  [DEBUG] tuwunel backup dir exists: $([ -d "$TUWUNEL_BACKUP_DIR" ] && echo yes || echo no)"
 echo "  [DEBUG] tuwunel config database_backup_path check:"
 grep -i "database_backup_path" /etc/tuwunel/tuwunel.toml 2>/dev/null || echo "    NOT FOUND IN CONFIG!"
 echo "  [DEBUG] tuwunel config admin_signal_execute check:"
@@ -156,6 +161,8 @@ echo "  [DEBUG] Tuwunel process info: $(ps -p $TUWUNEL_PID -o pid,rss,etime,args
 # content here is stale retry debris rather than persistent app state.
 rm -rf "$TUWUNEL_BACKUP_DIR" \
     || abort "Failed to clear stale Tuwunel backup dir" "dump-tuwunel"
+mkdir -p "$(dirname "$TUWUNEL_BACKUP_DIR")" \
+    || abort "Failed to create parent for Tuwunel backup dir" "dump-tuwunel"
 mkdir -p "$TUWUNEL_BACKUP_DIR" \
     || abort "Failed to create Tuwunel backup dir" "dump-tuwunel"
 
@@ -196,7 +203,7 @@ for i in $(seq 1 "$BACKUP_TIMEOUT"); do
     fi
     if [ $((i % 10)) -eq 0 ]; then
         echo "  [DEBUG] Still waiting... ${i}s elapsed, latest ID: $AFTER_ID (need > $BEFORE_ID)"
-        echo "  [DEBUG] meta/ contents: $(ls $TUWUNEL_BACKUP_DIR/meta/ 2>/dev/null || echo 'empty')"
+        echo "  [DEBUG] meta/ contents: $(ls "$TUWUNEL_BACKUP_DIR/meta/" 2>/dev/null || echo 'empty')"
         tail -3 /var/log/supervisor/tuwunel.log 2>/dev/null || echo "    empty"
     fi
     sleep 1
@@ -228,14 +235,14 @@ BACKUP_FILES=$(find "$TUWUNEL_BACKUP_DIR" -type f 2>/dev/null | wc -l)
 echo "  [DEBUG] Backup total: $BACKUP_FILES files, $BACKUP_SIZE"
 echo "  [DEBUG] Backup dir full listing:"
 find "$TUWUNEL_BACKUP_DIR" -type f 2>/dev/null | head -40
-echo "  [DEBUG] shared_checksum/ exists: $([ -d $TUWUNEL_BACKUP_DIR/shared_checksum ] && echo yes || echo NO)"
-echo "  [DEBUG] shared_checksum/ SST count: $(find $TUWUNEL_BACKUP_DIR/shared_checksum -name '*.sst' 2>/dev/null | wc -l)"
-echo "  [DEBUG] shared_checksum/ SST total size: $(du -sh $TUWUNEL_BACKUP_DIR/shared_checksum 2>/dev/null | awk '{print $1}' || echo '0')"
+echo "  [DEBUG] shared_checksum/ exists: $([ -d "$TUWUNEL_BACKUP_DIR/shared_checksum" ] && echo yes || echo NO)"
+echo "  [DEBUG] shared_checksum/ SST count: $(find "$TUWUNEL_BACKUP_DIR/shared_checksum" -name '*.sst' 2>/dev/null | wc -l)"
+echo "  [DEBUG] shared_checksum/ SST total size: $(du -sh "$TUWUNEL_BACKUP_DIR/shared_checksum" 2>/dev/null | awk '{print $1}' || echo '0')"
 echo "  [DEBUG] shared_checksum/ first 5 SSTs:"
 find "$TUWUNEL_BACKUP_DIR/shared_checksum" -name '*.sst' 2>/dev/null | head -5
-echo "  [DEBUG] private/ exists: $([ -d $TUWUNEL_BACKUP_DIR/private ] && echo yes || echo NO)"
-echo "  [DEBUG] private/ dirs: $(ls $TUWUNEL_BACKUP_DIR/private/ 2>/dev/null || echo 'none')"
-echo "  [DEBUG] meta/ exists: $([ -d $TUWUNEL_BACKUP_DIR/meta ] && echo yes || echo NO)"
+echo "  [DEBUG] private/ exists: $([ -d "$TUWUNEL_BACKUP_DIR/private" ] && echo yes || echo NO)"
+echo "  [DEBUG] private/ dirs: $(ls "$TUWUNEL_BACKUP_DIR/private/" 2>/dev/null || echo 'none')"
+echo "  [DEBUG] meta/ exists: $([ -d "$TUWUNEL_BACKUP_DIR/meta" ] && echo yes || echo NO)"
 for d in "$TUWUNEL_BACKUP_DIR"/private/*/; do
     bnum=$(basename "$d" 2>/dev/null)
     echo "  [DEBUG] private/$bnum/ contents:"
@@ -249,8 +256,15 @@ fi
 # Tar the backup directory
 echo "  [DEBUG] Creating tar of $TUWUNEL_BACKUP_DIR..."
 mkdir -p "${STAGING}/tuwunel"
-tar cf "${STAGING}/tuwunel/tuwunel_data.tar" -C / var/lib/tuwunel-backup 2>/dev/null \
+TUWUNEL_TAR_ROOT="${STAGING}/tuwunel-tar-root"
+rm -rf "$TUWUNEL_TAR_ROOT"
+mkdir -p "$TUWUNEL_TAR_ROOT/var/lib" \
+    || abort "failed to create Tuwunel tar staging root" "dump-tuwunel"
+ln -s "$TUWUNEL_BACKUP_DIR" "$TUWUNEL_TAR_ROOT/$TUWUNEL_CANONICAL_BACKUP_DIR" \
+    || abort "failed to link Tuwunel backup dir into tar staging root" "dump-tuwunel"
+tar cf "${STAGING}/tuwunel/tuwunel_data.tar" -h -C "$TUWUNEL_TAR_ROOT" "$TUWUNEL_CANONICAL_BACKUP_DIR" 2>/dev/null \
     || abort "tar of tuwunel backup dir failed" "dump-tuwunel"
+rm -rf "$TUWUNEL_TAR_ROOT"
 TAR_SIZE=$(stat -c%s "${STAGING}/tuwunel/tuwunel_data.tar" 2>/dev/null || echo unknown)
 TAR_FILES=$(tar tf "${STAGING}/tuwunel/tuwunel_data.tar" 2>/dev/null | wc -l)
 echo "  [DEBUG] tuwunel tar: $TAR_SIZE bytes, $TAR_FILES entries"

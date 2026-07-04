@@ -57,12 +57,14 @@ while true; do
 
         # Extract all presigned URLs from trigger into env vars for export.sh
         export EXPORT_TYPE="${EXPORT_TYPE}"
-        export BACKUP_S3_KEY=$(echo "${REQUEST}" | jq -r '.backup_s3_key // ""')
-        export PRESIGNED_PUT_BACKUP_S3=$(echo "${REQUEST}" | jq -r '.presigned_put_backup_s3 // ""')
-        export PRESIGNED_PUT_BACKUP_R2=$(echo "${REQUEST}" | jq -r '.presigned_put_backup_r2 // ""')
-        export PRESIGNED_PUT_HEALTH=$(echo "${REQUEST}" | jq -r '.presigned_put_health // ""')
-        export PRESIGNED_PUT_COMPLETE=$(echo "${REQUEST}" | jq -r '.presigned_put_complete // ""')
-        export PROMOTE_JSON=$(echo "${REQUEST}" | jq -c '.promote // []')
+        BACKUP_S3_KEY=$(echo "${REQUEST}" | jq -r '.backup_s3_key // ""')
+        PRESIGNED_PUT_BACKUP_S3=$(echo "${REQUEST}" | jq -r '.presigned_put_backup_s3 // ""')
+        PRESIGNED_PUT_BACKUP_R2=$(echo "${REQUEST}" | jq -r '.presigned_put_backup_r2 // ""')
+        PRESIGNED_PUT_HEALTH=$(echo "${REQUEST}" | jq -r '.presigned_put_health // ""')
+        PRESIGNED_PUT_COMPLETE=$(echo "${REQUEST}" | jq -r '.presigned_put_complete // ""')
+        PROMOTE_JSON=$(echo "${REQUEST}" | jq -c '.promote // []')
+        export BACKUP_S3_KEY PRESIGNED_PUT_BACKUP_S3 PRESIGNED_PUT_BACKUP_R2
+        export PRESIGNED_PUT_HEALTH PRESIGNED_PUT_COMPLETE PROMOTE_JSON
 
         # Run export
         /app/export.sh 2>&1 | tee "$LAST_RUN_LOG"
@@ -71,16 +73,17 @@ while true; do
 
         FINISHED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-        if [ ${EXIT_CODE} -eq 0 ]; then
+        if [ "${EXIT_CODE}" -eq 0 ]; then
             echo "export-watcher: ${EXPORT_TYPE} export succeeded at ${FINISHED_AT}"
         else
+            EXPORT_ERROR_TAIL=$(tail -120 "$LAST_RUN_LOG" 2>/dev/null | sed 's|https://[^ ]*|[REDACTED_URL]|g' || echo "no output")
             echo "export-watcher: ${EXPORT_TYPE} export FAILED (exit ${EXIT_CODE}) at ${FINISHED_AT}"
             echo "export-watcher: storage report after failure:"
             storage_report_compact | tee -a "$LAST_RUN_LOG" >/dev/null
             cap_last_run_log
 
             # Try to upload failure status via presigned URL (use jq for safe JSON encoding)
-            ERROR_TAIL=$(tail -40 "$LAST_RUN_LOG" 2>/dev/null | sed 's|https://[^ ]*|[REDACTED_URL]|g' | tr '\n' ' ' | head -c 4000 || echo "no output")
+            ERROR_TAIL=$(printf '%s' "$EXPORT_ERROR_TAIL" | tr '\n' ' ' | head -c 4000 || echo "no output")
             STORAGE_TAIL=$(storage_report_compact | tr '\n' ' ' | head -c 4000 || echo "no storage report")
 
             # For deploy: write failure to completion URL
