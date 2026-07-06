@@ -10,7 +10,8 @@ pub const STATUS_ATTEMPTING: &str = "attempting";
 pub const STATUS_COMMAND_ACCEPTED: &str = "command_accepted";
 pub const STATUS_RETRYING: &str = "retrying";
 pub const STATUS_EXHAUSTED: &str = "exhausted";
-pub const STATUS_SUCCEEDED: &str = "succeeded";
+pub const STATUS_COMMANDS_SUBMITTED: &str = "commands_submitted";
+pub const STATUS_PARTIAL_COMMANDS_SUBMITTED: &str = "partial_commands_submitted";
 
 const MAX_ERROR_LEN: usize = 4000;
 
@@ -123,7 +124,7 @@ impl TuwunelCleanupRepository {
         self.record_failure(event_id, attempt, STATUS_EXHAUSTED, error, true)
     }
 
-    pub fn record_succeeded(&self, event_id: &str) -> Result<()> {
+    pub fn record_commands_submitted(&self, event_id: &str) -> Result<()> {
         let mut conn = self.connection()?;
         let now = now_timestamp();
 
@@ -131,8 +132,26 @@ impl TuwunelCleanupRepository {
             tuwunel_cleanup_events::table.filter(tuwunel_cleanup_events::event_id.eq(event_id)),
         )
         .set((
-            tuwunel_cleanup_events::status.eq(STATUS_SUCCEEDED),
+            tuwunel_cleanup_events::status.eq(STATUS_COMMANDS_SUBMITTED),
             tuwunel_cleanup_events::last_error.eq(None::<String>),
+            tuwunel_cleanup_events::completed_at.eq(Some(now)),
+            tuwunel_cleanup_events::updated_at.eq(now),
+        ))
+        .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    pub fn record_partial_commands_submitted(&self, event_id: &str, error: &str) -> Result<()> {
+        let mut conn = self.connection()?;
+        let now = now_timestamp();
+
+        diesel::update(
+            tuwunel_cleanup_events::table.filter(tuwunel_cleanup_events::event_id.eq(event_id)),
+        )
+        .set((
+            tuwunel_cleanup_events::status.eq(STATUS_PARTIAL_COMMANDS_SUBMITTED),
+            tuwunel_cleanup_events::last_error.eq(Some(trim_error(error))),
             tuwunel_cleanup_events::completed_at.eq(Some(now)),
             tuwunel_cleanup_events::updated_at.eq(now),
         ))

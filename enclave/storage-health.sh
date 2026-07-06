@@ -7,7 +7,7 @@
 
 set -uo pipefail
 
-MIN_FREE_KB="${MIN_FREE_KB:-262144}"          # 256 MiB
+MIN_FREE_KB="${MIN_FREE_KB:-524288}"          # 512 MiB
 MIN_FREE_INODES="${MIN_FREE_INODES:-1024}"
 HISTORY_FILE="${STORAGE_HEALTH_HISTORY_FILE:-/tmp/storage-health-history.log}"
 MAX_HISTORY_BYTES="${STORAGE_MAX_HISTORY_BYTES:-1048576}"
@@ -16,6 +16,9 @@ TOP_DIR_LINES="${STORAGE_HEALTH_TOP_DIR_LINES:-80}"
 TOP_FILE_LINES="${STORAGE_HEALTH_TOP_FILE_LINES:-40}"
 LARGE_FILE_MIN_KB="${STORAGE_HEALTH_LARGE_FILE_MIN_KB:-1024}"
 GROWTH_REPORT_MIN_KB="${STORAGE_HEALTH_GROWTH_REPORT_MIN_KB:-10240}"
+TUWUNEL_MEDIA_DIR="${TUWUNEL_MEDIA_DIR:-/var/lib/tuwunel/media}"
+TUWUNEL_MEDIA_MAX_BYTES="${TUWUNEL_MEDIA_MAX_BYTES:-67108864}"       # 64 MiB
+TUWUNEL_MEDIA_MIN_AGE_SECS="${TUWUNEL_MEDIA_MIN_AGE_SECS:-1800}"     # 30 minutes
 
 WATCH_PATHS=(
     /
@@ -232,9 +235,263 @@ print_tuwunel_detailed_breakdown() {
     echo "--- tuwunel top files ---"
     find /var/lib/tuwunel -xdev -type f -printf '%s %p\n' 2>/dev/null | sort -n | tail -60 || true
 
+    echo "--- tuwunel media janitor policy ---"
+    printf "media_dir=%s max_bytes=%s max_mib=%.1f min_age_secs=%s\n" \
+        "$TUWUNEL_MEDIA_DIR" \
+        "$TUWUNEL_MEDIA_MAX_BYTES" \
+        "$(awk -v b="$TUWUNEL_MEDIA_MAX_BYTES" 'BEGIN {print b / 1048576}')" \
+        "$TUWUNEL_MEDIA_MIN_AGE_SECS"
+
     echo "--- tuwunel config storage/admin knobs ---"
     grep -E '^(database_path|database_backup_path|database_backups_to_keep|rocksdb_direct_io|allow_legacy_media|freeze_legacy_media|allow_federation|admin_signal_execute)' \
         /etc/tuwunel/tuwunel.toml 2>/dev/null || true
+}
+
+is_nonnegative_int() {
+    case "${1:-}" in
+        ''|*[!0-9]*)
+            return 1
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+}
+
+check_tuwunel_media_cap() {
+    if [ ! -d "$TUWUNEL_MEDIA_DIR" ]; then
+        return 0
+    fi
+
+    if ! is_nonnegative_int "$TUWUNEL_MEDIA_MAX_BYTES" || [ "$TUWUNEL_MEDIA_MAX_BYTES" -eq 0 ]; then
+        return 0
+    fi
+
+    local media_bytes media_count
+    media_bytes=$(du_bytes "$TUWUNEL_MEDIA_DIR")
+    media_count=$(find "$TUWUNEL_MEDIA_DIR" -xdev -type f 2>/dev/null | wc -l | awk '{print $1 + 0}')
+
+    if [ "$media_bytes" -gt "$TUWUNEL_MEDIA_MAX_BYTES" ]; then
+        printf "TUWUNEL_MEDIA_OVER_CAP path=%s bytes=%d count=%d cap_bytes=%d cap_mib=%.1f\n" \
+            "$TUWUNEL_MEDIA_DIR" \
+            "$media_bytes" \
+            "$media_count" \
+            "$TUWUNEL_MEDIA_MAX_BYTES" \
+            "$(awk -v b="$TUWUNEL_MEDIA_MAX_BYTES" 'BEGIN {print b / 1048576}')"
+        return 1
+    fi
+
+    return 0
+}
+
+cleanup_tuwunel_media() {
+    echo "--- tuwunel media janitor ---"
+
+    if [ ! -d "$TUWUNEL_MEDIA_DIR" ]; then
+        echo "Tuwunel media dir not present: $TUWUNEL_MEDIA_DIR"
+        return 0
+    fi
+
+    if ! is_nonnegative_int "$TUWUNEL_MEDIA_MAX_BYTES" || [ "$TUWUNEL_MEDIA_MAX_BYTES" -eq 0 ]; then
+        echo "Tuwunel media janitor disabled: TUWUNEL_MEDIA_MAX_BYTES=$TUWUNEL_MEDIA_MAX_BYTES"
+        return 0
+    fi
+
+    if ! is_nonnegative_int "$TUWUNEL_MEDIA_MIN_AGE_SECS"; then
+        echo "Invalid TUWUNEL_MEDIA_MIN_AGE_SECS=$TUWUNEL_MEDIA_MIN_AGE_SECS; using 1800"
+        TUWUNEL_MEDIA_MIN_AGE_SECS=1800
+    fi
+
+    if pgrep -f '/app/export.sh' >/dev/null 2>&1; then
+        echo "Skipping Tuwunel media cleanup while export.sh is running"
+        return 0
+    fi
+
+    local before_bytes before_count cutoff_epoch list_file current_bytes deleted_count deleted_bytes
+    before_bytes=$(du_bytes "$TUWUNEL_MEDIA_DIR")
+    before_count=$(find "$TUWUNEL_MEDIA_DIR" -xdev -type f 2>/dev/null | wc -l | awk '{print $1 + 0}')
+
+    printf "before_bytes=%d before_mib=%.1f before_count=%d cap_bytes=%d cap_mib=%.1f min_age_secs=%s\n" \
+        "$before_bytes" \
+        "$(awk -v b="$before_bytes" 'BEGIN {print b / 1048576}')" \
+        "$before_count" \
+        "$TUWUNEL_MEDIA_MAX_BYTES" \
+        "$(awk -v b="$TUWUNEL_MEDIA_MAX_BYTES" 'BEGIN {print b / 1048576}')" \
+        "$TUWUNEL_MEDIA_MIN_AGE_SECS"
+
+    if [ "$before_bytes" -le "$TUWUNEL_MEDIA_MAX_BYTES" ]; then
+        echo "Tuwunel media is within cap"
+        return 0
+    fi
+
+    cutoff_epoch=$(($(date +%s) - TUWUNEL_MEDIA_MIN_AGE_SECS))
+    list_file="/tmp/tuwunel-media-prune.$$"
+    find "$TUWUNEL_MEDIA_DIR" -xdev -type f -printf '%T@ %s %p\n' 2>/dev/null | sort -n > "$list_file" || true
+
+    current_bytes="$before_bytes"
+    deleted_count=0
+    deleted_bytes=0
+
+    while IFS=' ' read -r mtime size path; do
+        [ -n "${path:-}" ] || continue
+        [ "$current_bytes" -le "$TUWUNEL_MEDIA_MAX_BYTES" ] && break
+
+        local mtime_epoch
+        mtime_epoch="${mtime%.*}"
+        if ! is_nonnegative_int "$mtime_epoch" || [ "$mtime_epoch" -gt "$cutoff_epoch" ]; then
+            break
+        fi
+
+        if rm -f -- "$path" 2>/dev/null; then
+            current_bytes=$((current_bytes - size))
+            deleted_count=$((deleted_count + 1))
+            deleted_bytes=$((deleted_bytes + size))
+            printf "deleted_tuwunel_media bytes=%s path=%s\n" "$size" "$path"
+        fi
+    done < "$list_file"
+
+    rm -f "$list_file" 2>/dev/null || true
+    find "$TUWUNEL_MEDIA_DIR" -xdev -mindepth 1 -type d -empty -delete 2>/dev/null || true
+
+    local after_bytes after_count
+    after_bytes=$(du_bytes "$TUWUNEL_MEDIA_DIR")
+    after_count=$(find "$TUWUNEL_MEDIA_DIR" -xdev -type f 2>/dev/null | wc -l | awk '{print $1 + 0}')
+
+    printf "deleted_count=%d deleted_bytes=%d deleted_mib=%.1f after_bytes=%d after_mib=%.1f after_count=%d\n" \
+        "$deleted_count" \
+        "$deleted_bytes" \
+        "$(awk -v b="$deleted_bytes" 'BEGIN {print b / 1048576}')" \
+        "$after_bytes" \
+        "$(awk -v b="$after_bytes" 'BEGIN {print b / 1048576}')" \
+        "$after_count"
+
+    if [ "$after_bytes" -gt "$TUWUNEL_MEDIA_MAX_BYTES" ]; then
+        echo "Tuwunel media remains over cap; remaining files are newer than min_age_secs or could not be deleted"
+    fi
+}
+
+du_bytes() {
+    local path="$1"
+    if [ ! -e "$path" ]; then
+        echo 0
+        return 0
+    fi
+
+    du -sb "$path" 2>/dev/null | awk 'NR == 1 {print $1 + 0; seen = 1} END {if (!seen) print 0}'
+}
+
+df_metrics() {
+    local path="$1"
+    df -Pk "$path" 2>/dev/null | awk '
+        NR == 2 {
+            gsub(/%/, "", $5)
+            printf "%d %d %d %d\n", $2, $3, $4, $5
+            seen = 1
+        }
+        END {
+            if (!seen) {
+                print "0 0 0 0"
+            }
+        }
+    '
+}
+
+json_escape() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+tuwunel_bucket_assignments() {
+    if [ ! -d /var/lib/tuwunel ]; then
+        cat <<'EOF'
+TUWUNEL_MEDIA_COUNT=0
+TUWUNEL_MEDIA_BYTES=0
+TUWUNEL_ROCKSDB_SST_COUNT=0
+TUWUNEL_ROCKSDB_SST_BYTES=0
+TUWUNEL_ROCKSDB_META_LOGS_COUNT=0
+TUWUNEL_ROCKSDB_META_LOGS_BYTES=0
+TUWUNEL_OTHER_COUNT=0
+TUWUNEL_OTHER_BYTES=0
+EOF
+        return 0
+    fi
+
+    find /var/lib/tuwunel -xdev -type f -printf '%s %p\n' 2>/dev/null \
+        | awk '
+            function add(kind, size) {
+                count[kind] += 1
+                bytes[kind] += size
+            }
+            {
+                size = $1
+                $1 = ""
+                sub(/^ /, "")
+                path = $0
+
+                if (path ~ /\/media\//) {
+                    add("MEDIA", size)
+                } else if (path ~ /\.sst$/) {
+                    add("ROCKSDB_SST", size)
+                } else if (path ~ /\/(LOG|LOG\.old|MANIFEST-)/ || path ~ /\/OPTIONS-/) {
+                    add("ROCKSDB_META_LOGS", size)
+                } else {
+                    add("OTHER", size)
+                }
+            }
+            END {
+                kinds[1] = "MEDIA"
+                kinds[2] = "ROCKSDB_SST"
+                kinds[3] = "ROCKSDB_META_LOGS"
+                kinds[4] = "OTHER"
+                for (i = 1; i <= 4; i++) {
+                    kind = kinds[i]
+                    printf "TUWUNEL_%s_COUNT=%d\n", kind, count[kind] + 0
+                    printf "TUWUNEL_%s_BYTES=%d\n", kind, bytes[kind] + 0
+                }
+            }
+        '
+}
+
+print_json_metrics() {
+    local timestamp reserve_file reserve_file_json reserve_present
+    local root_size root_used root_avail root_pct tmp_size tmp_used tmp_avail tmp_pct
+    local reserve_bytes reserve_kib projected_root_avail_kib
+    local tuwunel_total_bytes postgres_bytes tuwunel_backup_bytes supervisor_logs_bytes
+
+    timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    reserve_file="${LIGHTFRIEND_ROOTFS_RESERVE_FILE:-/var/lib/lightfriend-reserve/rootfs-reserve.bin}"
+    reserve_file_json="$(json_escape "$reserve_file")"
+
+    read -r root_size root_used root_avail root_pct < <(df_metrics /)
+    read -r tmp_size tmp_used tmp_avail tmp_pct < <(df_metrics /tmp)
+
+    reserve_present=false
+    reserve_bytes=0
+    if [ -e "$reserve_file" ]; then
+        reserve_present=true
+        reserve_bytes=$(stat -c%s "$reserve_file" 2>/dev/null || echo 0)
+    fi
+    reserve_bytes=${reserve_bytes:-0}
+    reserve_kib=$(((reserve_bytes + 1023) / 1024))
+    projected_root_avail_kib=$((root_avail + reserve_kib))
+
+    tuwunel_total_bytes=$(du_bytes /var/lib/tuwunel)
+    postgres_bytes=$(du_bytes /var/lib/postgresql)
+    tuwunel_backup_bytes=$(du_bytes /var/lib/tuwunel-backup)
+    supervisor_logs_bytes=$(du_bytes /var/log/supervisor)
+
+    local TUWUNEL_MEDIA_COUNT=0
+    local TUWUNEL_MEDIA_BYTES=0
+    local TUWUNEL_ROCKSDB_SST_COUNT=0
+    local TUWUNEL_ROCKSDB_SST_BYTES=0
+    local TUWUNEL_ROCKSDB_META_LOGS_COUNT=0
+    local TUWUNEL_ROCKSDB_META_LOGS_BYTES=0
+    local TUWUNEL_OTHER_COUNT=0
+    local TUWUNEL_OTHER_BYTES=0
+    eval "$(tuwunel_bucket_assignments)"
+
+    cat <<EOF
+{"timestamp":"${timestamp}","filesystems":{"root":{"size_kib":${root_size},"used_kib":${root_used},"avail_kib":${root_avail},"use_pct":${root_pct}},"tmp":{"size_kib":${tmp_size},"used_kib":${tmp_used},"avail_kib":${tmp_avail},"use_pct":${tmp_pct}}},"reserve":{"path":"${reserve_file_json}","present":${reserve_present},"bytes":${reserve_bytes},"projected_root_avail_kib":${projected_root_avail_kib}},"tuwunel":{"total_bytes":${tuwunel_total_bytes},"media":{"count":${TUWUNEL_MEDIA_COUNT},"bytes":${TUWUNEL_MEDIA_BYTES}},"rocksdb_sst":{"count":${TUWUNEL_ROCKSDB_SST_COUNT},"bytes":${TUWUNEL_ROCKSDB_SST_BYTES}},"rocksdb_meta_logs":{"count":${TUWUNEL_ROCKSDB_META_LOGS_COUNT},"bytes":${TUWUNEL_ROCKSDB_META_LOGS_BYTES}},"other":{"count":${TUWUNEL_OTHER_COUNT},"bytes":${TUWUNEL_OTHER_BYTES}}},"postgres":{"bytes":${postgres_bytes}},"tuwunel_backup_engine":{"bytes":${tuwunel_backup_bytes}},"supervisor_logs":{"bytes":${supervisor_logs_bytes}}}
+EOF
 }
 
 print_report() {
@@ -299,6 +556,7 @@ check_storage() {
     while IFS= read -r path; do
         check_path "$path" || rc=1
     done < <(discover_check_paths)
+    check_tuwunel_media_cap || rc=1
     return "$rc"
 }
 
@@ -318,6 +576,8 @@ cleanup_storage() {
             rm -rf /var/lib/tuwunel-backup 2>/dev/null || true
         fi
     fi
+
+    cleanup_tuwunel_media
 
     # The tunnel and bridge logs can grow quickly during scans/outages. Keep
     # recent logs, but cap any single supervisor log to the last 1 MiB.
@@ -349,8 +609,11 @@ case "${1:-report}" in
     cleanup)
         cleanup_storage
         ;;
+    json)
+        print_json_metrics
+        ;;
     *)
-        echo "Usage: $0 [report|check|cleanup]" >&2
+        echo "Usage: $0 [report|check|cleanup|json]" >&2
         exit 2
         ;;
 esac

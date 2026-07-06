@@ -264,10 +264,10 @@ fn record_cleanup_exhausted(state: &Arc<AppState>, job: &EventCleanupJob, error:
     }
 }
 
-fn record_cleanup_succeeded(state: &Arc<AppState>, job: &EventCleanupJob) {
+fn record_cleanup_commands_submitted(state: &Arc<AppState>, job: &EventCleanupJob) {
     if let Err(e) = state
         .tuwunel_cleanup_repository
-        .record_succeeded(&job.event_id)
+        .record_commands_submitted(&job.event_id)
     {
         tracing::warn!(
             user_id = job.user_id,
@@ -277,7 +277,30 @@ fn record_cleanup_succeeded(state: &Arc<AppState>, job: &EventCleanupJob) {
             event_id = %job.event_id,
             attempt = job.attempt,
             error = %e,
-            "Failed to record Tuwunel cleanup success instrumentation"
+            "Failed to record Tuwunel cleanup submitted-command instrumentation"
+        );
+    }
+}
+
+fn record_cleanup_partial_commands_submitted(
+    state: &Arc<AppState>,
+    job: &EventCleanupJob,
+    error: &str,
+) {
+    if let Err(e) = state
+        .tuwunel_cleanup_repository
+        .record_partial_commands_submitted(&job.event_id, error)
+    {
+        tracing::warn!(
+            user_id = job.user_id,
+            ontology_message_id = job.ontology_message_id,
+            service = %job.service,
+            room_id = %job.room_id,
+            event_id = %job.event_id,
+            attempt = job.attempt,
+            error = %e,
+            cleanup_error = %error,
+            "Failed to record Tuwunel cleanup partial-submitted instrumentation"
         );
     }
 }
@@ -293,9 +316,26 @@ async fn event_cleanup_worker(
         record_cleanup_attempt(&state, &job);
 
         match send_cleanup_commands(&state, &config, &job).await {
-            Ok(sent_commands) => {
-                record_cleanup_succeeded(&state, &job);
-                for sent_command in &sent_commands {
+            Ok(outcome) => {
+                if let Some(media_error) = outcome.media_error.as_deref() {
+                    record_cleanup_partial_commands_submitted(&state, &job, media_error);
+                    tracing::warn!(
+                        user_id = job.user_id,
+                        ontology_message_id = job.ontology_message_id,
+                        service = %job.service,
+                        room_id = %job.room_id,
+                        event_id = %job.event_id,
+                        delete_media = job.delete_media,
+                        commands_sent = outcome.sent_commands.len(),
+                        attempt = job.attempt,
+                        error = %media_error,
+                        "Tuwunel cleanup only partially submitted; media delete command failed"
+                    );
+                } else {
+                    record_cleanup_commands_submitted(&state, &job);
+                }
+
+                for sent_command in &outcome.sent_commands {
                     tracing::info!(
                         user_id = job.user_id,
                         ontology_message_id = job.ontology_message_id,
@@ -320,9 +360,10 @@ async fn event_cleanup_worker(
                     room_id = %job.room_id,
                     event_id = %job.event_id,
                     delete_media = job.delete_media,
-                    commands_sent = sent_commands.len(),
+                    commands_sent = outcome.sent_commands.len(),
                     attempt = job.attempt,
-                    "Tuwunel event cleanup admin command messages sent"
+                    media_command_failed = outcome.media_error.is_some(),
+                    "Tuwunel event cleanup admin command messages submitted"
                 );
             }
             Err(e) => {
@@ -383,6 +424,12 @@ struct SentAdminCommand {
     admin_command_event_id: String,
 }
 
+#[derive(Debug)]
+struct CleanupCommandOutcome {
+    sent_commands: Vec<SentAdminCommand>,
+    media_error: Option<String>,
+}
+
 struct AdminCommandTarget {
     room_id: String,
     room_source: &'static str,
@@ -394,8 +441,9 @@ async fn send_cleanup_commands(
     state: &Arc<AppState>,
     config: &EventCleanupConfig,
     job: &EventCleanupJob,
-) -> Result<Vec<SentAdminCommand>> {
+) -> Result<CleanupCommandOutcome> {
     let mut sent_commands = Vec::with_capacity(if job.delete_media { 2 } else { 1 });
+    let mut media_error = None;
     let target = resolve_admin_command_target(state, config, job).await?;
 
     if job.delete_media {
@@ -413,6 +461,7 @@ async fn send_cleanup_commands(
                 sent_commands.push(sent_command);
             }
             Err(e) => {
+                media_error = Some(e.to_string());
                 tracing::warn!(
                     user_id = job.user_id,
                     ontology_message_id = job.ontology_message_id,
@@ -444,7 +493,10 @@ async fn send_cleanup_commands(
     record_cleanup_command_accepted(state, job, &sent_command);
     sent_commands.push(sent_command);
 
-    Ok(sent_commands)
+    Ok(CleanupCommandOutcome {
+        sent_commands,
+        media_error,
+    })
 }
 
 async fn resolve_admin_command_target(
