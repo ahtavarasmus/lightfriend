@@ -399,7 +399,7 @@ async fn send_cleanup_commands(
     let target = resolve_admin_command_target(state, config, job).await?;
 
     if job.delete_media {
-        let sent_command = send_admin_room_command(
+        match send_admin_room_command(
             config,
             &target,
             job,
@@ -407,9 +407,29 @@ async fn send_cleanup_commands(
             &build_delete_media_by_event_command(&job.event_id),
         )
         .await
-        .map_err(|e| anyhow!("media delete-by-event command failed: {}", e))?;
-        record_cleanup_command_accepted(state, job, &sent_command);
-        sent_commands.push(sent_command);
+        {
+            Ok(sent_command) => {
+                record_cleanup_command_accepted(state, job, &sent_command);
+                sent_commands.push(sent_command);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    user_id = job.user_id,
+                    ontology_message_id = job.ontology_message_id,
+                    service = %job.service,
+                    room_id = %job.room_id,
+                    source_event_id = %job.event_id,
+                    cleanup_command_kind = "media_delete_by_event",
+                    admin_room_id = %target.room_id,
+                    admin_room_source = target.room_source,
+                    admin_auth_source = target.auth_source,
+                    admin_user_id = config.admin_user_id,
+                    attempt = job.attempt,
+                    error = %e,
+                    "Tuwunel media cleanup admin command failed; continuing with event redaction"
+                );
+            }
+        }
     }
 
     let sent_command = send_admin_room_command(

@@ -86,16 +86,6 @@ fn bump_skipped_duplicate(service: &str) {
     counter.fetch_add(1, Ordering::Relaxed);
 }
 
-fn should_cleanup_tuwunel_media(msgtype: &MessageType) -> bool {
-    matches!(
-        msgtype,
-        MessageType::Image(_)
-            | MessageType::Video(_)
-            | MessageType::File(_)
-            | MessageType::Audio(_)
-    )
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BridgeRoom {
     pub room_id: String,
@@ -2437,7 +2427,11 @@ pub async fn handle_bridge_message(
         );
     }
 
-    let cleanup_tuwunel_media = should_cleanup_tuwunel_media(&event.content.msgtype);
+    // Once the bridge event is stored in Lightfriend's ontology DB, Tuwunel is
+    // no longer our source of truth. Always attempt a scoped media delete before
+    // redacting the event; text-only/no-media events are treated as best effort
+    // by the cleanup worker.
+    let cleanup_tuwunel_media = true;
     let cleanup_matrix_event_id = event.event_id.to_string();
 
     // Extract message content and estimate message size for bandwidth tracking
