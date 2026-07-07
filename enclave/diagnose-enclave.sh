@@ -115,6 +115,19 @@ if command -v psql >/dev/null 2>&1 && [ -n "${PG_DATABASE_URL:-}" ]; then
          GROUP BY status
          ORDER BY status;
 
+        SELECT service,
+               delete_media,
+               status,
+               count(*) AS rows,
+               COALESCE(sum(commands_expected), 0) AS commands_expected,
+               COALESCE(sum(commands_accepted), 0) AS commands_accepted,
+               to_char(to_timestamp(min(updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS first_updated,
+               to_char(to_timestamp(max(updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS last_updated
+          FROM tuwunel_cleanup_events
+         WHERE updated_at >= EXTRACT(EPOCH FROM NOW())::INT4 - (6 * 60 * 60)
+         GROUP BY service, delete_media, status
+         ORDER BY last_updated DESC, service, status;
+
         SELECT id,
                user_id,
                service,
@@ -245,6 +258,18 @@ echo ""
 
 echo "--- startup-services.log (last 100 lines) ---"
 tail -100 /data/seed/startup-services.log 2>/dev/null || echo "  not found"
+echo ""
+
+echo "--- service-watchdog stdout (last 200 lines) ---"
+tail -200 /var/log/supervisor/service-watchdog.log 2>/dev/null || echo "  empty"
+echo ""
+
+echo "--- service-watchdog stderr (last 80 lines) ---"
+tail -80 /var/log/supervisor/service-watchdog-err.log 2>/dev/null || echo "  empty"
+echo ""
+
+echo "--- storage cleanup last run (last 240 lines) ---"
+tail -240 /tmp/storage-cleanup-last.log 2>/dev/null || echo "  no cleanup run recorded yet"
 echo ""
 
 echo "--- storage health ---"

@@ -19,7 +19,12 @@ UNHEALTHY_THRESHOLD=3  # 3 consecutive failures * 30s = 90 seconds before restar
 
 PORT="${PORT:-3100}"
 STORAGE_WARN_COUNT=0
-STORAGE_WARN_THRESHOLD=2
+STORAGE_WARN_THRESHOLD="${STORAGE_WARN_THRESHOLD:-1}"
+case "$STORAGE_WARN_THRESHOLD" in
+    ''|*[!0-9]*|0)
+        STORAGE_WARN_THRESHOLD=1
+        ;;
+esac
 MEMORY_WARN_COUNT=0
 MEMORY_WARN_THRESHOLD=2
 HEALTH_UPLOAD_INTERVAL_LOOPS="${HEALTH_UPLOAD_INTERVAL_LOOPS:-10}" # 10 checks * 30s = 5 minutes
@@ -88,7 +93,8 @@ while true; do
         cat /tmp/storage-health-check.log 2>/dev/null || true
         if [ "$STORAGE_WARN_COUNT" -ge "$STORAGE_WARN_THRESHOLD" ]; then
             echo "WATCHDOG: Running storage cleanup"
-            /app/storage-health.sh cleanup 2>&1 || true
+            /app/storage-health.sh cleanup >/tmp/storage-cleanup-last.log 2>&1 || true
+            cat /tmp/storage-cleanup-last.log 2>/dev/null || true
             upload_health_snapshot
             STORAGE_WARN_COUNT=0
         fi
