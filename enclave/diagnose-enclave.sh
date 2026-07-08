@@ -128,6 +128,48 @@ if command -v psql >/dev/null 2>&1 && [ -n "${PG_DATABASE_URL:-}" ]; then
          GROUP BY service, delete_media, status
          ORDER BY last_updated DESC, service, status;
 
+        WITH now_epoch AS (
+            SELECT EXTRACT(EPOCH FROM NOW())::INT4 AS ts
+        ),
+        windows(label, seconds) AS (
+            VALUES ('\''last_5m'\'', 300),
+                   ('\''last_1h'\'', 3600),
+                   ('\''last_6h'\'', 21600),
+                   ('\''last_24h'\'', 86400)
+        )
+        SELECT windows.label AS time_window,
+               count(e.id) AS rows,
+               COALESCE(sum(e.commands_expected), 0) AS commands_expected,
+               COALESCE(sum(e.commands_accepted), 0) AS commands_accepted,
+               count(e.id) FILTER (WHERE e.status IN ('\''exhausted'\'', '\''partial_commands_submitted'\'', '\''retrying'\'')) AS attention_rows,
+               to_char(to_timestamp(max(e.updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS last_updated
+          FROM windows
+          CROSS JOIN now_epoch
+          LEFT JOIN tuwunel_cleanup_events e
+            ON e.enqueued_at >= now_epoch.ts - windows.seconds
+         GROUP BY windows.label, windows.seconds
+         ORDER BY windows.seconds;
+
+        SELECT COALESCE(last_command_kind, '\''none'\'') AS last_command_kind,
+               count(*) AS rows,
+               to_char(to_timestamp(max(updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS last_updated
+          FROM tuwunel_cleanup_events
+         WHERE updated_at >= EXTRACT(EPOCH FROM NOW())::INT4 - (6 * 60 * 60)
+         GROUP BY COALESCE(last_command_kind, '\''none'\'')
+         ORDER BY rows DESC, last_command_kind;
+
+        SELECT status,
+               count(*) AS rows,
+               to_char(to_timestamp(min(updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS oldest_updated,
+               to_char(to_timestamp(max(updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS newest_updated,
+               left(coalesce(max(last_error), '\'''\''), 240) AS sample_error
+          FROM tuwunel_cleanup_events
+         WHERE status IN ('\''enqueued'\'', '\''attempting'\'', '\''retrying'\'', '\''exhausted'\'', '\''partial_commands_submitted'\'')
+            OR commands_accepted < commands_expected
+         GROUP BY status
+         ORDER BY oldest_updated NULLS LAST, status
+         LIMIT 20;
+
         SELECT id,
                user_id,
                service,
@@ -147,6 +189,18 @@ if command -v psql >/dev/null 2>&1 && [ -n "${PG_DATABASE_URL:-}" ]; then
     fi
 else
     echo "  psql or PG_DATABASE_URL unavailable"
+fi
+echo ""
+
+echo "--- Tuwunel admin command traces across tuwunel logs ---"
+TUWUNEL_ADMIN_LOG_LINES=$(grep -hEi "backup-database|delete-by-event|redact-event|redacted|admin command|admin room|compact|purge|cleanup" \
+    /var/log/supervisor/tuwunel.log /var/log/supervisor/tuwunel.log.1 /var/log/supervisor/tuwunel.log.2 \
+    /var/log/supervisor/tuwunel-err.log /var/log/supervisor/tuwunel-err.log.1 /var/log/supervisor/tuwunel-err.log.2 \
+    2>/dev/null | tail -160 || true)
+if [ -n "$TUWUNEL_ADMIN_LOG_LINES" ]; then
+    printf '%s\n' "$TUWUNEL_ADMIN_LOG_LINES"
+else
+    echo "  none found"
 fi
 echo ""
 

@@ -12,10 +12,12 @@ MIN_FREE_INODES="${MIN_FREE_INODES:-1024}"
 HISTORY_FILE="${STORAGE_HEALTH_HISTORY_FILE:-/tmp/storage-health-history.log}"
 MAX_HISTORY_BYTES="${STORAGE_MAX_HISTORY_BYTES:-1048576}"
 SNAPSHOT_FILE="${STORAGE_HEALTH_SNAPSHOT_FILE:-/tmp/storage-health-snapshot.tsv}"
+TUWUNEL_BUCKET_SNAPSHOT_FILE="${STORAGE_HEALTH_TUWUNEL_BUCKET_SNAPSHOT_FILE:-/tmp/tuwunel-storage-bucket-snapshot.tsv}"
 TOP_DIR_LINES="${STORAGE_HEALTH_TOP_DIR_LINES:-80}"
 TOP_FILE_LINES="${STORAGE_HEALTH_TOP_FILE_LINES:-40}"
 LARGE_FILE_MIN_KB="${STORAGE_HEALTH_LARGE_FILE_MIN_KB:-1024}"
 GROWTH_REPORT_MIN_KB="${STORAGE_HEALTH_GROWTH_REPORT_MIN_KB:-10240}"
+TUWUNEL_BUCKET_GROWTH_REPORT_MIN_KB="${STORAGE_HEALTH_TUWUNEL_BUCKET_GROWTH_REPORT_MIN_KB:-1024}"
 TUWUNEL_MEDIA_DIR="${TUWUNEL_MEDIA_DIR:-/var/lib/tuwunel/media}"
 TUWUNEL_MEDIA_MAX_BYTES="${TUWUNEL_MEDIA_MAX_BYTES:-8388608}"        # 8 MiB alarm cap
 TUWUNEL_MEDIA_RETENTION_SECS="${TUWUNEL_MEDIA_RETENTION_SECS:-${TUWUNEL_MEDIA_MIN_AGE_SECS:-60}}"
@@ -205,6 +207,171 @@ print_storage_size_summary() {
     done
 }
 
+print_tuwunel_file_type_buckets() {
+    find /var/lib/tuwunel -xdev -type f -printf '%s %T@ %p\n' 2>/dev/null \
+        | awk '
+            function classify(path) {
+                if (path ~ /^\/var\/lib\/tuwunel\/media(\/|$)/) {
+                    return "media"
+                }
+                if (path ~ /\.sst$/) {
+                    return "rocksdb_sst"
+                }
+                if (path ~ /\.blob$/) {
+                    return "rocksdb_blob"
+                }
+                if (path ~ /\/archive\/[0-9]+\.log$/) {
+                    return "rocksdb_archive_log"
+                }
+                if (path ~ /\/[0-9]+\.log$/) {
+                    return "rocksdb_wal"
+                }
+                if (path ~ /\/MANIFEST-[0-9]+$/) {
+                    return "rocksdb_manifest"
+                }
+                if (path ~ /\/OPTIONS-[0-9]+$/) {
+                    return "rocksdb_options"
+                }
+                if (path ~ /\/LOG(\.old(\.[0-9]+)?)?$/) {
+                    return "rocksdb_info_log"
+                }
+                if (path ~ /\/(CURRENT|IDENTITY)$/) {
+                    return "rocksdb_identity"
+                }
+                if (path ~ /\/LOCK$/) {
+                    return "rocksdb_lock"
+                }
+                return "other"
+            }
+            function add(kind, size, mtime) {
+                count[kind] += 1
+                bytes[kind] += size
+                if (!(kind in oldest) || mtime < oldest[kind]) {
+                    oldest[kind] = mtime
+                }
+                if (!(kind in newest) || mtime > newest[kind]) {
+                    newest[kind] = mtime
+                }
+            }
+            {
+                size = $1 + 0
+                mtime = int($2)
+                $1 = ""
+                $2 = ""
+                sub(/^  /, "")
+                path = $0
+                add(classify(path), size, mtime)
+            }
+            END {
+                order[1] = "media"
+                order[2] = "rocksdb_sst"
+                order[3] = "rocksdb_blob"
+                order[4] = "rocksdb_wal"
+                order[5] = "rocksdb_archive_log"
+                order[6] = "rocksdb_manifest"
+                order[7] = "rocksdb_options"
+                order[8] = "rocksdb_info_log"
+                order[9] = "rocksdb_identity"
+                order[10] = "rocksdb_lock"
+                order[11] = "other"
+                for (i = 1; i <= 11; i++) {
+                    kind = order[i]
+                    if (count[kind] > 0) {
+                        printf "%s count=%d bytes=%d mib=%.1f oldest_mtime_epoch=%d newest_mtime_epoch=%d\n", kind, count[kind], bytes[kind], bytes[kind] / 1048576, oldest[kind], newest[kind]
+                    }
+                }
+            }
+        ' | sort || true
+}
+
+collect_tuwunel_bucket_snapshot() {
+    if [ ! -d /var/lib/tuwunel ]; then
+        return 0
+    fi
+
+    find /var/lib/tuwunel -xdev -type f -printf '%s %p\n' 2>/dev/null \
+        | awk '
+            function classify(path) {
+                if (path ~ /^\/var\/lib\/tuwunel\/media(\/|$)/) {
+                    return "media"
+                }
+                if (path ~ /\.sst$/) {
+                    return "rocksdb_sst"
+                }
+                if (path ~ /\.blob$/) {
+                    return "rocksdb_blob"
+                }
+                if (path ~ /\/archive\/[0-9]+\.log$/) {
+                    return "rocksdb_archive_log"
+                }
+                if (path ~ /\/[0-9]+\.log$/) {
+                    return "rocksdb_wal"
+                }
+                if (path ~ /\/MANIFEST-[0-9]+$/) {
+                    return "rocksdb_manifest"
+                }
+                if (path ~ /\/OPTIONS-[0-9]+$/) {
+                    return "rocksdb_options"
+                }
+                if (path ~ /\/LOG(\.old(\.[0-9]+)?)?$/) {
+                    return "rocksdb_info_log"
+                }
+                if (path ~ /\/(CURRENT|IDENTITY)$/) {
+                    return "rocksdb_identity"
+                }
+                if (path ~ /\/LOCK$/) {
+                    return "rocksdb_lock"
+                }
+                return "other"
+            }
+            {
+                size = $1 + 0
+                $1 = ""
+                sub(/^ /, "")
+                kind = classify($0)
+                count[kind] += 1
+                bytes[kind] += size
+            }
+            END {
+                for (kind in bytes) {
+                    printf "%s\t%d\t%d\n", kind, bytes[kind], count[kind]
+                }
+            }
+        ' | sort
+}
+
+print_tuwunel_bucket_growth_since_last_snapshot() {
+    local tmp_snapshot
+    tmp_snapshot="${TUWUNEL_BUCKET_SNAPSHOT_FILE}.$$"
+
+    collect_tuwunel_bucket_snapshot > "$tmp_snapshot" 2>/dev/null || true
+
+    echo "--- tuwunel bucket growth since previous storage snapshot (>= ${TUWUNEL_BUCKET_GROWTH_REPORT_MIN_KB} KiB) ---"
+    if [ -s "$TUWUNEL_BUCKET_SNAPSHOT_FILE" ] && [ -s "$tmp_snapshot" ]; then
+        awk -F '\t' -v min_kb="$TUWUNEL_BUCKET_GROWTH_REPORT_MIN_KB" '
+            FNR == NR {
+                previous_bytes[$1] = $2
+                previous_count[$1] = $3
+                next
+            }
+            {
+                old_bytes = (($1 in previous_bytes) ? previous_bytes[$1] : 0)
+                old_count = (($1 in previous_count) ? previous_count[$1] : 0)
+                delta_bytes = $2 - old_bytes
+                delta_count = $3 - old_count
+                delta_kb = int(delta_bytes / 1024)
+                if (delta_kb >= min_kb || delta_kb <= -min_kb) {
+                    printf "%+10d KiB files_delta=%+d now_bytes=%d was_bytes=%d kind=%s\n", delta_kb, delta_count, $2, old_bytes, $1
+                }
+            }
+        ' "$TUWUNEL_BUCKET_SNAPSHOT_FILE" "$tmp_snapshot" | sort -nr || true
+    else
+        echo "no previous tuwunel bucket snapshot"
+    fi
+
+    mv "$tmp_snapshot" "$TUWUNEL_BUCKET_SNAPSHOT_FILE" 2>/dev/null || rm -f "$tmp_snapshot"
+}
+
 print_tuwunel_detailed_breakdown() {
     echo "--- tuwunel detailed storage ---"
     if [ ! -d /var/lib/tuwunel ]; then
@@ -215,40 +382,21 @@ print_tuwunel_detailed_breakdown() {
     du -sh /var/lib/tuwunel /var/lib/tuwunel/media 2>/dev/null || true
 
     echo "--- tuwunel file type buckets ---"
-    find /var/lib/tuwunel -xdev -type f -printf '%s %p\n' 2>/dev/null \
-        | awk '
-            function add(kind, size) {
-                count[kind] += 1
-                bytes[kind] += size
-            }
-            {
-                size = $1
-                $1 = ""
-                sub(/^ /, "")
-                path = $0
-
-                if (path ~ /\/media\//) {
-                    add("media", size)
-                } else if (path ~ /\.sst$/) {
-                    add("rocksdb_sst", size)
-                } else if (path ~ /\/(LOG|LOG\.old|MANIFEST-)/ || path ~ /\/OPTIONS-/) {
-                    add("rocksdb_meta_logs", size)
-                } else {
-                    add("other", size)
-                }
-            }
-            END {
-                for (kind in count) {
-                    printf "%s count=%d bytes=%d mib=%.1f\n", kind, count[kind], bytes[kind], bytes[kind] / 1048576
-                }
-            }
-        ' | sort || true
+    print_tuwunel_file_type_buckets
+    print_tuwunel_bucket_growth_since_last_snapshot
 
     echo "--- tuwunel top dirs (du -xhd2) ---"
     du -xh -d 2 /var/lib/tuwunel 2>/dev/null | sort -h | tail -60 || true
 
     echo "--- tuwunel top files ---"
     find /var/lib/tuwunel -xdev -type f -printf '%s %p\n' 2>/dev/null | sort -n | tail -60 || true
+
+    echo "--- tuwunel newest files ---"
+    find /var/lib/tuwunel -xdev -type f -printf '%TY-%Tm-%TdT%TH:%TM:%TSZ %s %p\n' 2>/dev/null | sort | tail -60 || true
+
+    echo "--- tuwunel largest non-media non-sst files ---"
+    find /var/lib/tuwunel -xdev -type f ! -path '/var/lib/tuwunel/media/*' ! -name '*.sst' -printf '%s %p\n' 2>/dev/null \
+        | sort -n | tail -80 || true
 
     echo "--- tuwunel media janitor policy ---"
     printf "media_dir=%s max_bytes=%s max_mib=%.1f retention_secs=%s min_age_secs_alias=%s delete_log_limit=%s\n" \
@@ -540,6 +688,18 @@ TUWUNEL_ROCKSDB_SST_COUNT=0
 TUWUNEL_ROCKSDB_SST_BYTES=0
 TUWUNEL_ROCKSDB_META_LOGS_COUNT=0
 TUWUNEL_ROCKSDB_META_LOGS_BYTES=0
+TUWUNEL_ROCKSDB_BLOB_COUNT=0
+TUWUNEL_ROCKSDB_BLOB_BYTES=0
+TUWUNEL_ROCKSDB_WAL_COUNT=0
+TUWUNEL_ROCKSDB_WAL_BYTES=0
+TUWUNEL_ROCKSDB_ARCHIVE_LOG_COUNT=0
+TUWUNEL_ROCKSDB_ARCHIVE_LOG_BYTES=0
+TUWUNEL_ROCKSDB_MANIFEST_COUNT=0
+TUWUNEL_ROCKSDB_MANIFEST_BYTES=0
+TUWUNEL_ROCKSDB_OPTIONS_COUNT=0
+TUWUNEL_ROCKSDB_OPTIONS_BYTES=0
+TUWUNEL_ROCKSDB_INFO_LOG_COUNT=0
+TUWUNEL_ROCKSDB_INFO_LOG_BYTES=0
 TUWUNEL_OTHER_COUNT=0
 TUWUNEL_OTHER_BYTES=0
 EOF
@@ -552,18 +712,32 @@ EOF
                 count[kind] += 1
                 bytes[kind] += size
             }
+            function add_meta(kind, size) {
+                add(kind, size)
+                add("ROCKSDB_META_LOGS", size)
+            }
             {
-                size = $1
+                size = $1 + 0
                 $1 = ""
                 sub(/^ /, "")
                 path = $0
 
-                if (path ~ /\/media\//) {
+                if (path ~ /^\/var\/lib\/tuwunel\/media(\/|$)/) {
                     add("MEDIA", size)
                 } else if (path ~ /\.sst$/) {
                     add("ROCKSDB_SST", size)
-                } else if (path ~ /\/(LOG|LOG\.old|MANIFEST-)/ || path ~ /\/OPTIONS-/) {
-                    add("ROCKSDB_META_LOGS", size)
+                } else if (path ~ /\.blob$/) {
+                    add("ROCKSDB_BLOB", size)
+                } else if (path ~ /\/archive\/[0-9]+\.log$/) {
+                    add_meta("ROCKSDB_ARCHIVE_LOG", size)
+                } else if (path ~ /\/[0-9]+\.log$/) {
+                    add_meta("ROCKSDB_WAL", size)
+                } else if (path ~ /\/MANIFEST-[0-9]+$/) {
+                    add_meta("ROCKSDB_MANIFEST", size)
+                } else if (path ~ /\/OPTIONS-[0-9]+$/) {
+                    add_meta("ROCKSDB_OPTIONS", size)
+                } else if (path ~ /\/LOG(\.old(\.[0-9]+)?)?$/) {
+                    add_meta("ROCKSDB_INFO_LOG", size)
                 } else {
                     add("OTHER", size)
                 }
@@ -572,8 +746,14 @@ EOF
                 kinds[1] = "MEDIA"
                 kinds[2] = "ROCKSDB_SST"
                 kinds[3] = "ROCKSDB_META_LOGS"
-                kinds[4] = "OTHER"
-                for (i = 1; i <= 4; i++) {
+                kinds[4] = "ROCKSDB_BLOB"
+                kinds[5] = "ROCKSDB_WAL"
+                kinds[6] = "ROCKSDB_ARCHIVE_LOG"
+                kinds[7] = "ROCKSDB_MANIFEST"
+                kinds[8] = "ROCKSDB_OPTIONS"
+                kinds[9] = "ROCKSDB_INFO_LOG"
+                kinds[10] = "OTHER"
+                for (i = 1; i <= 10; i++) {
                     kind = kinds[i]
                     printf "TUWUNEL_%s_COUNT=%d\n", kind, count[kind] + 0
                     printf "TUWUNEL_%s_BYTES=%d\n", kind, bytes[kind] + 0
@@ -601,11 +781,23 @@ print_tuwunel_cleanup_metrics() {
     local TUWUNEL_ROCKSDB_SST_BYTES=0
     local TUWUNEL_ROCKSDB_META_LOGS_COUNT=0
     local TUWUNEL_ROCKSDB_META_LOGS_BYTES=0
+    local TUWUNEL_ROCKSDB_BLOB_COUNT=0
+    local TUWUNEL_ROCKSDB_BLOB_BYTES=0
+    local TUWUNEL_ROCKSDB_WAL_COUNT=0
+    local TUWUNEL_ROCKSDB_WAL_BYTES=0
+    local TUWUNEL_ROCKSDB_ARCHIVE_LOG_COUNT=0
+    local TUWUNEL_ROCKSDB_ARCHIVE_LOG_BYTES=0
+    local TUWUNEL_ROCKSDB_MANIFEST_COUNT=0
+    local TUWUNEL_ROCKSDB_MANIFEST_BYTES=0
+    local TUWUNEL_ROCKSDB_OPTIONS_COUNT=0
+    local TUWUNEL_ROCKSDB_OPTIONS_BYTES=0
+    local TUWUNEL_ROCKSDB_INFO_LOG_COUNT=0
+    local TUWUNEL_ROCKSDB_INFO_LOG_BYTES=0
     local TUWUNEL_OTHER_COUNT=0
     local TUWUNEL_OTHER_BYTES=0
     eval "$(tuwunel_bucket_assignments)"
 
-    printf "tuwunel_cleanup_metrics phase=%s root_avail_kib=%d root_use_pct=%d tmp_avail_kib=%d tmp_use_pct=%d tuwunel_total_bytes=%d tuwunel_total_mib=%.1f media_count=%d media_bytes=%d media_mib=%.1f rocksdb_sst_count=%d rocksdb_sst_bytes=%d rocksdb_sst_mib=%.1f rocksdb_meta_logs_count=%d rocksdb_meta_logs_bytes=%d rocksdb_meta_logs_mib=%.1f other_count=%d other_bytes=%d other_mib=%.1f postgres_bytes=%d postgres_mib=%.1f tuwunel_backup_engine_bytes=%d tuwunel_backup_engine_mib=%.1f supervisor_logs_bytes=%d supervisor_logs_mib=%.1f\n" \
+    printf "tuwunel_cleanup_metrics phase=%s root_avail_kib=%d root_use_pct=%d tmp_avail_kib=%d tmp_use_pct=%d tuwunel_total_bytes=%d tuwunel_total_mib=%.1f media_count=%d media_bytes=%d media_mib=%.1f rocksdb_sst_count=%d rocksdb_sst_bytes=%d rocksdb_sst_mib=%.1f rocksdb_meta_logs_count=%d rocksdb_meta_logs_bytes=%d rocksdb_meta_logs_mib=%.1f rocksdb_blob_count=%d rocksdb_blob_bytes=%d rocksdb_blob_mib=%.1f rocksdb_wal_count=%d rocksdb_wal_bytes=%d rocksdb_wal_mib=%.1f rocksdb_archive_log_count=%d rocksdb_archive_log_bytes=%d rocksdb_archive_log_mib=%.1f rocksdb_manifest_count=%d rocksdb_manifest_bytes=%d rocksdb_manifest_mib=%.1f rocksdb_options_count=%d rocksdb_options_bytes=%d rocksdb_options_mib=%.1f rocksdb_info_log_count=%d rocksdb_info_log_bytes=%d rocksdb_info_log_mib=%.1f other_count=%d other_bytes=%d other_mib=%.1f postgres_bytes=%d postgres_mib=%.1f tuwunel_backup_engine_bytes=%d tuwunel_backup_engine_mib=%.1f supervisor_logs_bytes=%d supervisor_logs_mib=%.1f\n" \
         "$phase" \
         "$root_avail" \
         "$root_pct" \
@@ -622,6 +814,24 @@ print_tuwunel_cleanup_metrics() {
         "$TUWUNEL_ROCKSDB_META_LOGS_COUNT" \
         "$TUWUNEL_ROCKSDB_META_LOGS_BYTES" \
         "$(awk -v b="$TUWUNEL_ROCKSDB_META_LOGS_BYTES" 'BEGIN {print b / 1048576}')" \
+        "$TUWUNEL_ROCKSDB_BLOB_COUNT" \
+        "$TUWUNEL_ROCKSDB_BLOB_BYTES" \
+        "$(awk -v b="$TUWUNEL_ROCKSDB_BLOB_BYTES" 'BEGIN {print b / 1048576}')" \
+        "$TUWUNEL_ROCKSDB_WAL_COUNT" \
+        "$TUWUNEL_ROCKSDB_WAL_BYTES" \
+        "$(awk -v b="$TUWUNEL_ROCKSDB_WAL_BYTES" 'BEGIN {print b / 1048576}')" \
+        "$TUWUNEL_ROCKSDB_ARCHIVE_LOG_COUNT" \
+        "$TUWUNEL_ROCKSDB_ARCHIVE_LOG_BYTES" \
+        "$(awk -v b="$TUWUNEL_ROCKSDB_ARCHIVE_LOG_BYTES" 'BEGIN {print b / 1048576}')" \
+        "$TUWUNEL_ROCKSDB_MANIFEST_COUNT" \
+        "$TUWUNEL_ROCKSDB_MANIFEST_BYTES" \
+        "$(awk -v b="$TUWUNEL_ROCKSDB_MANIFEST_BYTES" 'BEGIN {print b / 1048576}')" \
+        "$TUWUNEL_ROCKSDB_OPTIONS_COUNT" \
+        "$TUWUNEL_ROCKSDB_OPTIONS_BYTES" \
+        "$(awk -v b="$TUWUNEL_ROCKSDB_OPTIONS_BYTES" 'BEGIN {print b / 1048576}')" \
+        "$TUWUNEL_ROCKSDB_INFO_LOG_COUNT" \
+        "$TUWUNEL_ROCKSDB_INFO_LOG_BYTES" \
+        "$(awk -v b="$TUWUNEL_ROCKSDB_INFO_LOG_BYTES" 'BEGIN {print b / 1048576}')" \
         "$TUWUNEL_OTHER_COUNT" \
         "$TUWUNEL_OTHER_BYTES" \
         "$(awk -v b="$TUWUNEL_OTHER_BYTES" 'BEGIN {print b / 1048576}')" \
