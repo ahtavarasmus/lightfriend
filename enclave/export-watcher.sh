@@ -18,6 +18,7 @@ LAST_PROCESSED=""
 LAST_RESERVE_PROCESSED=""
 LAST_RUN_LOG="/tmp/export-watcher-last-run.log"
 MAX_LAST_RUN_BYTES=1048576
+MAX_FAILED_RUN_LOGS="${EXPORT_WATCHER_MAX_FAILED_RUN_LOGS:-12}"
 
 echo "export-watcher: starting (poll every ${POLL_INTERVAL}s)"
 
@@ -37,6 +38,30 @@ cap_last_run_log() {
     fi
 }
 
+sanitize_log_tail() {
+    tail -n "${1:-80}" "$LAST_RUN_LOG" 2>/dev/null \
+        | sed 's|https://[^ ]*|[REDACTED_URL]|g' \
+        | tr '\n' ' ' \
+        | cut -c1-4000 || echo "no output"
+}
+
+preserve_failed_run_log() {
+    local timestamp="$1"
+    local failure_log="/tmp/export-watcher-failed-${timestamp//[:]/}.log"
+
+    cp "$LAST_RUN_LOG" "$failure_log" 2>/dev/null || true
+
+    find /tmp -maxdepth 1 -type f -name 'export-watcher-failed-*.log' -printf '%T@ %p\n' 2>/dev/null \
+        | sort -nr \
+        | awk -v keep="$MAX_FAILED_RUN_LOGS" 'NR > keep {$1 = ""; sub(/^ /, ""); print}' \
+        | while IFS= read -r stale_log; do
+            [ -n "$stale_log" ] || continue
+            rm -f -- "$stale_log" 2>/dev/null || true
+        done
+
+    echo "$failure_log"
+}
+
 while true; do
     RESERVE_REQUEST=$(curl -sf --max-time 5 "${RESERVE_RELEASE_URL}" 2>/dev/null || true)
     if [ -n "${RESERVE_REQUEST}" ] && [ "${RESERVE_REQUEST}" != "${LAST_RESERVE_PROCESSED}" ] && echo "${RESERVE_REQUEST}" | jq -e '.action == "release-rootfs-reserve"' >/dev/null 2>&1; then
@@ -52,17 +77,19 @@ while true; do
 
     if [ -n "${REQUEST}" ] && [ "${REQUEST}" != "${LAST_PROCESSED}" ] && echo "${REQUEST}" | jq -e '.action == "export"' >/dev/null 2>&1; then
         TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        START_EPOCH=$(date +%s)
         EXPORT_TYPE=$(echo "${REQUEST}" | jq -r '.type // "unknown"')
         echo "export-watcher: ${EXPORT_TYPE} export request at ${TIMESTAMP}"
 
         # Extract all presigned URLs from trigger into env vars for export.sh
-        export EXPORT_TYPE="${EXPORT_TYPE}"
-        export BACKUP_S3_KEY=$(echo "${REQUEST}" | jq -r '.backup_s3_key // ""')
-        export PRESIGNED_PUT_BACKUP_S3=$(echo "${REQUEST}" | jq -r '.presigned_put_backup_s3 // ""')
-        export PRESIGNED_PUT_BACKUP_R2=$(echo "${REQUEST}" | jq -r '.presigned_put_backup_r2 // ""')
-        export PRESIGNED_PUT_HEALTH=$(echo "${REQUEST}" | jq -r '.presigned_put_health // ""')
-        export PRESIGNED_PUT_COMPLETE=$(echo "${REQUEST}" | jq -r '.presigned_put_complete // ""')
-        export PROMOTE_JSON=$(echo "${REQUEST}" | jq -c '.promote // []')
+        BACKUP_S3_KEY=$(echo "${REQUEST}" | jq -r '.backup_s3_key // ""')
+        PRESIGNED_PUT_BACKUP_S3=$(echo "${REQUEST}" | jq -r '.presigned_put_backup_s3 // ""')
+        PRESIGNED_PUT_BACKUP_R2=$(echo "${REQUEST}" | jq -r '.presigned_put_backup_r2 // ""')
+        PRESIGNED_PUT_HEALTH=$(echo "${REQUEST}" | jq -r '.presigned_put_health // ""')
+        PRESIGNED_PUT_COMPLETE=$(echo "${REQUEST}" | jq -r '.presigned_put_complete // ""')
+        PROMOTE_JSON=$(echo "${REQUEST}" | jq -c '.promote // []')
+        export EXPORT_TYPE BACKUP_S3_KEY PRESIGNED_PUT_BACKUP_S3 PRESIGNED_PUT_BACKUP_R2
+        export PRESIGNED_PUT_HEALTH PRESIGNED_PUT_COMPLETE PROMOTE_JSON
 
         # Run export
         /app/export.sh 2>&1 | tee "$LAST_RUN_LOG"
@@ -70,23 +97,35 @@ while true; do
         cap_last_run_log
 
         FINISHED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        FINISH_EPOCH=$(date +%s)
+        DURATION_SEC=$((FINISH_EPOCH - START_EPOCH))
 
-        if [ ${EXIT_CODE} -eq 0 ]; then
-            echo "export-watcher: ${EXPORT_TYPE} export succeeded at ${FINISHED_AT}"
+        if [ "${EXIT_CODE}" -eq 0 ]; then
+            echo "export-watcher: ${EXPORT_TYPE} export succeeded at ${FINISHED_AT} duration_sec=${DURATION_SEC}"
         else
-            echo "export-watcher: ${EXPORT_TYPE} export FAILED (exit ${EXIT_CODE}) at ${FINISHED_AT}"
+            ERROR_TAIL=$(sanitize_log_tail 80)
             echo "export-watcher: storage report after failure:"
             storage_report_compact | tee -a "$LAST_RUN_LOG" >/dev/null
             cap_last_run_log
+            FAILED_RUN_LOG=$(preserve_failed_run_log "$TIMESTAMP")
+            EXPORT_STATUS=$(cat /data/seed/export-status.json 2>/dev/null | sed 's|https://[^ ]*|[REDACTED_URL]|g' | cut -c1-2000 || echo "")
+            echo "export-watcher: ${EXPORT_TYPE} export FAILED (exit ${EXIT_CODE}) at ${FINISHED_AT} duration_sec=${DURATION_SEC} failed_run_log=${FAILED_RUN_LOG}"
 
             # Try to upload failure status via presigned URL (use jq for safe JSON encoding)
-            ERROR_TAIL=$(tail -40 "$LAST_RUN_LOG" 2>/dev/null | sed 's|https://[^ ]*|[REDACTED_URL]|g' | tr '\n' ' ' | head -c 4000 || echo "no output")
-            STORAGE_TAIL=$(storage_report_compact | tr '\n' ' ' | head -c 4000 || echo "no storage report")
+            STORAGE_TAIL=$(storage_report_compact | tr '\n' ' ' | cut -c1-4000 || echo "no storage report")
 
             # For deploy: write failure to completion URL
             if [ -n "${PRESIGNED_PUT_COMPLETE}" ]; then
-                jq -n --arg error "$ERROR_TAIL" --arg storage "$STORAGE_TAIL" --argjson code "${EXIT_CODE}" \
-                    '{"status":"FAILED","exit_code":$code,"error":$error,"storage":$storage}' | \
+                jq -n \
+                    --arg started_at "${TIMESTAMP}" \
+                    --arg finished_at "$FINISHED_AT" \
+                    --arg error "$ERROR_TAIL" \
+                    --arg storage "$STORAGE_TAIL" \
+                    --arg failure_log "$FAILED_RUN_LOG" \
+                    --arg export_status "$EXPORT_STATUS" \
+                    --argjson code "${EXIT_CODE}" \
+                    --argjson duration_sec "${DURATION_SEC}" \
+                    '{"status":"FAILED","exit_code":$code,"started_at":$started_at,"finished_at":$finished_at,"duration_sec":$duration_sec,"error":$error,"storage":$storage,"failure_log":$failure_log,"export_status":$export_status}' | \
                     curl -sf --max-time 30 -X PUT -H "Content-Type: application/json" \
                     --data-binary @- -x http://127.0.0.1:3128 \
                     "${PRESIGNED_PUT_COMPLETE}" 2>/dev/null || true
@@ -94,8 +133,17 @@ while true; do
 
             # For hourly: write failure to health URL
             if [ -n "${PRESIGNED_PUT_HEALTH}" ]; then
-                jq -n --arg ts "${TIMESTAMP}" --arg storage "$STORAGE_TAIL" --argjson code "${EXIT_CODE}" \
-                    '{"last_failure":$ts,"step":"export","exit_code":$code,"storage":$storage}' | \
+                jq -n \
+                    --arg ts "${TIMESTAMP}" \
+                    --arg started_at "${TIMESTAMP}" \
+                    --arg finished_at "$FINISHED_AT" \
+                    --arg error "$ERROR_TAIL" \
+                    --arg storage "$STORAGE_TAIL" \
+                    --arg failure_log "$FAILED_RUN_LOG" \
+                    --arg export_status "$EXPORT_STATUS" \
+                    --argjson code "${EXIT_CODE}" \
+                    --argjson duration_sec "${DURATION_SEC}" \
+                    '{"last_failure":$ts,"started_at":$started_at,"finished_at":$finished_at,"duration_sec":$duration_sec,"step":"export","exit_code":$code,"error":$error,"storage":$storage,"failure_log":$failure_log,"export_status":$export_status}' | \
                     curl -sf --max-time 30 -X PUT -H "Content-Type: application/json" \
                     --data-binary @- -x http://127.0.0.1:3128 \
                     "${PRESIGNED_PUT_HEALTH}" 2>/dev/null || true

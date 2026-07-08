@@ -9,6 +9,7 @@ set -uo pipefail
 
 MIN_FREE_KB="${MIN_FREE_KB:-524288}"          # 512 MiB
 MIN_FREE_INODES="${MIN_FREE_INODES:-1024}"
+ROOTFS_RESERVE_FILE="${LIGHTFRIEND_ROOTFS_RESERVE_FILE:-/var/lib/lightfriend-reserve/rootfs-reserve.bin}"
 HISTORY_FILE="${STORAGE_HEALTH_HISTORY_FILE:-/tmp/storage-health-history.log}"
 MAX_HISTORY_BYTES="${STORAGE_MAX_HISTORY_BYTES:-1048576}"
 SNAPSHOT_FILE="${STORAGE_HEALTH_SNAPSHOT_FILE:-/tmp/storage-health-snapshot.tsv}"
@@ -171,7 +172,7 @@ print_rootfs_backup_headroom() {
     echo "--- rootfs backup headroom ---"
 
     local reserve_file
-    reserve_file="${LIGHTFRIEND_ROOTFS_RESERVE_FILE:-/var/lib/lightfriend-reserve/rootfs-reserve.bin}"
+    reserve_file="$ROOTFS_RESERVE_FILE"
 
     local root_avail_kib tmp_avail_kib reserve_bytes reserve_kib projected_kib
     root_avail_kib=$(df -Pk / 2>/dev/null | awk 'NR==2 {print $4 + 0}')
@@ -532,7 +533,7 @@ cleanup_tuwunel_media() {
     retention_secs=$(normalized_tuwunel_media_retention_secs)
     delete_log_limit=$(normalized_tuwunel_media_delete_log_limit)
 
-    if pgrep -f '/app/export.sh' >/dev/null 2>&1; then
+    if export_running; then
         echo "Skipping Tuwunel media cleanup while export.sh is running"
         return 0
     fi
@@ -677,6 +678,37 @@ df_metrics() {
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+export_running() {
+    if command -v pgrep >/dev/null 2>&1 && pgrep -f '/app/export.sh' >/dev/null 2>&1; then
+        return 0
+    fi
+
+    # shellcheck disable=SC2009
+    ps aux 2>/dev/null | grep -F '/app/export.sh' | grep -v grep >/dev/null 2>&1
+}
+
+rootfs_reserve_kib() {
+    local reserve_bytes
+    reserve_bytes=0
+
+    if [ -e "$ROOTFS_RESERVE_FILE" ]; then
+        reserve_bytes=$(stat -c%s "$ROOTFS_RESERVE_FILE" 2>/dev/null || echo 0)
+    fi
+
+    reserve_bytes=${reserve_bytes:-0}
+    echo $(((reserve_bytes + 1023) / 1024))
+}
+
+path_uses_rootfs() {
+    local path="$1"
+    local root_source path_source
+
+    root_source=$(df -Pk / 2>/dev/null | awk 'NR == 2 {print $1}')
+    path_source=$(df -Pk "$path" 2>/dev/null | awk 'NR == 2 {print $1}')
+
+    [ -n "$root_source" ] && [ -n "$path_source" ] && [ "$root_source" = "$path_source" ]
 }
 
 tuwunel_bucket_assignments() {
@@ -850,7 +882,7 @@ print_json_metrics() {
     local tuwunel_total_bytes postgres_bytes tuwunel_backup_bytes supervisor_logs_bytes
 
     timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    reserve_file="${LIGHTFRIEND_ROOTFS_RESERVE_FILE:-/var/lib/lightfriend-reserve/rootfs-reserve.bin}"
+    reserve_file="$ROOTFS_RESERVE_FILE"
     reserve_file_json="$(json_escape "$reserve_file")"
 
     read -r root_size root_used root_avail root_pct < <(df_metrics /)
@@ -925,12 +957,19 @@ check_path() {
     local path="$1"
     [ -e "$path" ] || return 0
 
-    local avail_kb avail_inodes
+    local avail_kb avail_inodes effective_avail_kb reserve_kib
     avail_kb=$(df -Pk "$path" 2>/dev/null | awk 'NR==2 {print $4}')
     avail_inodes=$(df -Pi "$path" 2>/dev/null | awk 'NR==2 {print $4}')
+    effective_avail_kb="$avail_kb"
+    reserve_kib=0
 
-    if [ -n "$avail_kb" ] && [ "$avail_kb" -lt "$MIN_FREE_KB" ]; then
-        echo "LOW_SPACE path=$path avail_kb=$avail_kb threshold_kb=$MIN_FREE_KB"
+    if [ -n "$avail_kb" ] && path_uses_rootfs "$path"; then
+        reserve_kib=$(rootfs_reserve_kib)
+        effective_avail_kb=$((avail_kb + reserve_kib))
+    fi
+
+    if [ -n "$avail_kb" ] && [ "$effective_avail_kb" -lt "$MIN_FREE_KB" ]; then
+        echo "LOW_SPACE path=$path avail_kb=$avail_kb reserve_kib=$reserve_kib effective_avail_kb=$effective_avail_kb threshold_kb=$MIN_FREE_KB"
         return 1
     fi
 
@@ -956,13 +995,24 @@ check_storage() {
 cleanup_storage() {
     echo "=== Storage Cleanup $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 
-    rm -rf /tmp/backup-staging /tmp/verify.tar.gz /tmp/lightfriend-full-backup-*.tar.gz 2>/dev/null || true
-    find /tmp -maxdepth 1 -name 'lightfriend-full-backup-*.tar.gz.enc' -mmin +30 -delete 2>/dev/null || true
-    rm -rf /tmp/backup-restore 2>/dev/null || true
-    find /data/seed -name 'lightfriend-full-backup-*.tar.gz.enc' -mmin +30 -delete 2>/dev/null || true
+    local is_exporting
+    is_exporting=false
+    if export_running; then
+        is_exporting=true
+        echo "Export is running; preserving active backup artifacts"
+    fi
+
+    if [ "$is_exporting" = "true" ]; then
+        echo "Skipping backup artifact cleanup while export.sh is running"
+    else
+        rm -rf /tmp/backup-staging /tmp/verify.tar.gz /tmp/lightfriend-full-backup-*.tar.gz 2>/dev/null || true
+        find /tmp -maxdepth 1 -name 'lightfriend-full-backup-*.tar.gz.enc' -mmin +30 -delete 2>/dev/null || true
+        rm -rf /tmp/backup-restore 2>/dev/null || true
+        find /data/seed -name 'lightfriend-full-backup-*.tar.gz.enc' -mmin +30 -delete 2>/dev/null || true
+    fi
 
     if [ -d /var/lib/tuwunel-backup ]; then
-        if pgrep -f '/app/export.sh' >/dev/null 2>&1; then
+        if [ "$is_exporting" = "true" ]; then
             echo "Skipping /var/lib/tuwunel-backup cleanup while export.sh is running"
         else
             echo "Removing stale /var/lib/tuwunel-backup"

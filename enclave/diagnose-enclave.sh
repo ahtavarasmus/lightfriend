@@ -50,6 +50,10 @@ sanitize_backend_log() {
         -e 's/xoxb-[A-Za-z0-9-]{20,}/[API_KEY]/g'
 }
 
+sanitize_url_log() {
+    sed -E 's|https://[^[:space:]]+|[REDACTED_URL]|g'
+}
+
 echo "=== Enclave Diagnostics $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 echo ""
 
@@ -367,7 +371,23 @@ tail -80 /tmp/enclave-health-history.log 2>/dev/null || echo "  no persistent he
 echo ""
 
 echo "--- export-watcher-last-run.log (last 80 lines) ---"
-tail -80 /tmp/export-watcher-last-run.log 2>/dev/null || echo "  not found (no export has run yet)"
+tail -80 /tmp/export-watcher-last-run.log 2>/dev/null | sanitize_url_log || echo "  not found (no export has run yet)"
+echo ""
+
+echo "--- export-watcher failed run logs (newest 5, last 80 lines each) ---"
+FAILED_EXPORT_LOGS=$(find /tmp -maxdepth 1 -type f -name 'export-watcher-failed-*.log' -printf '%T@ %p\n' 2>/dev/null \
+    | sort -nr \
+    | head -5 \
+    | awk '{$1 = ""; sub(/^ /, ""); print}' || true)
+if [ -n "$FAILED_EXPORT_LOGS" ]; then
+    printf '%s\n' "$FAILED_EXPORT_LOGS" | while IFS= read -r failed_log; do
+        [ -f "$failed_log" ] || continue
+        echo "### $failed_log"
+        tail -80 "$failed_log" 2>/dev/null | sanitize_url_log || true
+    done
+else
+    echo "  none"
+fi
 echo ""
 
 echo "--- boot-trace.log restore section (grep DEBUG/restore/tuwunel/bridge) ---"
@@ -385,7 +405,7 @@ echo ""
 echo "--- telegram SOCKS5 proxy check ---"
 echo "socat 1080 listener: $(ss -tlnp 2>/dev/null | grep ':1080' || echo 'NOT LISTENING')"
 echo "socat 1080 processes: $(pgrep -la socat 2>/dev/null | grep 1080 || echo 'none')"
-echo "VSOCK 8500 connections: $(ss -tnp 2>/dev/null | grep '8500' | wc -l)"
+echo "VSOCK 8500 connections: $(ss -tnp 2>/dev/null | grep -c '8500' || true)"
 echo ""
 
 echo "--- env check ---"
@@ -404,7 +424,7 @@ echo ""
 echo "--- backend health ---"
 echo "  port ${PORT:-3100}: $(ss -tlnp 2>/dev/null | grep ":${PORT:-3100}" || echo 'NOT LISTENING')"
 # Use subshell with kill to ensure we never hang
-(curl -sf --max-time 1 --connect-timeout 1 http://localhost:${PORT:-3100}/api/health 2>&1 & CPID=$!; sleep 2; kill $CPID 2>/dev/null; wait $CPID 2>/dev/null) || echo "backend not responding (hung or crashed)"
+(curl -sf --max-time 1 --connect-timeout 1 "http://localhost:${PORT:-3100}/api/health" 2>&1 & CPID=$!; sleep 2; kill "$CPID" 2>/dev/null; wait "$CPID" 2>/dev/null) || echo "backend not responding (hung or crashed)"
 echo ""
 
 echo "--- tuwunel health ---"
@@ -417,12 +437,12 @@ BACKEND_PID=$(pgrep -f '/app/backend' 2>/dev/null | head -1)
 if [ -n "$BACKEND_PID" ]; then
     echo "  PID: $BACKEND_PID"
     echo "  RSS: $(ps -o rss= -p "$BACKEND_PID" 2>/dev/null | tr -d ' ')KB"
-    echo "  Threads: $(ls /proc/$BACKEND_PID/task 2>/dev/null | wc -l)"
-    echo "  FDs: $(ls /proc/$BACKEND_PID/fd 2>/dev/null | wc -l)"
-    echo "  Open files: $(ls -la /proc/$BACKEND_PID/fd 2>/dev/null | grep -c socket)"
+    echo "  Threads: $(find "/proc/$BACKEND_PID/task" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)"
+    echo "  FDs: $(find "/proc/$BACKEND_PID/fd" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)"
+    echo "  Open files: $(find "/proc/$BACKEND_PID/fd" -mindepth 1 -maxdepth 1 -type l -lname 'socket:*' 2>/dev/null | wc -l)"
     echo "  TCP connections from backend:"
     ss -tnp 2>/dev/null | grep "pid=$BACKEND_PID" | head -20
-    echo "  State: $(cat /proc/$BACKEND_PID/status 2>/dev/null | grep -E 'State|Threads|VmRSS|VmSize|FDSize')"
+    echo "  State: $(grep -E 'State|Threads|VmRSS|VmSize|FDSize' "/proc/$BACKEND_PID/status" 2>/dev/null)"
 else
     echo "  Backend process NOT FOUND!"
 fi
@@ -478,7 +498,7 @@ echo ""
 
 echo "--- bridge 7844 (cloudflared edge) ---"
 echo "  listening: $(ss -tlnp 2>/dev/null | grep ':7844' || echo 'NOT LISTENING!')"
-echo "  active connections: $(ss -tnp 2>/dev/null | grep ':7844' | wc -l)"
+echo "  active connections: $(ss -tnp 2>/dev/null | grep -c ':7844' || true)"
 echo "  connection states:"
 ss -tn 2>/dev/null | grep ':7844' || echo "    none"
 echo "  supervisor: $(supervisorctl status vsock-bridge-7844 2>&1)"
@@ -487,7 +507,7 @@ echo ""
 
 echo "--- bridge 853 (DoT) ---"
 echo "  listening: $(ss -tlnp 2>/dev/null | grep ':853' || echo 'NOT LISTENING!')"
-echo "  active connections: $(ss -tnp 2>/dev/null | grep ':853' | wc -l)"
+echo "  active connections: $(ss -tnp 2>/dev/null | grep -c ':853' || true)"
 echo "  supervisor: $(supervisorctl status vsock-bridge-dot 2>&1)"
 echo ""
 
@@ -497,7 +517,7 @@ if [ -n "$CF_PID" ]; then
     echo "  PID: $CF_PID"
     echo "  RSS: $(ps -o rss= -p "$CF_PID" 2>/dev/null | tr -d ' ')KB"
     echo "  Uptime: $(ps -o etime= -p "$CF_PID" 2>/dev/null | tr -d ' ')"
-    echo "  FDs: $(ls /proc/$CF_PID/fd 2>/dev/null | wc -l)"
+    echo "  FDs: $(find "/proc/$CF_PID/fd" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)"
     echo "  TCP connections from cloudflared:"
     ss -tnp 2>/dev/null | grep "pid=$CF_PID" || echo "    none"
 else
