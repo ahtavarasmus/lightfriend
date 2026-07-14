@@ -1670,7 +1670,7 @@ pub async fn start_climate_notify(
             Ok(Some(temp)) => {
                 let msg = format!(
                     "Your {} is ready to drive! Cabin temp is {:.1}°C.",
-                    &vehicle_name, temp
+                    vehicle_name, temp
                 );
                 let _ = crate::proactive::utils::send_notification(
                     &state_clone,
@@ -1679,7 +1679,7 @@ pub async fn start_climate_notify(
                     "tesla_ready_to_drive".to_string(),
                     Some(format!(
                         "Your {} is warmed up and ready to drive!",
-                        &vehicle_name
+                        vehicle_name
                     )),
                 )
                 .await;
@@ -1687,17 +1687,14 @@ pub async fn start_climate_notify(
             Ok(None) => {
                 let msg = format!(
                     "Your {} should be ready by now (climate running 20+ min).",
-                    &vehicle_name
+                    vehicle_name
                 );
                 let _ = crate::proactive::utils::send_notification(
                     &state_clone,
                     user_id,
                     &msg,
                     "tesla_ready_timeout".to_string(),
-                    Some(format!(
-                        "Your {} should be warmed up by now.",
-                        &vehicle_name
-                    )),
+                    Some(format!("Your {} should be warmed up by now.", vehicle_name)),
                 )
                 .await;
             }
@@ -1708,7 +1705,7 @@ pub async fn start_climate_notify(
                         user_id,
                         "Tesla climate was turned off before reaching target temperature.",
                         "tesla_climate_stopped".to_string(),
-                        Some(format!("Your {} climate was stopped early.", &vehicle_name)),
+                        Some(format!("Your {} climate was stopped early.", vehicle_name)),
                     )
                     .await;
                 }
@@ -1873,14 +1870,14 @@ pub async fn start_charging_notify(
                 } else {
                     let msg = format!(
                         "Your {} has finished charging! Battery is now at {}%.",
-                        &vehicle_name, battery_level
+                        vehicle_name, battery_level
                     );
                     let _ = crate::proactive::utils::send_notification(
                         &state_clone,
                         user_id,
                         &msg,
                         "tesla_charging_complete".to_string(),
-                        Some(format!("Your {} is done charging!", &vehicle_name)),
+                        Some(format!("Your {} is done charging!", vehicle_name)),
                     )
                     .await;
                 }

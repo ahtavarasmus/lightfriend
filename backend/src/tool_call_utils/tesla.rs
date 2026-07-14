@@ -489,7 +489,7 @@ fn spawn_climate_monitoring(
                 } else {
                     let msg = format!(
                         "Your {} is ready to drive! Cabin temp is {:.1}°C.",
-                        &vehicle_name, temp
+                        vehicle_name, temp
                     );
                     let _ = crate::proactive::utils::send_notification(
                         &state_clone,
@@ -498,7 +498,7 @@ fn spawn_climate_monitoring(
                         "tesla_ready_to_drive".to_string(),
                         Some(format!(
                             "Your {} is warmed up and ready to drive!",
-                            &vehicle_name
+                            vehicle_name
                         )),
                     )
                     .await;
@@ -523,16 +523,13 @@ fn spawn_climate_monitoring(
                         user_id
                     );
                 } else {
-                    let msg = format!("Your {} should be ready by now (climate running 20+ min). Please check if needed.", &vehicle_name);
+                    let msg = format!("Your {} should be ready by now (climate running 20+ min). Please check if needed.", vehicle_name);
                     let _ = crate::proactive::utils::send_notification(
                         &state_clone,
                         user_id,
                         &msg,
                         "tesla_ready_timeout".to_string(),
-                        Some(format!(
-                            "Your {} should be warmed up by now.",
-                            &vehicle_name
-                        )),
+                        Some(format!("Your {} should be warmed up by now.", vehicle_name)),
                     )
                     .await;
                 }
@@ -549,7 +546,7 @@ fn spawn_climate_monitoring(
                         user_id,
                         "Tesla climate was turned off before reaching target temperature.",
                         "tesla_climate_stopped".to_string(),
-                        Some(format!("Your {} climate was stopped early.", &vehicle_name)),
+                        Some(format!("Your {} climate was stopped early.", vehicle_name)),
                     )
                     .await;
                 }

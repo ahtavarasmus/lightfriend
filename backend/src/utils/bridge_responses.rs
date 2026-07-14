@@ -371,10 +371,9 @@ pub fn classify_whatsapp_start_chat(body: &str) -> Option<WhatsAppStartChatReply
     // the appropriate prefix first, then parse the shared tail.
     let (rest, sep) = if let Some(rest) = body.strip_prefix(SUCCESS_CREATED_PREFIX) {
         (rest, ": ")
-    } else if let Some(rest) = body.strip_prefix(SUCCESS_EXISTING_PREFIX) {
-        (rest, " at ")
     } else {
-        return None;
+        let rest = body.strip_prefix(SUCCESS_EXISTING_PREFIX)?;
+        (rest, " at ")
     };
 
     // Extract the matrix.to URL at the end and pull the room_id from it.
