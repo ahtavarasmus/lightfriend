@@ -105,6 +105,17 @@ else
     record_check "tuwunel_appservice_manager" "true"
 fi
 
+echo "Check 4c: Tuwunel purge API version..."
+TUWUNEL_EXPECTED_VERSION="${TUWUNEL_EXPECTED_VERSION:-1.8.1}"
+TUWUNEL_VERSION_JSON=$(curl -sf http://localhost:8008/_synapse/admin/v1/server_version 2>/dev/null || echo "")
+if echo "${TUWUNEL_VERSION_JSON}" | grep -q "${TUWUNEL_EXPECTED_VERSION}"; then
+    echo "  OK: Tuwunel ${TUWUNEL_EXPECTED_VERSION} purge API available"
+    record_check "tuwunel_purge_api_version" "true"
+else
+    echo "  FAIL: expected Tuwunel ${TUWUNEL_EXPECTED_VERSION}, got ${TUWUNEL_VERSION_JSON:-no response}"
+    record_check "tuwunel_purge_api_version" "false" "expected version ${TUWUNEL_EXPECTED_VERSION}"
+fi
+
 # ── 5. Bridge processes alive ──────────────────────────────────────────────
 
 echo "Check 5: bridge processes..."
@@ -218,6 +229,33 @@ if [ -f "${BRIDGE_HASHES_FILE}" ]; then
 else
     echo "  SKIP: no bridge registration hash file (not a full-restore verification)"
     record_check "bridge_registration_integrity" "true"
+fi
+
+# A healthy process and valid appservice token are not enough if the restored
+# WhatsApp login/device rows disappeared. Compare mautrix's durable session
+# records with Lightfriend's own connected-bridge records before swap-over.
+echo "Check 8b: WhatsApp session preservation..."
+CONNECTED_WHATSAPP=$(psql -h localhost -U lightfriend -d lightfriend_db -t -A \
+    -c "SELECT count(*) FROM bridges WHERE bridge_type = 'whatsapp' AND status = 'connected'" 2>/dev/null || echo "ERROR")
+WHATSAPP_LOGINS=$(psql -h localhost -U whatsapp_user -d whatsapp_db -t -A \
+    -c "SELECT count(*) FROM user_logins" 2>/dev/null || echo "ERROR")
+if [ "${WHATSAPP_LOGINS}" = "ERROR" ]; then
+    WHATSAPP_LOGINS=$(psql -h localhost -U whatsapp_user -d whatsapp_db -t -A \
+        -c "SELECT count(*) FROM user_login" 2>/dev/null || echo "ERROR")
+fi
+WHATSAPP_DEVICES=$(psql -h localhost -U whatsapp_user -d whatsapp_db -t -A \
+    -c "SELECT count(*) FROM whatsmeow_device" 2>/dev/null || echo "ERROR")
+echo "  [DEBUG] connected=${CONNECTED_WHATSAPP}, login_rows=${WHATSAPP_LOGINS}, device_rows=${WHATSAPP_DEVICES}"
+if [[ "${CONNECTED_WHATSAPP}" =~ ^[0-9]+$ ]] \
+    && [[ "${WHATSAPP_LOGINS}" =~ ^[0-9]+$ ]] \
+    && [[ "${WHATSAPP_DEVICES}" =~ ^[0-9]+$ ]] \
+    && [ "${WHATSAPP_LOGINS}" -ge "${CONNECTED_WHATSAPP}" ] \
+    && { [ "${CONNECTED_WHATSAPP}" -eq 0 ] || [ "${WHATSAPP_DEVICES}" -gt 0 ]; }; then
+    echo "  OK: restored WhatsApp login/device rows cover connected users"
+    record_check "whatsapp_session_preservation" "true"
+else
+    echo "  FAIL: restored WhatsApp session rows do not cover connected users"
+    record_check "whatsapp_session_preservation" "false" "connected=${CONNECTED_WHATSAPP}, logins=${WHATSAPP_LOGINS}, devices=${WHATSAPP_DEVICES}"
 fi
 
 # ── 9. Tuwunel data directory ────────────────────────────────────────

@@ -1688,6 +1688,14 @@ async fn main() {
         jobs::scheduler::start_scheduler(state_for_scheduler).await;
     });
 
+    let state_for_tuwunel_purge = state.clone();
+    tokio::spawn(async move {
+        backend::utils::tuwunel_event_cleanup::start_tuwunel_event_purge_worker(
+            state_for_tuwunel_purge,
+        )
+        .await;
+    });
+
     // Spawn one IDLE task per active IMAP connection. The polling cron
     // above remains as a safety net for servers that don't support IDLE
     // and for any task-down windows.

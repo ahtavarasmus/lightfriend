@@ -2254,11 +2254,30 @@ pub async fn handle_bridge_message(
                 .as_secs() as i32,
             matrix_event_id: Some(event.event_id.to_string()),
         };
+        let cleanup_matrix_event_id = event.event_id.to_string();
+        let cleanup_room_id = current_room_id.clone();
+        crate::utils::tuwunel_event_cleanup::record_bridge_event_ingesting(
+            &state,
+            user_id,
+            &service,
+            &cleanup_room_id,
+            &cleanup_matrix_event_id,
+            false,
+        );
         let state_clone = state.clone();
         let stored_service = service.clone();
         tokio::spawn(async move {
             match state_clone.ontology_repository.insert_message(&msg) {
                 Ok((created, is_new)) => {
+                    crate::utils::tuwunel_event_cleanup::enqueue_processed_bridge_event(
+                        &state_clone,
+                        user_id,
+                        &stored_service,
+                        &cleanup_room_id,
+                        &cleanup_matrix_event_id,
+                        created.id,
+                        false,
+                    );
                     if !is_new {
                         bump_skipped_duplicate(&stored_service);
                         return;
@@ -2315,7 +2334,14 @@ pub async fn handle_bridge_message(
                     )
                     .await;
                 }
-                Err(e) => tracing::warn!("Failed to store user message: {}", e),
+                Err(e) => {
+                    crate::utils::tuwunel_event_cleanup::record_bridge_event_ingest_failed(
+                        &state_clone,
+                        &cleanup_matrix_event_id,
+                        &e.to_string(),
+                    );
+                    tracing::warn!("Failed to store user message: {}", e);
+                }
             }
         });
         return;
@@ -2582,14 +2608,17 @@ pub async fn handle_bridge_message(
     let state_clone = state.clone();
     let stored_service = service.clone();
     let cleanup_room_id = current_room_id.clone();
+    crate::utils::tuwunel_event_cleanup::record_bridge_event_ingesting(
+        &state,
+        user_id,
+        &service,
+        &cleanup_room_id,
+        &cleanup_matrix_event_id,
+        cleanup_tuwunel_media,
+    );
     tokio::spawn(async move {
         match state_clone.ontology_repository.insert_message(&msg) {
             Ok((created, is_new)) => {
-                if !is_new {
-                    bump_skipped_duplicate(&stored_service);
-                    return;
-                }
-                bump_stored(&stored_service);
                 crate::utils::tuwunel_event_cleanup::enqueue_processed_bridge_event(
                     &state_clone,
                     user_id,
@@ -2599,6 +2628,11 @@ pub async fn handle_bridge_message(
                     created.id,
                     cleanup_tuwunel_media,
                 );
+                if !is_new {
+                    bump_skipped_duplicate(&stored_service);
+                    return;
+                }
+                bump_stored(&stored_service);
                 let mut snapshot = serde_json::json!({
                     "message_id": created.id,
                     "platform": msg.platform,
@@ -2637,6 +2671,11 @@ pub async fn handle_bridge_message(
                 }
             }
             Err(e) => {
+                crate::utils::tuwunel_event_cleanup::record_bridge_event_ingest_failed(
+                    &state_clone,
+                    &cleanup_matrix_event_id,
+                    &e.to_string(),
+                );
                 tracing::warn!("Failed to store bridge message: {}", e);
             }
         }

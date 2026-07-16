@@ -95,8 +95,11 @@ grep -HnE "panicked at|thread '[^']*' panicked|stack backtrace:|fatal runtime er
     2>/dev/null | tail -80 | sanitize_backend_log || echo "  none found"
 echo ""
 
-echo "--- Tuwunel cleanup instrumentation across backend logs ---"
-TUWUNEL_CLEANUP_LOG_LINES=$(grep -hEi "Tuwunel event cleanup|Tuwunel cleanup admin command|cleanup_command_kind|media_delete_by_event|redact_event|cleanup instrumentation|cleanup exhausted|cleanup failed" \
+echo "--- Tuwunel purge instrumentation across backend logs ---"
+echo "Tuwunel server version:"
+curl -sf http://localhost:8008/_synapse/admin/v1/server_version 2>/dev/null || echo "  unavailable"
+echo ""
+TUWUNEL_CLEANUP_LOG_LINES=$(grep -hEi "Tuwunel event purge|Tuwunel room-history purge|durable Tuwunel purge|purge API|purge candidate" \
     /var/log/supervisor/lightfriend.log /var/log/supervisor/lightfriend.log.1 /var/log/supervisor/lightfriend.log.2 \
     /var/log/supervisor/lightfriend-err.log /var/log/supervisor/lightfriend-err.log.1 /var/log/supervisor/lightfriend-err.log.2 \
     2>/dev/null | tail -120 || true)
@@ -145,7 +148,7 @@ if command -v psql >/dev/null 2>&1 && [ -n "${PG_DATABASE_URL:-}" ]; then
                count(e.id) AS rows,
                COALESCE(sum(e.commands_expected), 0) AS commands_expected,
                COALESCE(sum(e.commands_accepted), 0) AS commands_accepted,
-               count(e.id) FILTER (WHERE e.status IN ('\''exhausted'\'', '\''partial_commands_submitted'\'', '\''retrying'\'')) AS attention_rows,
+               count(e.id) FILTER (WHERE e.status IN ('\''ingesting'\'', '\''ingest_failed'\'', '\''purge_exhausted'\'', '\''purge_retrying'\'')) AS attention_rows,
                to_char(to_timestamp(max(e.updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS last_updated
           FROM windows
           CROSS JOIN now_epoch
@@ -168,7 +171,7 @@ if command -v psql >/dev/null 2>&1 && [ -n "${PG_DATABASE_URL:-}" ]; then
                to_char(to_timestamp(max(updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS newest_updated,
                left(coalesce(max(last_error), '\'''\''), 240) AS sample_error
           FROM tuwunel_cleanup_events
-         WHERE status IN ('\''enqueued'\'', '\''attempting'\'', '\''retrying'\'', '\''exhausted'\'', '\''partial_commands_submitted'\'')
+         WHERE status IN ('\''ingesting'\'', '\''ingest_failed'\'', '\''pending_purge'\'', '\''purge_attempting'\'', '\''purge_submitted'\'', '\''purge_retrying'\'', '\''purge_exhausted'\'')
             OR commands_accepted < commands_expected
          GROUP BY status
          ORDER BY oldest_updated NULLS LAST, status

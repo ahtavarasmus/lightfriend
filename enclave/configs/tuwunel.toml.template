@@ -4,6 +4,12 @@ database_path = "/var/lib/tuwunel"
 database_backup_path = "/var/lib/tuwunel-backup"
 database_backups_to_keep = 2
 
+# Redaction must never retain a second copy of message content. Room-history
+# purges remove originals directly, but these settings also make any manual or
+# bridge redactions release their retained payload immediately.
+save_unredacted_events = false
+redaction_retention_seconds = 0
+
 # SIGUSR2 triggers these admin commands (used by export.sh for backups)
 admin_signal_execute = ["server backup-database"]
 
