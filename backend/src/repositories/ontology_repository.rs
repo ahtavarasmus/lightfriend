@@ -1127,9 +1127,10 @@ impl OntologyRepository {
         .execute(&mut conn)
     }
 
-    /// Look up an existing email-sourced message by its deterministic
-    /// `email_<uid>` room_id. Used by the IDLE path (and cron) to avoid
-    /// inserting the same email twice when both paths run concurrently.
+    /// Look up an existing email-sourced message by its deterministic room ID.
+    /// New multi-account IDs include both connection ID and UID; legacy IDs
+    /// include only UID. Used by the IDLE path (and cron) to avoid inserting
+    /// the same email twice when both paths run concurrently.
     ///
     /// Unlike the time-windowed dedup inside `insert_message`, this has
     /// no time bound — if the row exists at all for this `(user_id,
@@ -1975,6 +1976,24 @@ impl OntologyRepository {
             .filter(ont_messages::user_id.eq(user_id))
             .filter(ont_messages::room_id.eq(room_id))
             .filter(ont_messages::created_at.eq(message_created_at))
+            .filter(ont_messages::seen_at.is_not_null())
+            .filter(ont_messages::sender_name.ne("You"))
+            .count()
+            .get_result::<i64>(&mut conn)
+            .unwrap_or(0)
+            > 0
+    }
+
+    /// Check whether a specific message has already been seen.
+    ///
+    /// Prefer this over matching by `created_at` when the message ID is
+    /// available: notification jobs are spawned after insertion and may cross
+    /// a one-second boundary before they capture a timestamp.
+    pub fn is_message_seen_by_id(&self, user_id: i32, message_id: i64) -> bool {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::id.eq(message_id))
             .filter(ont_messages::seen_at.is_not_null())
             .filter(ont_messages::sender_name.ne("You"))
             .count()

@@ -9,8 +9,8 @@ use crate::models::ontology_models::OntMessage;
 use crate::pg_models::PgMessageHistory;
 use crate::proactive::signal_extraction::MessageSignals;
 use crate::proactive::utils::{
-    compact_email_notification, notification_meta_from_snapshot, send_notification,
-    send_notification_with_context,
+    compact_email_notification, notification_meta_from_snapshot,
+    resolve_system_important_content_type, send_notification, send_notification_with_context,
 };
 use crate::repositories::ontology_repository::RecentHighSenderMessagesQuery;
 use crate::repositories::user_core::UserCoreOps;
@@ -110,6 +110,16 @@ pub async fn run_urgency_classification(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i32;
+
+    let message_created_at = entity_snapshot
+        .get("created_at")
+        .and_then(|v| v.as_i64())
+        .map(|v| v as i32)
+        .unwrap_or(now);
+    let imap_connection_id = entity_snapshot
+        .get("imap_connection_id")
+        .and_then(|v| v.as_i64())
+        .map(|v| v as i32);
 
     // Per-room cooldown: skip if we already notified for this room recently
     let cooldown_key = (user_id, room_id.to_string());
@@ -503,6 +513,27 @@ pub async fn run_urgency_classification(
             }
 
             if should_notify {
+                // Classification can take long enough for the user to read the
+                // message after the pre-classification check. Re-check at the
+                // last responsible moment before starting an SMS/call.
+                if crate::proactive::rules::check_message_seen(
+                    state,
+                    user_id,
+                    platform,
+                    room_id,
+                    message_id,
+                    message_created_at,
+                    imap_connection_id,
+                )
+                .await
+                {
+                    info!(
+                        "Urgency notification skipped for user {}: message was already seen",
+                        user_id
+                    );
+                    return Ok(());
+                }
+
                 let cleaned = strip_urls(summary);
                 let notification_message =
                     compact_email_notification(cleaned.trim(), entity_snapshot);
@@ -513,12 +544,14 @@ pub async fn run_urgency_classification(
                         .system_notify_cooldowns
                         .insert((user_id, room_id.to_string()), now);
 
-                    // Route: known contact + not email = call + SMS, otherwise just SMS
-                    let content_type = if person_id.is_some() && platform != "email" {
-                        "system_important_call".to_string()
-                    } else {
-                        "system_important".to_string()
-                    };
+                    // Resolve once to an explicit route. A call notification
+                    // always includes the companion SMS in the sender.
+                    let content_type = resolve_system_important_content_type(
+                        settings.notification_type.as_deref(),
+                        person_id.is_some(),
+                        platform,
+                    )
+                    .to_string();
 
                     let _ = send_notification_with_context(
                         state,

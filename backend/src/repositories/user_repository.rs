@@ -1844,14 +1844,32 @@ impl UserRepository {
     }
 
     // Delete a single processed email record
-    pub fn delete_processed_email(&self, user_id: i32, email_uid: &str) -> Result<(), DieselError> {
+    pub fn delete_processed_email(
+        &self,
+        user_id: i32,
+        email_uid: &str,
+        imap_connection_id: Option<i32>,
+    ) -> Result<(), DieselError> {
         use crate::pg_schema::processed_emails;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
-        diesel::delete(processed_emails::table)
-            .filter(processed_emails::user_id.eq(user_id))
-            .filter(processed_emails::email_uid.eq(email_uid))
+        if let Some(connection_id) = imap_connection_id {
+            diesel::delete(
+                processed_emails::table
+                    .filter(processed_emails::user_id.eq(user_id))
+                    .filter(processed_emails::email_uid.eq(email_uid))
+                    .filter(processed_emails::imap_connection_id.eq(connection_id)),
+            )
             .execute(&mut conn)?;
+        } else {
+            diesel::delete(
+                processed_emails::table
+                    .filter(processed_emails::user_id.eq(user_id))
+                    .filter(processed_emails::email_uid.eq(email_uid))
+                    .filter(processed_emails::imap_connection_id.is_null()),
+            )
+            .execute(&mut conn)?;
+        }
 
         Ok(())
     }

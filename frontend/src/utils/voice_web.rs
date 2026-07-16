@@ -19,4 +19,7 @@ extern "C" {
 
     #[wasm_bindgen(js_name = getVoiceCallStatus)]
     pub fn get_voice_call_status() -> String;
+
+    #[wasm_bindgen(js_name = getVoiceLastError)]
+    pub fn get_voice_last_error() -> String;
 }

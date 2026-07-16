@@ -1,0 +1,5 @@
+-- Irreversible identity backfill.
+--
+-- Reverting account-scoped room IDs to UID-only IDs would recreate the
+-- multi-account collision this migration removes. Restore from a backup if
+-- the data migration itself must be undone.

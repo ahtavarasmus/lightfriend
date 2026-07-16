@@ -5,8 +5,12 @@
 //! pure helpers and the DB-side invariants that a bug would silently
 //! break without the stress script noticing.
 
-use backend::handlers::imap_handlers::{insert_email_into_ontology, ImapEmailPreview};
-use backend::models::ontology_models::NewOntMessage;
+use backend::handlers::imap_handlers::{
+    active_imap_connection_belongs_to_user, email_identity_matches_account, email_preview_content,
+    email_room_id, fetch_single_email_imap_for_connection, insert_email_into_ontology,
+    legacy_email_matches_preview, parse_email_room_id, ImapEmailPreview, ImapError,
+};
+use backend::models::ontology_models::{NewOntMessage, OntMessage};
 use backend::test_utils::{
     create_test_state, create_test_user, setup_test_encryption, TestUserParams,
 };
@@ -26,6 +30,74 @@ fn make_preview(uid: &str, from_email: &str, subject: &str) -> ImapEmailPreview 
         is_read: false,
         imap_connection_id: None,
     }
+}
+
+#[test]
+fn account_scoped_email_room_ids_round_trip() {
+    let room_id = email_room_id("42", Some(17));
+    assert_eq!(room_id, "email_17_42");
+
+    let parsed = parse_email_room_id(&room_id).expect("scoped room id should parse");
+    assert_eq!(parsed.imap_connection_id, Some(17));
+    assert_eq!(parsed.uid, "42");
+    assert!(email_identity_matches_account(&parsed, 17, 2));
+    assert!(!email_identity_matches_account(&parsed, 18, 2));
+}
+
+#[test]
+fn legacy_email_room_id_is_never_shared_across_multiple_accounts() {
+    let parsed = parse_email_room_id("email_42").expect("legacy room id should parse");
+    assert!(!email_identity_matches_account(&parsed, 17, 1));
+    assert!(!email_identity_matches_account(&parsed, 17, 2));
+    assert!(!email_identity_matches_account(&parsed, 18, 2));
+}
+
+#[test]
+fn imap_connection_ownership_is_tenant_scoped_and_fail_closed() {
+    assert!(active_imap_connection_belongs_to_user(10, 10, "active"));
+    assert!(!active_imap_connection_belongs_to_user(10, 11, "active"));
+    assert!(!active_imap_connection_belongs_to_user(10, 10, "inactive"));
+    assert!(!active_imap_connection_belongs_to_user(
+        10,
+        10,
+        "auth_failed"
+    ));
+}
+
+#[test]
+fn legacy_email_compatibility_requires_matching_sender_and_content() {
+    let preview = make_preview("42", "alice@example.com", "legacy subject");
+    let mut legacy = OntMessage {
+        id: 1,
+        user_id: 10,
+        room_id: "email_42".to_string(),
+        platform: "email".to_string(),
+        sender_name: "Alice".to_string(),
+        sender_key: Some("alice@example.com".to_string()),
+        content: email_preview_content(&preview),
+        person_id: None,
+        created_at: Utc::now().timestamp() as i32,
+        urgency: None,
+        category: None,
+        summary: None,
+        digest_delivered_at: None,
+        classification_prompt: None,
+        classification_result: None,
+        resolved_at: None,
+        seen_at: None,
+        matrix_event_id: None,
+        commitment_prompt: None,
+        commitment_result: None,
+    };
+
+    assert!(legacy_email_matches_preview(&legacy, &preview));
+
+    legacy.sender_key = Some("mallory@example.com".to_string());
+    assert!(!legacy_email_matches_preview(&legacy, &preview));
+
+    legacy.sender_key = Some("alice@example.com".to_string());
+    legacy.content.push_str(" changed");
+    assert!(!legacy_email_matches_preview(&legacy, &preview));
 }
 
 // =============================================================================
@@ -59,6 +131,158 @@ async fn test_insert_email_creates_ont_message() {
     assert_eq!(msg.platform, "email");
     assert_eq!(msg.room_id, "email_12345");
     assert!(msg.content.contains("hello"));
+}
+
+#[tokio::test]
+#[serial]
+async fn test_insert_already_read_email_records_seen_state() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    let mut preview = make_preview("12346", "alice@example.com", "already read");
+    preview.is_read = true;
+
+    let id = insert_email_into_ontology(&state, user.id, &preview, &[], None)
+        .await
+        .expect("insertion should succeed");
+
+    assert!(
+        state.ontology_repository.is_message_seen_by_id(user.id, id),
+        "an email already marked Seen by IMAP must be ineligible for a later notification"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn test_duplicate_ingest_promotes_existing_email_to_seen() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    let preview = make_preview("12347", "alice@example.com", "read after first fetch");
+    let id = insert_email_into_ontology(&state, user.id, &preview, &[], None)
+        .await
+        .unwrap();
+    assert!(!state.ontology_repository.is_message_seen_by_id(user.id, id));
+
+    let mut read_preview = preview.clone();
+    read_preview.is_read = true;
+    let duplicate_id = insert_email_into_ontology(&state, user.id, &read_preview, &[], None)
+        .await
+        .unwrap();
+
+    assert_eq!(duplicate_id, id);
+    assert!(state.ontology_repository.is_message_seen_by_id(user.id, id));
+}
+
+#[tokio::test]
+#[serial]
+async fn test_same_uid_in_two_accounts_creates_two_isolated_messages() {
+    setup_test_encryption();
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let account_a = state
+        .user_repository
+        .set_imap_credentials(user.id, "account-a@example.com", "pw-a", None, None)
+        .unwrap();
+    let account_b = state
+        .user_repository
+        .set_imap_credentials(user.id, "account-b@example.com", "pw-b", None, None)
+        .unwrap();
+
+    let mut preview_a = make_preview("42", "alice@example.com", "from account A");
+    preview_a.imap_connection_id = Some(account_a);
+    let mut preview_b = make_preview("42", "bob@example.com", "from account B");
+    preview_b.imap_connection_id = Some(account_b);
+
+    let id_a = insert_email_into_ontology(&state, user.id, &preview_a, &[], None)
+        .await
+        .unwrap();
+    let id_b = insert_email_into_ontology(&state, user.id, &preview_b, &[], None)
+        .await
+        .unwrap();
+
+    assert_ne!(id_a, id_b);
+    assert!(state
+        .ontology_repository
+        .get_message_by_email_room_id(user.id, &email_room_id("42", Some(account_a)))
+        .unwrap()
+        .is_some());
+    assert!(state
+        .ontology_repository
+        .get_message_by_email_room_id(user.id, &email_room_id("42", Some(account_b)))
+        .unwrap()
+        .is_some());
+}
+
+#[tokio::test]
+#[serial]
+async fn test_email_insert_rejects_another_users_connection_id() {
+    setup_test_encryption();
+    let state = create_test_state();
+    let user_a = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let user_b = create_test_user(&state, &TestUserParams::finland_user(10.0, 5.0));
+    let account_a = state
+        .user_repository
+        .set_imap_credentials(user_a.id, "owner-a@example.com", "pw-a", None, None)
+        .unwrap();
+
+    let mut preview = make_preview("99", "alice@example.com", "must not cross users");
+    preview.imap_connection_id = Some(account_a);
+    let error = insert_email_into_ontology(&state, user_b.id, &preview, &[], None)
+        .await
+        .expect_err("another user's connection must be rejected");
+
+    assert!(error.contains("does not belong"));
+    assert!(state
+        .ontology_repository
+        .get_message_by_email_room_id(user_b.id, &email_room_id("99", Some(account_a)))
+        .unwrap()
+        .is_none());
+
+    let fetch_error = fetch_single_email_imap_for_connection(&state, user_b.id, account_a, "99")
+        .await
+        .expect_err("another user's mailbox must be rejected before IMAP access");
+    assert!(matches!(fetch_error, ImapError::CredentialsError(_)));
+}
+
+#[tokio::test]
+#[serial]
+async fn test_scoped_ingest_reuses_matching_legacy_email() {
+    setup_test_encryption();
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let account = state
+        .user_repository
+        .set_imap_credentials(user.id, "account@example.com", "pw", None, None)
+        .unwrap();
+    let mut preview = make_preview("501", "alice@example.com", "legacy subject");
+    preview.imap_connection_id = Some(account);
+
+    let (legacy, _) = state
+        .ontology_repository
+        .insert_message(&NewOntMessage {
+            user_id: user.id,
+            room_id: "email_501".to_string(),
+            platform: "email".to_string(),
+            sender_name: "Alice".to_string(),
+            sender_key: Some("alice@example.com".to_string()),
+            content: email_preview_content(&preview),
+            person_id: None,
+            created_at: Utc::now().timestamp() as i32,
+            matrix_event_id: None,
+        })
+        .unwrap();
+
+    let returned = insert_email_into_ontology(&state, user.id, &preview, &[], Some(account))
+        .await
+        .unwrap();
+
+    assert_eq!(returned, legacy.id);
+    assert!(state
+        .ontology_repository
+        .get_message_by_email_room_id(user.id, &email_room_id("501", Some(account)))
+        .unwrap()
+        .is_none());
 }
 
 // =============================================================================
@@ -268,6 +492,45 @@ fn test_get_max_processed_uid_returns_highest_numeric() {
         .get_max_processed_uid(user.id, conn_id)
         .unwrap();
     assert_eq!(max, Some(250), "must return the numerically highest UID");
+}
+
+#[test]
+#[serial]
+fn test_processed_email_cleanup_is_scoped_to_one_account() {
+    setup_test_encryption();
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let account_a = state
+        .user_repository
+        .set_imap_credentials(user.id, "cleanup-a@example.com", "pw-a", None, None)
+        .unwrap();
+    let account_b = state
+        .user_repository
+        .set_imap_credentials(user.id, "cleanup-b@example.com", "pw-b", None, None)
+        .unwrap();
+
+    state
+        .user_repository
+        .mark_email_as_processed(user.id, "77", Some(account_a))
+        .unwrap();
+    state
+        .user_repository
+        .mark_email_as_processed(user.id, "77", Some(account_b))
+        .unwrap();
+
+    state
+        .user_repository
+        .delete_processed_email(user.id, "77", Some(account_a))
+        .unwrap();
+
+    assert!(!state
+        .user_repository
+        .is_email_processed(user.id, "77", Some(account_a))
+        .unwrap());
+    assert!(state
+        .user_repository
+        .is_email_processed(user.id, "77", Some(account_b))
+        .unwrap());
 }
 
 #[test]

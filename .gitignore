@@ -10,6 +10,7 @@ backend/uploads/
 backend/target/
 backend/stripe_webhook_logic/target/
 tools/attestation-verifier/target/
+notify-server/target/
 .env
 docs/OPERATOR_RUNBOOK.md
 backend/src/api/payloads.md
@@ -42,6 +43,7 @@ backend/matrix_store/
 # Claude safety guard override flags (one-time use)
 .claude/.allow-*
 .claude/worktrees/
+.claude/scheduled_tasks.lock
 
 # Generated contract build artifacts
 cache/

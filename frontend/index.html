@@ -131,6 +131,7 @@
             window._voiceScriptNode = null;
             window._voiceCallStartTime = null;
             window._voiceCallStatus = 'disconnected';
+            window._voiceLastError = null;
             window._voicePlaybackQueue = [];
             window._voiceCurrentSampleRate = 24000;
 
@@ -144,6 +145,7 @@
                     console.log('Mic granted');
 
                     window._voiceCallStatus = 'connecting';
+                    window._voiceLastError = null;
                     window._voiceCallStartTime = Date.now();
 
                     // Set up AudioContext at 16kHz for mic capture
@@ -183,6 +185,11 @@
                                 }
                             } else if (msg.type === 'error') {
                                 console.error('Voice pipeline error:', msg.message);
+                                window._voiceLastError = msg.message || 'Voice call failed.';
+                                window._voiceCallStatus = 'error';
+                                if (window._voiceWs) {
+                                    try { window._voiceWs.close(); } catch(e) {}
+                                }
                             } else if (msg.type === 'vad') {
                                 console.log('VAD:', msg.speaking ? 'speaking' : 'silent', msg.processing ? '(processing)' : '');
                             }
@@ -192,9 +199,16 @@
                         }
                     };
 
-                    window._voiceWs.onclose = () => {
-                        console.log('Voice WS closed');
-                        window._voiceCallStatus = 'disconnected';
+                    window._voiceWs.onclose = (evt) => {
+                        console.log('Voice WS closed', evt.code, evt.reason);
+                        if (window._voiceCallStatus !== 'error') {
+                            if (evt.reason) {
+                                window._voiceLastError = evt.reason;
+                                window._voiceCallStatus = 'error';
+                            } else {
+                                window._voiceCallStatus = 'disconnected';
+                            }
+                        }
                         window._voiceCleanup();
                     };
 
@@ -220,6 +234,7 @@
                 } catch (error) {
                     console.error('Failed to start voice call:', error);
                     window._voiceCallStatus = 'error';
+                    window._voiceLastError = error && error.message ? error.message : 'Failed to start voice call.';
                     window._voiceCallStartTime = null;
                     window._voiceCleanup();
                     return false;
@@ -284,6 +299,7 @@
                 const duration = window.getVoiceCallDuration();
                 window._voiceCallStartTime = null;
                 window._voiceCallStatus = 'disconnected';
+                window._voiceLastError = null;
                 return duration;
             };
 
@@ -298,6 +314,10 @@
 
             window.getVoiceCallStatus = function() {
                 return window._voiceCallStatus;
+            };
+
+            window.getVoiceLastError = function() {
+                return window._voiceLastError || '';
             };
 
             window.setVoiceStatusCallback = function(callback) {

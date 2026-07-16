@@ -3,7 +3,7 @@ use crate::{handlers::auth_middleware::AuthUser, AppState};
 use async_imap::Session;
 use async_native_tls::TlsStream;
 use axum::{
-    extract::{Json, State},
+    extract::{Json, Query, State},
     http::StatusCode,
     response::Json as AxumJson,
 };
@@ -136,6 +136,66 @@ pub struct ImapEmailPreview {
     #[serde(skip_serializing)]
     pub imap_connection_id: Option<i32>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmailRoomIdentity {
+    pub imap_connection_id: Option<i32>,
+    pub uid: String,
+}
+
+/// Build a deterministic ontology room ID for an email. IMAP UIDs are only
+/// unique inside one mailbox, so account-scoped IDs must include the
+/// connection primary key. The legacy form remains for old/single-account
+/// rows that predate multi-email support.
+pub fn email_room_id(uid: &str, imap_connection_id: Option<i32>) -> String {
+    match imap_connection_id {
+        Some(connection_id) => format!("email_{}_{}", connection_id, uid),
+        None => format!("email_{}", uid),
+    }
+}
+
+/// Parse both account-scoped (`email_<connection>_<uid>`) and legacy
+/// (`email_<uid>`) room IDs.
+pub fn parse_email_room_id(room_id: &str) -> Option<EmailRoomIdentity> {
+    let rest = room_id.strip_prefix("email_")?;
+    if let Some((connection, uid)) = rest.split_once('_') {
+        if let Ok(connection_id) = connection.parse::<i32>() {
+            if connection_id > 0 && !uid.is_empty() && uid.chars().all(|c| c.is_ascii_digit()) {
+                return Some(EmailRoomIdentity {
+                    imap_connection_id: Some(connection_id),
+                    uid: uid.to_string(),
+                });
+            }
+        }
+    }
+    if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()) {
+        Some(EmailRoomIdentity {
+            imap_connection_id: None,
+            uid: rest.to_string(),
+        })
+    } else {
+        None
+    }
+}
+
+/// Only account-scoped rows are eligible for mailbox operations. A legacy row
+/// cannot be safely associated with whatever account happens to be connected
+/// today, even when there is currently only one.
+pub fn email_identity_matches_account(
+    identity: &EmailRoomIdentity,
+    account_id: i32,
+    _connected_account_count: usize,
+) -> bool {
+    identity.imap_connection_id == Some(account_id)
+}
+
+pub fn active_imap_connection_belongs_to_user(
+    owner_user_id: i32,
+    authenticated_user_id: i32,
+    status: &str,
+) -> bool {
+    owner_user_id == authenticated_user_id && status == "active"
+}
 #[derive(Debug, Serialize)]
 pub struct ImapEmail {
     pub id: String,
@@ -160,6 +220,11 @@ pub enum ImapError {
 #[derive(Debug, Deserialize)]
 pub struct FetchEmailsQuery {
     pub limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct FetchSingleEmailQuery {
+    pub imap_connection_id: Option<i32>,
 }
 
 /// Pure parser: turn a `async_imap::types::Fetch` message into an
@@ -366,11 +431,49 @@ pub fn match_email_sender_to_person(
     None
 }
 
+/// Build the exact content representation stored for an IMAP preview.
+pub fn email_preview_content(preview: &ImapEmailPreview) -> String {
+    format!(
+        "{}\n{}",
+        preview.subject.as_deref().unwrap_or(""),
+        preview
+            .body
+            .as_deref()
+            .unwrap_or("")
+            .chars()
+            .take(500)
+            .collect::<String>()
+    )
+}
+
+/// Compatibility check for cron-era `email_<uid>` rows. Legacy UIDs do not
+/// identify a mailbox, so they must never be assigned to a connection based on
+/// UID alone. Reuse is allowed only when the stored sender and content match
+/// the freshly fetched message.
+pub fn legacy_email_matches_preview(
+    message: &crate::models::ontology_models::OntMessage,
+    preview: &ImapEmailPreview,
+) -> bool {
+    if message.platform != "email" || message.content != email_preview_content(preview) {
+        return false;
+    }
+
+    let preview_sender_key = preview
+        .from_email
+        .as_deref()
+        .and_then(normalize_email_sender_key);
+    match (message.sender_key.as_deref(), preview_sender_key.as_deref()) {
+        (Some(stored), Some(fetched)) => stored.eq_ignore_ascii_case(fetched),
+        _ => message.sender_name == preview.from.as_deref().unwrap_or("Unknown"),
+    }
+}
+
 /// Insert an email preview into `ont_messages` and emit an ontology
 /// change event so rules can react. Idempotent: if a message with the
-/// same `email_<uid>` room_id already exists for this user (e.g. the
+/// same account-scoped email room ID already exists for this user (e.g. the
 /// cron fallback inserted it first), we skip the insert and return the
-/// existing id.
+/// existing id. New IDs use `email_<connection_id>_<uid>`; legacy
+/// single-account rows may still use `email_<uid>`.
 ///
 /// Returns `Ok(Some(id))` on successful insert or discovered duplicate,
 /// `Err` on DB failure. The caller should only mark the email as
@@ -383,7 +486,49 @@ pub async fn insert_email_into_ontology(
     imap_connection_id: Option<i32>,
 ) -> Result<i64, String> {
     let email_uid = preview.id.clone();
-    let room_id = format!("email_{}", email_uid);
+    let mut imap_connection_id = imap_connection_id.or(preview.imap_connection_id);
+    if imap_connection_id.is_none() {
+        let accounts = state
+            .user_repository
+            .get_all_imap_credentials(user_id)
+            .map_err(|e| format!("Failed to resolve email account identity: {}", e))?;
+        match accounts.len() {
+            0 => {}
+            1 => imap_connection_id = Some(accounts[0].id),
+            _ => {
+                return Err(
+                    "Multiple email accounts are connected; imap_connection_id is required"
+                        .to_string(),
+                );
+            }
+        }
+    }
+    let email_account = if let Some(conn_id) = imap_connection_id {
+        match state.user_repository.get_imap_connection_by_id(conn_id) {
+            Ok(Some((owner_id, account, status)))
+                if active_imap_connection_belongs_to_user(owner_id, user_id, &status) =>
+            {
+                Some(account.email)
+            }
+            Ok(Some(_)) => {
+                return Err(format!(
+                    "IMAP connection {} does not belong to user {} or is inactive",
+                    conn_id, user_id
+                ));
+            }
+            Ok(None) => return Err(format!("IMAP connection {} not found", conn_id)),
+            Err(e) => return Err(format!("Failed to verify IMAP connection ownership: {}", e)),
+        }
+    } else {
+        None
+    };
+    let room_id = email_room_id(&email_uid, imap_connection_id);
+    let sender_name = preview.from.as_deref().unwrap_or("Unknown").to_string();
+    let sender_key = preview
+        .from_email
+        .as_deref()
+        .and_then(normalize_email_sender_key);
+    let content = email_preview_content(preview);
 
     // Cron-vs-IDLE dedup: if the row already exists, we're done.
     match state
@@ -391,6 +536,15 @@ pub async fn insert_email_into_ontology(
         .get_message_by_email_room_id(user_id, &room_id)
     {
         Ok(Some(existing)) => {
+            if preview.is_read {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i32;
+                let _ = state
+                    .ontology_repository
+                    .mark_message_seen(existing.id, now);
+            }
             tracing::debug!(
                 "Email {} already in ontology for user {} (id={}), skipping insert",
                 room_id,
@@ -401,6 +555,39 @@ pub async fn insert_email_into_ontology(
         }
         Ok(None) => {}
         Err(e) => return Err(format!("Failed to check existing email message: {}", e)),
+    }
+
+    // Deployment compatibility: cron-era rows used only `email_<uid>`. Do
+    // not emit the same email again merely because the new key includes its
+    // account. Since UID alone is ambiguous across mailboxes, require the
+    // stored sender and content to match and leave the legacy row unassigned.
+    if imap_connection_id.is_some() {
+        let legacy_room_id = email_room_id(&email_uid, None);
+        match state
+            .ontology_repository
+            .get_message_by_email_room_id(user_id, &legacy_room_id)
+        {
+            Ok(Some(existing)) if legacy_email_matches_preview(&existing, preview) => {
+                if preview.is_read {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i32;
+                    let _ = state
+                        .ontology_repository
+                        .mark_message_seen(existing.id, now);
+                }
+                tracing::info!(
+                    "Reused matching legacy email row {} for account-scoped UID {} (user {})",
+                    existing.id,
+                    email_uid,
+                    user_id
+                );
+                return Ok(existing.id);
+            }
+            Ok(_) => {}
+            Err(e) => return Err(format!("Failed to check legacy email message: {}", e)),
+        }
     }
 
     // Look up the user's own connected IMAP email addresses so
@@ -423,12 +610,6 @@ pub async fn insert_email_into_ontology(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i32;
-    let sender_name = preview.from.as_deref().unwrap_or("Unknown").to_string();
-    let sender_key = preview
-        .from_email
-        .as_deref()
-        .and_then(normalize_email_sender_key);
-
     // Pending reply watch: SMS the user the first reply we see from a
     // recipient they explicitly asked to be notified about, then clear
     // the watch. Only runs when we know which IMAP account this email
@@ -503,18 +684,6 @@ pub async fn insert_email_into_ontology(
             ),
         }
     }
-    let content = format!(
-        "{}\n{}",
-        preview.subject.as_deref().unwrap_or(""),
-        preview
-            .body
-            .as_deref()
-            .unwrap_or("")
-            .chars()
-            .take(500)
-            .collect::<String>()
-    );
-
     let msg = crate::models::ontology_models::NewOntMessage {
         user_id,
         room_id: room_id.clone(),
@@ -541,17 +710,9 @@ pub async fn insert_email_into_ontology(
             .mark_messages_seen_in_room(user_id, &room_id, now, now);
     }
 
-    let email_account = imap_connection_id.and_then(|conn_id| {
-        state
-            .user_repository
-            .get_imap_connection_by_id(conn_id)
-            .ok()
-            .flatten()
-            .map(|(_, account, _)| account.email)
-    });
-
     let mut snapshot = json!({
         "message_id": created.id,
+        "created_at": created.created_at,
         "platform": "email",
         "sender": sender_name,
         "sender_name": sender_name,
@@ -1084,6 +1245,7 @@ pub async fn fetch_single_imap_email(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     axum::extract::Path(email_id): axum::extract::Path<String>,
+    Query(params): Query<FetchSingleEmailQuery>,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
     tracing::info!(
         "Fetching single IMAP email {} for user {}",
@@ -1106,7 +1268,19 @@ pub async fn fetch_single_imap_email(
             })),
         ));
     }
-    match fetch_single_email_imap(&state, auth_user.user_id, &email_id).await {
+    let result = match params.imap_connection_id {
+        Some(connection_id) => {
+            fetch_single_email_imap_for_connection(
+                &state,
+                auth_user.user_id,
+                connection_id,
+                &email_id,
+            )
+            .await
+        }
+        None => fetch_single_email_imap(&state, auth_user.user_id, &email_id).await,
+    };
+    match result {
         Ok(email) => {
             tracing::debug!("Successfully fetched email {}", email_id);
             Ok(AxumJson(json!({
@@ -1378,6 +1552,12 @@ pub async fn fetch_single_email_imap(
         return Err(ImapError::NoConnection);
     }
 
+    if accounts.len() > 1 {
+        return Err(ImapError::CredentialsError(
+            "Multiple email accounts are connected; imap_connection_id is required".to_string(),
+        ));
+    }
+
     // Try each account - return first success
     let mut last_err = ImapError::NoConnection;
     for account in &accounts {
@@ -1405,6 +1585,45 @@ pub async fn fetch_single_email_imap(
         }
     }
     Err(last_err)
+}
+
+/// Fetch one UID from one explicitly selected account. Ownership is checked
+/// before any network access so a connection ID can never cross user tenants.
+pub async fn fetch_single_email_imap_for_connection(
+    state: &AppState,
+    user_id: i32,
+    imap_connection_id: i32,
+    email_id: &str,
+) -> Result<ImapEmail, ImapError> {
+    let account = match state
+        .user_repository
+        .get_imap_connection_by_id(imap_connection_id)
+        .map_err(|e| ImapError::CredentialsError(e.to_string()))?
+    {
+        Some((owner_id, account, status))
+            if active_imap_connection_belongs_to_user(owner_id, user_id, &status) =>
+        {
+            account
+        }
+        Some(_) => {
+            return Err(ImapError::CredentialsError(
+                "Email account does not belong to the authenticated user or is inactive"
+                    .to_string(),
+            ));
+        }
+        None => return Err(ImapError::NoConnection),
+    };
+
+    fetch_single_email_from_account(
+        state,
+        user_id,
+        email_id,
+        &account.email,
+        &account.password,
+        account.imap_server.as_deref(),
+        account.imap_port,
+    )
+    .await
 }
 
 async fn fetch_single_email_from_account(

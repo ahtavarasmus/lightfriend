@@ -444,64 +444,46 @@ pub async fn handle_respond_to_email(
     let from_email = sender_account.email.clone();
 
     // Fetch the email details to get the subject
-    let email_details = match crate::handlers::imap_handlers::fetch_single_imap_email(
-        State(state.clone()),
-        AuthUser {
+    let email_details =
+        match crate::handlers::imap_handlers::fetch_single_email_imap_for_connection(
+            state,
             user_id,
-            is_admin: false,
-        },
-        axum::extract::Path(args.email_id.clone()),
-    )
-    .await
-    {
-        Ok(details) => details,
-        Err((_, error_json)) => {
-            let error_msg = format!(
-                "Failed to fetch email details: {}",
-                error_json
-                    .0
-                    .get("error")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Unknown error")
-            );
-            if !skip_sms {
-                if let Err(e) = state
-                    .channel_router
-                    .send_to_user(user, &error_msg, None)
-                    .await
-                {
-                    eprintln!("Failed to send error message: {}", e);
+            sender_account.id,
+            &args.email_id,
+        )
+        .await
+        {
+            Ok(details) => details,
+            Err(error) => {
+                let error_msg = format!("Failed to fetch email details: {:?}", error);
+                if !skip_sms {
+                    if let Err(e) = state
+                        .channel_router
+                        .send_to_user(user, &error_msg, None)
+                        .await
+                    {
+                        eprintln!("Failed to send error message: {}", e);
+                    }
                 }
+                return Ok((
+                    axum::http::StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    axum::Json(crate::api::twilio_sms::TwilioResponse {
+                        message: error_msg,
+                        created_item_id: None,
+                    }),
+                ));
             }
-            return Ok((
-                axum::http::StatusCode::OK,
-                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                axum::Json(crate::api::twilio_sms::TwilioResponse {
-                    message: error_msg,
-                    created_item_id: None,
-                }),
-            ));
-        }
-    };
+        };
     let subject = email_details
-        .0
-        .get("email")
-        .and_then(|e| e.get("subject"))
-        .and_then(|s| s.as_str())
+        .subject
+        .as_deref()
         .unwrap_or("Unknown subject")
         .to_string();
-    let original_from_email = email_details
-        .0
-        .get("email")
-        .and_then(|e| e.get("from_email"))
-        .and_then(|s| s.as_str())
-        .map(|s| s.to_string());
+    let original_from_email = email_details.from_email.clone();
     let original_from_display = email_details
-        .0
-        .get("email")
-        .and_then(|e| e.get("from"))
-        .and_then(|s| s.as_str())
-        .map(|s| s.to_string())
+        .from
+        .clone()
         .or_else(|| original_from_email.clone())
         .unwrap_or_else(|| "Unknown sender".to_string());
     // Format the queued message using the subject

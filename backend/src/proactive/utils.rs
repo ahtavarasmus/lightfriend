@@ -154,6 +154,24 @@ pub fn compact_email_notification(message: &str, snap: &serde_json::Value) -> St
     }
 }
 
+/// Resolve the delivery route for an automatic `now`-urgency notification.
+///
+/// Known contacts on chat platforms retain the escalation behavior that
+/// forces a call. Every other message, including email, follows the user's
+/// configured notification type. Returning an explicit content type keeps
+/// `send_notification_with_context` from having to infer this later.
+pub fn resolve_system_important_content_type(
+    default_notification_type: Option<&str>,
+    is_known_contact: bool,
+    platform: &str,
+) -> &'static str {
+    if (is_known_contact && platform != "email") || default_notification_type == Some("call") {
+        "system_important_call"
+    } else {
+        "system_important_sms"
+    }
+}
+
 fn email_ref_annotation_from_snapshot(snap: &serde_json::Value) -> Option<String> {
     let is_email = snap
         .get("platform")
@@ -171,8 +189,8 @@ fn email_ref_annotation_from_snapshot(snap: &serde_json::Value) -> Option<String
         .or_else(|| {
             snap.get("room_id")
                 .and_then(|v| v.as_str())
-                .and_then(|room_id| room_id.strip_prefix("email_"))
-                .map(str::to_string)
+                .and_then(crate::handlers::imap_handlers::parse_email_room_id)
+                .map(|identity| identity.uid)
         })?;
 
     let mailbox = snap

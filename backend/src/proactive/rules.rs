@@ -215,8 +215,8 @@ pub struct TriggerConfig {
     // Common: fire once then auto-complete
     #[serde(default)]
     pub fire_once: bool,
-    // Delay before evaluating (seconds). During this window, check if user
-    // already saw the message. None or 0 = immediate (no seen-check).
+    // Delay before evaluating (seconds). After this window, check if user
+    // already saw the message. None or 0 = immediate check.
     // Default 300 (5 min) for ontology_change rules.
     pub delay_seconds: Option<i32>,
     // Group chat mode: "all" = all messages, "mention_only" = only @mentions
@@ -1124,11 +1124,26 @@ async fn execute_flow_action(
                     // Auto-injected params override LLM values (higher priority)
                     if tool_name == "respond_to_email" {
                         if let Some(snapshot) = trigger_snapshot {
-                            if let Some(room_id) = snapshot.get("room_id").and_then(|v| v.as_str())
+                            let email_uid = snapshot
+                                .get("email_uid")
+                                .and_then(|v| v.as_str())
+                                .map(str::to_string)
+                                .or_else(|| {
+                                    snapshot
+                                        .get("room_id")
+                                        .and_then(|v| v.as_str())
+                                        .and_then(
+                                            crate::handlers::imap_handlers::parse_email_room_id,
+                                        )
+                                        .map(|identity| identity.uid)
+                                });
+                            if let Some(email_uid) = email_uid {
+                                p["email_id"] = serde_json::json!(email_uid);
+                            }
+                            if let Some(account) =
+                                snapshot.get("email_account").and_then(|v| v.as_str())
                             {
-                                if let Some(email_uid) = room_id.strip_prefix("email_") {
-                                    p["email_id"] = serde_json::json!(email_uid);
-                                }
+                                p["from"] = serde_json::json!(account);
                             }
                         }
                     }
@@ -1302,13 +1317,33 @@ pub(crate) async fn check_message_seen(
     user_id: i32,
     platform: &str,
     room_id: &str,
+    message_id: Option<i64>,
     message_created_at: i32,
+    imap_connection_id: Option<i32>,
 ) -> bool {
+    // Trust read state already captured at ingestion/read-receipt time first.
+    // This also makes the check resilient to a temporary IMAP outage.
+    if message_id
+        .map(|id| state.ontology_repository.is_message_seen_by_id(user_id, id))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
     let seen = match platform {
         "email" => {
             // Check IMAP \Seen flag for this email
-            let uid = room_id.strip_prefix("email_").unwrap_or(room_id);
-            check_email_seen(state, user_id, uid).await
+            let identity = crate::handlers::imap_handlers::parse_email_room_id(room_id);
+            let connection_id = imap_connection_id.or_else(|| {
+                identity
+                    .as_ref()
+                    .and_then(|identity| identity.imap_connection_id)
+            });
+            let uid = identity
+                .as_ref()
+                .map(|identity| identity.uid.as_str())
+                .unwrap_or(room_id);
+            check_email_seen(state, user_id, uid, connection_id).await
         }
         // Bridge platforms: check Matrix read receipts + user reply history
         _ => check_bridge_seen(state, user_id, room_id, message_created_at).await,
@@ -1329,24 +1364,42 @@ pub(crate) async fn check_message_seen(
 }
 
 /// Check if user read the email in their actual email app via IMAP \Seen flag.
-async fn check_email_seen(state: &Arc<AppState>, user_id: i32, email_uid: &str) -> bool {
-    use crate::repositories::user_core::UserCoreOps;
+async fn check_email_seen(
+    state: &Arc<AppState>,
+    user_id: i32,
+    email_uid: &str,
+    imap_connection_id: Option<i32>,
+) -> bool {
     use futures_util::TryStreamExt;
 
-    let creds = match state.user_repository.get_imap_credentials(user_id) {
-        Ok(Some(c)) => c,
+    let Some(connection_id) = imap_connection_id else {
+        // A UID is only meaningful inside one mailbox. Never guess an account
+        // for legacy rows that do not carry their connection identity.
+        return false;
+    };
+    let (email, password, server, port) = match state
+        .user_repository
+        .get_imap_connection_by_id(connection_id)
+    {
+        Ok(Some((owner_id, connection, status)))
+            if crate::handlers::imap_handlers::active_imap_connection_belongs_to_user(
+                owner_id, user_id, &status,
+            ) =>
+        {
+            (
+                connection.email,
+                connection.password,
+                connection.imap_server,
+                connection.imap_port,
+            )
+        }
         _ => return false,
     };
-    let (_description, password, server, port) = creds;
     let server = match server {
         Some(s) => s,
         None => return false,
     };
     let port = port.unwrap_or(993) as u16;
-    let email = match state.user_core.find_by_id(user_id) {
-        Ok(Some(u)) => u.email,
-        _ => return false,
-    };
 
     let uid = email_uid.to_string();
     let work = async {
@@ -1464,10 +1517,21 @@ pub async fn emit_ontology_change(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            let created_at_sys = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i32;
+            let message_id_sys = entity_snapshot.get("message_id").and_then(|v| v.as_i64());
+            let imap_connection_id_sys = entity_snapshot
+                .get("imap_connection_id")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32);
+            let created_at_sys = entity_snapshot
+                .get("created_at")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32)
+                .unwrap_or_else(|| {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i32
+                });
 
             tokio::spawn(async move {
                 tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
@@ -1477,7 +1541,9 @@ pub async fn emit_ontology_change(
                     user_id,
                     &platform_sys,
                     &room_id_sys,
+                    message_id_sys,
                     created_at_sys,
+                    imap_connection_id_sys,
                 )
                 .await
                 {
@@ -1552,10 +1618,21 @@ pub async fn emit_ontology_change(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let msg_created_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i32;
+    let msg_id = entity_snapshot.get("message_id").and_then(|v| v.as_i64());
+    let msg_imap_connection_id = entity_snapshot
+        .get("imap_connection_id")
+        .and_then(|v| v.as_i64())
+        .map(|v| v as i32);
+    let msg_created_at = entity_snapshot
+        .get("created_at")
+        .and_then(|v| v.as_i64())
+        .map(|v| v as i32)
+        .unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i32
+        });
 
     for rule in rules {
         if matches_trigger(&rule, entity_type, change_type, &entity_snapshot) {
@@ -1566,6 +1643,8 @@ pub async fn emit_ontology_change(
             let platform = msg_platform.clone();
             let room_id = msg_room_id.clone();
             let is_message = entity_type == "Message";
+            let message_id = msg_id;
+            let imap_connection_id = msg_imap_connection_id;
 
             // Parse delay from trigger config (default 300s for ontology_change)
             let trigger: TriggerConfig =
@@ -1573,12 +1652,21 @@ pub async fn emit_ontology_change(
             let delay = trigger.delay_seconds.unwrap_or(600);
 
             tokio::spawn(async move {
-                if delay > 0 && is_message {
-                    // Wait, then check if user already saw the message
-                    tokio::time::sleep(tokio::time::Duration::from_secs(delay as u64)).await;
+                if is_message {
+                    if delay > 0 {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(delay as u64)).await;
+                    }
 
-                    if check_message_seen(&state, rule.user_id, &platform, &room_id, msg_created_at)
-                        .await
+                    if check_message_seen(
+                        &state,
+                        rule.user_id,
+                        &platform,
+                        &room_id,
+                        message_id,
+                        msg_created_at,
+                        imap_connection_id,
+                    )
+                    .await
                     {
                         info!(
                             "Rule {} ({}): skipping - user already saw the message",

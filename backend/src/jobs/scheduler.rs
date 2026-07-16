@@ -569,7 +569,11 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                                             // Delete old processed emails
                                             for email in emails_to_delete {
-                                                if let Err(e) = state.user_repository.delete_processed_email(user.id, &email.email_uid) {
+                                                if let Err(e) = state.user_repository.delete_processed_email(
+                                                    user.id,
+                                                    &email.email_uid,
+                                                    email.imap_connection_id,
+                                                ) {
                                                     error!("Failed to delete old processed email {}: {}", email.email_uid, e);
                                                 } else {
                                                     debug!("Deleted old processed email {} for user {}", email.email_uid, user.id);
@@ -606,7 +610,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             user.id,
                                             email,
                                             &persons,
-                                            None,
+                                            email.imap_connection_id,
                                         )
                                         .await
                                         {
@@ -618,7 +622,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                 if let Err(e) = state.user_repository.mark_email_as_processed(
                                                     user.id,
                                                     &uid_str,
-                                                    None,
+                                                    email.imap_connection_id,
                                                 ) {
                                                     error!(
                                                         "Failed to mark email {} as processed for user {}: {}",
@@ -1996,23 +2000,19 @@ async fn sync_email_read_receipts(state: &Arc<AppState>) {
             _ => continue,
         };
 
-        // Extract UIDs from room_ids (format: "email_{uid}")
-        let uid_msg_pairs: Vec<(String, i64)> = unseen
+        // Extract account-scoped identities from both new and legacy room IDs.
+        let email_identities: Vec<(imap_handlers::EmailRoomIdentity, i64)> = unseen
             .iter()
-            .filter_map(|m| {
-                m.room_id
-                    .strip_prefix("email_")
-                    .map(|uid| (uid.to_string(), m.id))
-            })
+            .filter_map(|m| imap_handlers::parse_email_room_id(&m.room_id).map(|id| (id, m.id)))
             .collect();
 
-        if uid_msg_pairs.is_empty() {
+        if email_identities.is_empty() {
             continue;
         }
 
         // Wall-clock timeout per user: 60s total for all IMAP connections.
         // Prevents a single slow server from blocking the entire sync.
-        let per_user = sync_email_receipts_for_user(state, user_id, &creds, &uid_msg_pairs, now);
+        let per_user = sync_email_receipts_for_user(state, user_id, &creds, &email_identities, now);
         if tokio::time::timeout(std::time::Duration::from_secs(60), per_user)
             .await
             .is_err()
@@ -2029,10 +2029,21 @@ async fn sync_email_receipts_for_user(
     state: &Arc<AppState>,
     user_id: i32,
     creds: &[crate::repositories::user_repository::ImapConnectionInfo],
-    uid_msg_pairs: &[(String, i64)],
+    email_identities: &[(imap_handlers::EmailRoomIdentity, i64)],
     now: i32,
 ) {
     for cred in creds {
+        let account_messages: Vec<(&imap_handlers::EmailRoomIdentity, i64)> = email_identities
+            .iter()
+            .filter(|(identity, _)| {
+                imap_handlers::email_identity_matches_account(identity, cred.id, creds.len())
+            })
+            .map(|(identity, message_id)| (identity, *message_id))
+            .collect();
+        if account_messages.is_empty() {
+            continue;
+        }
+
         let server = match &cred.imap_server {
             Some(s) => s.clone(),
             None => continue,
@@ -2055,9 +2066,9 @@ async fn sync_email_receipts_for_user(
             continue;
         }
 
-        let uid_set: String = uid_msg_pairs
+        let uid_set: String = account_messages
             .iter()
-            .map(|(uid, _)| uid.as_str())
+            .map(|(identity, _)| identity.uid.as_str())
             .collect::<Vec<_>>()
             .join(",");
 
@@ -2073,8 +2084,9 @@ async fn sync_email_receipts_for_user(
                     if let Some(uid) = msg.uid {
                         let uid_str = uid.to_string();
                         if msg.flags().any(|f| f == async_imap::types::Flag::Seen) {
-                            if let Some((_, msg_id)) =
-                                uid_msg_pairs.iter().find(|(u, _)| u == &uid_str)
+                            if let Some((_, msg_id)) = account_messages
+                                .iter()
+                                .find(|(identity, _)| identity.uid == uid_str)
                             {
                                 let _ = state.ontology_repository.mark_message_seen(*msg_id, now);
                             }

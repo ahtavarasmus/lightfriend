@@ -440,13 +440,16 @@ pub async fn voice_incoming(State(state): State<Arc<AppState>>, body: String) ->
     let twiml = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <Response>
+  <Say>{}</Say>
   <Connect>
     <Stream url="{}/api/voice/ws" track="inbound_track">
       <Parameter name="user_id" value="{}" />
     </Stream>
   </Connect>
 </Response>"#,
-        ws_url, user.id
+        xml_escape("Connecting Lightfriend."),
+        ws_url,
+        user.id
     );
 
     tracing::info!("Voice incoming TwiML returned for user {}", user.id);
@@ -1260,6 +1263,7 @@ struct OpenAiReaderSession {
     mode: OpenAiRealtimeAudioMode,
     stream_sid: Option<String>,
     greeting: Option<String>,
+    sent_error_notice: bool,
 }
 
 fn openai_realtime_model() -> String {
@@ -1590,13 +1594,40 @@ async fn handle_openai_reader(
             Ok(m) => m,
             Err(e) => {
                 tracing::error!("OpenAI Realtime WS receive error: {}", e);
+                send_openai_realtime_failure_notice(
+                    &mut session,
+                    &state,
+                    &send_tx,
+                    "Voice is unavailable right now. OpenAI Realtime closed the connection.",
+                )
+                .await;
                 break;
             }
         };
 
         let text = match msg {
             TungsteniteMessage::Text(t) => t.to_string(),
-            TungsteniteMessage::Close(_) => break,
+            TungsteniteMessage::Close(frame) => {
+                let reason = frame
+                    .as_ref()
+                    .map(|f| {
+                        let code = format!("{:?}", f.code);
+                        let reason = f.reason.to_string();
+                        let reason = reason.trim();
+                        if reason.is_empty() {
+                            format!("OpenAI Realtime closed the connection with code {}.", code)
+                        } else {
+                            format!(
+                                "OpenAI Realtime closed the connection with code {}: {}",
+                                code, reason
+                            )
+                        }
+                    })
+                    .unwrap_or_else(|| "OpenAI Realtime closed the connection.".to_string());
+                tracing::error!("{}", reason);
+                send_openai_realtime_failure_notice(&mut session, &state, &send_tx, &reason).await;
+                break;
+            }
             _ => continue,
         };
 
@@ -1716,17 +1747,12 @@ async fn handle_openai_reader(
             }
             "error" => {
                 tracing::error!("OpenAI Realtime error event: {}", event);
-                if session.mode == OpenAiRealtimeAudioMode::WebPcm24 {
-                    let err = serde_json::json!({
-                        "type": "error",
-                        "message": event
-                            .get("error")
-                            .and_then(|e| e.get("message"))
-                            .and_then(|m| m.as_str())
-                            .unwrap_or("OpenAI Realtime error")
-                    });
-                    let _ = send_tx.send(Message::Text(err.to_string().into())).await;
-                }
+                let message = event
+                    .get("error")
+                    .and_then(|e| e.get("message"))
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("OpenAI Realtime error");
+                send_openai_realtime_failure_notice(&mut session, &state, &send_tx, message).await;
             }
             "session.updated" => {
                 if let Some(greeting) = session.greeting.take() {
@@ -1737,6 +1763,50 @@ async fn handle_openai_reader(
             other => {
                 tracing::debug!("OpenAI Realtime event: {}", other);
             }
+        }
+    }
+}
+
+pub fn claim_voice_failure_notice(sent_error_notice: &mut bool) -> bool {
+    if *sent_error_notice {
+        false
+    } else {
+        *sent_error_notice = true;
+        true
+    }
+}
+
+async fn send_openai_realtime_failure_notice(
+    session: &mut OpenAiReaderSession,
+    state: &Arc<AppState>,
+    send_tx: &mpsc::Sender<Message>,
+    message: &str,
+) {
+    if !claim_voice_failure_notice(&mut session.sent_error_notice) {
+        return;
+    }
+
+    match session.mode {
+        OpenAiRealtimeAudioMode::TwilioPcmu => {
+            if let Some(ref stream_sid) = session.stream_sid {
+                if let Err(e) = send_twilio_tinfoil_tts(
+                    state,
+                    send_tx,
+                    stream_sid,
+                    "Sorry, voice is unavailable right now. Please try again in a moment.",
+                )
+                .await
+                {
+                    tracing::error!("Failed to send Twilio realtime failure notice: {}", e);
+                }
+            }
+        }
+        OpenAiRealtimeAudioMode::WebPcm24 => {
+            let err = serde_json::json!({
+                "type": "error",
+                "message": message
+            });
+            let _ = send_tx.send(Message::Text(err.to_string().into())).await;
         }
     }
 }
@@ -1767,6 +1837,7 @@ async fn start_openai_realtime_session(
             mode,
             stream_sid,
             greeting,
+            sent_error_notice: false,
         },
     ));
 
@@ -1798,6 +1869,19 @@ async fn handle_openai_twilio_session(
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to start OpenAI Realtime Twilio session: {}", e);
+            if let Err(tts_err) = send_twilio_tinfoil_tts(
+                &state,
+                send_tx,
+                &stream_sid,
+                "Sorry, voice is having trouble right now. Please try again in a moment.",
+            )
+            .await
+            {
+                tracing::error!(
+                    "Failed to send Twilio realtime startup failure notice: {}",
+                    tts_err
+                );
+            }
             return;
         }
     };
@@ -2051,6 +2135,53 @@ fn build_greeting(state: &Arc<AppState>, user_id: i32) -> String {
     } else {
         format!("Hello {}!", nickname)
     }
+}
+
+async fn send_twilio_tinfoil_tts(
+    state: &Arc<AppState>,
+    send_tx: &mpsc::Sender<Message>,
+    stream_sid: &str,
+    text: &str,
+) -> Result<(), String> {
+    let tinfoil = TinfoilVoiceClient::new(&state.ai_config);
+    tracing::info!("Fallback TTS requesting ({} chars)", text.len());
+    let tts_wav = tinfoil.text_to_speech(text, "aiden").await?;
+    let pcm_bytes = strip_wav_header(&tts_wav);
+    if pcm_bytes.is_empty() {
+        return Err("fallback TTS returned empty audio".to_string());
+    }
+
+    let pcm_samples: Vec<i16> = pcm_bytes
+        .chunks_exact(2)
+        .map(|c| i16::from_le_bytes([c[0], c[1]]))
+        .collect();
+    let pcm_8k = resample(&pcm_samples, 24000, 8000);
+    let mulaw_bytes: Vec<u8> = pcm_8k.iter().map(|&s| mulaw_encode(s)).collect();
+
+    for chunk in mulaw_bytes.chunks(160) {
+        let payload = BASE64.encode(chunk);
+        let msg = serde_json::json!({
+            "event": "media",
+            "streamSid": stream_sid,
+            "media": { "payload": payload }
+        });
+        let _ = send_tx.send(Message::Text(msg.to_string().into())).await;
+    }
+
+    let mark_msg = serde_json::json!({
+        "event": "mark",
+        "streamSid": stream_sid,
+        "mark": { "name": "fallback_error_notice" }
+    });
+    let _ = send_tx
+        .send(Message::Text(mark_msg.to_string().into()))
+        .await;
+
+    tracing::info!(
+        "Fallback TTS audio queued for Twilio ({} bytes mulaw)",
+        mulaw_bytes.len()
+    );
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

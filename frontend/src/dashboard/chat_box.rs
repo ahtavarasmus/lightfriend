@@ -461,12 +461,32 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
     {
         let call_active = call_active.clone();
         let call_duration = call_duration.clone();
+        let call_error = call_error.clone();
         let is_active_dep = (*call_active).clone();
         use_effect_with_deps(
             move |is_active: &bool| {
                 let call_duration = call_duration.clone();
+                let call_active = call_active.clone();
+                let call_error = call_error.clone();
                 let interval_handle: Option<gloo_timers::callback::Interval> = if *is_active {
                     Some(gloo_timers::callback::Interval::new(1000, move || {
+                        let status = crate::utils::voice_web::get_voice_call_status();
+                        if status == "error" {
+                            let message = crate::utils::voice_web::get_voice_last_error();
+                            call_error.set(Some(if message.is_empty() {
+                                "Voice call failed.".to_string()
+                            } else {
+                                message
+                            }));
+                            call_active.set(false);
+                            call_duration.set(0);
+                            return;
+                        }
+                        if status == "disconnected" {
+                            call_active.set(false);
+                            call_duration.set(0);
+                            return;
+                        }
                         let duration = crate::utils::voice_web::get_voice_call_duration();
                         call_duration.set(duration);
                     }))
