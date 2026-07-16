@@ -94,6 +94,7 @@ COPY frontend/index.html ./
 COPY frontend/assets ./assets
 COPY frontend/Trunk.toml ./
 COPY frontend/robots.txt ./
+COPY frontend/3d870fd8-5621-466c-8d7b-e326e09db85e.txt ./
 
 RUN trunk build --release
 

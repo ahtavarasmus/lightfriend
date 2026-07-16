@@ -456,7 +456,7 @@ pub fn landing() -> Html {
             </section>
             <div class="filter-concept">
                 <div class="filter-content">
-                    <div class="faq-in-filter scroll-animate">
+                    <div id="faq" class="faq-in-filter scroll-animate">
                         <h2>{"Frequently Asked Questions"}</h2>
                         { for faq_items_html }
                         <div class="faq-more-link">
