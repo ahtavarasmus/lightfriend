@@ -57,7 +57,7 @@ LOCKED_OUTPUT=$(env \
     LIGHTFRIEND_BACKUP_RESTORE_ROOT="$RESTORE_ROOT" \
     LIGHTFRIEND_BACKUP_SEED_DIR="$SEED_ROOT" \
     TUWUNEL_BACKUP_DIR="$TUWUNEL_BACKUP_ROOT" \
-    "$STORAGE_HEALTH" cleanup-backup-artifacts)
+    bash "$STORAGE_HEALTH" cleanup-backup-artifacts)
 
 grep -q "export holds lock" <<<"$LOCKED_OUTPUT"
 [ -f "$STAGING_ROOT/active/data" ]
@@ -75,7 +75,7 @@ env \
     LIGHTFRIEND_BACKUP_RESTORE_ROOT="$RESTORE_ROOT" \
     LIGHTFRIEND_BACKUP_SEED_DIR="$SEED_ROOT" \
     TUWUNEL_BACKUP_DIR="$TUWUNEL_BACKUP_ROOT" \
-    "$STORAGE_HEALTH" cleanup-backup-artifacts >/dev/null
+    bash "$STORAGE_HEALTH" cleanup-backup-artifacts >/dev/null
 
 [ ! -e "$STAGING_ROOT" ]
 [ ! -e "$TMP_ROOT/lightfriend-full-backup-test.tar.gz" ]
