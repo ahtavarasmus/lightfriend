@@ -521,7 +521,7 @@ if ip addr show tap0 2>/dev/null | grep -q 'inet '; then
     ip addr show tap0 2>/dev/null | grep -E 'inet |link/ether'
     echo "  default route: $(ip route show default 2>/dev/null)"
     echo "  gvforwarder: $(pgrep -f gvforwarder >/dev/null 2>&1 && echo 'running' || echo 'NOT running')"
-    echo "  DNS: $(cat /etc/resolv.conf 2>/dev/null | head -3)"
+    echo "  DNS: $(head -3 /etc/resolv.conf 2>/dev/null)"
     echo "  gateway ping: $(timeout 2 ping -c1 -W1 192.168.127.1 >/dev/null 2>&1 && echo 'OK' || echo 'FAIL')"
     echo "  internet test: $(timeout 3 curl -sf --noproxy '*' --max-time 2 https://api.cloudflare.com/cdn-cgi/trace 2>/dev/null | head -1 || echo 'FAIL')"
     echo "  gvforwarder log (last 5 lines):"
@@ -635,8 +635,8 @@ echo ""
 echo "--- KMS derive test ---"
 if curl -sf --max-time 5 http://127.0.0.1:1101/derive/x25519?path=lightfriend/backup > /tmp/diag-key1.bin 2>/dev/null; then
     curl -sf --max-time 5 http://127.0.0.1:1101/derive/x25519?path=lightfriend/backup > /tmp/diag-key2.bin 2>/dev/null
-    FP1=$(cat /tmp/diag-key1.bin | base64 | tr -d '\n' | sha256sum | cut -c1-16)
-    FP2=$(cat /tmp/diag-key2.bin | base64 | tr -d '\n' | sha256sum | cut -c1-16)
+    FP1=$(base64 < /tmp/diag-key1.bin | tr -d '\n' | sha256sum | cut -c1-16)
+    FP2=$(base64 < /tmp/diag-key2.bin | tr -d '\n' | sha256sum | cut -c1-16)
     SZ1=$(stat -c%s /tmp/diag-key1.bin 2>/dev/null || echo "?")
     echo "  derive call 1: ${SZ1} bytes, fp=${FP1}"
     echo "  derive call 2: ${SZ1} bytes, fp=${FP2}"
