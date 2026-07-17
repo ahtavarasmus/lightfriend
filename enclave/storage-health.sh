@@ -29,6 +29,12 @@ TUWUNEL_ARCHIVE_LOG_MAX_BYTES="${TUWUNEL_ARCHIVE_LOG_MAX_BYTES:-33554432}" # 32 
 TUWUNEL_ARCHIVE_LOG_RETENTION_SECS="${TUWUNEL_ARCHIVE_LOG_RETENTION_SECS:-21600}" # 6 hours
 TUWUNEL_ARCHIVE_LOG_MIN_AGE_SECS="${TUWUNEL_ARCHIVE_LOG_MIN_AGE_SECS:-600}" # cap pruning skips very fresh logs
 TUWUNEL_ARCHIVE_LOG_DELETE_LOG_LIMIT="${TUWUNEL_ARCHIVE_LOG_DELETE_LOG_LIMIT:-200}"
+BACKUP_ARTIFACT_LOCK_FILE="${LIGHTFRIEND_BACKUP_ARTIFACT_LOCK_FILE:-/tmp/lightfriend-backup-artifacts.lock}"
+BACKUP_STAGING_ROOT="${LIGHTFRIEND_BACKUP_STAGING_ROOT:-/tmp/backup-staging}"
+BACKUP_TMP_ROOT="${LIGHTFRIEND_BACKUP_TMP_ROOT:-/tmp}"
+BACKUP_RESTORE_ROOT="${LIGHTFRIEND_BACKUP_RESTORE_ROOT:-/tmp/backup-restore}"
+BACKUP_SEED_DIR="${LIGHTFRIEND_BACKUP_SEED_DIR:-/data/seed}"
+TUWUNEL_BACKUP_DIR="${TUWUNEL_BACKUP_DIR:-/var/lib/tuwunel-backup}"
 
 WATCH_PATHS=(
     /
@@ -939,6 +945,41 @@ export_running() {
     ps aux 2>/dev/null | grep -F '/app/export.sh' | grep -v grep >/dev/null 2>&1
 }
 
+cleanup_backup_artifacts() {
+    if ! command -v flock >/dev/null 2>&1; then
+        echo "Skipping backup artifact cleanup: flock is unavailable"
+        return 0
+    fi
+
+    # This is the authoritative synchronization boundary with export.sh.
+    # Process-name checks are diagnostic only and cannot safely guard deletion.
+    exec 9>"$BACKUP_ARTIFACT_LOCK_FILE" || {
+        echo "Skipping backup artifact cleanup: cannot open lock $BACKUP_ARTIFACT_LOCK_FILE"
+        return 0
+    }
+    if ! flock -n 9; then
+        echo "Skipping backup artifact cleanup: export holds lock $BACKUP_ARTIFACT_LOCK_FILE"
+        exec 9>&-
+        return 0
+    fi
+
+    echo "Backup artifact cleanup lock acquired: $BACKUP_ARTIFACT_LOCK_FILE"
+    rm -rf "$BACKUP_STAGING_ROOT" "$BACKUP_TMP_ROOT/verify.tar.gz" \
+        "$BACKUP_TMP_ROOT"/lightfriend-full-backup-*.tar.gz 2>/dev/null || true
+    find "$BACKUP_TMP_ROOT" -maxdepth 1 -name 'lightfriend-full-backup-*.verify.tar.gz' -delete 2>/dev/null || true
+    find "$BACKUP_TMP_ROOT" -maxdepth 1 -name 'lightfriend-full-backup-*.tar.gz.enc' -mmin +30 -delete 2>/dev/null || true
+    rm -rf "$BACKUP_RESTORE_ROOT" 2>/dev/null || true
+    find "$BACKUP_SEED_DIR" -name 'lightfriend-full-backup-*.tar.gz.enc' -mmin +30 -delete 2>/dev/null || true
+
+    if [ -d "$TUWUNEL_BACKUP_DIR" ]; then
+        echo "Removing stale $TUWUNEL_BACKUP_DIR"
+        rm -rf "$TUWUNEL_BACKUP_DIR" 2>/dev/null || true
+    fi
+
+    flock -u 9 || true
+    exec 9>&-
+}
+
 rootfs_reserve_kib() {
     local reserve_bytes
     reserve_bytes=0
@@ -1248,30 +1289,7 @@ check_storage() {
 cleanup_storage() {
     echo "=== Storage Cleanup $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 
-    local is_exporting
-    is_exporting=false
-    if export_running; then
-        is_exporting=true
-        echo "Export is running; preserving active backup artifacts"
-    fi
-
-    if [ "$is_exporting" = "true" ]; then
-        echo "Skipping backup artifact cleanup while export.sh is running"
-    else
-        rm -rf /tmp/backup-staging /tmp/verify.tar.gz /tmp/lightfriend-full-backup-*.tar.gz 2>/dev/null || true
-        find /tmp -maxdepth 1 -name 'lightfriend-full-backup-*.tar.gz.enc' -mmin +30 -delete 2>/dev/null || true
-        rm -rf /tmp/backup-restore 2>/dev/null || true
-        find /data/seed -name 'lightfriend-full-backup-*.tar.gz.enc' -mmin +30 -delete 2>/dev/null || true
-    fi
-
-    if [ -d /var/lib/tuwunel-backup ]; then
-        if [ "$is_exporting" = "true" ]; then
-            echo "Skipping /var/lib/tuwunel-backup cleanup while export.sh is running"
-        else
-            echo "Removing stale /var/lib/tuwunel-backup"
-            rm -rf /var/lib/tuwunel-backup 2>/dev/null || true
-        fi
-    fi
+    cleanup_backup_artifacts
 
     cleanup_tuwunel_media
     cleanup_tuwunel_archive_logs
@@ -1312,11 +1330,14 @@ case "${1:-report}" in
     cleanup-archive-logs)
         cleanup_tuwunel_archive_logs
         ;;
+    cleanup-backup-artifacts)
+        cleanup_backup_artifacts
+        ;;
     json)
         print_json_metrics
         ;;
     *)
-        echo "Usage: $0 [report|check|cleanup|cleanup-media|cleanup-archive-logs|json]" >&2
+        echo "Usage: $0 [report|check|cleanup|cleanup-media|cleanup-archive-logs|cleanup-backup-artifacts|json]" >&2
         exit 2
         ;;
 esac

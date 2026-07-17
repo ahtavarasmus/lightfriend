@@ -168,6 +168,7 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     iproute2 \
     jq \
+    util-linux \
     busybox \
     && rm -rf /var/lib/apt/lists/*
 

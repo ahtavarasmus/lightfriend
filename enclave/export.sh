@@ -29,14 +29,17 @@ BACKUP_NAME="lightfriend-full-backup-${TIMESTAMP}"
 STAGING="/tmp/backup-staging/${BACKUP_NAME}"
 ARCHIVE="/tmp/${BACKUP_NAME}.tar.gz"
 ENCRYPTED="/tmp/${BACKUP_NAME}.tar.gz.enc"
+CHECKSUMS_TMP="/tmp/${BACKUP_NAME}.checksums.sha256"
+VERIFY_ARCHIVE="/tmp/${BACKUP_NAME}.verify.tar.gz"
 STATUS_FILE="/data/seed/export-status.json"
 TUWUNEL_BACKUP_DIR="/var/lib/tuwunel-backup"
+BACKUP_ARTIFACT_LOCK_FILE="${LIGHTFRIEND_BACKUP_ARTIFACT_LOCK_FILE:-/tmp/lightfriend-backup-artifacts.lock}"
 
-# Cleanup function - remove staging artifacts
+# Cleanup only this export's artifacts. Stale artifacts from other runs are
+# handled by storage-health.sh while holding the same backup-artifact lock.
 cleanup() {
-    rm -rf /tmp/backup-staging /tmp/verify.tar.gz "${ARCHIVE}" "${ENCRYPTED}" 2>/dev/null || true
-    # Clean matrix snapshot dirs created during Phase A
-    rm -rf "${STAGING}/matrix-store-snapshot" 2>/dev/null || true
+    rm -rf "${STAGING}" "${ARCHIVE}" "${ENCRYPTED}" "${CHECKSUMS_TMP}" "${VERIFY_ARCHIVE}" 2>/dev/null || true
+    rmdir /tmp/backup-staging 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -67,6 +70,22 @@ abort() {
 
 echo "=== Lightfriend Full Data Export ==="
 echo "Timestamp: ${TIMESTAMP}"
+
+# Storage cleanup uses this same lock before removing any backup artifacts.
+# Hold it for the entire export, including the EXIT trap, so cleanup can never
+# remove staging files between snapshot verification, assembly, and upload.
+command -v flock >/dev/null 2>&1 \
+    || abort "flock is required for backup artifact locking" "preflight-lock"
+exec 9>"${BACKUP_ARTIFACT_LOCK_FILE}" \
+    || abort "Could not open backup artifact lock ${BACKUP_ARTIFACT_LOCK_FILE}" "preflight-lock"
+echo "Waiting for backup artifact lock: ${BACKUP_ARTIFACT_LOCK_FILE}"
+flock -x 9 \
+    || abort "Could not acquire backup artifact lock ${BACKUP_ARTIFACT_LOCK_FILE}" "preflight-lock"
+echo "Backup artifact lock acquired"
+
+# A same-second retry is unlikely, but never merge new output into an existing
+# per-export directory or archive.
+rm -rf "${STAGING}" "${ARCHIVE}" "${ENCRYPTED}" "${CHECKSUMS_TMP}" "${VERIFY_ARCHIVE}" 2>/dev/null || true
 
 # ── Disk usage snapshot (for debugging space issues) ─────────────────────────
 echo "=== Disk Usage ==="
@@ -368,7 +387,10 @@ echo "Phase C: Assembling archive..."
 
 # Generate checksums
 cd "${STAGING}"
-find . -type f -print0 | sort -z | xargs -0 sha256sum > checksums.sha256
+find . -type f -print0 | sort -z | xargs -0 sha256sum > "${CHECKSUMS_TMP}" \
+    || abort "Failed to generate component checksums" "assemble-checksums"
+mv "${CHECKSUMS_TMP}" checksums.sha256 \
+    || abort "Failed to install component checksums" "assemble-checksums"
 echo "  Generated checksums.sha256"
 
 # Get user count for manifest
@@ -410,6 +432,9 @@ tar tzf "${ARCHIVE}" > /dev/null 2>&1 \
     || abort "tar.gz round-trip verification failed" "verify-archive"
 
 ARCHIVE_SIZE=$(stat -c%s "${ARCHIVE}" 2>/dev/null || stat -f%z "${ARCHIVE}" 2>/dev/null || echo "0")
+if [ "${ARCHIVE_SIZE}" -le 0 ]; then
+    abort "tar.gz archive disappeared or is empty after verification" "verify-archive"
+fi
 echo "  Archive: ${ARCHIVE_SIZE} bytes, integrity OK"
 echo "Phase C complete."
 
@@ -431,16 +456,16 @@ openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt \
 openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
     -pass env:BACKUP_ENCRYPTION_KEY \
     -in "${ENCRYPTED}" \
-    -out /tmp/verify.tar.gz \
+    -out "${VERIFY_ARCHIVE}" \
     || abort "Decrypt verification failed - encrypted file may be corrupt" "verify-encrypt"
 
-VERIFY_SHA=$(sha256sum /tmp/verify.tar.gz | awk '{print $1}')
+VERIFY_SHA=$(sha256sum "${VERIFY_ARCHIVE}" | awk '{print $1}')
 if [ "${ORIGINAL_SHA}" != "${VERIFY_SHA}" ]; then
     rm -f "${ENCRYPTED}"
     abort "SHA-256 mismatch after decrypt: original=${ORIGINAL_SHA} verify=${VERIFY_SHA}" "verify-encrypt"
 fi
 
-rm -f /tmp/verify.tar.gz
+rm -f "${VERIFY_ARCHIVE}"
 
 ENCRYPTED_SIZE=$(stat -c%s "${ENCRYPTED}" 2>/dev/null || stat -f%z "${ENCRYPTED}" 2>/dev/null || echo "0")
 echo "  Encrypted: ${ENCRYPTED_SIZE} bytes, decrypt-verify OK"
