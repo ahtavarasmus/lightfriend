@@ -156,6 +156,7 @@ jobs:
           echo "Checking enclave shell scripts for syntax errors..."
           shellcheck -s bash enclave/entrypoint.sh
           shellcheck -s bash enclave/export.sh
+          shellcheck -s bash enclave/diagnose-enclave.sh
           shellcheck -s bash enclave/storage-health.sh
           shellcheck -s bash enclave/verify.sh
           shellcheck -s bash enclave/enter-maintenance.sh

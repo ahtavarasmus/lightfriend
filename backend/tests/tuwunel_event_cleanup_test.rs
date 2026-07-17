@@ -1,6 +1,6 @@
 use backend::utils::tuwunel_event_cleanup::{
     build_purge_history_url, build_purge_status_url, is_matrix_event_id,
-    is_tuwunel_admin_redaction_reason, purge_history_request,
+    is_tuwunel_admin_redaction_reason, next_backfill_scan_timestamp, purge_history_request,
 };
 use serde_json::json;
 
@@ -48,4 +48,24 @@ fn detects_legacy_tuwunel_admin_redaction_reason() {
         "Message deleted by source platform"
     )));
     assert!(!is_tuwunel_admin_redaction_reason(None));
+}
+
+#[test]
+fn historical_backfill_drains_full_batches_at_worker_poll_speed() {
+    assert_eq!(
+        next_backfill_scan_timestamp(1_000, 25, 25, 30, 3_600),
+        1_030
+    );
+    assert_eq!(
+        next_backfill_scan_timestamp(1_000, 24, 25, 30, 3_600),
+        4_600
+    );
+}
+
+#[test]
+fn historical_backfill_timestamp_saturates() {
+    assert_eq!(
+        next_backfill_scan_timestamp(i32::MAX - 5, 25, 25, 30, 3_600),
+        i32::MAX
+    );
 }

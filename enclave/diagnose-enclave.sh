@@ -99,7 +99,7 @@ echo "--- Tuwunel purge instrumentation across backend logs ---"
 echo "Tuwunel server version:"
 curl -sf http://localhost:8008/_synapse/admin/v1/server_version 2>/dev/null || echo "  unavailable"
 echo ""
-TUWUNEL_CLEANUP_LOG_LINES=$(grep -hEi "Tuwunel event purge|Tuwunel room-history purge|durable Tuwunel purge|purge API|purge candidate" \
+TUWUNEL_CLEANUP_LOG_LINES=$(grep -hEi "Tuwunel.*purge|purge.*Tuwunel|purge API|purge candidate|Tuwunel event retained" \
     /var/log/supervisor/lightfriend.log /var/log/supervisor/lightfriend.log.1 /var/log/supervisor/lightfriend.log.2 \
     /var/log/supervisor/lightfriend-err.log /var/log/supervisor/lightfriend-err.log.1 /var/log/supervisor/lightfriend-err.log.2 \
     2>/dev/null | tail -120 || true)
@@ -115,6 +115,8 @@ if command -v psql >/dev/null 2>&1 && [ -n "${PG_DATABASE_URL:-}" ]; then
     TUWUNEL_CLEANUP_SQL='
         SELECT status,
                count(*) AS rows,
+               count(*) FILTER (WHERE last_command_kind = '\''intentional_discard'\'') AS intentionally_discarded,
+               count(*) FILTER (WHERE last_command_kind = '\''retained_unproven'\'') AS retained_unproven,
                COALESCE(sum(commands_expected), 0) AS commands_expected,
                COALESCE(sum(commands_accepted), 0) AS commands_accepted,
                to_char(to_timestamp(max(updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS last_updated
@@ -177,6 +179,17 @@ if command -v psql >/dev/null 2>&1 && [ -n "${PG_DATABASE_URL:-}" ]; then
          ORDER BY oldest_updated NULLS LAST, status
          LIMIT 20;
 
+        SELECT service,
+               status,
+               left(COALESCE(last_error, '\''reason unavailable'\''), 240) AS blocker_reason,
+               count(*) AS events,
+               count(DISTINCT room_id) AS blocked_rooms,
+               to_char(to_timestamp(max(updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS last_updated
+          FROM tuwunel_cleanup_events
+         WHERE status IN ('\''ingesting'\'', '\''ingest_failed'\'')
+         GROUP BY service, status, left(COALESCE(last_error, '\''reason unavailable'\''), 240)
+         ORDER BY events DESC, service, blocker_reason;
+
         SELECT id,
                user_id,
                service,
@@ -208,6 +221,57 @@ if [ -n "$TUWUNEL_ADMIN_LOG_LINES" ]; then
     printf '%s\n' "$TUWUNEL_ADMIN_LOG_LINES"
 else
     echo "  none found"
+fi
+echo ""
+
+echo "--- Tuwunel RocksDB columns from latest startup database-files report ---"
+TUWUNEL_DB_FILE_ROWS=$(
+    cat /var/log/supervisor/tuwunel.log.2 /var/log/supervisor/tuwunel.log.1 /var/log/supervisor/tuwunel.log 2>/dev/null \
+        | awk '
+            /\|[[:space:]]*lev[[:space:]]*\|[[:space:]]*sst[[:space:]]*\|[[:space:]]*keys[[:space:]]*\|/ {
+                rows = ""
+                capture = 1
+                next
+            }
+            capture && /^\|[[:space:]]*---/ { next }
+            capture && /^\|[[:space:]]*[0-9]+[[:space:]]*\|/ {
+                rows = rows $0 "\n"
+                next
+            }
+            capture { capture = 0 }
+            END { printf "%s", rows }
+        ' || true
+)
+if [ -n "$TUWUNEL_DB_FILE_ROWS" ]; then
+    printf "bytes\tentries\tdeletions\tsst_files\tcolumn\n"
+    printf '%s\n' "$TUWUNEL_DB_FILE_ROWS" \
+        | awk -F'|' '
+            NF >= 8 {
+                entries = $4
+                deletions = $5
+                bytes = $6
+                column = $7
+                gsub(/[^0-9]/, "", entries)
+                gsub(/[^0-9]/, "", deletions)
+                gsub(/[^0-9]/, "", bytes)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", column)
+                if (column != "" && bytes != "") {
+                    total_bytes[column] += bytes
+                    total_entries[column] += entries
+                    total_deletions[column] += deletions
+                    files[column] += 1
+                }
+            }
+            END {
+                for (column in total_bytes) {
+                    printf "%d\t%d\t%d\t%d\t%s\n", total_bytes[column], total_entries[column], total_deletions[column], files[column], column
+                }
+            }
+        ' \
+        | sort -nr \
+        | head -40
+else
+    echo "  unavailable; startup database-files output not found"
 fi
 echo ""
 

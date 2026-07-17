@@ -4,6 +4,11 @@ database_path = "/var/lib/tuwunel"
 database_backup_path = "/var/lib/tuwunel-backup"
 database_backups_to_keep = 2
 
+# Capture per-column SST sizes and tombstone counts once per enclave boot.
+# Ignore command errors so diagnostics can never prevent Tuwunel startup.
+admin_execute_errors_ignore = true
+admin_execute = ["debug database-files"]
+
 # Redaction must never retain a second copy of message content. Room-history
 # purges remove originals directly, but these settings also make any manual or
 # bridge redactions release their retained payload immediately.
@@ -18,6 +23,9 @@ port = 8008
 
 # Nitro enclave filesystem doesn't support Direct I/O
 rocksdb_direct_io = false
+rocksdb_max_log_files = 1
+rocksdb_compression_algo = "zstd"
+rocksdb_bottommost_compression = true
 
 # Allow legacy unauthenticated media endpoints (/media/r0/* and /media/v3/*).
 # Required by mautrix-telegram v0.15.3 (and any pre-bridgev2 mautrix bridge):

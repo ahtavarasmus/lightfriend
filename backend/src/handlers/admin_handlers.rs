@@ -2670,8 +2670,11 @@ pub async fn handler_stats(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     use crate::utils::bridge::{
         HANDLER_BOOT_TS, HANDLER_INVOCATIONS_SIGNAL, HANDLER_INVOCATIONS_TG,
-        HANDLER_INVOCATIONS_WA, HANDLER_SKIPPED_DUPLICATE_SIGNAL, HANDLER_SKIPPED_DUPLICATE_TG,
-        HANDLER_SKIPPED_DUPLICATE_WA, HANDLER_STORED_SIGNAL, HANDLER_STORED_TG, HANDLER_STORED_WA,
+        HANDLER_INVOCATIONS_WA, HANDLER_RETAINED_BRIDGE_CONNECTING,
+        HANDLER_RETAINED_INCOMING_UNSUPPORTED, HANDLER_RETAINED_NO_SUBSCRIPTION,
+        HANDLER_RETAINED_OUTGOING_UNSUPPORTED, HANDLER_SKIPPED_DUPLICATE_SIGNAL,
+        HANDLER_SKIPPED_DUPLICATE_TG, HANDLER_SKIPPED_DUPLICATE_WA, HANDLER_STORED_SIGNAL,
+        HANDLER_STORED_TG, HANDLER_STORED_WA,
     };
     use std::sync::atomic::Ordering;
 
@@ -2695,6 +2698,12 @@ pub async fn handler_stats(
             "telegram": HANDLER_SKIPPED_DUPLICATE_TG.load(Ordering::Relaxed),
             "whatsapp": HANDLER_SKIPPED_DUPLICATE_WA.load(Ordering::Relaxed),
             "signal":   HANDLER_SKIPPED_DUPLICATE_SIGNAL.load(Ordering::Relaxed),
+        },
+        "retained_without_ontology_proof": {
+            "bridge_connecting": HANDLER_RETAINED_BRIDGE_CONNECTING.load(Ordering::Relaxed),
+            "no_valid_subscription": HANDLER_RETAINED_NO_SUBSCRIPTION.load(Ordering::Relaxed),
+            "outgoing_unsupported_message_type": HANDLER_RETAINED_OUTGOING_UNSUPPORTED.load(Ordering::Relaxed),
+            "incoming_unsupported_message_type": HANDLER_RETAINED_INCOMING_UNSUPPORTED.load(Ordering::Relaxed),
         },
     })))
 }

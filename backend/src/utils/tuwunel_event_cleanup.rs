@@ -6,6 +6,7 @@ use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::fmt;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -15,10 +16,17 @@ const DEFAULT_RETENTION_SECS: u64 = 60;
 const DEFAULT_POLL_SECS: u64 = 30;
 const DEFAULT_MAX_ATTEMPTS: i32 = 5;
 const DEFAULT_BATCH_SIZE: usize = 10;
+const DEFAULT_BACKFILL_BATCH_SIZE: usize = 25;
+const DEFAULT_BACKFILL_SCAN_SECS: u64 = 3600;
+const DEFAULT_STALE_INGEST_SECS: u64 = 300;
+const DEFAULT_EXHAUSTED_RETRY_SECS: u64 = 900;
+const BLOCKER_LOG_INTERVAL_SECS: i64 = 600;
 const HTTP_TIMEOUT_SECS: u64 = 15;
 
 static DISABLED_LOGGED: OnceLock<()> = OnceLock::new();
 static DRY_RUN_LOGGED: OnceLock<()> = OnceLock::new();
+static CONFIG_LOGGED: OnceLock<()> = OnceLock::new();
+static LAST_BLOCKER_LOGGED_AT: AtomicI64 = AtomicI64::new(0);
 
 #[derive(Debug, Clone)]
 struct EventPurgeConfig {
@@ -30,6 +38,16 @@ struct EventPurgeConfig {
     poll_secs: u64,
     max_attempts: i32,
     batch_size: usize,
+    backfill_enabled: bool,
+    backfill_batch_size: usize,
+    backfill_scan_secs: u64,
+    stale_ingest_secs: u64,
+    exhausted_retry_secs: u64,
+}
+
+#[derive(Debug, Default)]
+struct PurgeCycleOutcome {
+    backfilled: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -161,28 +179,225 @@ pub fn enqueue_processed_bridge_event(
     }
 }
 
+pub fn enqueue_intentionally_discarded_bridge_event(
+    state: &Arc<AppState>,
+    user_id: i32,
+    service: &str,
+    room_id: &str,
+    event_id: &str,
+    reason: &str,
+) {
+    if !is_matrix_event_id(event_id) || !room_id.starts_with('!') {
+        tracing::warn!(
+            user_id,
+            service,
+            room_id,
+            event_id,
+            reason,
+            "Skipping invalid intentionally-discarded Tuwunel purge candidate"
+        );
+        return;
+    }
+
+    match state
+        .tuwunel_cleanup_repository
+        .record_intentionally_discarded(user_id, service, room_id, event_id, reason)
+    {
+        Ok(true) => tracing::info!(
+            user_id,
+            service,
+            room_id,
+            event_id,
+            reason,
+            "Recorded intentionally-discarded Tuwunel purge candidate"
+        ),
+        Ok(false) => tracing::debug!(
+            user_id,
+            service,
+            room_id,
+            event_id,
+            reason,
+            "Tuwunel purge candidate already existed"
+        ),
+        Err(error) => tracing::error!(
+            user_id,
+            service,
+            room_id,
+            event_id,
+            reason,
+            error = %error,
+            "Failed to record intentionally-discarded Tuwunel purge candidate"
+        ),
+    }
+}
+
+pub fn record_unproven_bridge_event_blocker(
+    state: &Arc<AppState>,
+    user_id: i32,
+    service: &str,
+    room_id: &str,
+    event_id: &str,
+    reason: &str,
+) {
+    if !is_matrix_event_id(event_id) || !room_id.starts_with('!') {
+        tracing::error!(
+            user_id,
+            service,
+            room_id,
+            event_id,
+            reason,
+            "Cannot create Tuwunel purge blocker for invalid Matrix identifiers"
+        );
+        return;
+    }
+
+    match state
+        .tuwunel_cleanup_repository
+        .record_unproven_blocker(user_id, service, room_id, event_id, reason)
+    {
+        Ok(true) => tracing::warn!(
+            user_id,
+            service,
+            room_id,
+            event_id,
+            reason,
+            "Created durable Tuwunel room purge blocker for unproven event"
+        ),
+        Ok(false) => tracing::debug!(
+            user_id,
+            service,
+            room_id,
+            event_id,
+            reason,
+            "Tuwunel cleanup audit row already exists for retained event"
+        ),
+        Err(error) => tracing::error!(
+            user_id,
+            service,
+            room_id,
+            event_id,
+            reason,
+            error = %error,
+            "Failed to create durable Tuwunel room purge blocker"
+        ),
+    }
+}
+
 pub async fn start_tuwunel_event_purge_worker(state: Arc<AppState>) {
     tracing::info!("Tuwunel event purge worker started");
+    let mut next_backfill_scan_at = 0_i32;
     loop {
         let config = EventPurgeConfig::from_env();
-        if let Err(error) = run_purge_cycle(&state, &config).await {
-            tracing::error!(error = %error, "Tuwunel event purge cycle failed");
+        if CONFIG_LOGGED.set(()).is_ok() {
+            tracing::info!(
+                enabled = config.enabled,
+                dry_run = config.dry_run,
+                retention_secs = config.retention_secs,
+                poll_secs = config.poll_secs,
+                max_attempts = config.max_attempts,
+                batch_size = config.batch_size,
+                backfill_enabled = config.backfill_enabled,
+                backfill_batch_size = config.backfill_batch_size,
+                backfill_scan_secs = config.backfill_scan_secs,
+                stale_ingest_secs = config.stale_ingest_secs,
+                exhausted_retry_secs = config.exhausted_retry_secs,
+                "Tuwunel event purge policy loaded"
+            );
+        }
+        let now = now_timestamp();
+        let run_backfill = config.backfill_enabled && now >= next_backfill_scan_at;
+        match run_purge_cycle(&state, &config, run_backfill).await {
+            Ok(outcome) if run_backfill => {
+                next_backfill_scan_at = next_backfill_scan_timestamp(
+                    now,
+                    outcome.backfilled,
+                    config.backfill_batch_size,
+                    config.poll_secs,
+                    config.backfill_scan_secs,
+                );
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::error!(error = %error, "Tuwunel event purge cycle failed");
+            }
         }
         tokio::time::sleep(Duration::from_secs(config.poll_secs)).await;
     }
 }
 
-async fn run_purge_cycle(state: &Arc<AppState>, config: &EventPurgeConfig) -> Result<()> {
+pub fn next_backfill_scan_timestamp(
+    now: i32,
+    inserted: usize,
+    batch_size: usize,
+    poll_secs: u64,
+    scan_secs: u64,
+) -> i32 {
+    let delay = if inserted >= batch_size {
+        poll_secs
+    } else {
+        scan_secs
+    };
+    now.saturating_add(delay.min(i32::MAX as u64) as i32)
+}
+
+async fn run_purge_cycle(
+    state: &Arc<AppState>,
+    config: &EventPurgeConfig,
+    run_backfill: bool,
+) -> Result<PurgeCycleOutcome> {
     if !config.enabled {
         if DISABLED_LOGGED.set(()).is_ok() {
             tracing::warn!(
                 "Tuwunel event purge is disabled; candidates will remain durable and untouched"
             );
         }
-        return Ok(());
+        return Ok(PurgeCycleOutcome::default());
     }
 
-    let cutoff = now_timestamp().saturating_sub(config.retention_secs.min(i32::MAX as u64) as i32);
+    let now = now_timestamp();
+    let stale_ingest_cutoff =
+        now.saturating_sub(config.stale_ingest_secs.min(i32::MAX as u64) as i32);
+    let recovered = state
+        .tuwunel_cleanup_repository
+        .recover_stale_ingest_blockers(stale_ingest_cutoff, config.batch_size as i64)?;
+    if recovered > 0 {
+        tracing::warn!(
+            recovered,
+            stale_ingest_secs = config.stale_ingest_secs,
+            "Recovered stale Tuwunel ingest blockers already present in ontology"
+        );
+    }
+
+    let exhausted_cutoff =
+        now.saturating_sub(config.exhausted_retry_secs.min(i32::MAX as u64) as i32);
+    let requeued = state
+        .tuwunel_cleanup_repository
+        .requeue_exhausted(exhausted_cutoff, config.batch_size as i64)?;
+    if requeued > 0 {
+        tracing::warn!(
+            requeued,
+            exhausted_retry_secs = config.exhausted_retry_secs,
+            "Requeued exhausted Tuwunel purge candidates after cooldown"
+        );
+    }
+
+    let backfilled = if run_backfill {
+        let inserted = state
+            .tuwunel_cleanup_repository
+            .enqueue_historical_backfill(config.backfill_batch_size)?;
+        tracing::info!(
+            inserted,
+            batch_size = config.backfill_batch_size,
+            "Tuwunel historical purge backfill scan completed"
+        );
+        inserted
+    } else {
+        0
+    };
+
+    log_stale_blockers(state, stale_ingest_cutoff, now)?;
+
+    let cutoff = now.saturating_sub(config.retention_secs.min(i32::MAX as u64) as i32);
     let due = state
         .tuwunel_cleanup_repository
         .list_due_room_boundaries(cutoff, config.batch_size)?;
@@ -199,11 +414,11 @@ async fn run_purge_cycle(state: &Arc<AppState>, config: &EventPurgeConfig) -> Re
                 "Tuwunel event purge dry-run: no purge API calls made"
             );
         }
-        return Ok(());
+        return Ok(PurgeCycleOutcome { backfilled });
     }
 
     if due.is_empty() && submitted.is_empty() {
-        return Ok(());
+        return Ok(PurgeCycleOutcome { backfilled });
     }
 
     let access_token = admin_access_token(state, config.admin_user_id).await?;
@@ -219,6 +434,32 @@ async fn run_purge_cycle(state: &Arc<AppState>, config: &EventPurgeConfig) -> Re
         submit_purge(state, config, &client, &access_token, &candidate).await;
     }
 
+    Ok(PurgeCycleOutcome { backfilled })
+}
+
+fn log_stale_blockers(state: &Arc<AppState>, cutoff: i32, now: i32) -> Result<()> {
+    let previous = LAST_BLOCKER_LOGGED_AT.load(Ordering::Relaxed);
+    let now = i64::from(now);
+    if now.saturating_sub(previous) < BLOCKER_LOG_INTERVAL_SECS {
+        return Ok(());
+    }
+    if LAST_BLOCKER_LOGGED_AT
+        .compare_exchange(previous, now, Ordering::Relaxed, Ordering::Relaxed)
+        .is_err()
+    {
+        return Ok(());
+    }
+
+    let counts = state
+        .tuwunel_cleanup_repository
+        .stale_blocker_counts(cutoff)?;
+    if !counts.is_empty() {
+        tracing::error!(
+            ?counts,
+            cutoff,
+            "Tuwunel purge has stale blockers requiring operator attention"
+        );
+    }
     Ok(())
 }
 
@@ -524,6 +765,28 @@ impl EventPurgeConfig {
                 1,
             )
             .min(100) as usize,
+            backfill_enabled: env_flag("TUWUNEL_EVENT_PURGE_BACKFILL_ENABLED", false),
+            backfill_batch_size: env_u64(
+                "TUWUNEL_EVENT_PURGE_BACKFILL_BATCH_SIZE",
+                DEFAULT_BACKFILL_BATCH_SIZE as u64,
+                1,
+            )
+            .min(100) as usize,
+            backfill_scan_secs: env_u64(
+                "TUWUNEL_EVENT_PURGE_BACKFILL_SCAN_SECS",
+                DEFAULT_BACKFILL_SCAN_SECS,
+                60,
+            ),
+            stale_ingest_secs: env_u64(
+                "TUWUNEL_EVENT_PURGE_STALE_INGEST_SECS",
+                DEFAULT_STALE_INGEST_SECS,
+                60,
+            ),
+            exhausted_retry_secs: env_u64(
+                "TUWUNEL_EVENT_PURGE_EXHAUSTED_RETRY_SECS",
+                DEFAULT_EXHAUSTED_RETRY_SECS,
+                60,
+            ),
         }
     }
 }

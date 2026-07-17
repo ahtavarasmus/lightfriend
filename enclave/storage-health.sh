@@ -429,7 +429,7 @@ print_tuwunel_detailed_breakdown() {
         "$TUWUNEL_ARCHIVE_LOG_DELETE_LOG_LIMIT"
 
     echo "--- tuwunel config storage/admin knobs ---"
-    grep -E '^(database_path|database_backup_path|database_backups_to_keep|rocksdb_direct_io|allow_legacy_media|freeze_legacy_media|allow_federation|admin_signal_execute)' \
+    grep -E '^(database_path|database_backup_path|database_backups_to_keep|rocksdb_direct_io|rocksdb_max_log_files|rocksdb_compression_algo|rocksdb_bottommost_compression|allow_legacy_media|freeze_legacy_media|allow_federation|admin_execute|admin_execute_errors_ignore|admin_signal_execute)' \
         /etc/tuwunel/tuwunel.toml 2>/dev/null || true
 
     echo "--- tuwunel latest RocksDB WAL options ---"

@@ -45,6 +45,10 @@ pub static HANDLER_STORED_SIGNAL: AtomicU64 = AtomicU64::new(0);
 pub static HANDLER_SKIPPED_DUPLICATE_TG: AtomicU64 = AtomicU64::new(0);
 pub static HANDLER_SKIPPED_DUPLICATE_WA: AtomicU64 = AtomicU64::new(0);
 pub static HANDLER_SKIPPED_DUPLICATE_SIGNAL: AtomicU64 = AtomicU64::new(0);
+pub static HANDLER_RETAINED_BRIDGE_CONNECTING: AtomicU64 = AtomicU64::new(0);
+pub static HANDLER_RETAINED_NO_SUBSCRIPTION: AtomicU64 = AtomicU64::new(0);
+pub static HANDLER_RETAINED_OUTGOING_UNSUPPORTED: AtomicU64 = AtomicU64::new(0);
+pub static HANDLER_RETAINED_INCOMING_UNSUPPORTED: AtomicU64 = AtomicU64::new(0);
 /// Set once on first handler invocation; readable by the stats endpoint to
 /// compute "events per minute since boot".
 pub static HANDLER_BOOT_TS: OnceLock<AtomicI64> = OnceLock::new();
@@ -84,6 +88,35 @@ fn bump_skipped_duplicate(service: &str) {
         _ => return,
     };
     counter.fetch_add(1, Ordering::Relaxed);
+}
+
+fn record_retained_unproven_event(
+    state: &Arc<AppState>,
+    user_id: i32,
+    service: &str,
+    room_id: &str,
+    event_id: &str,
+    reason: &str,
+) {
+    let counter = match reason {
+        "bridge_connecting" => &HANDLER_RETAINED_BRIDGE_CONNECTING,
+        "no_valid_subscription" => &HANDLER_RETAINED_NO_SUBSCRIPTION,
+        "outgoing_unsupported_message_type" => &HANDLER_RETAINED_OUTGOING_UNSUPPORTED,
+        "incoming_unsupported_message_type" => &HANDLER_RETAINED_INCOMING_UNSUPPORTED,
+        _ => return,
+    };
+    counter.fetch_add(1, Ordering::Relaxed);
+    crate::utils::tuwunel_event_cleanup::record_unproven_bridge_event_blocker(
+        state, user_id, service, room_id, event_id, reason,
+    );
+    tracing::warn!(
+        user_id,
+        service,
+        room_id,
+        event_id,
+        reason,
+        "Tuwunel event retained because ontology persistence was not proven"
+    );
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -2181,6 +2214,14 @@ pub async fn handle_bridge_message(
             "⏳ Skipping {} portal message - bridge is connecting",
             service
         );
+        record_retained_unproven_event(
+            &state,
+            user_id,
+            &service,
+            &room_id_str,
+            event.event_id.as_str(),
+            "bridge_connecting",
+        );
         return;
     }
 
@@ -2206,6 +2247,14 @@ pub async fn handle_bridge_message(
             "Skipping bridge bot message from {} in portal room",
             sender_localpart
         );
+        crate::utils::tuwunel_event_cleanup::enqueue_intentionally_discarded_bridge_event(
+            &state,
+            user_id,
+            &service,
+            &room_id_str,
+            event.event_id.as_str(),
+            "portal_bridge_bot",
+        );
         return;
     }
 
@@ -2213,11 +2262,26 @@ pub async fn handle_bridge_message(
     let sender_prefix = get_sender_prefix(&service);
     if !sender_localpart.starts_with(&sender_prefix) {
         // User's own outgoing message - store in ontology for context, skip AI processing
-        let content = match &event.content.msgtype {
-            MessageType::Text(t) => t.body.clone(),
-            MessageType::Notice(n) => n.body.clone(),
-            MessageType::Emote(t) => t.body.clone(),
-            _ => return, // Skip user media (no useful text for LLM)
+        let (content, cleanup_tuwunel_media) = match &event.content.msgtype {
+            MessageType::Text(t) => (t.body.clone(), false),
+            MessageType::Notice(n) => (n.body.clone(), false),
+            MessageType::Emote(t) => (t.body.clone(), false),
+            MessageType::Image(_) => ("IMAGE".to_string(), true),
+            MessageType::Video(_) => ("VIDEO".to_string(), true),
+            MessageType::File(_) => ("FILE".to_string(), true),
+            MessageType::Audio(_) => ("AUDIO".to_string(), true),
+            MessageType::Location(_) => ("LOCATION".to_string(), false),
+            _ => {
+                record_retained_unproven_event(
+                    &state,
+                    user_id,
+                    &service,
+                    &room_id_str,
+                    event.event_id.as_str(),
+                    "outgoing_unsupported_message_type",
+                );
+                return;
+            }
         };
         if is_error_message(&content) {
             log_bridge_error_notice(
@@ -2226,6 +2290,14 @@ pub async fn handle_bridge_message(
                 &service,
                 room.room_id().as_str(),
                 &content,
+            );
+            crate::utils::tuwunel_event_cleanup::enqueue_intentionally_discarded_bridge_event(
+                &state,
+                user_id,
+                &service,
+                &room_id_str,
+                event.event_id.as_str(),
+                "outgoing_bridge_error_notice",
             );
             return;
         }
@@ -2262,7 +2334,7 @@ pub async fn handle_bridge_message(
             &service,
             &cleanup_room_id,
             &cleanup_matrix_event_id,
-            false,
+            cleanup_tuwunel_media,
         );
         let state_clone = state.clone();
         let stored_service = service.clone();
@@ -2276,7 +2348,7 @@ pub async fn handle_bridge_message(
                         &cleanup_room_id,
                         &cleanup_matrix_event_id,
                         created.id,
-                        false,
+                        cleanup_tuwunel_media,
                     );
                     if !is_new {
                         bump_skipped_duplicate(&stored_service);
@@ -2441,6 +2513,14 @@ pub async fn handle_bridge_message(
             "User {} does not have valid subscription, skipping",
             user_id
         );
+        record_retained_unproven_event(
+            &state,
+            user_id,
+            &service,
+            &current_room_id,
+            event.event_id.as_str(),
+            "no_valid_subscription",
+        );
         return;
     }
     let user_plan = state.user_repository.get_plan_type(user_id).unwrap_or(None);
@@ -2502,7 +2582,17 @@ pub async fn handle_bridge_message(
         }
         MessageType::Location(_) => ("LOCATION".into(), 200i32),
         MessageType::Emote(ref t) => (t.body.clone(), t.body.len() as i32),
-        _ => return,
+        _ => {
+            record_retained_unproven_event(
+                &state,
+                user_id,
+                &service,
+                &current_room_id,
+                event.event_id.as_str(),
+                "incoming_unsupported_message_type",
+            );
+            return;
+        }
     };
 
     // Log bandwidth estimate for bridge traffic tracking
@@ -2520,6 +2610,14 @@ pub async fn handle_bridge_message(
     // mautrix-whatsapp creates for status@broadcast). Every status post from
     // any contact lands here and is noise for digests/notifications.
     if service == "whatsapp" && chat_name.to_lowercase().contains("status broadcast") {
+        crate::utils::tuwunel_event_cleanup::enqueue_intentionally_discarded_bridge_event(
+            &state,
+            user_id,
+            &service,
+            &current_room_id,
+            event.event_id.as_str(),
+            "whatsapp_status_broadcast",
+        );
         return;
     }
 
@@ -2527,6 +2625,14 @@ pub async fn handle_bridge_message(
     // as user messages for notification/proactive rules.
     if is_error_message(&content) {
         log_bridge_error_notice("incoming", user_id, &service, &current_room_id, &content);
+        crate::utils::tuwunel_event_cleanup::enqueue_intentionally_discarded_bridge_event(
+            &state,
+            user_id,
+            &service,
+            &current_room_id,
+            event.event_id.as_str(),
+            "incoming_bridge_error_notice",
+        );
         return;
     }
 
