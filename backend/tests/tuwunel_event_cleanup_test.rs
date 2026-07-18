@@ -1,6 +1,7 @@
 use backend::utils::tuwunel_event_cleanup::{
-    build_purge_history_url, build_purge_status_url, is_matrix_event_id,
-    is_tuwunel_admin_redaction_reason, next_backfill_scan_timestamp, purge_history_request,
+    build_purge_history_url, build_purge_status_url, historical_event_requires_proof,
+    is_matrix_event_id, is_tuwunel_admin_redaction_reason, next_backfill_scan_timestamp,
+    purge_history_request,
 };
 use serde_json::json;
 
@@ -68,4 +69,23 @@ fn historical_backfill_timestamp_saturates() {
         next_backfill_scan_timestamp(i32::MAX - 5, 25, 25, 30, 3_600),
         i32::MAX
     );
+}
+
+#[test]
+fn historical_audit_requires_proof_for_payload_events() {
+    assert!(historical_event_requires_proof("m.room.message", false));
+    assert!(historical_event_requires_proof("m.room.encrypted", false));
+    assert!(historical_event_requires_proof("m.sticker", false));
+    assert!(historical_event_requires_proof(
+        "com.example.bridge_payload",
+        false
+    ));
+}
+
+#[test]
+fn historical_audit_allows_state_and_non_payload_housekeeping() {
+    assert!(!historical_event_requires_proof("m.room.create", true));
+    assert!(!historical_event_requires_proof("m.room.member", true));
+    assert!(!historical_event_requires_proof("m.reaction", false));
+    assert!(!historical_event_requires_proof("m.room.redaction", false));
 }

@@ -366,14 +366,45 @@ print_tuwunel_purge_audit() {
          GROUP BY status, COALESCE(last_error, '\''reason unavailable'\'')
          ORDER BY rows DESC, status, reason;
 
+        WITH message_coverage AS (
+            SELECT messages.id,
+                   messages.room_id,
+                   cleanup.status,
+                   EXISTS (
+                       SELECT 1
+                         FROM tuwunel_cleanup_events newer
+                        WHERE newer.room_id = messages.room_id
+                          AND newer.status = '\''purge_succeeded'\''
+                          AND newer.ontology_message_id > messages.id
+                   ) AS covered_by_newer_success
+              FROM ont_messages messages
+              LEFT JOIN tuwunel_cleanup_events cleanup
+                ON cleanup.event_id = messages.matrix_event_id
+             WHERE messages.matrix_event_id IS NOT NULL
+        )
         SELECT count(*) AS ontology_events_with_matrix_id,
-               count(cleanup.id) AS tracked_cleanup_events,
-               count(*) - count(cleanup.id) AS untracked_historical_ontology_events,
-               count(DISTINCT messages.room_id) FILTER (WHERE cleanup.id IS NULL) AS rooms_with_untracked_ontology_events
-          FROM ont_messages messages
+               count(*) FILTER (WHERE status IS NOT NULL) AS cleanup_rows_present,
+               count(*) FILTER (WHERE status IS NULL) AS no_cleanup_row,
+               count(*) FILTER (WHERE status IS NULL AND covered_by_newer_success) AS no_row_but_covered_by_newer_purge,
+               count(*) FILTER (WHERE status IS NULL AND NOT covered_by_newer_success) AS no_row_without_purge_proof,
+               count(DISTINCT room_id) FILTER (WHERE status IS NULL AND NOT covered_by_newer_success) AS rooms_without_purge_proof
+          FROM message_coverage;
+
+        WITH latest_by_room AS (
+            SELECT DISTINCT ON (room_id)
+                   room_id,
+                   matrix_event_id
+              FROM ont_messages
+             WHERE matrix_event_id IS NOT NULL
+             ORDER BY room_id, created_at DESC, id DESC
+        )
+        SELECT COALESCE(cleanup.status, '\''unaudited'\'') AS latest_boundary_state,
+               count(*) AS rooms
+          FROM latest_by_room latest
           LEFT JOIN tuwunel_cleanup_events cleanup
-            ON cleanup.event_id = messages.matrix_event_id
-         WHERE messages.matrix_event_id IS NOT NULL;
+            ON cleanup.event_id = latest.matrix_event_id
+         GROUP BY COALESCE(cleanup.status, '\''unaudited'\'')
+         ORDER BY rooms DESC, latest_boundary_state;
     ' 2>/dev/null || echo "purge audit query failed"
 }
 

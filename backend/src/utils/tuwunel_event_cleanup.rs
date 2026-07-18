@@ -1,10 +1,11 @@
 use crate::pg_models::TuwunelCleanupEvent;
-use crate::repositories::tuwunel_cleanup_repository::now_timestamp;
+use crate::repositories::tuwunel_cleanup_repository::{now_timestamp, HistoricalBackfillCandidate};
 use crate::AppState;
 use anyhow::{anyhow, Result};
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::fmt;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -18,6 +19,10 @@ const DEFAULT_MAX_ATTEMPTS: i32 = 5;
 const DEFAULT_BATCH_SIZE: usize = 10;
 const DEFAULT_BACKFILL_BATCH_SIZE: usize = 25;
 const DEFAULT_BACKFILL_SCAN_SECS: u64 = 3600;
+const DEFAULT_BACKFILL_MIN_AGE_SECS: u64 = 86_400;
+const DEFAULT_BACKFILL_AUDIT_RECHECK_SECS: u64 = 86_400;
+const DEFAULT_BACKFILL_AUDIT_MAX_PAGES: usize = 100;
+const DEFAULT_BACKFILL_AUDIT_PAGE_SIZE: u64 = 100;
 const DEFAULT_STALE_INGEST_SECS: u64 = 300;
 const DEFAULT_EXHAUSTED_RETRY_SECS: u64 = 900;
 const BLOCKER_LOG_INTERVAL_SECS: i64 = 600;
@@ -39,8 +44,14 @@ struct EventPurgeConfig {
     max_attempts: i32,
     batch_size: usize,
     backfill_enabled: bool,
+    backfill_audit_enabled: bool,
+    backfill_execute_verified_enabled: bool,
     backfill_batch_size: usize,
     backfill_scan_secs: u64,
+    backfill_min_age_secs: u64,
+    backfill_audit_recheck_secs: u64,
+    backfill_audit_max_pages: usize,
+    backfill_audit_page_size: u64,
     stale_ingest_secs: u64,
     exhausted_retry_secs: u64,
 }
@@ -48,6 +59,13 @@ struct EventPurgeConfig {
 #[derive(Debug, Default)]
 struct PurgeCycleOutcome {
     backfilled: usize,
+    audited: usize,
+}
+
+#[derive(Debug)]
+struct HistoricalBackfillAudit {
+    verified: bool,
+    summary: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -297,23 +315,43 @@ pub async fn start_tuwunel_event_purge_worker(state: Arc<AppState>) {
                 max_attempts = config.max_attempts,
                 batch_size = config.batch_size,
                 backfill_enabled = config.backfill_enabled,
+                backfill_audit_enabled = config.backfill_audit_enabled,
+                backfill_execute_verified_enabled = config.backfill_execute_verified_enabled,
                 backfill_batch_size = config.backfill_batch_size,
                 backfill_scan_secs = config.backfill_scan_secs,
+                backfill_min_age_secs = config.backfill_min_age_secs,
+                backfill_audit_recheck_secs = config.backfill_audit_recheck_secs,
+                backfill_audit_max_pages = config.backfill_audit_max_pages,
+                backfill_audit_page_size = config.backfill_audit_page_size,
                 stale_ingest_secs = config.stale_ingest_secs,
                 exhausted_retry_secs = config.exhausted_retry_secs,
                 "Tuwunel event purge policy loaded"
             );
         }
         let now = now_timestamp();
-        let run_backfill = config.backfill_enabled && now >= next_backfill_scan_at;
+        let destructive_backfill_enabled =
+            config.backfill_enabled && config.backfill_execute_verified_enabled;
+        let run_backfill = (config.backfill_audit_enabled || destructive_backfill_enabled)
+            && now >= next_backfill_scan_at;
         match run_purge_cycle(&state, &config, run_backfill).await {
             Ok(outcome) if run_backfill => {
                 next_backfill_scan_at = next_backfill_scan_timestamp(
                     now,
-                    outcome.backfilled,
+                    if destructive_backfill_enabled {
+                        outcome.backfilled
+                    } else {
+                        0
+                    },
                     config.backfill_batch_size,
                     config.poll_secs,
                     config.backfill_scan_secs,
+                );
+                tracing::info!(
+                    audited = outcome.audited,
+                    enqueued = outcome.backfilled,
+                    next_backfill_scan_at,
+                    destructive_backfill_enabled,
+                    "Tuwunel historical audit cycle scheduled"
                 );
             }
             Ok(_) => {}
@@ -381,18 +419,10 @@ async fn run_purge_cycle(
         );
     }
 
-    let backfilled = if run_backfill {
-        let inserted = state
-            .tuwunel_cleanup_repository
-            .enqueue_historical_backfill(config.backfill_batch_size)?;
-        tracing::info!(
-            inserted,
-            batch_size = config.backfill_batch_size,
-            "Tuwunel historical purge backfill scan completed"
-        );
-        inserted
+    let (audited, backfilled) = if run_backfill {
+        run_historical_backfill_audit(state, config, now).await?
     } else {
-        0
+        (0, 0)
     };
 
     log_stale_blockers(state, stale_ingest_cutoff, now)?;
@@ -414,11 +444,17 @@ async fn run_purge_cycle(
                 "Tuwunel event purge dry-run: no purge API calls made"
             );
         }
-        return Ok(PurgeCycleOutcome { backfilled });
+        return Ok(PurgeCycleOutcome {
+            backfilled,
+            audited,
+        });
     }
 
     if due.is_empty() && submitted.is_empty() {
-        return Ok(PurgeCycleOutcome { backfilled });
+        return Ok(PurgeCycleOutcome {
+            backfilled,
+            audited,
+        });
     }
 
     let access_token = admin_access_token(state, config.admin_user_id).await?;
@@ -434,7 +470,216 @@ async fn run_purge_cycle(
         submit_purge(state, config, &client, &access_token, &candidate).await;
     }
 
-    Ok(PurgeCycleOutcome { backfilled })
+    Ok(PurgeCycleOutcome {
+        backfilled,
+        audited,
+    })
+}
+
+async fn run_historical_backfill_audit(
+    state: &Arc<AppState>,
+    config: &EventPurgeConfig,
+    now: i32,
+) -> Result<(usize, usize)> {
+    let boundary_cutoff =
+        now.saturating_sub(config.backfill_min_age_secs.min(i32::MAX as u64) as i32);
+    let audit_recheck_cutoff =
+        now.saturating_sub(config.backfill_audit_recheck_secs.min(i32::MAX as u64) as i32);
+    let destructive_backfill_enabled =
+        config.backfill_enabled && config.backfill_execute_verified_enabled;
+    let batch_size = if destructive_backfill_enabled {
+        config.backfill_batch_size
+    } else {
+        config.backfill_batch_size.min(5)
+    };
+    let candidates = state
+        .tuwunel_cleanup_repository
+        .list_historical_backfill_candidates(boundary_cutoff, audit_recheck_cutoff, batch_size)?;
+
+    let mut audited = 0;
+    let mut enqueued = 0;
+    for candidate in candidates {
+        let audit = match audit_historical_backfill_candidate(state, config, &candidate).await {
+            Ok(audit) => audit,
+            Err(error) => HistoricalBackfillAudit {
+                verified: false,
+                summary: format!("audit_error={error}"),
+            },
+        };
+        state
+            .tuwunel_cleanup_repository
+            .record_historical_backfill_audit(&candidate, audit.verified, &audit.summary)?;
+        audited += 1;
+
+        if audit.verified && destructive_backfill_enabled {
+            state
+                .tuwunel_cleanup_repository
+                .enqueue_verified_historical_backfill(&candidate, &audit.summary)?;
+            enqueued += 1;
+        }
+
+        tracing::info!(
+            user_id = candidate.user_id,
+            service = candidate.service,
+            room_id = candidate.room_id,
+            boundary_event_id = candidate.event_id,
+            boundary_created_at = candidate.created_at,
+            verified = audit.verified,
+            enqueued = audit.verified && destructive_backfill_enabled,
+            audit = audit.summary,
+            "Tuwunel historical room audit completed"
+        );
+    }
+
+    Ok((audited, enqueued))
+}
+
+async fn audit_historical_backfill_candidate(
+    state: &Arc<AppState>,
+    config: &EventPurgeConfig,
+    candidate: &HistoricalBackfillCandidate,
+) -> Result<HistoricalBackfillAudit> {
+    let room_id = matrix_sdk::ruma::RoomId::parse(&candidate.room_id)
+        .map_err(|error| anyhow!("invalid_room_id={error}"))?;
+    let client = crate::utils::matrix_auth::get_cached_client(candidate.user_id, state)
+        .await
+        .map_err(|error| anyhow!("matrix_client_unavailable={error}"))?;
+    let room = client
+        .get_room(&room_id)
+        .ok_or_else(|| anyhow!("room_not_visible_to_owner_session"))?;
+
+    let mut from = None;
+    let mut seen_tokens = HashSet::new();
+    let mut proof_event_ids = HashSet::new();
+    let mut boundary_found = false;
+    let mut room_create_found = false;
+    let mut reached_start = false;
+    let mut scanned_events = 0_usize;
+    let mut pages = 0_usize;
+
+    for _ in 0..config.backfill_audit_max_pages {
+        let mut options = matrix_sdk::room::MessagesOptions::backward();
+        options.from = from.clone();
+        options.limit = matrix_sdk::ruma::UInt::new(config.backfill_audit_page_size)
+            .ok_or_else(|| anyhow!("invalid_history_page_size"))?;
+        let response = tokio::time::timeout(
+            Duration::from_secs(HTTP_TIMEOUT_SECS),
+            room.messages(options),
+        )
+        .await
+        .map_err(|_| anyhow!("history_page_timeout"))?
+        .map_err(|error| anyhow!("history_page_failed={error}"))?;
+        pages += 1;
+
+        if response.chunk.is_empty() {
+            reached_start = true;
+            break;
+        }
+
+        for timeline_event in &response.chunk {
+            let event: Value = timeline_event
+                .raw()
+                .deserialize_as()
+                .map_err(|error| anyhow!("history_event_decode_failed={error}"))?;
+            let Some(event_id) = event.get("event_id").and_then(Value::as_str) else {
+                return Err(anyhow!("history_event_missing_event_id"));
+            };
+            let Some(event_type) = event.get("type").and_then(Value::as_str) else {
+                return Err(anyhow!("history_event_missing_type event_id={event_id}"));
+            };
+
+            if !boundary_found {
+                if event_id == candidate.event_id {
+                    boundary_found = true;
+                }
+                continue;
+            }
+
+            scanned_events = scanned_events.saturating_add(1);
+            let is_state_event = event.get("state_key").is_some();
+            if event_type == "m.room.create" && is_state_event {
+                room_create_found = true;
+            }
+            if historical_event_requires_proof(event_type, is_state_event) {
+                proof_event_ids.insert(event_id.to_string());
+            }
+        }
+
+        let Some(next_token) = response.end else {
+            reached_start = true;
+            break;
+        };
+        if !seen_tokens.insert(next_token.clone()) {
+            return Err(anyhow!("history_pagination_token_repeated"));
+        }
+        from = Some(next_token);
+    }
+
+    if !boundary_found {
+        return Ok(HistoricalBackfillAudit {
+            verified: false,
+            summary: format!("boundary_not_found pages={pages}"),
+        });
+    }
+    if !reached_start {
+        return Ok(HistoricalBackfillAudit {
+            verified: false,
+            summary: format!(
+                "history_scan_limit_reached pages={pages} max_pages={}",
+                config.backfill_audit_max_pages
+            ),
+        });
+    }
+    if !room_create_found {
+        return Ok(HistoricalBackfillAudit {
+            verified: false,
+            summary: format!(
+                "room_creation_not_visible pages={pages} scanned_events={scanned_events}"
+            ),
+        });
+    }
+
+    let mut proof_event_ids: Vec<String> = proof_event_ids.into_iter().collect();
+    proof_event_ids.sort();
+    let unproven = state
+        .tuwunel_cleanup_repository
+        .unproven_event_ids(&proof_event_ids)?;
+    if !unproven.is_empty() {
+        let sample = unproven
+            .iter()
+            .take(5)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(",");
+        return Ok(HistoricalBackfillAudit {
+            verified: false,
+            summary: format!(
+                "unproven_payload_events={} proof_required={} pages={} scanned_events={} sample_event_ids={}",
+                unproven.len(),
+                proof_event_ids.len(),
+                pages,
+                scanned_events,
+                sample
+            ),
+        });
+    }
+
+    Ok(HistoricalBackfillAudit {
+        verified: true,
+        summary: format!(
+            "verified_full_history proof_events={} pages={} scanned_events={}",
+            proof_event_ids.len(),
+            pages,
+            scanned_events
+        ),
+    })
+}
+
+pub fn historical_event_requires_proof(event_type: &str, is_state_event: bool) -> bool {
+    if is_state_event {
+        return false;
+    }
+    !matches!(event_type, "m.reaction" | "m.room.redaction")
 }
 
 fn log_stale_blockers(state: &Arc<AppState>, cutoff: i32, now: i32) -> Result<()> {
@@ -511,9 +756,30 @@ async fn submit_purge(
                 "Tuwunel room-history purge submitted"
             );
         }
-        Err(error) if event_was_already_purged(&error) => {
-            record_purge_succeeded(state, candidate, "boundary event already absent");
-        }
+        Err(error) if event_was_already_purged(&error) => match state
+            .tuwunel_cleanup_repository
+            .has_newer_successful_boundary(&candidate.room_id, candidate.ontology_message_id)
+        {
+            Ok(true) => record_purge_succeeded(
+                state,
+                candidate,
+                "boundary absent and a newer successful boundary proves coverage",
+            ),
+            Ok(false) => record_purge_failure(
+                state,
+                config,
+                candidate,
+                attempt,
+                "boundary event absent without a newer successful purge boundary",
+            ),
+            Err(proof_error) => record_purge_failure(
+                state,
+                config,
+                candidate,
+                attempt,
+                &format!("failed to prove absent boundary coverage: {proof_error}"),
+            ),
+        },
         Err(error) => record_purge_failure(state, config, candidate, attempt, &error.to_string()),
     }
 }
@@ -766,6 +1032,11 @@ impl EventPurgeConfig {
             )
             .min(100) as usize,
             backfill_enabled: env_flag("TUWUNEL_EVENT_PURGE_BACKFILL_ENABLED", false),
+            backfill_audit_enabled: env_flag("TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_ENABLED", true),
+            backfill_execute_verified_enabled: env_flag(
+                "TUWUNEL_EVENT_PURGE_BACKFILL_EXECUTE_VERIFIED_ENABLED",
+                false,
+            ),
             backfill_batch_size: env_u64(
                 "TUWUNEL_EVENT_PURGE_BACKFILL_BATCH_SIZE",
                 DEFAULT_BACKFILL_BATCH_SIZE as u64,
@@ -777,6 +1048,28 @@ impl EventPurgeConfig {
                 DEFAULT_BACKFILL_SCAN_SECS,
                 60,
             ),
+            backfill_min_age_secs: env_u64(
+                "TUWUNEL_EVENT_PURGE_BACKFILL_MIN_AGE_SECS",
+                DEFAULT_BACKFILL_MIN_AGE_SECS,
+                3600,
+            ),
+            backfill_audit_recheck_secs: env_u64(
+                "TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_RECHECK_SECS",
+                DEFAULT_BACKFILL_AUDIT_RECHECK_SECS,
+                3600,
+            ),
+            backfill_audit_max_pages: env_u64(
+                "TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_MAX_PAGES",
+                DEFAULT_BACKFILL_AUDIT_MAX_PAGES as u64,
+                1,
+            )
+            .min(1000) as usize,
+            backfill_audit_page_size: env_u64(
+                "TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_PAGE_SIZE",
+                DEFAULT_BACKFILL_AUDIT_PAGE_SIZE,
+                10,
+            )
+            .min(100),
             stale_ingest_secs: env_u64(
                 "TUWUNEL_EVENT_PURGE_STALE_INGEST_SECS",
                 DEFAULT_STALE_INGEST_SECS,

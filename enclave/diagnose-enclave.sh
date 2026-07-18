@@ -203,6 +203,45 @@ if command -v psql >/dev/null 2>&1 && [ -n "${PG_DATABASE_URL:-}" ]; then
           FROM tuwunel_cleanup_events
          ORDER BY updated_at DESC
          LIMIT 20;
+
+        WITH message_coverage AS (
+            SELECT messages.id,
+                   messages.room_id,
+                   cleanup.status,
+                   EXISTS (
+                       SELECT 1
+                         FROM tuwunel_cleanup_events newer
+                        WHERE newer.room_id = messages.room_id
+                          AND newer.status = '\''purge_succeeded'\''
+                          AND newer.ontology_message_id > messages.id
+                   ) AS covered_by_newer_success
+              FROM ont_messages messages
+              LEFT JOIN tuwunel_cleanup_events cleanup
+                ON cleanup.event_id = messages.matrix_event_id
+             WHERE messages.matrix_event_id IS NOT NULL
+        )
+        SELECT count(*) AS ontology_events_with_matrix_id,
+               count(*) FILTER (WHERE status IS NULL) AS no_cleanup_row,
+               count(*) FILTER (WHERE status IS NULL AND covered_by_newer_success) AS no_row_but_covered_by_newer_purge,
+               count(*) FILTER (WHERE status IS NULL AND NOT covered_by_newer_success) AS no_row_without_purge_proof,
+               count(DISTINCT room_id) FILTER (WHERE status IS NULL AND NOT covered_by_newer_success) AS rooms_without_purge_proof
+          FROM message_coverage;
+
+        WITH latest_by_room AS (
+            SELECT DISTINCT ON (room_id)
+                   room_id,
+                   matrix_event_id
+              FROM ont_messages
+             WHERE matrix_event_id IS NOT NULL
+             ORDER BY room_id, created_at DESC, id DESC
+        )
+        SELECT COALESCE(cleanup.status, '\''unaudited'\'') AS latest_boundary_state,
+               count(*) AS rooms
+          FROM latest_by_room latest
+          LEFT JOIN tuwunel_cleanup_events cleanup
+            ON cleanup.event_id = latest.matrix_event_id
+         GROUP BY COALESCE(cleanup.status, '\''unaudited'\'')
+         ORDER BY rooms DESC, latest_boundary_state;
     '
     if ! psql "$PG_DATABASE_URL" -v ON_ERROR_STOP=1 -c "$TUWUNEL_CLEANUP_SQL" 2>&1 | sanitize_backend_log; then
         echo "  audit table unavailable or query failed"
