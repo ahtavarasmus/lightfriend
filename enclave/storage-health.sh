@@ -16,6 +16,8 @@ SNAPSHOT_FILE="${STORAGE_HEALTH_SNAPSHOT_FILE:-/tmp/storage-health-snapshot.tsv}
 TUWUNEL_BUCKET_SNAPSHOT_FILE="${STORAGE_HEALTH_TUWUNEL_BUCKET_SNAPSHOT_FILE:-/tmp/tuwunel-storage-bucket-snapshot.tsv}"
 TOP_DIR_LINES="${STORAGE_HEALTH_TOP_DIR_LINES:-80}"
 TOP_FILE_LINES="${STORAGE_HEALTH_TOP_FILE_LINES:-40}"
+HOT_PATH_DIR_LINES="${STORAGE_HEALTH_HOT_PATH_DIR_LINES:-60}"
+HOT_PATH_FILE_LINES="${STORAGE_HEALTH_HOT_PATH_FILE_LINES:-30}"
 LARGE_FILE_MIN_KB="${STORAGE_HEALTH_LARGE_FILE_MIN_KB:-1024}"
 GROWTH_REPORT_MIN_KB="${STORAGE_HEALTH_GROWTH_REPORT_MIN_KB:-10240}"
 TUWUNEL_BUCKET_GROWTH_REPORT_MIN_KB="${STORAGE_HEALTH_TUWUNEL_BUCKET_GROWTH_REPORT_MIN_KB:-1024}"
@@ -217,6 +219,162 @@ print_storage_size_summary() {
             printf "path=%s missing=true bytes=0 mib=0.0\n" "$path"
         fi
     done
+}
+
+print_exact_root_accounting() {
+    local tmp_file df_used_kib df_used_bytes du_root_bytes gap_bytes
+
+    echo "--- exact rootfs accounting ---"
+    tmp_file="/tmp/storage-health-root-accounting.$$"
+    du -x --block-size=1 -d 1 / > "$tmp_file" 2>/dev/null || true
+    df_used_kib=$(df -Pk / 2>/dev/null | awk 'NR == 2 {print $3}')
+    du_root_bytes=$(awk '$2 == "/" {print $1}' "$tmp_file" 2>/dev/null | tail -1)
+    df_used_kib=${df_used_kib:-0}
+    du_root_bytes=${du_root_bytes:-0}
+    df_used_bytes=$((df_used_kib * 1024))
+    gap_bytes=$((df_used_bytes - du_root_bytes))
+    printf "df_used_bytes=%d df_used_mib=%.1f du_root_bytes=%d du_root_mib=%.1f df_minus_du_bytes=%d df_minus_du_mib=%.1f\n" \
+        "$df_used_bytes" \
+        "$(awk -v b="$df_used_bytes" 'BEGIN {print b / 1048576}')" \
+        "$du_root_bytes" \
+        "$(awk -v b="$du_root_bytes" 'BEGIN {print b / 1048576}')" \
+        "$gap_bytes" \
+        "$(awk -v b="$gap_bytes" 'BEGIN {print b / 1048576}')"
+
+    echo "exact_bytes path"
+    sort -nr "$tmp_file" 2>/dev/null || true
+    rm -f "$tmp_file"
+}
+
+print_hot_path_accounting() {
+    local path total_bytes
+    local paths=(
+        /home/rasmus/matrix-server
+        /app/matrix_store
+        /data/bridges
+        /app/uploads
+    )
+
+    echo "--- mutable hot-path accounting ---"
+    for path in "${paths[@]}"; do
+        if [ ! -d "$path" ]; then
+            printf "path=%s missing=true\n" "$path"
+            continue
+        fi
+
+        total_bytes=$(du -x --block-size=1 -s "$path" 2>/dev/null | awk 'NR == 1 {print $1}')
+        total_bytes=${total_bytes:-0}
+        printf "path=%s bytes=%d mib=%.1f\n" \
+            "$path" \
+            "$total_bytes" \
+            "$(awk -v b="$total_bytes" 'BEGIN {print b / 1048576}')"
+
+        echo "largest_subdirs exact_bytes path"
+        du -x --block-size=1 -d 4 "$path" 2>/dev/null \
+            | sort -nr \
+            | head -n "$HOT_PATH_DIR_LINES" || true
+
+        echo "largest_files exact_bytes mtime_utc path"
+        find "$path" -xdev -type f -printf '%s\t%TY-%Tm-%TdT%TH:%TM:%TSZ\t%p\n' 2>/dev/null \
+            | sort -nr \
+            | head -n "$HOT_PATH_FILE_LINES" || true
+    done
+}
+
+print_deleted_open_file_accounting() {
+    local tmp_file fd_path target metadata key size pid comm
+    tmp_file="/tmp/storage-health-deleted-open.$$"
+    : > "$tmp_file" 2>/dev/null || {
+        echo "--- deleted-but-open files ---"
+        echo "unable to create temporary accounting file"
+        return 0
+    }
+
+    for fd_path in /proc/[0-9]*/fd/*; do
+        [ -L "$fd_path" ] || continue
+        target=$(readlink "$fd_path" 2>/dev/null || true)
+        case "$target" in
+            *" (deleted)") ;;
+            *) continue ;;
+        esac
+
+        metadata=$(stat -Lc '%d:%i %s' "$fd_path" 2>/dev/null || true)
+        [ -n "$metadata" ] || continue
+        key=${metadata%% *}
+        size=${metadata#* }
+        case "$size" in
+            ''|*[!0-9]*) continue ;;
+        esac
+        pid=${fd_path#/proc/}
+        pid=${pid%%/*}
+        comm=$(cat "/proc/$pid/comm" 2>/dev/null || echo unknown)
+        printf '%s\t%s\t%s\t%s\t%s\n' "$key" "$size" "$pid" "$comm" "$target" >> "$tmp_file"
+    done
+
+    echo "--- deleted-but-open files ---"
+    if [ ! -s "$tmp_file" ]; then
+        echo "unique_files=0 total_bytes=0 total_mib=0.0"
+        rm -f "$tmp_file"
+        return 0
+    fi
+
+    awk -F '\t' '
+        !seen[$1]++ { files += 1; bytes += $2 }
+        END { printf "unique_files=%d total_bytes=%d total_mib=%.1f\n", files, bytes, bytes / 1048576 }
+    ' "$tmp_file"
+    echo "bytes pid process target"
+    awk -F '\t' '!seen[$1]++ {print}' "$tmp_file" \
+        | sort -t $'\t' -k2,2nr \
+        | head -40 \
+        | awk -F '\t' '{printf "%s %s %s %s\n", $2, $3, $4, $5}' || true
+    rm -f "$tmp_file"
+}
+
+print_tuwunel_purge_audit() {
+    echo "--- Tuwunel purge compact audit ---"
+    if ! command -v psql >/dev/null 2>&1 || [ -z "${PG_DATABASE_URL:-}" ]; then
+        echo "psql or PG_DATABASE_URL unavailable"
+        return 0
+    fi
+
+    timeout 8 psql "$PG_DATABASE_URL" -X -v ON_ERROR_STOP=1 -P pager=off -F '|' -c '
+        SELECT status,
+               count(*) AS rows,
+               COALESCE(sum(commands_expected), 0) AS expected,
+               COALESCE(sum(commands_accepted), 0) AS accepted,
+               to_char(to_timestamp(max(updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS last_updated
+          FROM tuwunel_cleanup_events
+         GROUP BY status
+         ORDER BY status;
+
+        SELECT service,
+               status,
+               count(*) AS rows,
+               count(DISTINCT room_id) AS rooms,
+               to_char(to_timestamp(max(updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS last_updated
+          FROM tuwunel_cleanup_events
+         WHERE updated_at >= EXTRACT(EPOCH FROM NOW())::INT4 - (6 * 60 * 60)
+         GROUP BY service, status
+         ORDER BY rows DESC, service, status;
+
+        SELECT status,
+               COALESCE(last_error, '\''reason unavailable'\'') AS reason,
+               count(*) AS rows,
+               count(DISTINCT room_id) AS rooms
+          FROM tuwunel_cleanup_events
+         WHERE status IN ('\''ingesting'\'', '\''ingest_failed'\'', '\''purge_retrying'\'', '\''purge_exhausted'\'')
+         GROUP BY status, COALESCE(last_error, '\''reason unavailable'\'')
+         ORDER BY rows DESC, status, reason;
+
+        SELECT count(*) AS ontology_events_with_matrix_id,
+               count(cleanup.id) AS tracked_cleanup_events,
+               count(*) - count(cleanup.id) AS untracked_historical_ontology_events,
+               count(DISTINCT messages.room_id) FILTER (WHERE cleanup.id IS NULL) AS rooms_with_untracked_ontology_events
+          FROM ont_messages messages
+          LEFT JOIN tuwunel_cleanup_events cleanup
+            ON cleanup.event_id = messages.matrix_event_id
+         WHERE messages.matrix_event_id IS NOT NULL;
+    ' 2>/dev/null || echo "purge audit query failed"
 }
 
 print_tuwunel_file_type_buckets() {
@@ -1221,9 +1379,13 @@ print_report() {
     print_known_path_df
     print_rootfs_backup_headroom
     print_storage_size_summary
+    print_exact_root_accounting
+    print_hot_path_accounting
+    print_deleted_open_file_accounting
+    print_tuwunel_purge_audit
+    print_tuwunel_detailed_breakdown
     print_largest_dirs_by_filesystem
     print_largest_files_by_filesystem
-    print_tuwunel_detailed_breakdown
     print_growth_since_last_snapshot
     echo "--- tuwunel BackupEngine dir ---"
     if [ -d /var/lib/tuwunel-backup ]; then
