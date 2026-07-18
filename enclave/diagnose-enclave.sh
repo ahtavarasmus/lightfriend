@@ -95,11 +95,11 @@ grep -HnE "panicked at|thread '[^']*' panicked|stack backtrace:|fatal runtime er
     2>/dev/null | tail -80 | sanitize_backend_log || echo "  none found"
 echo ""
 
-echo "--- Tuwunel purge instrumentation across backend logs ---"
+echo "--- Tuwunel purge and historical audit instrumentation across backend logs ---"
 echo "Tuwunel server version:"
 curl -sf http://localhost:8008/_synapse/admin/v1/server_version 2>/dev/null || echo "  unavailable"
 echo ""
-TUWUNEL_CLEANUP_LOG_LINES=$(grep -hEi "Tuwunel.*purge|purge.*Tuwunel|purge API|purge candidate|Tuwunel event retained" \
+TUWUNEL_CLEANUP_LOG_LINES=$(grep -hEi "Tuwunel.*purge|purge.*Tuwunel|purge API|purge candidate|Tuwunel event retained|Tuwunel historical room audit|backfill_audit|audit_error" \
     /var/log/supervisor/lightfriend.log /var/log/supervisor/lightfriend.log.1 /var/log/supervisor/lightfriend.log.2 \
     /var/log/supervisor/lightfriend-err.log /var/log/supervisor/lightfriend-err.log.1 /var/log/supervisor/lightfriend-err.log.2 \
     2>/dev/null | tail -120 || true)
@@ -171,9 +171,9 @@ if command -v psql >/dev/null 2>&1 && [ -n "${PG_DATABASE_URL:-}" ]; then
                count(*) AS rows,
                to_char(to_timestamp(min(updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS oldest_updated,
                to_char(to_timestamp(max(updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS newest_updated,
-               left(coalesce(max(last_error), '\'''\''), 240) AS sample_error
+               left(coalesce(max(last_error), '\'''\''), 1000) AS sample_error
           FROM tuwunel_cleanup_events
-         WHERE status IN ('\''ingesting'\'', '\''ingest_failed'\'', '\''pending_purge'\'', '\''purge_attempting'\'', '\''purge_submitted'\'', '\''purge_retrying'\'', '\''purge_exhausted'\'')
+         WHERE status IN ('\''ingesting'\'', '\''ingest_failed'\'', '\''pending_purge'\'', '\''purge_attempting'\'', '\''purge_submitted'\'', '\''purge_retrying'\'', '\''purge_exhausted'\'', '\''backfill_audit_verified'\'', '\''backfill_audit_blocked'\'')
             OR commands_accepted < commands_expected
          GROUP BY status
          ORDER BY oldest_updated NULLS LAST, status
@@ -186,9 +186,36 @@ if command -v psql >/dev/null 2>&1 && [ -n "${PG_DATABASE_URL:-}" ]; then
                count(DISTINCT room_id) AS blocked_rooms,
                to_char(to_timestamp(max(updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS last_updated
           FROM tuwunel_cleanup_events
-         WHERE status IN ('\''ingesting'\'', '\''ingest_failed'\'')
+         WHERE status IN ('\''ingesting'\'', '\''ingest_failed'\'', '\''backfill_audit_blocked'\'')
          GROUP BY service, status, left(COALESCE(last_error, '\''reason unavailable'\''), 240)
          ORDER BY events DESC, service, blocker_reason;
+
+        SELECT status,
+               service,
+               split_part(COALESCE(last_error, '\''reason unavailable'\''), '\'' '\'', 1) AS reason_code,
+               count(*) AS rows,
+               count(DISTINCT room_id) AS rooms,
+               to_char(to_timestamp(max(updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS last_updated
+          FROM tuwunel_cleanup_events
+         WHERE status IN ('\''backfill_audit_verified'\'', '\''backfill_audit_blocked'\'')
+         GROUP BY status, service, split_part(COALESCE(last_error, '\''reason unavailable'\''), '\'' '\'', 1)
+         ORDER BY rows DESC, status, service, reason_code;
+
+        SELECT cleanup.status,
+               cleanup.user_id,
+               cleanup.service,
+               cleanup.room_id,
+               cleanup.event_id AS boundary_event_id,
+               cleanup.ontology_message_id,
+               to_char(to_timestamp(messages.created_at), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS boundary_created_at,
+               to_char(to_timestamp(cleanup.updated_at), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS audited_at,
+               left(COALESCE(cleanup.last_error, '\''reason unavailable'\''), 1000) AS audit_summary
+          FROM tuwunel_cleanup_events cleanup
+          LEFT JOIN ont_messages messages
+            ON messages.id = cleanup.ontology_message_id
+         WHERE cleanup.status IN ('\''backfill_audit_verified'\'', '\''backfill_audit_blocked'\'')
+         ORDER BY cleanup.updated_at DESC, cleanup.id DESC
+         LIMIT 100;
 
         SELECT id,
                user_id,

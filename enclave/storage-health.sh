@@ -332,6 +332,7 @@ print_deleted_open_file_accounting() {
 
 print_tuwunel_purge_audit() {
     echo "--- Tuwunel purge compact audit ---"
+    echo "historical_audit_policy backfill_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_ENABLED:-false} audit_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_ENABLED:-true} execute_verified_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_EXECUTE_VERIFIED_ENABLED:-false} batch_size=${TUWUNEL_EVENT_PURGE_BACKFILL_BATCH_SIZE:-25} scan_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_SCAN_SECS:-3600} min_age_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_MIN_AGE_SECS:-86400} recheck_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_RECHECK_SECS:-86400} max_pages=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_MAX_PAGES:-100} page_size=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_PAGE_SIZE:-100}"
     if ! command -v psql >/dev/null 2>&1 || [ -z "${PG_DATABASE_URL:-}" ]; then
         echo "psql or PG_DATABASE_URL unavailable"
         return 0
@@ -362,9 +363,36 @@ print_tuwunel_purge_audit() {
                count(*) AS rows,
                count(DISTINCT room_id) AS rooms
           FROM tuwunel_cleanup_events
-         WHERE status IN ('\''ingesting'\'', '\''ingest_failed'\'', '\''purge_retrying'\'', '\''purge_exhausted'\'')
+         WHERE status IN ('\''ingesting'\'', '\''ingest_failed'\'', '\''purge_retrying'\'', '\''purge_exhausted'\'', '\''backfill_audit_verified'\'', '\''backfill_audit_blocked'\'')
          GROUP BY status, COALESCE(last_error, '\''reason unavailable'\'')
          ORDER BY rows DESC, status, reason;
+
+        SELECT status,
+               service,
+               split_part(COALESCE(last_error, '\''reason unavailable'\''), '\'' '\'', 1) AS reason_code,
+               count(*) AS rows,
+               count(DISTINCT room_id) AS rooms,
+               to_char(to_timestamp(max(updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS last_updated
+          FROM tuwunel_cleanup_events
+         WHERE status IN ('\''backfill_audit_verified'\'', '\''backfill_audit_blocked'\'')
+         GROUP BY status, service, split_part(COALESCE(last_error, '\''reason unavailable'\''), '\'' '\'', 1)
+         ORDER BY rows DESC, status, service, reason_code;
+
+        SELECT cleanup.status,
+               cleanup.user_id,
+               cleanup.service,
+               cleanup.room_id,
+               cleanup.event_id AS boundary_event_id,
+               cleanup.ontology_message_id,
+               to_char(to_timestamp(messages.created_at), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS boundary_created_at,
+               to_char(to_timestamp(cleanup.updated_at), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS audited_at,
+               left(COALESCE(cleanup.last_error, '\''reason unavailable'\''), 1000) AS audit_summary
+          FROM tuwunel_cleanup_events cleanup
+          LEFT JOIN ont_messages messages
+            ON messages.id = cleanup.ontology_message_id
+         WHERE cleanup.status IN ('\''backfill_audit_verified'\'', '\''backfill_audit_blocked'\'')
+         ORDER BY cleanup.updated_at DESC, cleanup.id DESC
+         LIMIT 100;
 
         WITH message_coverage AS (
             SELECT messages.id,
