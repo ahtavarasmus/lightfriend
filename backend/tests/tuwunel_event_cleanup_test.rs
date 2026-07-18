@@ -1,3 +1,4 @@
+use backend::utils::disconnected_bridge_cleanup::{build_delete_room_url, build_room_members_url};
 use backend::utils::tuwunel_event_cleanup::{
     build_purge_history_url, build_purge_status_url, historical_event_requires_proof,
     is_matrix_event_id, is_tuwunel_admin_redaction_reason, next_backfill_scan_timestamp,
@@ -10,6 +11,18 @@ fn builds_encoded_room_history_purge_url() {
     assert_eq!(
         build_purge_history_url("http://localhost:8008/", "!room:localhost"),
         "http://localhost:8008/_synapse/admin/v1/purge_history/%21room%3Alocalhost"
+    );
+}
+
+#[test]
+fn builds_encoded_disconnected_room_admin_urls() {
+    assert_eq!(
+        build_room_members_url("http://localhost:8008/", "!room:localhost"),
+        "http://localhost:8008/_synapse/admin/v1/rooms/%21room%3Alocalhost/members"
+    );
+    assert_eq!(
+        build_delete_room_url("http://localhost:8008", "!room:localhost"),
+        "http://localhost:8008/_synapse/admin/v1/rooms/%21room%3Alocalhost"
     );
 }
 

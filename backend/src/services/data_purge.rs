@@ -276,6 +276,9 @@ pub fn cascade_delete_user_data(pg_pool: &PgDbPool, user_id: i32) -> Result<()> 
         .map_err(|e| anyhow!("failed to get DB connection: {}", e))?;
 
     conn.transaction::<_, diesel::result::Error, _>(|conn| {
+        diesel::sql_query("DELETE FROM bridge_cleanup_jobs WHERE user_id = $1")
+            .bind::<diesel::sql_types::Integer, _>(user_id)
+            .execute(conn)?;
         diesel::delete(bridges::table.filter(bridges::user_id.eq(user_id))).execute(conn)?;
         diesel::delete(
             bridge_bandwidth_logs::table.filter(bridge_bandwidth_logs::user_id.eq(user_id)),

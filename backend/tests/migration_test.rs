@@ -82,6 +82,8 @@ fn test_migrations_apply_cleanly_with_existing_data() {
         "contact_profile_exceptions",
         "bridges",
         "bridge_disconnection_events",
+        "bridge_cleanup_jobs",
+        "bridge_cleanup_rooms",
         "message_history",
         "usage_logs",
         "items",

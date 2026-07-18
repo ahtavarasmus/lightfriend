@@ -17,6 +17,22 @@ pub const STATUS_PURGE_EXHAUSTED: &str = "purge_exhausted";
 pub const STATUS_BACKFILL_AUDIT_VERIFIED: &str = "backfill_audit_verified";
 pub const STATUS_BACKFILL_AUDIT_BLOCKED: &str = "backfill_audit_blocked";
 
+pub const BRIDGE_JOB_AUDIT_PENDING: &str = "audit_pending";
+pub const BRIDGE_JOB_AUDIT_READY: &str = "audit_ready";
+pub const BRIDGE_JOB_PENDING: &str = "pending";
+pub const BRIDGE_JOB_RETRYING: &str = "retrying";
+pub const BRIDGE_JOB_SUCCEEDED: &str = "succeeded";
+pub const BRIDGE_JOB_EXHAUSTED: &str = "exhausted";
+pub const BRIDGE_JOB_CANCELLED_RECONNECTED: &str = "cancelled_reconnected";
+
+pub const BRIDGE_ROOM_PENDING: &str = "pending";
+pub const BRIDGE_ROOM_AUDIT_READY: &str = "audit_ready";
+pub const BRIDGE_ROOM_BLOCKED_ACTIVE: &str = "blocked_active_connection";
+pub const BRIDGE_ROOM_DELETING: &str = "deleting";
+pub const BRIDGE_ROOM_SUCCEEDED: &str = "succeeded";
+pub const BRIDGE_ROOM_RETRYING: &str = "retrying";
+pub const BRIDGE_ROOM_EXHAUSTED: &str = "exhausted";
+
 const MAX_ERROR_LEN: usize = 4000;
 const MAX_DUE_SCAN: i64 = 5000;
 
@@ -36,6 +52,54 @@ pub struct HistoricalBackfillCandidate {
     pub created_at: i32,
 }
 
+#[derive(Debug, QueryableByName)]
+pub struct BridgeCleanupJob {
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    pub id: i32,
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    pub user_id: i32,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub bridge_type: String,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub trigger_kind: String,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Integer>)]
+    pub expected_bridge_id: Option<i32>,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Integer>)]
+    pub expected_bridge_created_at: Option<i32>,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+    pub management_room_id: Option<String>,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub status: String,
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    pub attempt_count: i32,
+}
+
+#[derive(Debug, QueryableByName)]
+pub struct BridgeCleanupRoom {
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    pub id: i32,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub room_id: String,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub source: String,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub status: String,
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    pub attempt_count: i32,
+}
+
+#[derive(QueryableByName)]
+struct ReturnedId {
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    id: i32,
+}
+
+#[derive(QueryableByName)]
+struct CountRow {
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    count: i64,
+}
+
 type PgPooledConnection =
     diesel::r2d2::PooledConnection<diesel::r2d2::ConnectionManager<diesel::PgConnection>>;
 
@@ -46,6 +110,338 @@ pub struct TuwunelCleanupRepository {
 impl TuwunelCleanupRepository {
     pub fn new(pool: PgDbPool) -> Self {
         Self { pool }
+    }
+
+    /// Persist a disconnect before its bridge row is removed, then snapshot every
+    /// platform room known to the canonical ontology. The bridge generation is
+    /// retained so a later reconnect can cancel the destructive work.
+    pub fn enqueue_bridge_cleanup(
+        &self,
+        bridge: &crate::pg_models::PgBridge,
+        trigger_kind: &str,
+        grace_secs: i32,
+    ) -> Result<i32> {
+        let mut conn = self.connection()?;
+        let now = now_timestamp();
+        conn.transaction::<i32, anyhow::Error, _>(|conn| {
+            let job = diesel::sql_query(
+                "INSERT INTO bridge_cleanup_jobs (
+                     user_id, bridge_type, trigger_kind, expected_bridge_id,
+                     expected_bridge_created_at, management_room_id, status,
+                     attempt_count, not_before, created_at, updated_at
+                 ) VALUES ($1, $2, $3, $4, $5, $6, 'pending', 0, $7, $8, $8)
+                 ON CONFLICT (user_id, bridge_type, expected_bridge_id)
+                     WHERE expected_bridge_id IS NOT NULL
+                 DO UPDATE SET
+                     trigger_kind = EXCLUDED.trigger_kind,
+                     management_room_id = COALESCE(EXCLUDED.management_room_id, bridge_cleanup_jobs.management_room_id),
+                     not_before = LEAST(bridge_cleanup_jobs.not_before, EXCLUDED.not_before),
+                     updated_at = EXCLUDED.updated_at
+                 RETURNING id",
+            )
+            .bind::<diesel::sql_types::Integer, _>(bridge.user_id)
+            .bind::<diesel::sql_types::Text, _>(&bridge.bridge_type)
+            .bind::<diesel::sql_types::Text, _>(trigger_kind)
+            .bind::<diesel::sql_types::Integer, _>(bridge.id)
+            .bind::<diesel::sql_types::Nullable<diesel::sql_types::Integer>, _>(bridge.created_at)
+            .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(bridge.room_id.as_deref())
+            .bind::<diesel::sql_types::Integer, _>(now.saturating_add(grace_secs.max(0)))
+            .bind::<diesel::sql_types::Integer, _>(now)
+            .get_result::<ReturnedId>(conn)?;
+
+            self.seed_bridge_cleanup_rooms(conn, job.id, bridge.user_id, &bridge.bridge_type, bridge.room_id.as_deref(), now)?;
+            Ok(job.id)
+        })
+    }
+
+    fn seed_bridge_cleanup_rooms(
+        &self,
+        conn: &mut diesel::PgConnection,
+        job_id: i32,
+        user_id: i32,
+        bridge_type: &str,
+        management_room_id: Option<&str>,
+        now: i32,
+    ) -> Result<()> {
+        diesel::sql_query(
+            "INSERT INTO bridge_cleanup_rooms (
+                 job_id, room_id, source, status, attempt_count, discovered_at, updated_at
+             )
+             SELECT $1, rooms.room_id, rooms.source, 'pending', 0, $5, $5
+               FROM (
+                    SELECT DISTINCT room_id, 'ontology'::TEXT AS source
+                      FROM ont_messages
+                     WHERE user_id = $2 AND platform = $3
+                    UNION
+                    SELECT $4::TEXT, 'management'::TEXT
+                     WHERE $4::TEXT IS NOT NULL AND $4::TEXT LIKE '!%'
+               ) rooms
+              WHERE rooms.room_id LIKE '!%'
+             ON CONFLICT (job_id, room_id) DO NOTHING",
+        )
+        .bind::<diesel::sql_types::Integer, _>(job_id)
+        .bind::<diesel::sql_types::Integer, _>(user_id)
+        .bind::<diesel::sql_types::Text, _>(bridge_type)
+        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(management_room_id)
+        .bind::<diesel::sql_types::Integer, _>(now)
+        .execute(conn)?;
+        Ok(())
+    }
+
+    pub fn enqueue_orphan_bridge_cleanup_audits(
+        &self,
+        limit: i64,
+        grace_secs: i32,
+    ) -> Result<usize> {
+        let mut conn = self.connection()?;
+        let now = now_timestamp();
+        let rows = diesel::sql_query(
+            "WITH candidates AS (
+                 SELECT messages.user_id, messages.platform AS bridge_type
+                   FROM ont_messages messages
+                  WHERE messages.platform IN ('whatsapp', 'signal', 'telegram')
+                    AND NOT EXISTS (
+                        SELECT 1 FROM bridges current
+                         WHERE current.user_id = messages.user_id
+                           AND current.bridge_type = messages.platform
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM bridge_cleanup_jobs existing
+                         WHERE existing.user_id = messages.user_id
+                           AND existing.bridge_type = messages.platform
+                           AND existing.expected_bridge_id IS NULL
+                           AND existing.status IN ('audit_pending', 'audit_ready', 'retrying')
+                    )
+                  GROUP BY messages.user_id, messages.platform
+                  ORDER BY min(messages.created_at)
+                  LIMIT $1
+             )
+             INSERT INTO bridge_cleanup_jobs (
+                 user_id, bridge_type, trigger_kind, status, attempt_count,
+                 not_before, created_at, updated_at
+             )
+             SELECT user_id, bridge_type, 'orphan_audit', 'audit_pending', 0,
+                    $2, $3, $3
+               FROM candidates
+             ON CONFLICT DO NOTHING
+             RETURNING id",
+        )
+        .bind::<diesel::sql_types::BigInt, _>(limit.max(1))
+        .bind::<diesel::sql_types::Integer, _>(now.saturating_add(grace_secs.max(0)))
+        .bind::<diesel::sql_types::Integer, _>(now)
+        .load::<ReturnedId>(&mut conn)?;
+
+        for row in &rows {
+            let metadata = diesel::sql_query(
+                "SELECT id, user_id, bridge_type, trigger_kind, expected_bridge_id,
+                        expected_bridge_created_at, management_room_id, status,
+                        attempt_count
+                   FROM bridge_cleanup_jobs WHERE id = $1",
+            )
+            .bind::<diesel::sql_types::Integer, _>(row.id)
+            .get_result::<BridgeCleanupJob>(&mut conn)?;
+            self.seed_bridge_cleanup_rooms(
+                &mut conn,
+                row.id,
+                metadata.user_id,
+                &metadata.bridge_type,
+                None,
+                now,
+            )?;
+        }
+        Ok(rows.len())
+    }
+
+    pub fn list_due_bridge_cleanup_jobs(
+        &self,
+        now: i32,
+        limit: i64,
+    ) -> Result<Vec<BridgeCleanupJob>> {
+        let mut conn = self.connection()?;
+        Ok(diesel::sql_query(
+            "SELECT id, user_id, bridge_type, trigger_kind, expected_bridge_id,
+                    expected_bridge_created_at, management_room_id, status, attempt_count
+               FROM bridge_cleanup_jobs
+              WHERE status IN ('pending', 'audit_pending', 'audit_ready', 'retrying')
+                AND not_before <= $1
+              ORDER BY updated_at, id
+              LIMIT $2",
+        )
+        .bind::<diesel::sql_types::Integer, _>(now)
+        .bind::<diesel::sql_types::BigInt, _>(limit.max(1))
+        .load(&mut conn)?)
+    }
+
+    pub fn list_bridge_cleanup_rooms(&self, job_id: i32) -> Result<Vec<BridgeCleanupRoom>> {
+        let mut conn = self.connection()?;
+        Ok(diesel::sql_query(
+            "SELECT id, room_id, source, status, attempt_count
+               FROM bridge_cleanup_rooms
+              WHERE job_id = $1 AND status NOT IN ('succeeded')
+              ORDER BY id",
+        )
+        .bind::<diesel::sql_types::Integer, _>(job_id)
+        .load(&mut conn)?)
+    }
+
+    pub fn add_bridge_cleanup_rooms(
+        &self,
+        job_id: i32,
+        room_ids: &[String],
+        source: &str,
+    ) -> Result<usize> {
+        if room_ids.is_empty() {
+            return Ok(0);
+        }
+        let mut conn = self.connection()?;
+        let now = now_timestamp();
+        Ok(diesel::sql_query(
+            "INSERT INTO bridge_cleanup_rooms (
+                 job_id, room_id, source, status, attempt_count, discovered_at, updated_at
+             )
+             SELECT $1, rooms.room_id, $3, 'pending', 0, $4, $4
+               FROM unnest($2::TEXT[]) AS rooms(room_id)
+              WHERE rooms.room_id LIKE '!%'
+             ON CONFLICT (job_id, room_id) DO NOTHING",
+        )
+        .bind::<diesel::sql_types::Integer, _>(job_id)
+        .bind::<diesel::sql_types::Array<diesel::sql_types::Text>, _>(room_ids)
+        .bind::<diesel::sql_types::Text, _>(source)
+        .bind::<diesel::sql_types::Integer, _>(now)
+        .execute(&mut conn)?)
+    }
+
+    pub fn bridge_generation_present(
+        &self,
+        job: &BridgeCleanupJob,
+    ) -> Result<Option<(i32, String, Option<i32>)>> {
+        let mut conn = self.connection()?;
+        #[derive(QueryableByName)]
+        struct CurrentBridge {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            id: i32,
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            status: String,
+            #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Integer>)]
+            created_at: Option<i32>,
+        }
+        let current = diesel::sql_query(
+            "SELECT id, status, created_at FROM bridges
+              WHERE user_id = $1 AND bridge_type = $2 ORDER BY id DESC LIMIT 1",
+        )
+        .bind::<diesel::sql_types::Integer, _>(job.user_id)
+        .bind::<diesel::sql_types::Text, _>(&job.bridge_type)
+        .get_result::<CurrentBridge>(&mut conn)
+        .optional()?;
+        Ok(current.map(|row| (row.id, row.status, row.created_at)))
+    }
+
+    pub fn active_ontology_room_owners(
+        &self,
+        room_id: &str,
+        bridge_type: &str,
+        excluding_user_id: i32,
+    ) -> Result<i64> {
+        let mut conn = self.connection()?;
+        Ok(diesel::sql_query(
+            "SELECT count(DISTINCT messages.user_id) AS count
+               FROM ont_messages messages
+               JOIN bridges active
+                 ON active.user_id = messages.user_id
+                AND active.bridge_type = messages.platform
+                AND active.status = 'connected'
+              WHERE messages.room_id = $1
+                AND messages.platform = $2
+                AND messages.user_id <> $3",
+        )
+        .bind::<diesel::sql_types::Text, _>(room_id)
+        .bind::<diesel::sql_types::Text, _>(bridge_type)
+        .bind::<diesel::sql_types::Integer, _>(excluding_user_id)
+        .get_result::<CountRow>(&mut conn)?
+        .count)
+    }
+
+    pub fn active_bridge_members(
+        &self,
+        matrix_localparts: &[String],
+        bridge_type: &str,
+        excluding_user_id: i32,
+    ) -> Result<i64> {
+        if matrix_localparts.is_empty() {
+            return Ok(0);
+        }
+        let mut conn = self.connection()?;
+        Ok(diesel::sql_query(
+            "SELECT count(DISTINCT active.user_id) AS count
+               FROM bridges active
+               JOIN user_secrets secrets ON secrets.user_id = active.user_id
+              WHERE active.bridge_type = $1
+                AND active.status = 'connected'
+                AND active.user_id <> $2
+                AND secrets.matrix_username = ANY($3)",
+        )
+        .bind::<diesel::sql_types::Text, _>(bridge_type)
+        .bind::<diesel::sql_types::Integer, _>(excluding_user_id)
+        .bind::<diesel::sql_types::Array<diesel::sql_types::Text>, _>(matrix_localparts)
+        .get_result::<CountRow>(&mut conn)?
+        .count)
+    }
+
+    pub fn update_bridge_cleanup_job(
+        &self,
+        id: i32,
+        status: &str,
+        attempt_count: i32,
+        not_before: i32,
+        error: Option<&str>,
+        complete: bool,
+    ) -> Result<()> {
+        let mut conn = self.connection()?;
+        let now = now_timestamp();
+        diesel::sql_query(
+            "UPDATE bridge_cleanup_jobs SET status = $2, attempt_count = $3,
+                    not_before = $4, last_error = $5, updated_at = $6,
+                    completed_at = CASE WHEN $7 THEN $6 ELSE NULL END
+              WHERE id = $1",
+        )
+        .bind::<diesel::sql_types::Integer, _>(id)
+        .bind::<diesel::sql_types::Text, _>(status)
+        .bind::<diesel::sql_types::Integer, _>(attempt_count)
+        .bind::<diesel::sql_types::Integer, _>(not_before)
+        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(error.map(trim_error))
+        .bind::<diesel::sql_types::Integer, _>(now)
+        .bind::<diesel::sql_types::Bool, _>(complete)
+        .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn update_bridge_cleanup_room(
+        &self,
+        id: i32,
+        status: &str,
+        attempt_count: i32,
+        delete_id: Option<&str>,
+        error: Option<&str>,
+        complete: bool,
+    ) -> Result<()> {
+        let mut conn = self.connection()?;
+        let now = now_timestamp();
+        diesel::sql_query(
+            "UPDATE bridge_cleanup_rooms SET status = $2, attempt_count = $3,
+                    delete_id = COALESCE($4, delete_id), last_error = $5,
+                    updated_at = $6,
+                    completed_at = CASE WHEN $7 THEN $6 ELSE NULL END
+              WHERE id = $1",
+        )
+        .bind::<diesel::sql_types::Integer, _>(id)
+        .bind::<diesel::sql_types::Text, _>(status)
+        .bind::<diesel::sql_types::Integer, _>(attempt_count)
+        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(delete_id)
+        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(error.map(trim_error))
+        .bind::<diesel::sql_types::Integer, _>(now)
+        .bind::<diesel::sql_types::Bool, _>(complete)
+        .execute(&mut conn)?;
+        Ok(())
     }
 
     pub fn record_ingesting(

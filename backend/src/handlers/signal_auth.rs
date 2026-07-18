@@ -787,6 +787,23 @@ pub async fn disconnect_signal(
 
     let room_id_str = bridge.room_id.clone().unwrap_or_default();
 
+    crate::utils::disconnected_bridge_cleanup::enqueue_disconnect_cleanup(
+        &state,
+        &bridge,
+        "explicit_disconnect",
+    )
+    .map_err(|e| {
+        tracing::error!(
+            user_id = auth_user.user_id,
+            error = %e,
+            "Refusing Signal disconnect because durable Tuwunel cleanup could not be queued"
+        );
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            AxumJson(json!({"error": "Failed to queue durable connection cleanup"})),
+        )
+    })?;
+
     // Set bridge status to "cleaning_up" instead of deleting immediately
     // This allows us to block reconnection until cleanup is complete
     state

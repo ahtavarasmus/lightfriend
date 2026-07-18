@@ -1694,6 +1694,14 @@ async fn main() {
         .await;
     });
 
+    let state_for_disconnected_bridge_cleanup = state.clone();
+    tokio::spawn(async move {
+        backend::utils::disconnected_bridge_cleanup::start_disconnected_bridge_cleanup_worker(
+            state_for_disconnected_bridge_cleanup,
+        )
+        .await;
+    });
+
     // Spawn one IDLE task per active IMAP connection. The polling cron
     // above remains as a safety net for servers that don't support IDLE
     // and for any task-down windows.

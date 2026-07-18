@@ -165,10 +165,24 @@ pub async fn check_all_bridges_health(
                 }
                 Some(false) => {
                     tracing::info!(
-                        "Bridge health: {} for user {} confirmed disconnected, deleting",
+                        "Bridge health: {} for user {} confirmed disconnected",
                         bridge.bridge_type,
                         user_id
                     );
+
+                    if let Err(e) =
+                        crate::utils::disconnected_bridge_cleanup::enqueue_disconnect_cleanup(
+                            state,
+                            &bridge,
+                            "confirmed_bad_credentials",
+                        )
+                    {
+                        error!(
+                            "Failed to queue durable cleanup for disconnected bridge {} user {}; leaving bridge record for retry: {}",
+                            bridge.bridge_type, user_id, e
+                        );
+                        continue;
+                    }
 
                     let current_time = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
