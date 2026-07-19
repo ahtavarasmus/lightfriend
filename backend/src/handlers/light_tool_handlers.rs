@@ -286,8 +286,8 @@ pub async fn disconnect_account(
     auth: LightToolDeviceAuth,
 ) -> Result<StatusCode, ApiError> {
     let now = chrono::Utc::now().timestamp() as i32;
-    LightToolDevicesRepository::new(state.pg_pool.clone())
-        .disconnect_account_if_active(auth.device.id, now)
+    LightToolPairingRepository::new(state.pg_pool.clone())
+        .disconnect_device(auth.device.id, now)
         .map_err(|error| {
             tracing::error!(
                 device_id = auth.device.id,
@@ -295,6 +295,7 @@ pub async fn disconnect_account(
             );
             internal_error("disconnect failed")
         })?
+        .then_some(())
         .ok_or_else(unauthorized)?;
     Ok(StatusCode::NO_CONTENT)
 }

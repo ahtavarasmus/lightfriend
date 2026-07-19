@@ -73,6 +73,19 @@ impl LightToolPairingRepository {
     ) -> Result<PairingConsumption, LightToolPairingRepositoryError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         conn.transaction::<PairingConsumption, LightToolPairingRepositoryError, _>(|conn| {
+            // Pair and disconnect both lock the device before its session so
+            // concurrent requests cannot deadlock or reconnect after logout.
+            let device = light_tool_devices::table
+                .filter(light_tool_devices::id.eq(device_id))
+                .filter(light_tool_devices::revoked_at.is_null())
+                .for_update()
+                .select(LightToolDevice::as_select())
+                .first::<LightToolDevice>(conn)
+                .optional()?;
+            let Some(device) = device else {
+                return Ok(PairingConsumption::DeviceUnavailable);
+            };
+
             let session = light_tool_pairing_sessions::table
                 .filter(light_tool_pairing_sessions::token_hash.eq(token_hash))
                 .for_update()
@@ -85,17 +98,6 @@ impl LightToolPairingRepository {
             if session.expires_at <= now {
                 return Ok(PairingConsumption::InvalidOrExpired);
             }
-
-            let device = light_tool_devices::table
-                .filter(light_tool_devices::id.eq(device_id))
-                .filter(light_tool_devices::revoked_at.is_null())
-                .for_update()
-                .select(LightToolDevice::as_select())
-                .first::<LightToolDevice>(conn)
-                .optional()?;
-            let Some(device) = device else {
-                return Ok(PairingConsumption::DeviceUnavailable);
-            };
 
             if session.consumed_at.is_some() {
                 if session.consumed_by_device_id == Some(device_id)
@@ -132,6 +134,43 @@ impl LightToolPairingRepository {
                 user_id: session.user_id,
                 newly_linked: true,
             })
+        })
+    }
+
+    pub fn disconnect_device(
+        &self,
+        device_id: i32,
+        now: i32,
+    ) -> Result<bool, LightToolPairingRepositoryError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        conn.transaction::<bool, LightToolPairingRepositoryError, _>(|conn| {
+            let device = light_tool_devices::table
+                .filter(light_tool_devices::id.eq(device_id))
+                .filter(light_tool_devices::revoked_at.is_null())
+                .for_update()
+                .select(LightToolDevice::as_select())
+                .first::<LightToolDevice>(conn)
+                .optional()?;
+            let Some(device) = device else {
+                return Ok(false);
+            };
+
+            if let Some(user_id) = device.user_id {
+                diesel::delete(
+                    light_tool_pairing_sessions::table
+                        .filter(light_tool_pairing_sessions::user_id.eq(user_id))
+                        .filter(light_tool_pairing_sessions::consumed_by_device_id.eq(device_id)),
+                )
+                .execute(conn)?;
+            }
+            diesel::update(light_tool_devices::table.find(device_id))
+                .set((
+                    light_tool_devices::user_id.eq::<Option<i32>>(None),
+                    light_tool_devices::updated_at.eq(now),
+                ))
+                .execute(conn)?;
+
+            Ok(true)
         })
     }
 }

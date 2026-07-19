@@ -299,6 +299,20 @@ async fn pairing_endpoints_connect_bootstrap_and_disconnect() {
     assert_eq!(disconnected.status(), StatusCode::NO_CONTENT);
     let after_disconnect = bootstrap_request(&app, &session.device_token).await;
     assert!(response_json(after_disconnect).await["account"].is_null());
+    assert_eq!(
+        get_pairing_status(
+            State(state.clone()),
+            AuthUser {
+                user_id: user.id,
+                is_admin: false,
+            },
+        )
+        .await
+        .unwrap()
+        .0
+        .status,
+        PairingStatusResponseKind::None
+    );
 
     let consumed_after_disconnect =
         pair_request(&app, &session.device_token, &offer.pairing_uri).await;

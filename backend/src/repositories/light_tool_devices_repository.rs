@@ -66,25 +66,6 @@ impl LightToolDevicesRepository {
         .optional()
     }
 
-    pub fn disconnect_account_if_active(
-        &self,
-        device_id: i32,
-        now: i32,
-    ) -> Result<Option<LightToolDevice>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(
-            light_tool_devices::table
-                .filter(light_tool_devices::id.eq(device_id))
-                .filter(light_tool_devices::revoked_at.is_null()),
-        )
-        .set((
-            light_tool_devices::user_id.eq::<Option<i32>>(None),
-            light_tool_devices::updated_at.eq(now),
-        ))
-        .get_result::<LightToolDevice>(&mut conn)
-        .optional()
-    }
-
     /// The eligibility predicates and increment share one UPDATE, so concurrent
     /// callers cannot both claim the final available trial message.
     pub fn claim_anonymous_trial_message(
