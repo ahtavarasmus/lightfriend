@@ -64,6 +64,21 @@ pub struct TrialQuotaResponse {
 #[derive(Serialize)]
 pub struct ConnectedAccountResponse {
     pub email: String,
+    pub monthly_credits: AccountCreditBalanceResponse,
+    pub overage_credits: Option<AccountCreditBalanceResponse>,
+}
+
+#[derive(Serialize)]
+pub struct AccountCreditBalanceResponse {
+    pub remaining: f32,
+    pub unit: AccountCreditUnitResponse,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountCreditUnitResponse {
+    Messages,
+    Eur,
 }
 
 #[derive(Serialize)]
@@ -194,7 +209,15 @@ pub async fn bootstrap(
                     internal_error("bootstrap failed")
                 })?
                 .ok_or_else(|| internal_error("connected account not found"))?;
-            Some(ConnectedAccountResponse { email: user.email })
+            let user = crate::utils::usage::ensure_current_included_usage_window(&state, &user)
+                .map_err(|error| {
+                    tracing::error!(
+                        user_id,
+                        "Light Tool bootstrap credit refresh failed: {error}"
+                    );
+                    internal_error("bootstrap failed")
+                })?;
+            Some(connected_account_response(&user))
         }
         None => None,
     };
@@ -277,8 +300,28 @@ pub async fn consume_pairing_offer(
         .ok_or_else(|| internal_error("paired account not found"))?;
 
     Ok(Json(ConsumePairingResponse {
-        account: ConnectedAccountResponse { email: user.email },
+        account: connected_account_response(&user),
     }))
+}
+
+fn connected_account_response(user: &crate::models::user_models::User) -> ConnectedAccountResponse {
+    let monthly_unit =
+        match crate::utils::country::get_country_code_from_phone(&user.phone_number).as_deref() {
+            Some("US") | Some("CA") => AccountCreditUnitResponse::Messages,
+            _ => AccountCreditUnitResponse::Eur,
+        };
+
+    ConnectedAccountResponse {
+        email: user.email.clone(),
+        monthly_credits: AccountCreditBalanceResponse {
+            remaining: user.credits_left.max(0.0),
+            unit: monthly_unit,
+        },
+        overage_credits: (user.credits > 0.0).then_some(AccountCreditBalanceResponse {
+            remaining: user.credits,
+            unit: AccountCreditUnitResponse::Eur,
+        }),
+    }
 }
 
 pub async fn disconnect_account(

@@ -25,6 +25,8 @@ use tokio::sync::mpsc;
 
 const CONTACTING_ACTIVITY: &str = "CONTACTING LIGHTFRIEND";
 const WORKING_ACTIVITY: &str = "WORKING ON IT";
+const REVIEWING_ACTIVITY: &str = "REVIEWING RESULTS";
+const PREPARING_RESPONSE_ACTIVITY: &str = "PREPARING RESPONSE";
 const MAX_HISTORY_MESSAGE_CHARACTERS: usize = 2_000;
 
 #[derive(Clone)]
@@ -355,6 +357,7 @@ where
     let mut reasoning_closed = false;
     let mut status_closed = false;
     let mut working_activity_sent = false;
+    let mut tool_result_ready = false;
 
     loop {
         tokio::select! {
@@ -362,7 +365,12 @@ where
             snippet = reasoning_rx.recv(), if !reasoning_closed => {
                 match snippet {
                     Some(_) if !working_activity_sent => {
-                        let _ = activity_tx.send(WORKING_ACTIVITY.to_string()).await;
+                        let activity = if tool_result_ready {
+                            PREPARING_RESPONSE_ACTIVITY
+                        } else {
+                            WORKING_ACTIVITY
+                        };
+                        let _ = activity_tx.send(activity.to_string()).await;
                         working_activity_sent = true;
                     }
                     Some(_) => {}
@@ -373,6 +381,12 @@ where
                 match status {
                     Some(AgentStatus::ToolCall { name }) => {
                         let _ = activity_tx.send(tool_activity(&name).to_string()).await;
+                        tool_result_ready = false;
+                    }
+                    Some(AgentStatus::ToolCompleted { .. }) => {
+                        let _ = activity_tx.send(REVIEWING_ACTIVITY.to_string()).await;
+                        tool_result_ready = true;
+                        working_activity_sent = false;
                     }
                     Some(AgentStatus::Retrying { .. } | AgentStatus::RetryingFollowup { .. }) => {
                         let _ = activity_tx.send("TRYING AGAIN".to_string()).await;

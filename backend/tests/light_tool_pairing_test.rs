@@ -270,7 +270,12 @@ async fn pairing_endpoints_connect_bootstrap_and_disconnect() {
 
     let paired = pair_request(&app, &session.device_token, &offer.pairing_uri).await;
     assert_eq!(paired.status(), StatusCode::OK);
-    assert_eq!(response_json(paired).await["account"]["email"], user.email);
+    let paired = response_json(paired).await;
+    assert_eq!(paired["account"]["email"], user.email);
+    assert_eq!(paired["account"]["monthly_credits"]["remaining"], 10.0);
+    assert_eq!(paired["account"]["monthly_credits"]["unit"], "messages");
+    assert_eq!(paired["account"]["overage_credits"]["remaining"], 5.0);
+    assert_eq!(paired["account"]["overage_credits"]["unit"], "eur");
     assert_eq!(
         get_pairing_status(
             State(state.clone()),
@@ -294,6 +299,14 @@ async fn pairing_endpoints_connect_bootstrap_and_disconnect() {
     let bootstrapped = response_json(bootstrapped).await;
     assert_eq!(bootstrapped["can_send"], true);
     assert_eq!(bootstrapped["account"]["email"], user.email);
+    assert_eq!(
+        bootstrapped["account"]["monthly_credits"]["remaining"],
+        10.0
+    );
+    assert_eq!(
+        bootstrapped["account"]["monthly_credits"]["unit"],
+        "messages"
+    );
 
     let disconnected = disconnect_request(&app, &session.device_token).await;
     assert_eq!(disconnected.status(), StatusCode::NO_CONTENT);

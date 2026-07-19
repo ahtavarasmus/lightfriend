@@ -2948,7 +2948,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                     <div class="tooltip">
                         <span class="tooltip-icon">{"?"}</span>
                         <span class="tooltip-text">
-                            {"Voice calls currently use OpenAI Realtime while Tinfoil voice is unavailable. Call audio and transcripts are processed by OpenAI."}
+                            {"Voice calls are optional and currently use OpenAI Realtime for a more natural experience. Call audio and transcripts are processed outside Lightfriend's verifiable trust chain and may be retained by OpenAI under its API data controls."}
                         </span>
                     </div>
                 </div>

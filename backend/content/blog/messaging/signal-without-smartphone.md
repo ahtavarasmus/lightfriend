@@ -20,14 +20,14 @@ faqs:
   - q: "Can I use Signal on a dumbphone?"
     a: "Not natively. But Lightfriend bridges Signal to SMS, so you can send and receive Signal messages from any phone."
   - q: "Is this still encrypted?"
-    a: "Signal messages are end-to-end encrypted between Signal users. The bridge decrypts inside Lightfriend's sealed enclave to convert to SMS. Your messages are never visible to Lightfriend operators."
+    a: "The Signal leg uses Signal's encryption, and the bridge processes decrypted content inside Lightfriend's enclave. The final SMS leg uses your carrier and is not end-to-end encrypted."
   - q: "Do my Signal contacts see my messages normally?"
     a: "Yes. They see your messages as regular Signal messages."
 related_slugs:
   - "whatsapp-without-smartphone"
   - "telegram-without-smartphone"
 hub_slug: "whatsapp-without-smartphone"
-ai_summary: "Lightfriend bridges Signal to SMS. Any phone that can text can send and receive Signal messages. The bridge runs inside a sealed enclave so operators can't read your messages."
+ai_summary: "Lightfriend bridges Signal to SMS. The production bridge runs inside an AWS Nitro Enclave, stored application data is encrypted, and the signed enclave measurement can be compared with the published build."
 ---
 
 ## The Problem
@@ -64,7 +64,7 @@ Lightfriend runs an open-source Signal bridge inside a sealed computing environm
 
 The obvious question: if Signal messages are end-to-end encrypted, doesn't a bridge break that?
 
-Here's how Lightfriend handles it: the bridge runs inside an AWS Nitro Enclave, a sealed computing environment that nobody can access - not even the server operators. Your Signal credentials and decrypted messages exist only inside this enclave. The code is open source and cryptographically verifiable.
+Here's how Lightfriend handles it: the production bridge runs inside an AWS Nitro Enclave. The enclave exposes no SSH login or administrative shell, stored application data is encrypted, and the signed enclave measurement can be compared with Lightfriend's published source build.
 
 The SMS leg (from Lightfriend to your phone) travels over your carrier's network, which is not end-to-end encrypted. This is a real tradeoff. But for people who would otherwise not use Signal at all, this is strictly better than sending everything as plain SMS.
 

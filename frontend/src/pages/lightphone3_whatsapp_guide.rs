@@ -7,7 +7,7 @@ use yew_router::components::Link;
 pub fn light_phone_3_whatsapp_guide() -> Html {
     use_seo(SeoMeta {
         title: "Light Phone 3 WhatsApp Guide \u{2013} How to Get WhatsApp on Light Phone",
-        description: "How to add WhatsApp to your Light Phone 3 without apps. AI monitors your WhatsApp and alerts you when something matters - send and receive messages via SMS and voice calls. Privacy verifiable on blockchain.",
+        description: "How to add WhatsApp to your Light Phone 3 without apps. AI monitors your WhatsApp and alerts you when something matters. Lightfriend is open source with cryptographically verifiable deployment measurements.",
         canonical: "https://lightfriend.ai/light-phone-3-whatsapp-guide",
         og_type: "article",
     });
@@ -104,7 +104,7 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
 
                 <h2>{"Common Questions"}</h2>
                 <p>{"Q: Does this work with Light Phone 3's international versions? A: Yes, as long as SMS/voice is available."}</p>
-                <p>{"Q: How private is my WhatsApp data? A: No trust required. Lightfriend runs in a hardware-isolated enclave - no one, not even the developer, can see your data. The codebase is fully open source and privacy is cryptographically verifiable."}</p>
+                <p>{"Q: How is my WhatsApp data handled? A: Lightfriend's production application runs in a hardware-isolated enclave. Stored application data is encrypted, the codebase is fully open source, and the running enclave reports a cryptographically signed code measurement that can be checked against the published build."}</p>
 
                 <h2>{"Also Works With"}</h2>
                 <p>{"Lightfriend bridges all major messaging platforms to SMS:"}</p>

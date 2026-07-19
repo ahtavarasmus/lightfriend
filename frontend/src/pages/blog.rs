@@ -33,7 +33,7 @@ pub fn blog() -> Html {
             <section class="blog-list-section">
                 <div class="blog-post-preview">
                     <Link<Route> to={Route::PromptInjectionSafe}>
-                        <h2>{"Why Lightfriend Can't Be Prompt Injected"}</h2>
+                        <h2>{"How Lightfriend Limits Prompt-Injection Impact"}</h2>
                         <p>{"Most AI assistants are powerful enough to be dangerous. Lightfriend is read-only by default - actions require your explicit approval."}</p>
                         <span class="blog-date">{"April 10, 2026"}</span>
                     </Link<Route>>

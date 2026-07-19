@@ -1,19 +1,21 @@
 # Lightfriend
 
-Verifiably private AI assistant for dumbphones. Access WhatsApp, Telegram, Signal, email, calendar, web search, and more via SMS and voice calls - no apps, no smartphone required. A practical solution for phone addiction: keep essential communication, ditch the addictive interfaces.
+AI assistant for dumbphones, designed so no one else can see your chats or personal data, including while AI processes them. All of the code is open source, and cryptographic evidence lets anyone independently verify which code is running in production.
+
+Access WhatsApp, Telegram, Signal, email, calendar, web search, and more via SMS and voice calls - no apps or smartphone required.
 
 Full-stack Rust (Axum backend, Yew WebAssembly frontend) with Matrix homeserver for multi-platform messaging.
 
-## Verifiable Privacy (Hardware Attestation)
+## Verifiable Privacy Architecture
 
-The first verifiably private cloud AI assistant. Not "we promise not to look" - cryptographically proven. Nobody can access user data: not the developer, not the cloud provider. Anyone can verify this at any time.
+The privacy goal shapes the entire architecture: hardware isolation, encrypted storage, independent key management, remote attestation, and verifiable AI inference. The sections below describe the implemented controls and what the available evidence establishes.
 
-- **Hardware isolation**: The entire application runs in an **AWS Nitro Enclave** - no SSH, no debugger, no memory access. Not by AWS, not by us, not by anyone.
-- **Remote attestation**: Cryptographic proof signed by AWS hardware (PCR0/PCR1/PCR2) proving exactly which code is running. Cannot be faked.
-- **Reproducible builds**: GitHub Actions builds the enclave image and publishes PCR values. Anyone can verify the live enclave matches this repo.
-- **Blockchain code registry**: Approved image fingerprints are published to an [Arbitrum smart contract](https://lightfriend.ai/trust-chain) - immutable, public, tamper-proof.
-- **Independent key management**: [Marlin KMS](https://github.com/marlinprotocol/oyster-monorepo) (itself running in an attested enclave) only releases encryption keys to enclaves running approved code. The developer never holds keys.
-- **Verifiable AI inference**: AI processing runs inside [Tinfoil](https://tinfoil.sh)'s hardware-isolated enclaves with their own attestation.
+- **Hardware isolation**: The production application runs in an **AWS Nitro Enclave** with no SSH login, interactive debugger, persistent storage, or direct external networking.
+- **Remote attestation**: AWS hardware signs an attestation document containing the enclave measurement (PCR0/PCR1/PCR2).
+- **Reproducible builds**: GitHub Actions builds the enclave image and publishes PCR values so they can be compared with the measurement reported by production.
+- **Public code registry**: Approved image fingerprints are published to an [Arbitrum smart contract](https://lightfriend.ai/trust-chain).
+- **Independent key management**: [Marlin KMS](https://github.com/marlinprotocol/oyster-monorepo) evaluates enclave attestation before releasing encryption keys. The Lightfriend operator does not manually provision the master key.
+- **Verifiable AI inference**: [Tinfoil](https://tinfoil.sh) publishes source code and attestation evidence for its confidential-computing inference environment.
 
 ### Verify it yourself
 
@@ -21,7 +23,11 @@ The first verifiably private cloud AI assistant. Not "we promise not to look" - 
 ./scripts/verify_live_attestation.sh https://lightfriend.ai --rpc-url https://arb1.arbitrum.io/rpc
 ```
 
-This checks: AWS attestation signature, PCR values match public build, code is on the blockchain approval list.
+This checks the AWS attestation signature, compares reported PCR values with the public build, and checks the public approval list. Attestation verifies deployment identity; it does not prove that the software is bug-free.
+
+### Optional voice calls
+
+Voice calls currently use OpenAI Realtime for a faster, more natural experience. Call audio and transcripts are processed outside Lightfriend's independently verifiable trust chain. OpenAI states that API data is not used for training unless the customer opts in, but default Realtime abuse-monitoring logs may retain customer content for up to 30 days. Voice calls are optional, and Lightfriend will switch as soon as a suitable open-source, attested voice alternative can provide a comparable experience.
 
 - Live attestation: `https://lightfriend.ai/.well-known/lightfriend/attestation`
 - Full explanation: [lightfriend.ai/trustless](https://lightfriend.ai/trustless)

@@ -4,6 +4,7 @@ use backend::{
         anonymous_light_tool_tools, run_agent_loop, AgentFailureMessages, AgentLoopInput,
         AgentPrincipal, AgentRunError,
     },
+    agent_core::AgentStatus,
     pg_models::NewPgMessageHistory,
     pg_schema::{light_tool_devices, light_tool_runs},
     repositories::{
@@ -35,6 +36,7 @@ use backend::{
     utils::encryption::decrypt,
 };
 use diesel::prelude::*;
+use std::collections::HashMap;
 use std::sync::{Arc, Barrier};
 use tokio::sync::mpsc;
 
@@ -126,6 +128,64 @@ async fn anonymous_agent_uses_the_shared_runner_for_direct_responses() {
     .unwrap();
 
     assert_eq!(output.final_response, "Hello from the shared agent");
+}
+
+#[tokio::test]
+async fn shared_agent_reports_when_a_tool_result_is_ready() {
+    let ai_config = backend::AiConfig::default_for_tests();
+    let tools = Vec::new();
+    let mut mock_llm_response = Some(
+        MockLlmResponse {
+            content: None,
+            tool_calls: Some(vec![openai_api_rs::v1::chat_completion::ToolCall {
+                id: "call_test_reminder".to_string(),
+                r#type: "function".to_string(),
+                function: openai_api_rs::v1::chat_completion::ToolCallFunction {
+                    name: Some("set_reminder".to_string()),
+                    arguments: Some("{}".to_string()),
+                },
+            }]),
+            is_text_response: false,
+        }
+        .to_response(),
+    );
+    let mock_tool_responses = Some(HashMap::from([(
+        "set_reminder".to_string(),
+        "Reminder set".to_string(),
+    )]));
+    let reasoning_tx = None;
+    let (status_tx, mut status_rx) = mpsc::channel(8);
+
+    let output = run_agent_loop(AgentLoopInput {
+        principal: AgentPrincipal::AnonymousLightTool {
+            device_id: 42,
+            ai_config: &ai_config,
+        },
+        model_purpose: backend::ModelPurpose::Default,
+        user_given_info: "",
+        image_url: None,
+        tools: &tools,
+        completion_messages: build_anonymous_chat_request(&[], "Remind me").messages,
+        skip_sms: true,
+        reasoning_tx: &reasoning_tx,
+        status_tx: Some(&status_tx),
+        mock_llm_response: &mut mock_llm_response,
+        mock_tool_responses: &mock_tool_responses,
+        current_time: NOW,
+        failure_messages: AgentFailureMessages::anonymous_trial(),
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(output.final_response, "Reminder set");
+    assert!(matches!(
+        status_rx.try_recv(),
+        Ok(AgentStatus::ToolCall { name }) if name == "set_reminder"
+    ));
+    assert!(matches!(
+        status_rx.try_recv(),
+        Ok(AgentStatus::ToolCompleted { name }) if name == "set_reminder"
+    ));
 }
 
 #[tokio::test]

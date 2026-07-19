@@ -6,8 +6,8 @@ use yew_router::components::Link;
 #[function_component(PromptInjectionSafe)]
 pub fn prompt_injection_safe() -> Html {
     use_seo(SeoMeta {
-        title: "Why Lightfriend Can't Be Prompt Injected - AI Assistant Without Write Access",
-        description: "Lightfriend is an AI assistant with no write permissions by default. It can only read your messages and notify you. Actions require your explicit approval. This makes prompt injection a non-issue.",
+        title: "How Lightfriend Limits Prompt-Injection Impact - AI Assistant Without Default Write Access",
+        description: "Lightfriend's default permission model separates message analysis from external actions. Outbound actions require explicit approval enforced by application code.",
         canonical: "https://lightfriend.ai/prompt-injection-safe",
         og_type: "article",
     });
@@ -27,7 +27,7 @@ pub fn prompt_injection_safe() -> Html {
         <div class="blog-page">
             <div class="blog-background"></div>
             <section class="blog-hero">
-                <h1>{"Why Lightfriend Can't Be Prompt Injected"}</h1>
+                <h1>{"How Lightfriend Limits Prompt-Injection Impact"}</h1>
                 <p>{"Most AI assistants are powerful enough to be dangerous. Lightfriend is powerful enough to be useful."}</p>
             </section>
             <section class="blog-content">
@@ -39,7 +39,7 @@ pub fn prompt_injection_safe() -> Html {
 
                 <h2>{"Lightfriend's Approach: Read-Only by Default"}</h2>
                 <p>{"Lightfriend takes a fundamentally different approach. By default, the AI has no write permissions. It can read your messages across WhatsApp, Telegram, Signal, and email. It can analyze them, understand context, and figure out what's important. But it cannot act on your behalf."}</p>
-                <p>{"The only thing Lightfriend can do without your permission is send you an SMS notification. That's it. The worst case scenario of a prompt injection against Lightfriend is: you get an unnecessary text message to your own phone."}</p>
+                <p>{"Under the default permission model, the only external action available without a separate approval is an SMS notification to the user's own phone. Other outbound actions pass through an application-code approval gate."}</p>
                 <p>{"Compare that to the worst case with a fully autonomous AI assistant: your private messages forwarded to strangers, emails sent in your name, meetings scheduled you didn't want, data exfiltrated to unknown endpoints."}</p>
 
                 <h2>{"Not a Limitation. A Design Decision."}</h2>
@@ -59,9 +59,9 @@ pub fn prompt_injection_safe() -> Html {
                 <p>{"Prompt injection works because AI models are fundamentally susceptible to it - they can't reliably distinguish instructions from data. No amount of prompt engineering fully fixes this. The real fix is architectural: don't give the AI the ability to do damage in the first place."}</p>
                 <p>{"Lightfriend's architecture means:"}</p>
                 <ul>
-                    <li>{"A malicious message in a Telegram group can't make Lightfriend leak your private chats - it has no way to send data anywhere except as an SMS to you"}</li>
-                    <li>{"A crafted email can't trick Lightfriend into replying with sensitive information - it can't reply to anything without you saying so"}</li>
-                    <li>{"A phishing message can't hijack your assistant into performing actions - there are no autonomous actions to hijack"}</li>
+                    <li>{"The default tool policy exposes no general outbound messaging action without user approval"}</li>
+                    <li>{"Email replies and messaging actions pass through deterministic application-code checks"}</li>
+                    <li>{"Optional autonomous rules are separate, explicit, and disabled by default"}</li>
                 </ul>
                 <p>{"You don't need to trust the AI model to be robust against prompt injection. You just need to trust the code that controls what the AI is allowed to do. And that code is open source."}</p>
 
@@ -72,20 +72,20 @@ pub fn prompt_injection_safe() -> Html {
 
                 <h2>{"The Enclave Layer"}</h2>
                 <p>{"Architecture alone doesn't solve everything. Even a read-only assistant handles sensitive data - your messages, your contacts, your communication patterns. If the server is compromised, that data is exposed."}</p>
-                <p>{"That's why Lightfriend runs inside an AWS Nitro Enclave - a hardware-isolated computing environment that nobody can access, not even the developer. Your data is encrypted with keys that only exist inside the enclave. The code running inside is cryptographically attested and verifiable by anyone."}</p>
+                <p>{"Lightfriend's production application runs inside an AWS Nitro Enclave. Application data stored outside the enclave is encrypted, key release is conditioned on attestation, and the reported measurement of the running code can be compared with the published build."}</p>
                 <p>{"So you get two layers of protection:"}</p>
                 <ol>
                     <li><strong>{"Architectural"}</strong>{" - The AI can't act on your behalf without permission (prevents prompt injection damage)"}</li>
-                    <li><strong>{"Cryptographic"}</strong>{" - Nobody can access your data even if they wanted to (prevents data breaches)"}</li>
+                    <li><strong>{"Cryptographic"}</strong>{" - Hardware isolation, encrypted storage, and attestation reduce operator access paths and make the deployed code measurement inspectable"}</li>
                 </ol>
-                <p>{"For the full technical explanation: "}<Link<Route> to={Route::Trustless}>{"How Lightfriend keeps your data private"}</Link<Route>>{"."}</p>
+                <p>{"For the full technical explanation: "}<Link<Route> to={Route::Trustless}>{"Review Lightfriend's privacy architecture"}</Link<Route>>{"."}</p>
 
                 <h2>{"Summary"}</h2>
                 <p>{"Most AI assistants are designed to be as autonomous as possible. Lightfriend is designed to be as useful as possible without being dangerous. It reads everything, understands context, notices what matters - then tells you about it and waits for your call. Actions are gated behind your explicit approval, enforced by code, not by hoping the AI won't get tricked."}</p>
-                <p>{"This means you can connect your real messaging apps and email to Lightfriend without worrying about what happens when - not if - someone tries to manipulate the AI."}</p>
+                <p>{"These controls are designed to limit what an injected instruction can do when Lightfriend is connected to real messaging apps and email."}</p>
 
                 <div class="blog-cta">
-                    <h3>{"An AI Assistant You Can Trust With Your Real Data"}</h3>
+                    <h3>{"An AI Assistant With Inspectable Controls"}</h3>
                     <a href="/#plans" class="forward-link">
                         <button class="hero-cta">{"See Plans"}</button>
                     </a>

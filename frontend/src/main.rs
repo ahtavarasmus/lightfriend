@@ -312,7 +312,7 @@ use crate::utils::seo::{use_seo, SeoMeta};
 pub fn pricing_wrapper() -> Html {
     use_seo(SeoMeta {
         title: "Pricing \u{2013} Lightfriend AI Assistant for Dumbphones",
-        description: "Lightfriend pricing plans. AI that watches your WhatsApp, Telegram, Signal, and email - only interrupts when it matters. Works with any phone including dumbphones. Privacy verifiable on blockchain.",
+        description: "Lightfriend pricing plans. AI that watches your WhatsApp, Telegram, Signal, and email and notifies you when something matters. Open source with cryptographically verifiable deployment measurements.",
         canonical: "https://lightfriend.ai/#plans",
         og_type: "website",
     });
@@ -427,7 +427,7 @@ pub fn nav(props: &NavProps) -> Html {
                                         </a>
                                         <Link<Route> to={Route::TrustChain} classes="nav-trust-badge">
                                             <i class="fa-solid fa-shield-halved"></i>
-                                            <span>{"Verifiably Private"}</span>
+                                            <span>{"Private by Design"}</span>
                                         </Link<Route>>
                                     </div>
                                     if !is_pricing {

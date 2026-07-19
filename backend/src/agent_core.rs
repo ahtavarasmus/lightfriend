@@ -23,6 +23,9 @@ pub enum AgentStatus {
     ToolCall {
         name: String,
     },
+    ToolCompleted {
+        name: String,
+    },
     Retrying {
         attempt: u32,
         max: u32,

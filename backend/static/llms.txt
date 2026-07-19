@@ -1,31 +1,35 @@
 # Lightfriend
 
-> Verifiably private AI assistant for dumbphones. Access WhatsApp, Telegram, Signal, email, calendar, web search, and more via SMS and voice calls - no apps, no smartphone required.
+> AI assistant for dumbphones, designed so no one else can see your chats or personal data, including while AI processes them. All code is open source, and cryptographic evidence lets anyone independently verify which code is running in production.
 
 Lightfriend bridges the gap between minimalist dumbphones and essential digital services. Users interact entirely through SMS text messages and voice calls from any phone. It is a practical solution for people overcoming phone addiction: users keep access to essential communication without the addictive apps, infinite feeds, and attention-harvesting algorithms of smartphones.
 
-## Verifiable Privacy (Hardware Attestation)
+## Verifiable Privacy Architecture
 
-Lightfriend is the first verifiably private cloud AI assistant. Not "we promise not to look at your data" private - cryptographically proven private. Nobody can access user data: not the developer, not the cloud provider, not anyone. And anyone can verify this at any time.
+Lightfriend's privacy goal shapes the entire architecture: hardware isolation, encrypted storage, independent key management, remote attestation, and verifiable AI inference. The source code and cryptographic evidence about the production deployment are public.
 
-The entire application runs inside an AWS Nitro Enclave - a hardware-isolated computing environment with no SSH access, no debugger, no memory inspection. The enclave is cryptographically attested: AWS hardware signs a proof of exactly which code is running, and that proof is verified against the open-source build and a public blockchain registry. Encryption keys are managed by an independent service that only releases them to attested enclaves running approved code. The developer never holds or sees user encryption keys.
+The production application runs inside an AWS Nitro Enclave with no SSH login, interactive debugger, persistent storage, or direct external networking. AWS hardware signs an attestation document containing the enclave measurement. That reported measurement can be compared with the open-source build and the public approval registry. Marlin KMS evaluates attestation before releasing encryption keys, and the Lightfriend operator does not manually provision the master key.
 
 Key properties:
 
-- **Hardware isolation**: Production runs in an AWS Nitro Enclave. No one can access the inside - not AWS, not the developer.
-- **Remote attestation**: The enclave produces a cryptographic attestation document signed by AWS hardware, proving exactly which code is running (PCR0/PCR1/PCR2 values). Cannot be faked.
-- **Open source + reproducible builds**: All code is on GitHub. Automated builds publish enclave fingerprints. Anyone can verify the live system matches the public source.
-- **Blockchain code registry**: Approved code fingerprints are published to an Arbitrum smart contract - an immutable, public, tamper-proof record.
-- **Independent key management**: Encryption keys are held by Marlin KMS (itself running in an attested enclave). Keys only go to enclaves that prove they are running approved code. The developer never touches keys.
-- **Verifiable AI inference**: AI processing is handled by Tinfoil, which runs models inside hardware-isolated enclaves with their own attestation - so the AI layer is also verifiably private.
-- **End-to-end verification**: Anyone can run `./scripts/verify_live_attestation.sh` to independently verify the full trust chain from source code to live deployment.
+- **Hardware isolation**: Production runs in an AWS Nitro Enclave with restricted interfaces to the parent server.
+- **Remote attestation**: AWS hardware signs an attestation document containing PCR0/PCR1/PCR2 measurements.
+- **Open source + reproducible builds**: Automated builds publish enclave measurements for comparison with the live attestation.
+- **Public code registry**: Approved code measurements are published to an Arbitrum smart contract.
+- **Independent key management**: Marlin KMS evaluates attestation before releasing encryption keys.
+- **Verifiable AI inference**: Tinfoil publishes source code and attestation evidence for its confidential-computing inference environment.
+- **Deployment verification**: Anyone can run `./scripts/verify_live_attestation.sh` to check the reported measurement against the public build and approval registry.
 - **Live attestation endpoints**: `/.well-known/lightfriend/attestation` returns live PCR values, commit SHA, and build metadata.
 
-This is a novel approach to cloud AI privacy. Instead of asking users to trust a privacy policy, Lightfriend provides a cryptographic proof chain: open source code, reproducible builds, hardware-signed attestation, and blockchain-verified code integrity. Every layer is independently verifiable.
+The verification chain combines open-source code, reproducible builds, hardware-signed attestation, and a public code registry. It makes the reported deployment identity independently inspectable; it does not prove that the software is free of bugs.
 
-For the full technical explanation of how this works, including the sealed room analogy, key rotation during updates, and what you still have to trust: [Verifiably Private](https://lightfriend.ai/trustless)
+For the full technical explanation, including key rotation and what still requires trust: [Privacy Architecture](https://lightfriend.ai/trustless)
 
 For live verification data with timestamps, blockchain transactions, and attestation status: [Live Trust Chain](https://lightfriend.ai/trust-chain)
+
+### Optional voice calls
+
+Voice calls currently use OpenAI Realtime for a faster, more natural experience. Call audio and transcripts are processed outside Lightfriend's independently verifiable trust chain. OpenAI states that API data is not used for training unless the customer opts in, but default Realtime abuse-monitoring logs may retain customer content for up to 30 days. Voice calls are optional, and Lightfriend will switch as soon as a suitable open-source, attested voice alternative can provide a comparable experience.
 
 ## Phone Addiction Solution
 
@@ -40,20 +44,20 @@ Lightfriend is designed for people who want to break free from phone addiction. 
 
 - [How It Works](https://lightfriend.ai/faq): FAQ covering features, setup, privacy, and compatible phones
 - [Pricing](https://lightfriend.ai/pricing): Autopilot costs $80/month, $210 every 3 months, or $420/year with a 7-day free trial
-- [Verifiably Private](https://lightfriend.ai/trustless): Full explanation of the hardware attestation and trust chain
+- [Privacy Architecture](https://lightfriend.ai/trustless): Full explanation of the hardware isolation, attestation, and trust chain
 - [Live Trust Chain](https://lightfriend.ai/trust-chain): Real-time verification of the running enclave
 - [Supported Countries](https://lightfriend.ai/supported-countries): 40+ countries with local or notification-only numbers
 - [Bring Your Own Number](https://lightfriend.ai/bring-own-number): Use your own Twilio number in unsupported countries
 
 ## Security Architecture
 
-Lightfriend is read-only by default. The AI can read your messages and notify you via SMS, but it cannot act on your behalf without your explicit approval. Every outbound action (sending a message, replying to email) is gated behind user confirmation, enforced by deterministic code - not by trusting the AI model. This makes prompt injection a non-issue: the worst case is an unnecessary SMS to yourself. Users can optionally add custom WHEN/IF/THEN automation rules for specific cases, but these are off by default and constrained to the actions they define.
+Lightfriend is read-only by default. The default tool policy allows analysis and SMS notifications while messaging and email actions pass through explicit approval checks in application code. Optional WHEN/IF/THEN automation rules are disabled by default and constrained to the actions they define. These controls are designed to limit the impact of prompt injection.
 
-For the full explanation: [Why Lightfriend Can't Be Prompt Injected](https://lightfriend.ai/prompt-injection-safe)
+For the full explanation: [How Lightfriend Limits Prompt-Injection Impact](https://lightfriend.ai/prompt-injection-safe)
 
 ## Blog
 
-- [Why Lightfriend Can't Be Prompt Injected](https://lightfriend.ai/prompt-injection-safe): Read-only by default AI architecture that makes prompt injection harmless
+- [How Lightfriend Limits Prompt-Injection Impact](https://lightfriend.ai/prompt-injection-safe): Read-only-by-default architecture with application-code approval gates
 - [Telegram on Dumbphone](https://lightfriend.ai/telegram-on-dumbphone): How to use Telegram on any dumbphone or flip phone via SMS
 - [Signal on Dumbphone](https://lightfriend.ai/signal-on-dumbphone): How to use Signal encrypted messaging on any basic phone via SMS
 - [Light Phone 3 WhatsApp Guide](https://lightfriend.ai/light-phone-3-whatsapp-guide): Add WhatsApp to Light Phone 3 via Lightfriend

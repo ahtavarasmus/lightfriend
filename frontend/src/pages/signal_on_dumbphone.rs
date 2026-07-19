@@ -47,9 +47,9 @@ pub fn signal_on_dumbphone() -> Html {
 
                 <h2>{"Privacy: Dumbphone + Signal + Encrypted Enclave"}</h2>
                 <p>{"People who use Signal care about privacy. So does Lightfriend."}</p>
-                <p>{"Your Signal messages are relayed through Lightfriend's servers, but those servers run inside a hardware-isolated AWS Nitro Enclave. This is a sealed computing environment - nobody can access it, not the cloud provider, not the developer. Encryption keys only exist inside the enclave and are managed by an independent attested service."}</p>
+                <p>{"Your Signal messages are relayed through Lightfriend's production application inside a hardware-isolated AWS Nitro Enclave. Stored application data is encrypted, and key release is handled by an independently operated service that evaluates enclave attestation."}</p>
                 <p>{"This isn't a promise - it's a cryptographic proof. Anyone can verify what code is running inside the enclave at any time. The entire codebase is open source."}</p>
-                <p>{"For the technical details: "}<Link<Route> to={Route::Trustless}>{"How Lightfriend keeps your data private"}</Link<Route>>{"."}</p>
+                <p>{"For the technical details: "}<Link<Route> to={Route::Trustless}>{"Review Lightfriend's privacy architecture"}</Link<Route>>{"."}</p>
                 <p>{"The SMS leg between Lightfriend and your phone is standard carrier SMS (not encrypted end-to-end). If you need the full Signal encryption chain to stay intact, self-hosting Lightfriend is an option - the code is open source under AGPLv3."}</p>
 
                 <h2>{"What You Can Do"}</h2>
@@ -131,7 +131,7 @@ pub fn signal_on_dumbphone() -> Html {
 
                 <h2>{"Frequently Asked Questions"}</h2>
                 <p><strong>{"Q: Is this as secure as using Signal directly?"}</strong></p>
-                <p>{"The Signal-to-Lightfriend leg maintains Signal's encryption. The Lightfriend server runs in a hardware-isolated enclave that nobody can access. The final SMS leg to your phone uses standard carrier SMS. For most people this is more than sufficient. For maximum security, you can self-host Lightfriend."}</p>
+                <p>{"The Signal-to-Lightfriend leg uses Signal's encryption. Lightfriend processes the relayed message inside a hardware-isolated enclave. The final SMS leg to your phone uses standard carrier SMS. You can also self-host Lightfriend."}</p>
                 <p><strong>{"Q: Do I need a smartphone for setup?"}</strong></p>
                 <p>{"You need access to your Signal account for the initial connection. After that, everything works through your dumbphone's SMS."}</p>
                 <p><strong>{"Q: What about Signal's disappearing messages?"}</strong></p>

@@ -791,7 +791,8 @@ pub fn chat_box(props: &ChatBoxProps) -> Html {
                             if let Ok(data) = serde_json::from_str::<Value>(&data_str) {
                                 let step = data["step"].as_str().unwrap_or("");
                                 match step {
-                                    "thinking" | "tool_call" | "retry" | "reasoning" => {
+                                    "thinking" | "tool_call" | "tool_result" | "retry"
+                                    | "reasoning" => {
                                         if let Some(msg) = data["message"].as_str() {
                                             chat_status_msg.set(msg.to_string());
                                         }

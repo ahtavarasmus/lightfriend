@@ -276,6 +276,10 @@ pub async fn run_agent_loop(
                     if let Some(ref mock_map) = input.mock_tool_responses {
                         if let Some(mock_result) = mock_map.get(name) {
                             tracing::debug!("Using mock response for tool: {}", name);
+                            emit_status(
+                                input.status_tx,
+                                AgentStatus::ToolCompleted { name: name.clone() },
+                            );
                             round_answers.insert(tool_call_id.clone(), mock_result.clone());
 
                             if TERMINAL_TOOLS.contains(&name.as_str()) {
@@ -305,6 +309,10 @@ pub async fn run_agent_loop(
                         extras,
                     )
                     .await;
+                    emit_status(
+                        input.status_tx,
+                        AgentStatus::ToolCompleted { name: name.clone() },
+                    );
 
                     match dispatch_result {
                         ToolDispatchResult::Answer(answer) => {

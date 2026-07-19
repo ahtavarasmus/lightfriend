@@ -105,7 +105,7 @@ fn format_date(iso: &str) -> String {
 pub fn trust_chain_page() -> Html {
     use_seo(SeoMeta {
         title: "Trust Chain - Lightfriend",
-        description: "Follow the cryptographic proof chain from open source code to running enclave to blockchain attestation. Verify Lightfriend's privacy yourself - no trust required.",
+        description: "Follow the cryptographic proof chain from open-source code to the running enclave and public approval registry. Inspect the evidence and remaining trust assumptions.",
         canonical: "https://lightfriend.ai/trust-chain",
         og_type: "website",
     });
@@ -239,7 +239,7 @@ pub fn trust_chain_page() -> Html {
 
             <div class="tc-intro-box">
                 <p class="tc-intro-text">
-                    {"Your messages are processed inside a sealed hardware enclave. Not even Lightfriend can access your data."}
+                    {"Messages are processed inside a hardware-isolated enclave, and stored application data is encrypted."}
                 </p>
                 <p class="tc-intro-hw">
                     {"Hardware attested by "}
@@ -289,7 +289,7 @@ pub fn trust_chain_page() -> Html {
                 {" | "}
                 <Link<Route> to={Route::Privacy}>{"Privacy"}</Link<Route>>
                 {" | "}
-                <Link<Route> to={Route::Trustless}>{"Verifiably Private"}</Link<Route>>
+                <Link<Route> to={Route::Trustless}>{"Privacy Architecture"}</Link<Route>>
             </div>
         </div>
         </>
@@ -327,8 +327,8 @@ fn render_diagram() -> Html {
                             {" Lightfriend Server"}
                         </div>
                         <ul class="tc-node-points">
-                            <li>{"Cannot access user data"}</li>
-                            <li>{"Cannot see inside the enclave"}</li>
+                            <li>{"Stores encrypted application data"}</li>
+                            <li>{"Isolated from enclave memory"}</li>
                         </ul>
 
                         <div class="tc-node tc-enclave-node">
@@ -436,13 +436,13 @@ fn render_pillar_encrypted(
         <>
             <h3 class="tc-detail-title">{"Data is encrypted"}</h3>
             <p class="tc-detail-desc">
-                {"Your data is encrypted using a key managed by Marlin KMS. It only releases the encryption key after verifying this exact Image ID is approved on-chain."}
+                {"Application data is encrypted using a key managed by Marlin KMS. Its release policy checks the attested Image ID against the on-chain approval registry."}
             </p>
 
             <div class="tc-fingerprint">
                 <i class="fa-solid fa-fingerprint tc-fp-icon"></i>
                 <div class="tc-fp-info">
-                    <span class="tc-fp-label">{"Image ID - verified on-chain"}</span>
+                    <span class="tc-fp-label">{"Image ID - approval registry"}</span>
                     <code class="tc-fp-value">{short_hash(image_id, 20)}</code>
                 </div>
                 if approved {
@@ -645,7 +645,7 @@ fn render_history_section(
         <div class="tc-history">
             <h2>{"On-chain build history"}</h2>
             <p class="tc-history-desc">
-                {"Every version of Lightfriend is permanently recorded on the Arbitrum blockchain. Each entry links to its source code and on-chain proof."}
+                {"Approved Lightfriend build measurements are published to the Arbitrum contract. Each history entry links to its source code and on-chain transaction."}
             </p>
 
             if loading && builds.is_empty() {

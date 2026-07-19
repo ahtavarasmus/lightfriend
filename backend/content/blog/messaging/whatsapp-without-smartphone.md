@@ -76,6 +76,6 @@ After the initial setup, you don't need the smartphone again. Everything happens
 
 ## The Privacy Angle
 
-Lightfriend runs inside a sealed computing environment (AWS Nitro Enclave). Your WhatsApp credentials and messages are encrypted with keys that exist only inside this sealed environment. The code is open source and cryptographically verifiable. This means not even the people running Lightfriend can read your messages.
+Lightfriend's production application runs inside an AWS Nitro Enclave. Stored WhatsApp credentials and application data are encrypted, the source code is public, and the signed enclave measurement can be compared with the published build and approval registry.
 
-This is actually more private than using the WhatsApp app itself, which sends metadata to Meta's servers.
+The final SMS leg to your phone still uses your cellular carrier and is not end-to-end encrypted.

@@ -127,8 +127,8 @@ pub fn telegram_on_dumbphone() -> Html {
                 </table>
 
                 <h2>{"Privacy"}</h2>
-                <p>{"Your Telegram messages pass through Lightfriend's servers, so privacy matters. Lightfriend runs inside a hardware-isolated AWS Nitro Enclave - a sealed computing environment that nobody can access, not even the developer. Your messages are encrypted with keys that only exist inside the enclave. This is cryptographically verifiable: anyone can check the live attestation to confirm exactly which code is running. All code is open source."}</p>
-                <p>{"For the full technical explanation: "}<Link<Route> to={Route::Trustless}>{"How Lightfriend keeps your data private"}</Link<Route>>{"."}</p>
+                <p>{"Your Telegram messages pass through Lightfriend's production application inside an AWS Nitro Enclave. Stored application data is encrypted, the source code is public, and the enclave's signed attestation reports a code measurement that can be compared with the published build."}</p>
+                <p>{"For the full technical explanation: "}<Link<Route> to={Route::Trustless}>{"Review Lightfriend's privacy architecture"}</Link<Route>>{"."}</p>
 
                 <h2>{"Frequently Asked Questions"}</h2>
                 <p><strong>{"Q: Do I need a smartphone at all?"}</strong></p>

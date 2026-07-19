@@ -19,7 +19,7 @@ pub fn privacy_policy() -> Html {
             <section>
                 <h2>{"1. Overview"}</h2>
                 <p>{"Lightfriend is a verifiable system. Its privacy properties are enforced by architecture, not policy, and can be independently verified by anyone. This document describes how the system is designed to work. It is not a warranty. See Section 16."}</p>
-                <p>{"For a plain-language explanation, see "}<Link<Route> to={Route::Trustless}>{"Verifiably Private"}</Link<Route>>{"."}</p>
+                <p>{"For a plain-language explanation, see "}<Link<Route> to={Route::Trustless}>{"Privacy Architecture"}</Link<Route>>{"."}</p>
             </section>
 
             <section>
@@ -42,23 +42,23 @@ pub fn privacy_policy() -> Html {
                     <li>{"AI-generated attention items (summaries, suggested actions)"}</li>
                     <li>{"MCP server configuration data if you set it up"}</li>
                 </ul>
-                <p>{"All of this data is processed and stored inside a sealed enclave. It is designed to never leave the enclave in plaintext. Data stored outside the enclave is encrypted with keys that exist only inside the enclave. You can verify this."}</p>
+                <p>{"Lightfriend's production application processes this data inside an AWS Nitro Enclave. Application data persisted outside the enclave is encrypted with AES-256-GCM. Some requested features send necessary data to the sub-processors listed below."}</p>
             </section>
 
             <section>
                 <h2>{"4. How the System is Designed"}</h2>
                 <p>{"Lightfriend runs inside an AWS Nitro Enclave - an isolated environment designed to prevent anyone, including us, from accessing data inside it. The system is designed so that:"}</p>
                 <ul>
-                    <li>{"The enclave is designed so that no one can log in, inspect memory, or extract data."}</li>
-                    <li>{"Encryption keys are designed to exist only inside the enclave."}</li>
-                    <li>{"Key management is handled by an independent service (Marlin) that is designed to release keys only to enclaves running approved, publicly auditable code."}</li>
+                    <li>{"The enclave exposes no SSH login or administrative shell, and its memory is isolated from the parent EC2 instance."}</li>
+                    <li>{"The application requests encryption keys from an independently operated Marlin key service using enclave attestation."}</li>
+                    <li>{"Marlin's release policy checks the reported enclave measurement against the public approval registry."}</li>
                     <li>{"All source code is open source on GitHub with reproducible builds."}</li>
                 </ul>
             </section>
 
             <section>
                 <h2>{"5. Verification"}</h2>
-                <p>{"Anyone can verify what code is running by comparing the live enclave's cryptographic attestation against our public builds. Verification tools, API endpoints, and instructions are on our "}<Link<Route> to={Route::Trustless}>{"Verifiably Private"}</Link<Route>>{" page."}</p>
+                <p>{"Anyone can compare the measurement reported by the live enclave's cryptographic attestation with our public builds. Verification tools, API endpoints, and instructions are on our "}<Link<Route> to={Route::Trustless}>{"Privacy Architecture"}</Link<Route>>{" page."}</p>
             </section>
 
             <section>
@@ -81,6 +81,7 @@ pub fn privacy_policy() -> Html {
                     <li><strong>{"Marlin (Marlin Protocol - decentralized): "}</strong>{"Key custody. Runs inside its own enclave. Open source."}</li>
                     <li><strong>{"Tinfoil (Tinfoil, Inc. - US): "}</strong>{"AI inference inside sealed environments with cryptographic attestation."}</li>
                     <li><strong>{"NEAR AI (Jasnah Inc., d/b/a NEAR AI - US): "}</strong>{"Backup AI inference provider used when Tinfoil is unavailable or fails, so the Service can continue responding."}</li>
+                    <li><strong>{"OpenAI: "}</strong>{"Optional voice calls currently use the OpenAI Realtime API. Call audio and transcripts are processed outside Lightfriend's independently verifiable trust chain. "}<a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener noreferrer">{"OpenAI's published API data controls"}</a>{" state that API data is not used for model training unless the customer opts in, but Realtime customer content may be retained in abuse-monitoring logs for up to 30 days by default. OpenAI controls that environment and access to retained logs; Lightfriend cannot independently verify or technically prevent access there."}</li>
                     <li><strong>{"Twilio (Twilio, Inc. - US) and Sinch (Sinch AB - Sweden): "}</strong>{"SMS and voice delivery to your registered phone number. Message content is designed to be deleted from these providers after delivery. These providers act solely as carriers to transmit messages between you and the Service."}</li>
                     <li><strong>{"Stripe (Stripe, Inc. - US): "}</strong>{"Payment processing. We do not store credit card numbers. All payment data is handled by Stripe in accordance with PCI DSS standards."}</li>
                 </ul>
@@ -92,7 +93,7 @@ pub fn privacy_policy() -> Html {
                 <p>{"Some of our sub-processors are based in the United States. Data transferred outside the EU/EEA is protected by the following safeguards:"}</p>
                 <ul>
                     <li>{"Where applicable, our sub-processors participate in the EU-US Data Privacy Framework or provide Standard Contractual Clauses (SCCs) approved by the European Commission."}</li>
-                    <li>{"As a supplementary measure, data stored outside the enclave is encrypted with keys that exist only inside the enclave, meaning sub-processors cannot access plaintext data."}</li>
+                    <li>{"As a supplementary measure, protected application data stored outside the enclave is stored as ciphertext, with key release governed by enclave attestation."}</li>
                 </ul>
             </section>
 
@@ -133,7 +134,7 @@ pub fn privacy_policy() -> Html {
             <section>
                 <h2>{"13. Email, MCP, and Other Integrations"}</h2>
                 <p>{"All integration credentials are stored encrypted inside the enclave. You connect services at your own risk and are responsible for your accounts with third-party services. We are not liable for third-party service behavior."}</p>
-                <p><strong>{"IMPORTANT: "}</strong>{"When you configure MCP (Model Context Protocol) servers, data processed by those servers leaves the sealed enclave environment and is sent to your configured external servers. The privacy guarantees of the enclave do not extend to data processed by external MCP servers. You assume full responsibility for any MCP servers you configure."}</p>
+                <p><strong>{"IMPORTANT: "}</strong>{"When you configure MCP (Model Context Protocol) servers, data processed by those servers leaves the sealed enclave environment and is sent to your configured external servers. Lightfriend's enclave architecture does not cover processing performed by external MCP servers. You assume full responsibility for any MCP servers you configure."}</p>
             </section>
 
             <section>
@@ -209,7 +210,7 @@ pub fn privacy_policy() -> Html {
                 {" | "}
                 <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
                 {" | "}
-                <Link<Route> to={Route::Trustless}>{"Verifiably Private"}</Link<Route>>
+                <Link<Route> to={Route::Trustless}>{"Privacy Architecture"}</Link<Route>>
                 {" | "}
                 <Link<Route> to={Route::TrustChain}>{"Trust Chain"}</Link<Route>>
             </div>
@@ -378,7 +379,7 @@ pub fn terms_and_conditions() -> Html {
 
             <section>
                 <h2>{"12. MCP Server Integration"}</h2>
-                <p><strong>{"IMPORTANT: "}</strong>{"When you configure MCP (Model Context Protocol) servers, data processed by those servers leaves the sealed enclave environment and is sent to your configured external servers. The privacy guarantees of the enclave do not extend to data processed by external MCP servers."}</p>
+                <p><strong>{"IMPORTANT: "}</strong>{"When you configure MCP (Model Context Protocol) servers, data processed by those servers leaves the sealed enclave environment and is sent to your configured external servers. Lightfriend's enclave architecture does not cover processing performed by external MCP servers."}</p>
                 <ul>
                     <li>{"You assume full responsibility for any third-party MCP servers you configure."}</li>
                     <li>{"Data sent to MCP servers as part of AI processing is transmitted at your own risk."}</li>
@@ -446,7 +447,7 @@ pub fn terms_and_conditions() -> Html {
                 {" | "}
                 <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
                 {" | "}
-                <Link<Route> to={Route::Trustless}>{"Verifiably Private"}</Link<Route>>
+                <Link<Route> to={Route::Trustless}>{"Privacy Architecture"}</Link<Route>>
                 {" | "}
                 <Link<Route> to={Route::TrustChain}>{"Trust Chain"}</Link<Route>>
             </div>

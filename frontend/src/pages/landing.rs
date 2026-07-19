@@ -123,7 +123,8 @@ pub fn landing() -> Html {
             "How does it protect my data?",
             html! {
                 <>
-                    <p>{"Lightfriend runs in its own hardware-isolated enclave, and all AI requests are processed through Tinfoil's verified enclaves. No one - not even the developer - can access your data. Period. Fully open source, with privacy cryptographically verifiable on blockchain."}</p>
+                    <p>{"Lightfriend is designed so no one else can see your chats or personal data, including while AI processes them. All of the code is open source, and cryptographic evidence lets anyone independently verify which code is running in production."}</p>
+                    <p>{"The production application runs inside an AWS Nitro Enclave, stored application data is encrypted, and the enclave's signed code measurement can be compared with the published build and public approval registry."}</p>
                     <p><a href="/trustless" style="color: var(--landing-blue);">{"See exactly how it works"}</a></p>
                 </>
             },
@@ -405,11 +406,11 @@ pub fn landing() -> Html {
 
             // Privacy section
             <section class="privacy-hook scroll-animate">
-                <h2 class="privacy-hook-title">{"Nobody can read your messages. Not even us."}</h2>
-                <p class="privacy-hook-subtitle">{"Lightfriend runs inside a hardware-isolated enclave. Your data is end-to-end private, cryptographically verifiable."}</p>
+                <h2 class="privacy-hook-title">{"Designed so no one else can see your chats or data."}</h2>
+                <p class="privacy-hook-subtitle">{"That design includes AI processing. All of Lightfriend's code is open source, and cryptographic evidence lets anyone independently verify which code is running in production."}</p>
                 <div class="privacy-hook-links">
                     <Link<Route> to={Route::Trustless} classes="privacy-hook-link">
-                        {"Verifiably Private →"}
+                        {"How Privacy Works →"}
                     </Link<Route>>
                     <Link<Route> to={Route::TrustChain} classes="privacy-hook-link">
                         {"Trust Chain →"}
@@ -576,7 +577,7 @@ pub fn landing() -> Html {
                             {" | "}
                             <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
                             {" | "}
-                            <Link<Route> to={Route::Trustless}>{"Verifiably Private"}</Link<Route>>
+                            <Link<Route> to={Route::Trustless}>{"Privacy Architecture"}</Link<Route>>
                             {" | "}
                             <Link<Route> to={Route::TrustChain}>{"Trust Chain"}</Link<Route>>
                         </div>
@@ -3304,7 +3305,7 @@ pub fn landing() -> Html {
         }
     }
 
-    /* ========== Verifiably Private ========== */
+    /* ========== Privacy Architecture ========== */
     .privacy-section {
         padding: 4rem 2rem;
         max-width: 900px;
