@@ -1,4 +1,5 @@
 use crate::{
+    api::voice_pipeline,
     handlers::{
         auth_middleware::AuthUser,
         light_tool_auth::{optional_bearer, LightToolDeviceAuth},
@@ -172,6 +173,12 @@ pub struct RunStatusResponse {
     pub activity_text: Option<String>,
     pub assistant_message: Option<AssistantMessageResponse>,
     pub error_message: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct VoiceSessionResponse {
+    pub ws_url: String,
+    pub expires_in_seconds: i64,
 }
 
 type ApiError = (StatusCode, Json<Value>);
@@ -376,6 +383,22 @@ pub async fn unregister_push_endpoint(
             internal_error("push unregistration failed")
         })?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn start_voice_session(
+    State(state): State<Arc<AppState>>,
+    auth: LightToolDeviceAuth,
+) -> Result<Json<VoiceSessionResponse>, ApiError> {
+    let user_id = auth
+        .device
+        .user_id
+        .ok_or_else(|| forbidden("connect a Lightfriend account to start a voice call"))?;
+    let ticket = voice_pipeline::issue_web_voice_ticket(&state, user_id).await?;
+
+    Ok(Json(VoiceSessionResponse {
+        ws_url: ticket.ws_url,
+        expires_in_seconds: ticket.expires_in_seconds,
+    }))
 }
 
 pub async fn send_message(

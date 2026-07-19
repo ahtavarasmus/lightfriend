@@ -762,6 +762,10 @@ async fn main() {
                 .layer(DefaultBodyLimit::max(4 * 1024)),
         )
         .route(
+            "/api/light-tool/voice/start",
+            post(handlers::light_tool_handlers::start_voice_session),
+        )
+        .route(
             "/api/health/deep",
             get(handlers::health_handlers::deep_health),
         )

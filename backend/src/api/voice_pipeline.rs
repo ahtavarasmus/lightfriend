@@ -14,6 +14,19 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
 
+pub const WEB_VOICE_TICKET_TTL_SECONDS: i64 = 30;
+
+pub struct WebVoiceTicket {
+    pub ws_url: String,
+    pub expires_in_seconds: i64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum WebVoiceTicketError {
+    Expired,
+    Invalid,
+}
+
 // ---------------------------------------------------------------------------
 // Audio utilities
 // ---------------------------------------------------------------------------
@@ -635,6 +648,20 @@ pub async fn voice_web_start(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let user_id = auth_user.user_id;
 
+    let ticket = issue_web_voice_ticket(&state, user_id).await?;
+
+    Ok(Json(serde_json::json!({
+        "ws_url": ticket.ws_url,
+        "user_id": user_id,
+    })))
+}
+
+/// Checks whether an account can start a voice call and issues a short-lived,
+/// single-use ticket for the shared web voice WebSocket.
+pub async fn issue_web_voice_ticket(
+    state: &Arc<AppState>,
+    user_id: i32,
+) -> Result<WebVoiceTicket, (StatusCode, Json<serde_json::Value>)> {
     let user = state
         .user_core
         .find_by_id(user_id)
@@ -667,27 +694,25 @@ pub async fn voice_web_start(
         ));
     }
 
-    // Generate a one-time token for WebSocket auth (expires in 30s)
+    // Generate a one-time token for WebSocket auth.
     let token = uuid::Uuid::new_v4().to_string();
     let expiry = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64
-        + 30;
+        + WEB_VOICE_TICKET_TTL_SECONDS;
     state
         .pending_totp_logins
         .insert(format!("voice_{}", token), (user_id, expiry));
 
-    let ws_url = format!("/api/voice/web-ws?token={}", token);
-
-    Ok(Json(serde_json::json!({
-        "ws_url": ws_url,
-        "user_id": user_id,
-    })))
+    Ok(WebVoiceTicket {
+        ws_url: format!("/api/voice/web-ws?token={}", token),
+        expires_in_seconds: WEB_VOICE_TICKET_TTL_SECONDS,
+    })
 }
 
 // ---------------------------------------------------------------------------
-// Web voice call WebSocket: GET /api/voice/web-ws?user_id=N
+// Web voice call WebSocket: GET /api/voice/web-ws?token=...
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
@@ -700,26 +725,34 @@ pub async fn voice_web_ws(
     axum::extract::Query(params): axum::extract::Query<WebWsParams>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    let key = format!("voice_{}", params.token);
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-
-    // Validate and consume token (one-time use)
-    let user_id = match state.pending_totp_logins.remove(&key) {
-        Some((_, (uid, expiry))) if expiry > now => uid,
-        Some(_) => {
+    let user_id = match consume_web_voice_ticket(&state, &params.token) {
+        Ok(user_id) => user_id,
+        Err(WebVoiceTicketError::Expired) => {
             tracing::warn!("Expired voice WS token");
             return (StatusCode::UNAUTHORIZED, "Token expired").into_response();
         }
-        None => {
+        Err(WebVoiceTicketError::Invalid) => {
             tracing::warn!("Invalid voice WS token");
             return (StatusCode::UNAUTHORIZED, "Invalid token").into_response();
         }
     };
 
     ws.on_upgrade(move |socket| handle_web_ws(state, socket, user_id))
+}
+
+/// Atomically consumes a voice ticket so it cannot be replayed.
+pub fn consume_web_voice_ticket(state: &AppState, token: &str) -> Result<i32, WebVoiceTicketError> {
+    let key = format!("voice_{}", token);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+
+    match state.pending_totp_logins.remove(&key) {
+        Some((_, (user_id, expiry))) if expiry > now => Ok(user_id),
+        Some(_) => Err(WebVoiceTicketError::Expired),
+        None => Err(WebVoiceTicketError::Invalid),
+    }
 }
 
 /// Browser-based voice call: raw PCM i16 at 16kHz in, 24kHz out.
