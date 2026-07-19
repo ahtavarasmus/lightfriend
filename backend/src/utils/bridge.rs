@@ -3559,6 +3559,7 @@ pub async fn logout_all_bridgev2_logins(
         return Ok(0);
     }
 
+    let expected_logouts = connected.len();
     let mut logged_out = 0usize;
     for entry in connected {
         let logout_cmd = format!("{} logout {}", cmd_prefix, entry.login_id);
@@ -3601,6 +3602,14 @@ pub async fn logout_all_bridgev2_logins(
                 body
             );
         }
+    }
+    if logged_out != expected_logouts {
+        return Err(anyhow!(
+            "{} logout confirmed {}/{} connected login(s)",
+            cmd_prefix,
+            logged_out,
+            expected_logouts
+        ));
     }
     Ok(logged_out)
 }

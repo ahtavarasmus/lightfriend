@@ -84,6 +84,7 @@ fn test_migrations_apply_cleanly_with_existing_data() {
         "bridge_disconnection_events",
         "bridge_cleanup_jobs",
         "bridge_cleanup_rooms",
+        "bridge_connection_leases",
         "message_history",
         "usage_logs",
         "items",

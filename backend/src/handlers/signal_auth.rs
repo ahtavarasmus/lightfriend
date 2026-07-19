@@ -43,6 +43,7 @@ async fn count_signal_rooms(client: &MatrixClient, bridge_bot: &str) -> Result<u
 async fn cleanup_all_signal_rooms(client: &MatrixClient, bridge_bot: &str) -> Result<u32> {
     let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
     let mut rooms_left = 0;
+    let mut leave_failures = Vec::new();
 
     // Get all rooms the user is in
     let rooms = client.joined_rooms();
@@ -64,12 +65,20 @@ async fn cleanup_all_signal_rooms(client: &MatrixClient, bridge_bot: &str) -> Re
             tracing::info!("🧹 Leaving Signal room: {}", room.room_id());
             if let Err(e) = room.leave().await {
                 tracing::warn!("Failed to leave room {}: {}", room.room_id(), e);
+                leave_failures.push(format!("{}: {e}", room.room_id()));
             } else {
                 rooms_left += 1;
             }
         }
     }
 
+    if !leave_failures.is_empty() {
+        return Err(anyhow!(
+            "failed to leave {} Signal room(s): {}",
+            leave_failures.len(),
+            leave_failures.join(", ")
+        ));
+    }
     tracing::info!("✅ Left {} Signal-related rooms", rooms_left);
     Ok(rooms_left)
 }
@@ -354,6 +363,19 @@ pub async fn start_signal_connection(
         auth_user.user_id
     );
 
+    let _reconnect_lease =
+        crate::utils::disconnected_bridge_cleanup::acquire_bridge_reconnect_lease(
+            &state,
+            auth_user.user_id,
+            "signal",
+        )
+        .map_err(|error| {
+            (
+                StatusCode::CONFLICT,
+                AxumJson(json!({"error": error.to_string()})),
+            )
+        })?;
+
     if let Ok(Some(_existing_bridge)) = state
         .user_repository
         .get_bridge(auth_user.user_id, "signal")
@@ -598,6 +620,11 @@ async fn monitor_signal_connection(
 
         tracing::info!("🎉 Signal successfully connected for user {}", user_id);
 
+        let _reconnect_lease =
+            crate::utils::disconnected_bridge_cleanup::acquire_bridge_reconnect_lease(
+                &state, user_id, "signal",
+            )?;
+
         let connected_account =
             crate::utils::bridge_responses::first_connected_identifier(&combined);
         let current_time = std::time::SystemTime::now()
@@ -787,7 +814,7 @@ pub async fn disconnect_signal(
 
     let room_id_str = bridge.room_id.clone().unwrap_or_default();
 
-    crate::utils::disconnected_bridge_cleanup::enqueue_disconnect_cleanup(
+    let cleanup_job_id = crate::utils::disconnected_bridge_cleanup::enqueue_disconnect_cleanup(
         &state,
         &bridge,
         "explicit_disconnect",
@@ -803,6 +830,20 @@ pub async fn disconnect_signal(
             AxumJson(json!({"error": "Failed to queue durable connection cleanup"})),
         )
     })?;
+
+    let portal_cleanup_lease =
+        crate::utils::disconnected_bridge_cleanup::acquire_bridge_portal_cleanup_lease(
+            &state,
+            auth_user.user_id,
+            "signal",
+            cleanup_job_id,
+        )
+        .map_err(|error| {
+            (
+                StatusCode::CONFLICT,
+                AxumJson(json!({"error": error.to_string()})),
+            )
+        })?;
 
     // Set bridge status to "cleaning_up" instead of deleting immediately
     // This allows us to block reconnection until cleanup is complete
@@ -826,6 +867,7 @@ pub async fn disconnect_signal(
     let state_clone = state.clone();
     let user_id = auth_user.user_id;
     tokio::spawn(async move {
+        let _portal_cleanup_lease = portal_cleanup_lease;
         tracing::info!("🧹 Starting background cleanup for Signal user {}", user_id);
 
         // Get Matrix client for cleanup
@@ -833,11 +875,20 @@ pub async fn disconnect_signal(
             Ok(c) => c,
             Err(e) => {
                 tracing::error!("Background cleanup: Failed to get Matrix client: {}", e);
+                let _ = state_clone
+                    .tuwunel_cleanup_repository
+                    .mark_bridge_portal_cleanup(
+                        cleanup_job_id,
+                        false,
+                        Some(&format!("failed to get Matrix client: {e}")),
+                    );
                 // Still delete the bridge record so user can retry
                 let _ = state_clone.user_repository.delete_bridge(user_id, "signal");
                 return;
             }
         };
+
+        let mut cleanup_errors = Vec::new();
 
         // Get the room and send cleanup commands
         if let Ok(room_id) = OwnedRoomId::try_from(room_id_str.as_str()) {
@@ -865,11 +916,13 @@ pub async fn disconnect_signal(
                             user_id
                         ),
                         Err(e) => {
-                            tracing::warn!("Signal background cleanup logout helper failed: {}", e)
+                            tracing::warn!("Signal background cleanup logout helper failed: {}", e);
+                            cleanup_errors.push(format!("logout failed: {e}"));
                         }
                     }
                 } else {
                     tracing::warn!("Signal background cleanup: invalid SIGNAL_BRIDGE_BOT user id");
+                    cleanup_errors.push("invalid SIGNAL_BRIDGE_BOT user id".to_string());
                 }
 
                 // Send delete-all-portals
@@ -883,6 +936,7 @@ pub async fn disconnect_signal(
                         "Background cleanup: Failed to send delete-all-portals command: {}",
                         e
                     );
+                    cleanup_errors.push(format!("delete-all-portals send failed: {e}"));
                 }
                 sleep(Duration::from_secs(2)).await;
 
@@ -895,6 +949,7 @@ pub async fn disconnect_signal(
                         "Background cleanup: Failed to send clean-rooms command: {}",
                         e
                     );
+                    cleanup_errors.push(format!("clean-rooms send failed: {e}"));
                 }
                 sleep(Duration::from_secs(2)).await;
 
@@ -909,6 +964,7 @@ pub async fn disconnect_signal(
                         "Background cleanup: Failed to send delete-session command: {}",
                         e
                     );
+                    cleanup_errors.push(format!("delete-session send failed: {e}"));
                 }
                 sleep(Duration::from_secs(2)).await;
 
@@ -918,10 +974,15 @@ pub async fn disconnect_signal(
                         "Background cleanup: Failed to leave Signal management room: {}",
                         e
                     );
+                    cleanup_errors.push(format!("management-room leave failed: {e}"));
                 } else {
                     tracing::info!("Background cleanup: Left Signal bridge management room");
                 }
+            } else {
+                cleanup_errors.push("management room not found in Matrix client".to_string());
             }
+        } else {
+            cleanup_errors.push(format!("invalid management room id: {room_id_str}"));
         }
 
         // Clean up ALL Signal-related rooms (portal rooms created by the bridge)
@@ -934,10 +995,23 @@ pub async fn disconnect_signal(
                     tracing::info!("Background cleanup: Left {} Signal portal rooms", count)
                 }
                 Err(e) => {
-                    tracing::error!("Background cleanup: Failed to cleanup Signal rooms: {}", e)
+                    tracing::error!("Background cleanup: Failed to cleanup Signal rooms: {}", e);
+                    cleanup_errors.push(format!("portal-room leave failed: {e}"));
                 }
             }
+        } else {
+            cleanup_errors.push("SIGNAL_BRIDGE_BOT missing".to_string());
         }
+
+        crate::utils::disconnected_bridge_cleanup::record_portal_cleanup_outcome(
+            &state_clone,
+            cleanup_job_id,
+            user_id,
+            "signal",
+            &client,
+            cleanup_errors,
+        )
+        .await;
 
         // Check for remaining active bridges and cleanup store if none left.
         // Signal's status is "cleaning_up" here, so has_active_bridges only

@@ -72,6 +72,8 @@ pub struct BridgeCleanupJob {
     pub status: String,
     #[diesel(sql_type = diesel::sql_types::Integer)]
     pub attempt_count: i32,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub portal_cleanup_status: String,
 }
 
 #[derive(Debug, QueryableByName)]
@@ -98,6 +100,12 @@ struct ReturnedId {
 struct CountRow {
     #[diesel(sql_type = diesel::sql_types::BigInt)]
     count: i64,
+}
+
+#[derive(QueryableByName)]
+struct ReturnedLease {
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    owner_token: String,
 }
 
 type PgPooledConnection =
@@ -218,10 +226,10 @@ impl TuwunelCleanupRepository {
              )
              INSERT INTO bridge_cleanup_jobs (
                  user_id, bridge_type, trigger_kind, status, attempt_count,
-                 not_before, created_at, updated_at
+                 not_before, created_at, updated_at, portal_cleanup_status
              )
              SELECT user_id, bridge_type, 'orphan_audit', 'audit_pending', 0,
-                    $2, $3, $3
+                    $2, $3, $3, 'legacy_unverified'
                FROM candidates
              ON CONFLICT DO NOTHING
              RETURNING id",
@@ -235,7 +243,7 @@ impl TuwunelCleanupRepository {
             let metadata = diesel::sql_query(
                 "SELECT id, user_id, bridge_type, trigger_kind, expected_bridge_id,
                         expected_bridge_created_at, management_room_id, status,
-                        attempt_count
+                        attempt_count, portal_cleanup_status
                    FROM bridge_cleanup_jobs WHERE id = $1",
             )
             .bind::<diesel::sql_types::Integer, _>(row.id)
@@ -260,7 +268,8 @@ impl TuwunelCleanupRepository {
         let mut conn = self.connection()?;
         Ok(diesel::sql_query(
             "SELECT id, user_id, bridge_type, trigger_kind, expected_bridge_id,
-                    expected_bridge_created_at, management_room_id, status, attempt_count
+                    expected_bridge_created_at, management_room_id, status, attempt_count,
+                    portal_cleanup_status
                FROM bridge_cleanup_jobs
               WHERE status IN ('pending', 'audit_pending', 'audit_ready', 'retrying')
                 AND not_before <= $1
@@ -334,6 +343,114 @@ impl TuwunelCleanupRepository {
         .get_result::<CurrentBridge>(&mut conn)
         .optional()?;
         Ok(current.map(|row| (row.id, row.status, row.created_at)))
+    }
+
+    pub fn try_acquire_bridge_connection_lease(
+        &self,
+        user_id: i32,
+        bridge_type: &str,
+        lease_kind: &str,
+        owner_token: &str,
+        lease_until: i32,
+    ) -> Result<bool> {
+        let mut conn = self.connection()?;
+        let now = now_timestamp();
+        let acquired = diesel::sql_query(
+            "INSERT INTO bridge_connection_leases (
+                 user_id, bridge_type, lease_kind, owner_token, lease_until, updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (user_id, bridge_type) DO UPDATE SET
+                 lease_kind = EXCLUDED.lease_kind,
+                 owner_token = EXCLUDED.owner_token,
+                 lease_until = EXCLUDED.lease_until,
+                 updated_at = EXCLUDED.updated_at
+             WHERE bridge_connection_leases.lease_until <= $6
+                OR bridge_connection_leases.owner_token = EXCLUDED.owner_token
+             RETURNING owner_token",
+        )
+        .bind::<diesel::sql_types::Integer, _>(user_id)
+        .bind::<diesel::sql_types::Text, _>(bridge_type)
+        .bind::<diesel::sql_types::Text, _>(lease_kind)
+        .bind::<diesel::sql_types::Text, _>(owner_token)
+        .bind::<diesel::sql_types::Integer, _>(lease_until)
+        .bind::<diesel::sql_types::Integer, _>(now)
+        .get_result::<ReturnedLease>(&mut conn)
+        .optional()?;
+        Ok(acquired
+            .map(|lease| lease.owner_token == owner_token)
+            .unwrap_or(false))
+    }
+
+    pub fn release_bridge_connection_lease(
+        &self,
+        user_id: i32,
+        bridge_type: &str,
+        owner_token: &str,
+    ) -> Result<()> {
+        let mut conn = self.connection()?;
+        diesel::sql_query(
+            "DELETE FROM bridge_connection_leases
+              WHERE user_id = $1 AND bridge_type = $2 AND owner_token = $3",
+        )
+        .bind::<diesel::sql_types::Integer, _>(user_id)
+        .bind::<diesel::sql_types::Text, _>(bridge_type)
+        .bind::<diesel::sql_types::Text, _>(owner_token)
+        .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn mark_bridge_portal_cleanup(
+        &self,
+        job_id: i32,
+        confirmed: bool,
+        error: Option<&str>,
+    ) -> Result<()> {
+        let mut conn = self.connection()?;
+        let now = now_timestamp();
+        let status = if confirmed { "confirmed" } else { "failed" };
+        diesel::sql_query(
+            "UPDATE bridge_cleanup_jobs
+                SET portal_cleanup_status = $2,
+                    portal_cleanup_confirmed_at = CASE WHEN $3 THEN $4 ELSE NULL END,
+                    portal_cleanup_error = $5,
+                    not_before = $4,
+                    updated_at = $4
+              WHERE id = $1",
+        )
+        .bind::<diesel::sql_types::Integer, _>(job_id)
+        .bind::<diesel::sql_types::Text, _>(status)
+        .bind::<diesel::sql_types::Bool, _>(confirmed)
+        .bind::<diesel::sql_types::Integer, _>(now)
+        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(error.map(trim_error))
+        .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn record_bridge_cleanup_storage(
+        &self,
+        job_id: i32,
+        before: bool,
+        rootfs_free_bytes: Option<i64>,
+        tuwunel_bytes: Option<i64>,
+    ) -> Result<()> {
+        let mut conn = self.connection()?;
+        let now = now_timestamp();
+        diesel::sql_query(
+            "UPDATE bridge_cleanup_jobs SET
+                 rootfs_free_before_bytes = CASE WHEN $2 THEN COALESCE(rootfs_free_before_bytes, $3) ELSE rootfs_free_before_bytes END,
+                 tuwunel_before_bytes = CASE WHEN $2 THEN COALESCE(tuwunel_before_bytes, $4) ELSE tuwunel_before_bytes END,
+                 rootfs_free_after_bytes = CASE WHEN $2 THEN rootfs_free_after_bytes ELSE COALESCE($3, rootfs_free_after_bytes) END,
+                 tuwunel_after_bytes = CASE WHEN $2 THEN tuwunel_after_bytes ELSE COALESCE($4, tuwunel_after_bytes) END,
+                 updated_at = $5
+              WHERE id = $1",
+        )
+        .bind::<diesel::sql_types::Integer, _>(job_id)
+        .bind::<diesel::sql_types::Bool, _>(before)
+        .bind::<diesel::sql_types::Nullable<diesel::sql_types::BigInt>, _>(rootfs_free_bytes)
+        .bind::<diesel::sql_types::Nullable<diesel::sql_types::BigInt>, _>(tuwunel_bytes)
+        .bind::<diesel::sql_types::Integer, _>(now)
+        .execute(&mut conn)?;
+        Ok(())
     }
 
     pub fn active_ontology_room_owners(

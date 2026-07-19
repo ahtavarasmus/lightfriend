@@ -333,7 +333,7 @@ print_deleted_open_file_accounting() {
 print_tuwunel_purge_audit() {
     echo "--- Tuwunel purge compact audit ---"
     echo "historical_audit_policy backfill_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_ENABLED:-false} audit_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_ENABLED:-true} execute_verified_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_EXECUTE_VERIFIED_ENABLED:-false} batch_size=${TUWUNEL_EVENT_PURGE_BACKFILL_BATCH_SIZE:-25} scan_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_SCAN_SECS:-3600} min_age_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_MIN_AGE_SECS:-86400} recheck_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_RECHECK_SECS:-86400} max_pages=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_MAX_PAGES:-100} page_size=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_PAGE_SIZE:-100}"
-    echo "disconnected_bridge_policy audit_enabled=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_AUDIT_ENABLED:-true} execute_enabled=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_ENABLED:-false} orphan_execute_enabled=${TUWUNEL_DISCONNECTED_BRIDGE_ORPHAN_PURGE_ENABLED:-false} grace_secs=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_GRACE_SECS:-120} batch_size=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_BATCH_SIZE:-5}"
+    echo "disconnected_bridge_policy audit_enabled=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_AUDIT_ENABLED:-true} execute_enabled=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_ENABLED:-true} orphan_execute_enabled=${TUWUNEL_DISCONNECTED_BRIDGE_ORPHAN_PURGE_ENABLED:-false} grace_secs=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_GRACE_SECS:-120} batch_size=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_BATCH_SIZE:-5} room_delete_limit=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_ROOM_LIMIT:-1}"
     if ! command -v psql >/dev/null 2>&1 || [ -z "${PG_DATABASE_URL:-}" ]; then
         echo "psql or PG_DATABASE_URL unavailable"
         return 0
@@ -438,11 +438,12 @@ print_tuwunel_purge_audit() {
         SELECT trigger_kind,
                bridge_type,
                status,
+               portal_cleanup_status,
                count(*) AS jobs,
                to_char(to_timestamp(max(updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS last_updated
           FROM bridge_cleanup_jobs
-         GROUP BY trigger_kind, bridge_type, status
-         ORDER BY jobs DESC, trigger_kind, bridge_type, status;
+         GROUP BY trigger_kind, bridge_type, status, portal_cleanup_status
+         ORDER BY jobs DESC, trigger_kind, bridge_type, status, portal_cleanup_status;
 
         SELECT jobs.trigger_kind,
                jobs.bridge_type,
@@ -454,6 +455,32 @@ print_tuwunel_purge_audit() {
          GROUP BY jobs.trigger_kind, jobs.bridge_type, rooms.status,
                   left(COALESCE(rooms.last_error, '\''none'\''), 300)
          ORDER BY rooms DESC, jobs.trigger_kind, jobs.bridge_type, rooms.status;
+
+        SELECT id,
+               user_id,
+               bridge_type,
+               trigger_kind,
+               status,
+               portal_cleanup_status,
+               left(COALESCE(portal_cleanup_error, '\''none'\''), 200) AS portal_cleanup_error,
+               round(rootfs_free_before_bytes / 1048576.0, 1) AS rootfs_before_mib,
+               round(rootfs_free_after_bytes / 1048576.0, 1) AS rootfs_after_mib,
+               round((rootfs_free_after_bytes - rootfs_free_before_bytes) / 1048576.0, 1) AS rootfs_delta_mib,
+               round(tuwunel_before_bytes / 1048576.0, 1) AS tuwunel_before_mib,
+               round(tuwunel_after_bytes / 1048576.0, 1) AS tuwunel_after_mib,
+               round((tuwunel_after_bytes - tuwunel_before_bytes) / 1048576.0, 1) AS tuwunel_delta_mib,
+               left(COALESCE(last_error, '\''none'\''), 200) AS job_result
+          FROM bridge_cleanup_jobs
+         ORDER BY updated_at DESC
+         LIMIT 20;
+
+        SELECT user_id,
+               bridge_type,
+               lease_kind,
+               to_char(to_timestamp(lease_until), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS lease_until,
+               CASE WHEN lease_until > extract(epoch from now())::INT4 THEN '\''active'\'' ELSE '\''expired'\'' END AS lease_state
+          FROM bridge_connection_leases
+         ORDER BY updated_at DESC;
     ' 2>/dev/null || echo "purge audit query failed"
 }
 

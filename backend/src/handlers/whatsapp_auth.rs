@@ -501,6 +501,19 @@ pub async fn start_whatsapp_phone_connection(
         ));
     }
 
+    let _reconnect_lease =
+        crate::utils::disconnected_bridge_cleanup::acquire_bridge_reconnect_lease(
+            &state,
+            auth_user.user_id,
+            "whatsapp",
+        )
+        .map_err(|error| {
+            (
+                StatusCode::CONFLICT,
+                AxumJson(json!({"error": error.to_string()})),
+            )
+        })?;
+
     // Delete any existing bridge
     if let Err(e) = state
         .user_repository
@@ -696,6 +709,19 @@ pub async fn start_whatsapp_connection(
         "🚀 Starting WhatsApp connection process for user {}",
         auth_user.user_id
     );
+
+    let _reconnect_lease =
+        crate::utils::disconnected_bridge_cleanup::acquire_bridge_reconnect_lease(
+            &state,
+            auth_user.user_id,
+            "whatsapp",
+        )
+        .map_err(|error| {
+            (
+                StatusCode::CONFLICT,
+                AxumJson(json!({"error": error.to_string()})),
+            )
+        })?;
 
     // Check for and delete any existing WhatsApp bridge to start fresh
     if let Err(e) = state
@@ -930,6 +956,11 @@ async fn monitor_whatsapp_connection(
         // CONNECTED line present - the bridge has confirmed login.
         tracing::info!("🎉 WhatsApp successfully connected for user {}", user_id);
 
+        let _reconnect_lease =
+            crate::utils::disconnected_bridge_cleanup::acquire_bridge_reconnect_lease(
+                &state, user_id, "whatsapp",
+            )?;
+
         let connected_account =
             crate::utils::bridge_responses::first_connected_identifier(&combined);
         let current_time = std::time::SystemTime::now()
@@ -1139,7 +1170,7 @@ pub async fn disconnect_whatsapp(
 
     let room_id_str = bridge.room_id.clone().unwrap_or_default();
 
-    crate::utils::disconnected_bridge_cleanup::enqueue_disconnect_cleanup(
+    let cleanup_job_id = crate::utils::disconnected_bridge_cleanup::enqueue_disconnect_cleanup(
         &state,
         &bridge,
         "explicit_disconnect",
@@ -1155,6 +1186,20 @@ pub async fn disconnect_whatsapp(
             AxumJson(json!({"error": "Failed to queue durable connection cleanup"})),
         )
     })?;
+
+    let portal_cleanup_lease =
+        crate::utils::disconnected_bridge_cleanup::acquire_bridge_portal_cleanup_lease(
+            &state,
+            auth_user.user_id,
+            "whatsapp",
+            cleanup_job_id,
+        )
+        .map_err(|error| {
+            (
+                StatusCode::CONFLICT,
+                AxumJson(json!({"error": error.to_string()})),
+            )
+        })?;
 
     // Delete the bridge record IMMEDIATELY - user sees instant response
     state
@@ -1177,6 +1222,7 @@ pub async fn disconnect_whatsapp(
     let state_clone = state.clone();
     let user_id = auth_user.user_id;
     tokio::spawn(async move {
+        let _portal_cleanup_lease = portal_cleanup_lease;
         tracing::info!(
             "🧹 Starting background cleanup for WhatsApp user {}",
             user_id
@@ -1187,9 +1233,18 @@ pub async fn disconnect_whatsapp(
             Ok(c) => c,
             Err(e) => {
                 tracing::error!("Background cleanup: Failed to get Matrix client: {}", e);
+                let _ = state_clone
+                    .tuwunel_cleanup_repository
+                    .mark_bridge_portal_cleanup(
+                        cleanup_job_id,
+                        false,
+                        Some(&format!("failed to get Matrix client: {e}")),
+                    );
                 return;
             }
         };
+
+        let mut cleanup_errors = Vec::new();
 
         // Get the room and send cleanup commands
         if let Ok(room_id) = OwnedRoomId::try_from(room_id_str.as_str()) {
@@ -1216,11 +1271,13 @@ pub async fn disconnect_whatsapp(
                             user_id
                         ),
                         Err(e) => {
-                            tracing::warn!("WA background cleanup logout helper failed: {}", e)
+                            tracing::warn!("WA background cleanup logout helper failed: {}", e);
+                            cleanup_errors.push(format!("logout failed: {e}"));
                         }
                     }
                 } else {
                     tracing::warn!("WA background cleanup: invalid WHATSAPP_BRIDGE_BOT user id");
+                    cleanup_errors.push("invalid WHATSAPP_BRIDGE_BOT user id".to_string());
                 }
 
                 // Send command to delete all portals
@@ -1234,6 +1291,7 @@ pub async fn disconnect_whatsapp(
                         "Background cleanup: Failed to send delete-portals command: {}",
                         e
                     );
+                    cleanup_errors.push(format!("delete-all-portals send failed: {e}"));
                 }
                 sleep(Duration::from_secs(2)).await;
 
@@ -1246,10 +1304,25 @@ pub async fn disconnect_whatsapp(
                         "Background cleanup: Failed to send delete-session command: {}",
                         e
                     );
+                    cleanup_errors.push(format!("delete-session send failed: {e}"));
                 }
                 sleep(Duration::from_secs(2)).await;
+            } else {
+                cleanup_errors.push("management room not found in Matrix client".to_string());
             }
+        } else {
+            cleanup_errors.push(format!("invalid management room id: {room_id_str}"));
         }
+
+        crate::utils::disconnected_bridge_cleanup::record_portal_cleanup_outcome(
+            &state_clone,
+            cleanup_job_id,
+            user_id,
+            "whatsapp",
+            &client,
+            cleanup_errors,
+        )
+        .await;
 
         // Check for remaining active bridges and cleanup if none left.
         // Capture username before the stop call tears the client down, since

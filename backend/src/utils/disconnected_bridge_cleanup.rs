@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::process::Command;
 
 const DEFAULT_POLL_SECS: u64 = 30;
 const DEFAULT_GRACE_SECS: i32 = 120;
@@ -18,8 +19,10 @@ const DEFAULT_MAX_ATTEMPTS: i32 = 5;
 const DEFAULT_RETRY_SECS: i32 = 300;
 const DEFAULT_ORPHAN_SCAN_SECS: i32 = 3600;
 const DEFAULT_BATCH_SIZE: i64 = 5;
+const DEFAULT_ROOM_DELETE_LIMIT: i64 = 1;
 const DEFAULT_ADMIN_USER_ID: i32 = 1;
 const HTTP_TIMEOUT_SECS: u64 = 20;
+const CONNECTION_LEASE_SECS: i32 = 300;
 
 #[derive(Debug, Clone)]
 struct Config {
@@ -34,11 +37,166 @@ struct Config {
     retry_secs: i32,
     orphan_scan_secs: i32,
     batch_size: i64,
+    room_delete_limit: i64,
 }
 
 #[derive(Deserialize)]
 struct RoomMembersResponse {
     members: Vec<String>,
+}
+
+#[derive(Debug, Default)]
+struct StorageSnapshot {
+    rootfs_free_bytes: Option<i64>,
+    tuwunel_bytes: Option<i64>,
+}
+
+pub struct BridgeConnectionLease {
+    state: Arc<AppState>,
+    user_id: i32,
+    bridge_type: String,
+    owner_token: String,
+}
+
+impl Drop for BridgeConnectionLease {
+    fn drop(&mut self) {
+        if let Err(error) = self
+            .state
+            .tuwunel_cleanup_repository
+            .release_bridge_connection_lease(self.user_id, &self.bridge_type, &self.owner_token)
+        {
+            tracing::error!(
+                user_id = self.user_id,
+                service = self.bridge_type,
+                error = %error,
+                "Failed to release bridge connection lease"
+            );
+        }
+    }
+}
+
+pub fn acquire_bridge_reconnect_lease(
+    state: &Arc<AppState>,
+    user_id: i32,
+    bridge_type: &str,
+) -> Result<BridgeConnectionLease> {
+    let now = now_timestamp();
+    let owner_token = format!("reconnect-{}", uuid::Uuid::new_v4());
+    let acquired = state
+        .tuwunel_cleanup_repository
+        .try_acquire_bridge_connection_lease(
+            user_id,
+            bridge_type,
+            "reconnect",
+            &owner_token,
+            now.saturating_add(CONNECTION_LEASE_SECS),
+        )?;
+    if !acquired {
+        return Err(anyhow!(
+            "{} cleanup is currently deleting old Matrix rooms; retry connection shortly",
+            bridge_type
+        ));
+    }
+    Ok(BridgeConnectionLease {
+        state: state.clone(),
+        user_id,
+        bridge_type: bridge_type.to_string(),
+        owner_token,
+    })
+}
+
+pub fn acquire_bridge_portal_cleanup_lease(
+    state: &Arc<AppState>,
+    user_id: i32,
+    bridge_type: &str,
+    job_id: i32,
+) -> Result<BridgeConnectionLease> {
+    let now = now_timestamp();
+    let owner_token = format!("portal-cleanup-job-{job_id}-{}", uuid::Uuid::new_v4());
+    let acquired = state
+        .tuwunel_cleanup_repository
+        .try_acquire_bridge_connection_lease(
+            user_id,
+            bridge_type,
+            "portal_cleanup",
+            &owner_token,
+            now.saturating_add(CONNECTION_LEASE_SECS),
+        )?;
+    if !acquired {
+        return Err(anyhow!(
+            "{} connection operation is already in progress; retry disconnect shortly",
+            bridge_type
+        ));
+    }
+    Ok(BridgeConnectionLease {
+        state: state.clone(),
+        user_id,
+        bridge_type: bridge_type.to_string(),
+        owner_token,
+    })
+}
+
+pub async fn record_portal_cleanup_outcome(
+    state: &Arc<AppState>,
+    job_id: i32,
+    user_id: i32,
+    bridge_type: &str,
+    client: &matrix_sdk::Client,
+    mut errors: Vec<String>,
+) {
+    let mut remaining_rooms = Vec::new();
+    for attempt in 1..=3 {
+        let sync_settings =
+            matrix_sdk::config::SyncSettings::default().timeout(Duration::from_secs(2));
+        if let Err(error) = client.sync_once(sync_settings).await {
+            tracing::warn!(job_id, user_id, service = bridge_type, attempt, error = %error, "Portal cleanup verification sync failed");
+        }
+        match crate::utils::bridge::get_service_rooms(client, bridge_type).await {
+            Ok(rooms) if rooms.is_empty() => {
+                remaining_rooms.clear();
+                break;
+            }
+            Ok(rooms) => {
+                remaining_rooms = rooms.into_iter().map(|room| room.room_id).collect();
+            }
+            Err(error) => errors.push(format!("portal verification failed: {error}")),
+        }
+        if attempt < 3 {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    }
+    if !remaining_rooms.is_empty() {
+        errors.push(format!(
+            "{} service portal room(s) still visible: {}",
+            remaining_rooms.len(),
+            remaining_rooms.join(",")
+        ));
+    }
+
+    let confirmed = errors.is_empty();
+    let summary = (!confirmed).then(|| errors.join("; "));
+    if let Err(error) = state.tuwunel_cleanup_repository.mark_bridge_portal_cleanup(
+        job_id,
+        confirmed,
+        summary.as_deref(),
+    ) {
+        tracing::error!(job_id, user_id, service = bridge_type, error = %error, "Failed to persist bridge portal cleanup proof");
+    } else if confirmed {
+        tracing::info!(
+            job_id,
+            user_id,
+            service = bridge_type,
+            "Confirmed bridge portal cleanup; Tuwunel room deletion may proceed"
+        );
+    } else {
+        tracing::error!(
+            job_id,
+            user_id,
+            service = bridge_type,
+            reason = summary.as_deref().unwrap_or("unknown"),
+            "Bridge portal cleanup was not confirmed; Tuwunel room deletion remains blocked"
+        );
+    }
 }
 
 /// Queue cleanup while the exact bridge generation still exists. Callers must
@@ -83,6 +241,7 @@ pub async fn start_disconnected_bridge_cleanup_worker(state: Arc<AppState>) {
         max_attempts = config.max_attempts,
         orphan_scan_secs = config.orphan_scan_secs,
         batch_size = config.batch_size,
+        room_delete_limit = config.room_delete_limit,
         "Disconnected-bridge Tuwunel cleanup policy loaded"
     );
     let mut next_orphan_scan_at = 0;
@@ -128,8 +287,17 @@ async fn run_cycle(state: &Arc<AppState>, config: &Config) -> Result<()> {
         .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
         .build()?;
     let access_token = admin_access_token(state, config.admin_user_id).await?;
+    let mut remaining_room_deletes = config.room_delete_limit;
     for job in jobs {
-        process_job(state, config, &client, &access_token, &job).await;
+        process_job(
+            state,
+            config,
+            &client,
+            &access_token,
+            &job,
+            &mut remaining_room_deletes,
+        )
+        .await;
     }
     Ok(())
 }
@@ -140,6 +308,7 @@ async fn process_job(
     client: &reqwest::Client,
     access_token: &str,
     job: &BridgeCleanupJob,
+    remaining_room_deletes: &mut i64,
 ) {
     let now = now_timestamp();
     match state
@@ -212,25 +381,140 @@ async fn process_job(
         }
     };
 
-    let execute = config.execute_enabled
+    let execute_requested = config.execute_enabled
         && (job.trigger_kind != "orphan_audit" || config.orphan_execute_enabled);
+    let execute = bridge_cleanup_execution_allowed(
+        &job.trigger_kind,
+        &job.portal_cleanup_status,
+        config.execute_enabled,
+        config.orphan_execute_enabled,
+    );
+    let mut cleanup_lease = None;
+    if execute && *remaining_room_deletes > 0 {
+        let owner_token = format!("cleanup-job-{}-{}", job.id, uuid::Uuid::new_v4());
+        match state
+            .tuwunel_cleanup_repository
+            .try_acquire_bridge_connection_lease(
+                job.user_id,
+                &job.bridge_type,
+                "cleanup",
+                &owner_token,
+                now.saturating_add(CONNECTION_LEASE_SECS),
+            ) {
+            Ok(true) => {
+                cleanup_lease = Some(BridgeConnectionLease {
+                    state: state.clone(),
+                    user_id: job.user_id,
+                    bridge_type: job.bridge_type.clone(),
+                    owner_token,
+                });
+            }
+            Ok(false) => {
+                retry_job(
+                    state,
+                    config,
+                    job,
+                    "reconnect operation currently holds bridge lease",
+                );
+                return;
+            }
+            Err(error) => {
+                retry_job(
+                    state,
+                    config,
+                    job,
+                    &format!("cleanup lease acquisition failed: {error}"),
+                );
+                return;
+            }
+        }
+
+        match state
+            .tuwunel_cleanup_repository
+            .bridge_generation_present(job)
+        {
+            Ok(None) => {}
+            Ok(Some((current_id, current_status, current_created_at))) => {
+                let reason = format!(
+                    "cancelled after cleanup lease: bridge id={current_id} created_at={current_created_at:?} status={current_status}"
+                );
+                let _ = state.tuwunel_cleanup_repository.update_bridge_cleanup_job(
+                    job.id,
+                    BRIDGE_JOB_CANCELLED_RECONNECTED,
+                    job.attempt_count,
+                    now,
+                    Some(&reason),
+                    true,
+                );
+                return;
+            }
+            Err(error) => {
+                retry_job(
+                    state,
+                    config,
+                    job,
+                    &format!("post-lease bridge generation check failed: {error}"),
+                );
+                return;
+            }
+        }
+
+        let snapshot = storage_snapshot().await;
+        let _ = state
+            .tuwunel_cleanup_repository
+            .record_bridge_cleanup_storage(
+                job.id,
+                true,
+                snapshot.rootfs_free_bytes,
+                snapshot.tuwunel_bytes,
+            );
+        tracing::info!(
+            job_id = job.id,
+            rootfs_free_bytes = snapshot.rootfs_free_bytes,
+            tuwunel_bytes = snapshot.tuwunel_bytes,
+            "Captured pre-delete bridge cleanup storage"
+        );
+    }
     let mut blocked = 0;
     let mut failed = 0;
     let mut deleted = 0;
+    let mut deferred = 0;
     for room in rooms {
         match audit_room(state, config, client, access_token, job, &room).await {
             Ok(()) if !execute => {
+                let reason = if execute_requested {
+                    format!(
+                        "blocked: portal cleanup status={} (confirmed required)",
+                        job.portal_cleanup_status
+                    )
+                } else {
+                    "eligible; destructive execution disabled by policy".to_string()
+                };
                 let _ = state.tuwunel_cleanup_repository.update_bridge_cleanup_room(
                     room.id,
                     BRIDGE_ROOM_AUDIT_READY,
                     room.attempt_count,
                     None,
-                    Some("eligible; destructive execution disabled by policy"),
+                    Some(&reason),
+                    false,
+                );
+            }
+            Ok(()) if *remaining_room_deletes <= 0 => {
+                deferred += 1;
+                let _ = state.tuwunel_cleanup_repository.update_bridge_cleanup_room(
+                    room.id,
+                    BRIDGE_ROOM_AUDIT_READY,
+                    room.attempt_count,
+                    None,
+                    Some("eligible; deferred by per-cycle destructive canary limit"),
                     false,
                 );
             }
             Ok(()) => match delete_room(state, config, client, access_token, job, &room).await {
-                Ok(()) => deleted += 1,
+                Ok(()) => {
+                    deleted += 1;
+                    *remaining_room_deletes = (*remaining_room_deletes).saturating_sub(1);
+                }
                 Err(()) => failed += 1,
             },
             Err(reason) => {
@@ -254,12 +538,31 @@ async fn process_job(
         }
     }
 
+    if deleted > 0 {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let snapshot = storage_snapshot().await;
+        let _ = state
+            .tuwunel_cleanup_repository
+            .record_bridge_cleanup_storage(
+                job.id,
+                false,
+                snapshot.rootfs_free_bytes,
+                snapshot.tuwunel_bytes,
+            );
+        tracing::info!(
+            job_id = job.id,
+            rootfs_free_bytes = snapshot.rootfs_free_bytes,
+            tuwunel_bytes = snapshot.tuwunel_bytes,
+            "Captured post-delete bridge cleanup storage"
+        );
+    }
     let summary = format!(
-        "rooms_deleted={deleted} rooms_blocked={blocked} rooms_failed={failed} execute={execute}"
+        "rooms_deleted={deleted} rooms_blocked={blocked} rooms_failed={failed} rooms_deferred={deferred} execute={execute} portal_cleanup_status={} canary_limit={}",
+        job.portal_cleanup_status, config.room_delete_limit
     );
     if failed > 0 {
         retry_job(state, config, job, &summary);
-    } else if execute {
+    } else if execute && deferred == 0 {
         let _ = state.tuwunel_cleanup_repository.update_bridge_cleanup_job(
             job.id,
             BRIDGE_JOB_SUCCEEDED,
@@ -274,6 +577,22 @@ async fn process_job(
             service = job.bridge_type,
             summary,
             "Disconnected-bridge Tuwunel cleanup completed"
+        );
+    } else if execute {
+        let _ = state.tuwunel_cleanup_repository.update_bridge_cleanup_job(
+            job.id,
+            BRIDGE_JOB_AUDIT_READY,
+            job.attempt_count,
+            now.saturating_add(config.retry_secs),
+            Some(&summary),
+            false,
+        );
+        tracing::info!(
+            job_id = job.id,
+            user_id = job.user_id,
+            service = job.bridge_type,
+            summary,
+            "Disconnected-bridge cleanup paused at destructive canary limit"
         );
     } else {
         let _ = state.tuwunel_cleanup_repository.update_bridge_cleanup_job(
@@ -292,6 +611,46 @@ async fn process_job(
             "Disconnected-bridge cleanup audit completed"
         );
     }
+    drop(cleanup_lease);
+}
+
+async fn storage_snapshot() -> StorageSnapshot {
+    let rootfs_free_bytes = command_metric("df", &["-B1", "/"], |output| {
+        output
+            .lines()
+            .last()?
+            .split_whitespace()
+            .nth(3)?
+            .parse::<i64>()
+            .ok()
+    })
+    .await;
+    let tuwunel_bytes = command_metric("du", &["-sb", "/var/lib/tuwunel"], |output| {
+        output.split_whitespace().next()?.parse::<i64>().ok()
+    })
+    .await;
+    StorageSnapshot {
+        rootfs_free_bytes,
+        tuwunel_bytes,
+    }
+}
+
+async fn command_metric(
+    program: &str,
+    args: &[&str],
+    parse: impl FnOnce(&str) -> Option<i64>,
+) -> Option<i64> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(10),
+        Command::new(program).args(args).output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse(std::str::from_utf8(&output.stdout).ok()?)
 }
 
 async fn discover_visible_service_rooms(state: &Arc<AppState>, job: &BridgeCleanupJob) {
@@ -529,6 +888,17 @@ pub fn build_delete_room_url(homeserver_url: &str, room_id: &str) -> String {
     )
 }
 
+pub fn bridge_cleanup_execution_allowed(
+    trigger_kind: &str,
+    portal_cleanup_status: &str,
+    execute_enabled: bool,
+    orphan_execute_enabled: bool,
+) -> bool {
+    execute_enabled
+        && portal_cleanup_status == "confirmed"
+        && (trigger_kind != "orphan_audit" || orphan_execute_enabled)
+}
+
 impl Config {
     fn from_env() -> Self {
         Self {
@@ -536,7 +906,7 @@ impl Config {
                 .unwrap_or_else(|_| "http://localhost:8008".to_string()),
             admin_user_id: env_i32("TUWUNEL_ADMIN_USER_ID", DEFAULT_ADMIN_USER_ID, 1),
             audit_enabled: env_flag("TUWUNEL_DISCONNECTED_BRIDGE_PURGE_AUDIT_ENABLED", true),
-            execute_enabled: env_flag("TUWUNEL_DISCONNECTED_BRIDGE_PURGE_ENABLED", false),
+            execute_enabled: env_flag("TUWUNEL_DISCONNECTED_BRIDGE_PURGE_ENABLED", true),
             orphan_execute_enabled: env_flag(
                 "TUWUNEL_DISCONNECTED_BRIDGE_ORPHAN_PURGE_ENABLED",
                 false,
@@ -573,6 +943,14 @@ impl Config {
                     1,
                 )
                 .min(50),
+            ),
+            room_delete_limit: i64::from(
+                env_i32(
+                    "TUWUNEL_DISCONNECTED_BRIDGE_PURGE_ROOM_LIMIT",
+                    DEFAULT_ROOM_DELETE_LIMIT as i32,
+                    1,
+                )
+                .min(10),
             ),
         }
     }

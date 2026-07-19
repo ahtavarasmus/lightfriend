@@ -1,4 +1,6 @@
-use backend::utils::disconnected_bridge_cleanup::{build_delete_room_url, build_room_members_url};
+use backend::utils::disconnected_bridge_cleanup::{
+    bridge_cleanup_execution_allowed, build_delete_room_url, build_room_members_url,
+};
 use backend::utils::tuwunel_event_cleanup::{
     build_purge_history_url, build_purge_status_url, historical_event_requires_proof,
     is_matrix_event_id, is_tuwunel_admin_redaction_reason, next_backfill_scan_timestamp,
@@ -24,6 +26,40 @@ fn builds_encoded_disconnected_room_admin_urls() {
         build_delete_room_url("http://localhost:8008", "!room:localhost"),
         "http://localhost:8008/_synapse/admin/v1/rooms/%21room%3Alocalhost"
     );
+}
+
+#[test]
+fn disconnected_room_execution_requires_portal_proof_and_separate_orphan_permission() {
+    assert!(bridge_cleanup_execution_allowed(
+        "explicit_disconnect",
+        "confirmed",
+        true,
+        false,
+    ));
+    assert!(!bridge_cleanup_execution_allowed(
+        "explicit_disconnect",
+        "pending",
+        true,
+        false,
+    ));
+    assert!(!bridge_cleanup_execution_allowed(
+        "orphan_audit",
+        "legacy_unverified",
+        true,
+        true,
+    ));
+    assert!(!bridge_cleanup_execution_allowed(
+        "orphan_audit",
+        "confirmed",
+        true,
+        false,
+    ));
+    assert!(bridge_cleanup_execution_allowed(
+        "orphan_audit",
+        "confirmed",
+        true,
+        true,
+    ));
 }
 
 #[test]

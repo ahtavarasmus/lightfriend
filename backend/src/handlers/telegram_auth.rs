@@ -920,6 +920,17 @@ pub async fn start_telegram_connection(
         user_id
     );
 
+    let _reconnect_lease =
+        crate::utils::disconnected_bridge_cleanup::acquire_bridge_reconnect_lease(
+            &state, user_id, "telegram",
+        )
+        .map_err(|error| {
+            (
+                StatusCode::CONFLICT,
+                AxumJson(json!({"error": error.to_string()})),
+            )
+        })?;
+
     // Clean up any stale telegram bridge records from previous failed attempts
     let cleanup_start = Instant::now();
     match state.user_repository.delete_bridge(user_id, "telegram") {
@@ -1430,6 +1441,11 @@ async fn monitor_telegram_connection(
                                     user_id,
                                     username
                                 );
+                                let _reconnect_lease = crate::utils::disconnected_bridge_cleanup::acquire_bridge_reconnect_lease(
+                                    &state,
+                                    user_id,
+                                    "telegram",
+                                )?;
                                 let connected_account = Some(username);
 
                                 let current_time = std::time::SystemTime::now()
@@ -1711,7 +1727,7 @@ pub async fn disconnect_telegram(
 
     let room_id_str = bridge.room_id.clone().unwrap_or_default();
 
-    crate::utils::disconnected_bridge_cleanup::enqueue_disconnect_cleanup(
+    let cleanup_job_id = crate::utils::disconnected_bridge_cleanup::enqueue_disconnect_cleanup(
         &state,
         &bridge,
         "explicit_disconnect",
@@ -1727,6 +1743,20 @@ pub async fn disconnect_telegram(
             AxumJson(json!({"error": "Failed to queue durable connection cleanup"})),
         )
     })?;
+
+    let portal_cleanup_lease =
+        crate::utils::disconnected_bridge_cleanup::acquire_bridge_portal_cleanup_lease(
+            &state,
+            auth_user.user_id,
+            "telegram",
+            cleanup_job_id,
+        )
+        .map_err(|error| {
+            (
+                StatusCode::CONFLICT,
+                AxumJson(json!({"error": error.to_string()})),
+            )
+        })?;
 
     // Delete the bridge record IMMEDIATELY - user sees instant response
     state
@@ -1749,6 +1779,7 @@ pub async fn disconnect_telegram(
     let state_clone = state.clone();
     let user_id = auth_user.user_id;
     tokio::spawn(async move {
+        let _portal_cleanup_lease = portal_cleanup_lease;
         tracing::info!(
             "🧹 Starting background cleanup for Telegram user {}",
             user_id
@@ -1759,9 +1790,18 @@ pub async fn disconnect_telegram(
             Ok(c) => c,
             Err(e) => {
                 tracing::error!("Background cleanup: Failed to get Matrix client: {}", e);
+                let _ = state_clone
+                    .tuwunel_cleanup_repository
+                    .mark_bridge_portal_cleanup(
+                        cleanup_job_id,
+                        false,
+                        Some(&format!("failed to get Matrix client: {e}")),
+                    );
                 return;
             }
         };
+
+        let mut cleanup_errors = Vec::new();
 
         // Get the room and send cleanup commands
         if let Ok(room_id) = OwnedRoomId::try_from(room_id_str.as_str()) {
@@ -1772,6 +1812,7 @@ pub async fn disconnect_telegram(
                     .await
                 {
                     tracing::error!("Background cleanup: Failed to send logout command: {}", e);
+                    cleanup_errors.push(format!("logout send failed: {e}"));
                 }
                 sleep(Duration::from_secs(2)).await;
 
@@ -1784,10 +1825,25 @@ pub async fn disconnect_telegram(
                         "Background cleanup: Failed to send clean-rooms command: {}",
                         e
                     );
+                    cleanup_errors.push(format!("clean-rooms send failed: {e}"));
                 }
                 sleep(Duration::from_secs(2)).await;
+            } else {
+                cleanup_errors.push("management room not found in Matrix client".to_string());
             }
+        } else {
+            cleanup_errors.push(format!("invalid management room id: {room_id_str}"));
         }
+
+        crate::utils::disconnected_bridge_cleanup::record_portal_cleanup_outcome(
+            &state_clone,
+            cleanup_job_id,
+            user_id,
+            "telegram",
+            &client,
+            cleanup_errors,
+        )
+        .await;
 
         // Check for remaining active bridges and cleanup if none left
         let has_active_bridges = state_clone
