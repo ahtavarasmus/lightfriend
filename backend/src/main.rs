@@ -22,6 +22,10 @@ use tracing::Level;
 
 // Import modules and types from library crate
 use api::{twilio_sms, voice_pipeline};
+use backend::services::{
+    light_tool_agent_responder::LightToolAgentResponder,
+    light_tool_run_dispatcher::LightToolResponder,
+};
 use backend::{
     api, blog, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState, LlmUsageRepository,
     TotpRepository, TuwunelCleanupRepository, UserCore, UserCoreOps, UserRepository,
@@ -557,69 +561,76 @@ async fn main() {
 
     let channel_router = Arc::new(router);
 
-    let state = Arc::new(AppState {
-        pg_pool,
-        user_core: user_core.clone(),
-        user_repository: user_repository.clone(),
-        twilio_client,
-        twilio_message_service,
-        channel_router,
-        ai_config: AiConfig::from_env(),
-        tesla_oauth_client,
-        youtube_oauth_client,
-        session_store: session_store.clone(),
-        login_limiter: DashMap::new(),
-        password_reset_limiter: DashMap::new(),
-        password_reset_verify_limiter: DashMap::new(),
-        api_rate_limiter: DashMap::new(),
-        password_reset_otps: DashMap::new(),
-        phone_verify_otps: DashMap::new(),
-        matrix_users,
-        matrix_reconcile_lock: Arc::new(Mutex::new(())),
-        tesla_monitoring_tasks: Arc::new(DashMap::new()),
-        tesla_charging_monitor_tasks: Arc::new(DashMap::new()),
-        imap_idle_tasks: Arc::new(DashMap::new()),
-        tesla_waking_vehicles: Arc::new(DashMap::new()),
-        phone_verify_limiter: DashMap::new(),
-        phone_verify_verify_limiter: DashMap::new(),
-        pending_message_senders: Arc::new(Mutex::new(HashMap::new())),
-        totp_repository,
-        webauthn_repository,
-        admin_alert_repository,
-        metrics_repository,
-        provider_routes_repository,
-        pending_reply_watches_repository,
-        webhook_tokens_repository,
-        pending_totp_logins: DashMap::new(),
-        pending_password_resets: DashMap::new(),
-        session_to_token: DashMap::new(),
-        totp_verify_limiter: DashMap::new(),
-        webauthn_verify_limiter: DashMap::new(),
-        llm_usage_repository,
-        bandwidth_repository,
-        tuwunel_cleanup_repository,
-        ontology_repository,
-        commitment_repository,
-        whatsapp_bridge_repository,
-        telegram_bridge_repository,
-        ontology_registry: backend::ontology::registry::OntologyRegistry::build(),
-        tool_registry: backend::build_tool_registry(),
-        pending_rule_tests: Arc::new(DashMap::new()),
-        maintenance_mode: Arc::new(AtomicBool::new(false)),
-        blog_store: Arc::new(
-            blog::content::BlogStore::load("content/blog").unwrap_or_else(|e| {
-                tracing::warn!(
-                    "Failed to load blog content: {}. Starting with empty blog.",
-                    e
-                );
-                blog::content::BlogStore::empty()
-            }),
-        ),
-        system_notify_cooldowns: DashMap::new(),
-        digest_cooldowns: DashMap::new(),
-        activity_feed_tx: tokio::sync::broadcast::channel(64).0,
-        pending_purges: backend::services::data_purge::new_registry(),
-        rule_builder_contact_cache: Arc::new(DashMap::new()),
+    let ai_config = AiConfig::from_env();
+    let state = Arc::new_cyclic(|weak_state| {
+        let light_tool_responder: Arc<dyn LightToolResponder> = Arc::new(
+            LightToolAgentResponder::new(ai_config.clone(), weak_state.clone()),
+        );
+        AppState {
+            pg_pool,
+            user_core: user_core.clone(),
+            user_repository: user_repository.clone(),
+            twilio_client,
+            twilio_message_service,
+            channel_router,
+            ai_config,
+            light_tool_responder: Some(light_tool_responder),
+            tesla_oauth_client,
+            youtube_oauth_client,
+            session_store: session_store.clone(),
+            login_limiter: DashMap::new(),
+            password_reset_limiter: DashMap::new(),
+            password_reset_verify_limiter: DashMap::new(),
+            api_rate_limiter: DashMap::new(),
+            password_reset_otps: DashMap::new(),
+            phone_verify_otps: DashMap::new(),
+            matrix_users,
+            matrix_reconcile_lock: Arc::new(Mutex::new(())),
+            tesla_monitoring_tasks: Arc::new(DashMap::new()),
+            tesla_charging_monitor_tasks: Arc::new(DashMap::new()),
+            imap_idle_tasks: Arc::new(DashMap::new()),
+            tesla_waking_vehicles: Arc::new(DashMap::new()),
+            phone_verify_limiter: DashMap::new(),
+            phone_verify_verify_limiter: DashMap::new(),
+            pending_message_senders: Arc::new(Mutex::new(HashMap::new())),
+            totp_repository,
+            webauthn_repository,
+            admin_alert_repository,
+            metrics_repository,
+            provider_routes_repository,
+            pending_reply_watches_repository,
+            webhook_tokens_repository,
+            pending_totp_logins: DashMap::new(),
+            pending_password_resets: DashMap::new(),
+            session_to_token: DashMap::new(),
+            totp_verify_limiter: DashMap::new(),
+            webauthn_verify_limiter: DashMap::new(),
+            llm_usage_repository,
+            bandwidth_repository,
+            tuwunel_cleanup_repository,
+            ontology_repository,
+            commitment_repository,
+            whatsapp_bridge_repository,
+            telegram_bridge_repository,
+            ontology_registry: backend::ontology::registry::OntologyRegistry::build(),
+            tool_registry: backend::build_tool_registry(),
+            pending_rule_tests: Arc::new(DashMap::new()),
+            maintenance_mode: Arc::new(AtomicBool::new(false)),
+            blog_store: Arc::new(
+                blog::content::BlogStore::load("content/blog").unwrap_or_else(|e| {
+                    tracing::warn!(
+                        "Failed to load blog content: {}. Starting with empty blog.",
+                        e
+                    );
+                    blog::content::BlogStore::empty()
+                }),
+            ),
+            system_notify_cooldowns: DashMap::new(),
+            digest_cooldowns: DashMap::new(),
+            activity_feed_tx: tokio::sync::broadcast::channel(64).0,
+            pending_purges: backend::services::data_purge::new_registry(),
+            rule_builder_contact_cache: Arc::new(DashMap::new()),
+        }
     });
     // SMS server route - validates signature using user lookup
     let twilio_sms_routes = Router::new()
@@ -723,6 +734,32 @@ async fn main() {
     // Public routes that don't need authentication. there's ratelimiting though
     let public_routes = Router::new()
         .route("/api/health", get(health_check))
+        .route(
+            "/api/light-tool/bootstrap",
+            post(handlers::light_tool_handlers::bootstrap),
+        )
+        .route(
+            "/api/light-tool/messages",
+            post(handlers::light_tool_handlers::send_message)
+                .get(handlers::light_tool_handlers::get_message_history)
+                .layer(DefaultBodyLimit::max(16 * 1024)),
+        )
+        .route(
+            "/api/light-tool/runs/{run_id}",
+            get(handlers::light_tool_handlers::get_run_status),
+        )
+        .route(
+            "/api/light-tool/pair",
+            post(handlers::light_tool_handlers::consume_pairing_offer)
+                .delete(handlers::light_tool_handlers::disconnect_account)
+                .layer(DefaultBodyLimit::max(1024)),
+        )
+        .route(
+            "/api/light-tool/push",
+            put(handlers::light_tool_handlers::register_push_endpoint)
+                .delete(handlers::light_tool_handlers::unregister_push_endpoint)
+                .layer(DefaultBodyLimit::max(4 * 1024)),
+        )
         .route(
             "/api/health/deep",
             get(handlers::health_handlers::deep_health),
@@ -1544,6 +1581,11 @@ async fn main() {
         .route(
             "/api/me/webhook-tokens/{token_id}",
             delete(handlers::webhook_sms_handlers::revoke_token),
+        )
+        .route(
+            "/api/me/light-tool/pairing-sessions",
+            get(handlers::light_tool_handlers::get_pairing_status)
+                .post(handlers::light_tool_handlers::create_pairing_offer),
         )
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
     // Internal endpoints (secret-authenticated, no JWT)

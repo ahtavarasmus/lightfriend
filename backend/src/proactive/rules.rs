@@ -765,7 +765,7 @@ pub(crate) async fn prefetch_sources(
                     &loc,
                     "metric",
                     "current",
-                    rule.user_id,
+                    Some(rule.user_id),
                 )
                 .await
                 {

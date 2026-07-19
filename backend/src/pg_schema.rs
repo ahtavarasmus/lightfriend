@@ -613,6 +613,60 @@ diesel::table! {
 }
 
 diesel::table! {
+    light_tool_devices (id) {
+        id -> Int4,
+        installation_id_hash -> Text,
+        device_token_hash -> Text,
+        user_id -> Nullable<Int4>,
+        trial_started_at -> Int4,
+        trial_expires_at -> Int4,
+        trial_messages_used -> Int4,
+        last_seen_at -> Int4,
+        revoked_at -> Nullable<Int4>,
+        created_at -> Int4,
+        updated_at -> Int4,
+    }
+}
+
+diesel::table! {
+    light_tool_runs (id) {
+        id -> Text,
+        device_id -> Int4,
+        account_user_id -> Nullable<Int4>,
+        client_message_id -> Text,
+        encrypted_user_message -> Text,
+        encrypted_activity_text -> Nullable<Text>,
+        encrypted_assistant_message -> Nullable<Text>,
+        encrypted_error_message -> Nullable<Text>,
+        status -> Text,
+        created_at -> Int4,
+        updated_at -> Int4,
+        completed_at -> Nullable<Int4>,
+    }
+}
+
+diesel::table! {
+    light_tool_pairing_sessions (user_id) {
+        user_id -> Int4,
+        token_hash -> Text,
+        expires_at -> Int4,
+        consumed_at -> Nullable<Int4>,
+        consumed_by_device_id -> Nullable<Int4>,
+        created_at -> Int4,
+    }
+}
+
+diesel::table! {
+    light_tool_push_registrations (device_id) {
+        device_id -> Int4,
+        encrypted_endpoint -> Text,
+        endpoint_hash -> Text,
+        registered_at -> Int4,
+        updated_at -> Int4,
+    }
+}
+
+diesel::table! {
     webhook_tokens (id) {
         id -> Int4,
         user_id -> Int4,
@@ -643,6 +697,10 @@ diesel::joinable!(ont_channels -> ont_persons (person_id));
 
 diesel::joinable!(refund_info -> users (user_id));
 diesel::joinable!(user_settings -> users (user_id));
+diesel::joinable!(light_tool_devices -> users (user_id));
+diesel::joinable!(light_tool_push_registrations -> light_tool_devices (device_id));
+diesel::joinable!(light_tool_runs -> light_tool_devices (device_id));
+diesel::joinable!(light_tool_pairing_sessions -> users (user_id));
 diesel::joinable!(webhook_tokens -> users (user_id));
 diesel::joinable!(webhook_idempotency_keys -> webhook_tokens (token_id));
 
@@ -688,6 +746,10 @@ diesel::allow_tables_to_appear_in_same_query!(
     commitment_prompts,
     provider_routes,
     pending_reply_watches,
+    light_tool_devices,
+    light_tool_push_registrations,
+    light_tool_runs,
+    light_tool_pairing_sessions,
     webhook_tokens,
     webhook_idempotency_keys,
 );

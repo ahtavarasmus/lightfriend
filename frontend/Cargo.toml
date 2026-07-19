@@ -61,3 +61,4 @@ chrono-tz = "0.10.2"
 pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
 base64 = "0.22"
 regex = "1.10"
+qrcodegen = "1.8.0"

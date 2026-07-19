@@ -13,6 +13,8 @@ pub mod handlers {
     pub mod health_handlers;
     pub mod imap_auth;
     pub mod imap_handlers;
+    pub mod light_tool_auth;
+    pub mod light_tool_handlers;
     pub mod mcp_handlers;
     pub mod person_handlers;
     pub mod pricing_handlers;
@@ -119,6 +121,7 @@ pub mod tools {
 }
 pub mod models {
     pub mod commitment_models;
+    pub mod light_tool_models;
     pub mod mcp_models;
     pub mod ontology_models;
     pub mod user_models;
@@ -127,6 +130,10 @@ pub mod repositories {
     pub mod admin_alert_repository;
     pub mod bandwidth_repository;
     pub mod commitment_repository;
+    pub mod light_tool_devices_repository;
+    pub mod light_tool_pairing_repository;
+    pub mod light_tool_push_repository;
+    pub mod light_tool_runs_repository;
     pub mod llm_usage_repository;
     pub mod mcp_repository;
     pub mod metrics_repository;
@@ -152,6 +159,14 @@ pub mod repositories {
 pub mod services {
     pub mod country_service;
     pub mod data_purge;
+    pub mod light_tool_agent_responder;
+    pub mod light_tool_bootstrap;
+    pub mod light_tool_identity;
+    pub mod light_tool_pairing;
+    pub mod light_tool_push_delivery;
+    pub mod light_tool_run_dispatcher;
+    pub mod light_tool_run_execution;
+    pub mod light_tool_trial;
     pub mod mcp_client;
     pub mod metrics_service;
     pub mod signup_service;
@@ -258,6 +273,8 @@ pub struct AppState {
     pub twilio_message_service: Arc<TwilioMessageService<RealTwilioClient>>,
     pub channel_router: Arc<crate::channels::router::ChannelRouter>,
     pub ai_config: AiConfig,
+    pub light_tool_responder:
+        Option<Arc<dyn services::light_tool_run_dispatcher::LightToolResponder>>,
     pub youtube_oauth_client: GoogleOAuthClient,
     pub tesla_oauth_client: TeslaOAuthClient,
     pub session_store: MemoryStore,

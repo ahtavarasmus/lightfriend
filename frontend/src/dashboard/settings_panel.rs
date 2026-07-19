@@ -1,3 +1,4 @@
+use super::light_phone_panel::LightPhonePanel;
 use super::people_list::PeopleList;
 use super::webhooks_panel::WebhooksPanel;
 use crate::auth::connect::Connect;
@@ -62,8 +63,11 @@ const SETTINGS_STYLES: &str = r#"
     display: flex;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     padding: 0 1rem;
+    overflow-x: auto;
+    scrollbar-width: thin;
 }
 .settings-tab {
+    flex: 0 0 auto;
     background: transparent;
     border: none;
     color: #888;
@@ -72,6 +76,7 @@ const SETTINGS_STYLES: &str = r#"
     cursor: pointer;
     border-bottom: 2px solid transparent;
     transition: all 0.2s;
+    white-space: nowrap;
 }
 .settings-tab:hover {
     color: #ccc;
@@ -99,6 +104,7 @@ const SETTINGS_STYLES: &str = r#"
 pub enum SettingsTab {
     Capabilities,
     People,
+    LightPhone,
     Account,
     Billing,
     Webhooks,
@@ -206,6 +212,14 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                 </div>
             }
         }
+        SettingsTab::LightPhone => {
+            html! {
+                <div class="settings-content">
+                    <h3>{"Light Phone"}</h3>
+                    <LightPhonePanel />
+                </div>
+            }
+        }
         SettingsTab::Account => {
             if let Some(profile) = props.user_profile.as_ref() {
                 let on_profile_update = props.on_profile_update.clone();
@@ -290,6 +304,15 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                         }}
                     >
                         {"People"}
+                    </button>
+                    <button
+                        class={classes!("settings-tab", (*active_tab == SettingsTab::LightPhone).then(|| "active"))}
+                        onclick={{
+                            let active_tab = active_tab.clone();
+                            Callback::from(move |_| active_tab.set(SettingsTab::LightPhone))
+                        }}
+                    >
+                        {"Light Phone"}
                     </button>
                     <button
                         class={classes!("settings-tab", (*active_tab == SettingsTab::Account).then(|| "active"))}

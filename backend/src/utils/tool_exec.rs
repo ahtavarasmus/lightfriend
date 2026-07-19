@@ -44,21 +44,32 @@ pub async fn get_weather(
     location: &str,
     units: &str,
     forecast_type: &str,
-    user_id: i32,
+    user_id: Option<i32>,
+) -> Result<String, Box<dyn Error>> {
+    let user_timezone = match user_id {
+        Some(user_id) => {
+            state
+                .user_core
+                .get_user_info(user_id)
+                .map_err(|e| format!("Failed to get user info: {}", e))?
+                .timezone
+        }
+        None => None,
+    };
+    get_weather_for_location(location, units, forecast_type, user_timezone.as_deref()).await
+}
+
+pub async fn get_weather_for_location(
+    location: &str,
+    units: &str,
+    forecast_type: &str,
+    preferred_timezone: Option<&str>,
 ) -> Result<String, Box<dyn Error>> {
     let client = reqwest::Client::new();
-    // Get API keys from environment variables
-    let (geoapify_key, pirate_weather_key) = (
-        std::env::var("GEOAPIFY_API_KEY").expect("GEOAPIFY_API_KEY must be set"),
-        std::env::var("PIRATE_WEATHER_API_KEY").expect("PIRATE_WEATHER_API_KEY must be set"),
-    );
-
-    // Get user info for timezone
-    let user_info = state
-        .user_core
-        .get_user_info(user_id)
-        .map_err(|e| format!("Failed to get user info: {}", e))?;
-    let user_timezone = user_info.timezone;
+    let geoapify_key = std::env::var("GEOAPIFY_API_KEY")
+        .map_err(|_| "GEOAPIFY_API_KEY environment variable not set")?;
+    let pirate_weather_key = std::env::var("PIRATE_WEATHER_API_KEY")
+        .map_err(|_| "PIRATE_WEATHER_API_KEY environment variable not set")?;
 
     // First, get coordinates using Geoapify
     let geocoding_url = format!(
@@ -82,11 +93,6 @@ pub async fn get_weather(
     let lat = result["lat"].as_f64().ok_or("Latitude not found")?;
     let lon = result["lon"].as_f64().ok_or("Longitude not found")?;
     let location_name = result["formatted"].as_str().unwrap_or(location);
-
-    println!(
-        "Found coordinates for {}: lat={}, lon={}",
-        location_name, lat, lon
-    );
 
     // Get weather data using Pirate Weather
     let unit_system = match units {
@@ -123,14 +129,9 @@ pub async fn get_weather(
         _ => ("C", "m/s"),
     };
 
-    println!("{:#?}", weather_data);
-
     // Get timezone: prefer user's if set, else location's from weather data
-    let location_timezone = weather_data["timezone"]
-        .as_str()
-        .unwrap_or("UTC")
-        .to_string();
-    let tz_str = user_timezone.unwrap_or(location_timezone);
+    let location_timezone = weather_data["timezone"].as_str().unwrap_or("UTC");
+    let tz_str = preferred_timezone.unwrap_or(location_timezone);
 
     // Parse timezone using chrono_tz
     use chrono_tz::Tz;

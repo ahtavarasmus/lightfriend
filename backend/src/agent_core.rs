@@ -11,6 +11,30 @@ use crate::context::AgentContext;
 use crate::models::user_models::User;
 use crate::AppState;
 
+pub mod runner;
+
+/// Transport-neutral progress emitted by the shared agent pipeline.
+#[derive(Debug, Clone)]
+pub enum AgentStatus {
+    Thinking,
+    Reasoning {
+        snippet: String,
+    },
+    ToolCall {
+        name: String,
+    },
+    Retrying {
+        attempt: u32,
+        max: u32,
+        error: String,
+    },
+    RetryingFollowup {
+        attempt: u32,
+        max: u32,
+        error: String,
+    },
+}
+
 // ---------------------------------------------------------------------------
 // ChannelMode
 // ---------------------------------------------------------------------------
@@ -20,6 +44,7 @@ pub enum ChannelMode {
     Sms,
     Voice,
     WebChat,
+    LightTool,
 }
 
 // ---------------------------------------------------------------------------
@@ -71,6 +96,9 @@ pub fn build_system_prompt(ctx: &AgentContext, mode: ChannelMode) -> String {
         }
         ChannelMode::WebChat => {
             "Max 480 characters per response. Characters are expensive - be succinct! NEVER use emojis. ALWAYS list multiple items one per line, never in a paragraph. Example:\n1. Dad (WhatsApp) - Pick up car\n2. Lisa (Signal) - Review contract\nSend/create tools queue content for 60 seconds.".to_string()
+        }
+        ChannelMode::LightTool => {
+            "You are replying inside the Lightfriend tool on a Light Phone. Max 480 characters per response. Be succinct. NEVER use emojis. Respond in plain text only. ALWAYS list multiple items one per line, never in a paragraph. Send/create tools queue content for 60 seconds.".to_string()
         }
     };
 

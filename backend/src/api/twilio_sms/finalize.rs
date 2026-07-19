@@ -4,7 +4,7 @@ use openai_api_rs::v1::chat_completion;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub(super) struct FinalizeSmsResponseInput<'a> {
+pub(crate) struct FinalizeSmsResponseInput<'a> {
     pub state: &'a Arc<AppState>,
     pub user_id: i32,
     pub model_purpose: ModelPurpose,
@@ -19,12 +19,13 @@ pub(super) struct FinalizeSmsResponseInput<'a> {
     pub status_tx: Option<&'a tokio::sync::mpsc::Sender<ChatStatus>>,
 }
 
-pub(super) struct FinalizedSmsResponse {
+pub(crate) struct FinalizedSmsResponse {
     pub response_for_delivery: String,
+    pub user_facing_text: String,
     pub history_for_storage: String,
 }
 
-pub(super) async fn finalize_sms_response(
+pub(crate) async fn finalize_sms_response(
     mut input: FinalizeSmsResponseInput<'_>,
 ) -> FinalizedSmsResponse {
     let media_results_tag = extract_media_results_tag(input.tool_answers);
@@ -67,10 +68,11 @@ pub(super) async fn finalize_sms_response(
         SmsResponse::truncated(final_response).into_inner()
     };
 
-    let response_for_delivery = append_media_results(final_response, &media_results_tag);
+    let response_for_delivery = append_media_results(final_response.clone(), &media_results_tag);
 
     FinalizedSmsResponse {
         response_for_delivery,
+        user_facing_text: final_response,
         history_for_storage,
     }
 }

@@ -31,7 +31,7 @@ impl ToolHandler for WeatherHandler {
             &c.location,
             &c.units,
             &forecast_type,
-            ctx.user_id,
+            Some(ctx.user_id),
         )
         .await
         {

@@ -76,7 +76,7 @@ pub fn create_test_pg_pool() -> crate::PgDbPool {
         // Truncate all PG tables so each test starts clean
         // Core tables - always exist
         let _ = diesel::sql_query(
-            "TRUNCATE users, user_settings, refund_info, \
+            "TRUNCATE light_tool_pairing_sessions, light_tool_runs, light_tool_devices, users, user_settings, refund_info, \
              country_availability, message_status_log, admin_alerts, \
              disabled_alert_types, site_metrics, waitlist, \
              items, message_history, usage_logs, \
@@ -118,6 +118,7 @@ fn create_dummy_tesla_oauth_client() -> crate::TeslaOAuthClient {
 /// This creates a real in-memory database with UserCore and UserRepository,
 /// but stubs out OAuth clients and other services not needed for credit tests.
 pub fn create_test_state() -> Arc<crate::AppState> {
+    setup_test_encryption();
     let pg_pool = create_test_pg_pool();
 
     let user_core = Arc::new(crate::UserCore::new(pg_pool.clone()));
@@ -190,6 +191,7 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         twilio_message_service,
         channel_router,
         ai_config: crate::AiConfig::default_for_tests(),
+        light_tool_responder: None,
         youtube_oauth_client: google_oauth.clone(),
         tesla_oauth_client: tesla_oauth,
         session_store: MemoryStore::default(),
@@ -613,11 +615,13 @@ pub fn setup_test_encryption() {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        // 32-byte key base64-encoded for AES-256: "12345678901234567890123456789012"
-        std::env::set_var(
-            "ENCRYPTION_KEY",
-            "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=",
-        );
+        if std::env::var_os("ENCRYPTION_KEY").is_none() {
+            // 32-byte key base64-encoded for AES-256: "12345678901234567890123456789012"
+            std::env::set_var(
+                "ENCRYPTION_KEY",
+                "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=",
+            );
+        }
     });
 }
 

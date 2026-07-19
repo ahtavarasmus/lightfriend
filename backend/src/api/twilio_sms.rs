@@ -8,21 +8,20 @@ use std::sync::Arc;
 
 use openai_api_rs::v1::chat_completion;
 
-mod agent_loop;
 mod assembly;
 mod delivery;
 mod early_flow;
-mod finalize;
+pub(crate) mod finalize;
 mod status;
 
-/// Error messages for tool call failures - privacy-safe, user-facing
+pub use crate::agent_core::AgentStatus as ChatStatus;
+
 mod tool_error_messages {
-    /// Generic error shown to users when a tool fails
     pub const INTERNAL_ERROR: &str =
         "Sorry, we encountered an issue processing your request. Our team has been notified.";
 }
 
-/// LLM call through the central AI gateway, used by the agentic loop.
+/// Follow-up model call used by response verification and SMS condensation.
 #[allow(clippy::too_many_arguments)]
 async fn llm_call_with_gateway(
     state: &Arc<AppState>,
@@ -215,34 +214,7 @@ pub struct TextBeeWebhookPayload {
     pub body: String,
 }
 
-/// Status updates emitted during process_sms for streaming to clients.
-#[derive(Debug, Clone)]
-pub enum ChatStatus {
-    Thinking,
-    Reasoning {
-        snippet: String,
-    },
-    ToolCall {
-        name: String,
-    },
-    /// Provider call failed, about to retry. `error` carries the
-    /// underlying error text so the web SSE layer can surface it to
-    /// browser devtools for diagnosis — the enclave runs without
-    /// --debug-mode and its tracing logs aren't reachable from the
-    /// host, so this is the only way we see what Tinfoil/OpenRouter
-    /// actually returned.
-    Retrying {
-        attempt: u32,
-        max: u32,
-        error: String,
-    },
-    RetryingFollowup {
-        attempt: u32,
-        max: u32,
-        error: String,
-    },
-}
-
+/// Channel-specific behavior surrounding the shared agent runner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MessageChannel {
     #[default]
@@ -490,26 +462,43 @@ pub async fn process_sms(
 
     let mut mock_llm_response = options.mock_llm_response.take();
     let mock_tool_responses = options.mock_tool_responses.take();
-    let agent_loop_output = match agent_loop::run_agent_loop(agent_loop::AgentLoopInput {
-        state,
-        user: &user,
-        model_purpose: agent_ctx.model_purpose,
-        user_given_info: &user_given_info,
-        image_url: image_url.as_deref(),
-        tools: &tools,
-        completion_messages,
-        channel: options.channel,
-        reasoning_tx: &reasoning_tx,
-        status_tx: options.status_tx.as_ref(),
-        mock_llm_response: &mut mock_llm_response,
-        mock_tool_responses: &mock_tool_responses,
-        current_time: agent_ctx.current_time_unix,
-    })
-    .await
-    {
-        Ok(output) => output,
-        Err(result) => return result.into_response(),
-    };
+    let agent_loop_output =
+        match crate::agent_core::runner::run_agent_loop(crate::agent_core::runner::AgentLoopInput {
+            principal: crate::agent_core::runner::AgentPrincipal::Account { state, user: &user },
+            model_purpose: agent_ctx.model_purpose,
+            user_given_info: &user_given_info,
+            image_url: image_url.as_deref(),
+            tools: &tools,
+            completion_messages,
+            skip_sms: !options.channel.sends_sms(),
+            reasoning_tx: &reasoning_tx,
+            status_tx: options.status_tx.as_ref(),
+            mock_llm_response: &mut mock_llm_response,
+            mock_tool_responses: &mock_tool_responses,
+            current_time: agent_ctx.current_time_unix,
+            failure_messages: crate::agent_core::runner::AgentFailureMessages::account(),
+        })
+        .await
+        {
+            Ok(output) => output,
+            Err(crate::agent_core::runner::AgentRunError::System { log_msg }) => {
+                return SmsResult::SystemError { log_msg }.into_response();
+            }
+            Err(crate::agent_core::runner::AgentRunError::EarlyReturn {
+                message,
+                created_item_id,
+                status,
+            }) => {
+                return SmsResult::RawResponse {
+                    response: TwilioResponse {
+                        message,
+                        created_item_id,
+                    },
+                    status,
+                }
+                .into_response();
+            }
+        };
 
     let created_item_id = agent_loop_output.created_item_id;
     let finalized_response = finalize::finalize_sms_response(finalize::FinalizeSmsResponseInput {
