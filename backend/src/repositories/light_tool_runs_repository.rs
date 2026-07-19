@@ -386,6 +386,46 @@ impl LightToolRunsRepository {
         .optional()?;
         Ok(run.map(decrypt_run).transpose()?)
     }
+
+    /// Stops runs whose worker disappeared without replaying potentially
+    /// side-effecting account actions such as sending a message or email.
+    pub fn fail_stale_running_runs(
+        &self,
+        stale_before: i32,
+        error_message: &str,
+        now: i32,
+    ) -> Result<Vec<(String, i32)>, LightToolRunsRepositoryError> {
+        let encrypted_error_message = encrypt(error_message)?;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        Ok(diesel::update(
+            light_tool_runs::table
+                .filter(light_tool_runs::status.eq("running"))
+                .filter(light_tool_runs::updated_at.le(stale_before)),
+        )
+        .set((
+            light_tool_runs::status.eq("failed"),
+            light_tool_runs::encrypted_activity_text.eq::<Option<String>>(None),
+            light_tool_runs::encrypted_assistant_message.eq::<Option<String>>(None),
+            light_tool_runs::encrypted_error_message.eq(Some(encrypted_error_message)),
+            light_tool_runs::updated_at.eq(now),
+            light_tool_runs::completed_at.eq(Some(now)),
+        ))
+        .returning((light_tool_runs::id, light_tool_runs::device_id))
+        .get_results::<(String, i32)>(&mut conn)?)
+    }
+
+    pub fn find_queued_run_ids(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<(String, i32)>, LightToolRunsRepositoryError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        Ok(light_tool_runs::table
+            .filter(light_tool_runs::status.eq("queued"))
+            .order((light_tool_runs::created_at.asc(), light_tool_runs::id.asc()))
+            .limit(limit)
+            .select((light_tool_runs::id, light_tool_runs::device_id))
+            .load::<(String, i32)>(&mut conn)?)
+    }
 }
 
 fn remaining_messages(device: &LightToolDevice, message_limit: i32) -> i32 {

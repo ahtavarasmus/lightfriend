@@ -166,6 +166,7 @@ pub mod services {
     pub mod light_tool_push_delivery;
     pub mod light_tool_run_dispatcher;
     pub mod light_tool_run_execution;
+    pub mod light_tool_run_supervisor;
     pub mod light_tool_trial;
     pub mod mcp_client;
     pub mod metrics_service;

@@ -27,6 +27,7 @@ use backend::{
         light_tool_run_execution::{
             LightToolRunExecutionError, LightToolRunExecutionService, MAX_RUN_ACTIVITY_CHARACTERS,
         },
+        light_tool_run_supervisor::supervise_light_tool_runs_once,
     },
     test_utils::{
         create_test_pg_pool, create_test_state, create_test_user, MockLlmResponse, TestUserParams,
@@ -903,4 +904,90 @@ async fn dispatcher_sanitizes_fake_provider_failure() {
         .unwrap();
     assert_eq!(failed.status, "failed");
     assert_eq!(failed.error_message.as_deref(), Some("REQUEST FAILED"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial]
+async fn supervisor_dispatches_queued_runs_left_by_a_restart() {
+    set_test_encryption_key();
+    let (pool, device_id) = create_device();
+    let repository = LightToolRunsRepository::new(pool.clone());
+    let created = repository
+        .create_anonymous_trial_run(
+            device_id,
+            "supervisor-queued",
+            "Hello",
+            NOW,
+            TRIAL_MESSAGE_LIMIT,
+        )
+        .unwrap();
+    let AnonymousTrialRunCreation::Created { run, .. } = created else {
+        panic!("expected a newly created run");
+    };
+    let responder = Arc::new(FakeResponder {
+        activities: Vec::new(),
+        expected_history: Vec::new(),
+        response: Ok("Recovered reply".to_string()),
+    });
+
+    supervise_light_tool_runs_once(pool, responder)
+        .await
+        .unwrap();
+
+    for _ in 0..100 {
+        let current = repository
+            .find_by_id_for_device(&run.id, device_id)
+            .unwrap()
+            .unwrap();
+        if current.status == "completed" {
+            assert_eq!(
+                current.assistant_message.as_deref(),
+                Some("Recovered reply")
+            );
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("supervisor did not complete queued run");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial]
+async fn supervisor_fails_stale_running_runs_without_replaying_them() {
+    set_test_encryption_key();
+    let (pool, device_id) = create_device();
+    let repository = LightToolRunsRepository::new(pool.clone());
+    let created = repository
+        .create_anonymous_trial_run(
+            device_id,
+            "supervisor-stale",
+            "Send a message once",
+            NOW,
+            TRIAL_MESSAGE_LIMIT,
+        )
+        .unwrap();
+    let AnonymousTrialRunCreation::Created { run, .. } = created else {
+        panic!("expected a newly created run");
+    };
+    repository
+        .claim_queued_run(&run.id, "THINKING...", NOW + 1)
+        .unwrap();
+    let responder = Arc::new(FakeResponder {
+        activities: Vec::new(),
+        expected_history: Vec::new(),
+        response: Ok("This must not run".to_string()),
+    });
+
+    supervise_light_tool_runs_once(pool, responder)
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+
+    let failed = repository
+        .find_by_id_for_device(&run.id, device_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(failed.status, "failed");
+    assert_eq!(failed.error_message.as_deref(), Some("REQUEST INTERRUPTED"));
+    assert!(failed.assistant_message.is_none());
 }

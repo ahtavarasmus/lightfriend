@@ -25,6 +25,7 @@ use api::{twilio_sms, voice_pipeline};
 use backend::services::{
     light_tool_agent_responder::LightToolAgentResponder,
     light_tool_run_dispatcher::LightToolResponder,
+    light_tool_run_supervisor::start_light_tool_run_supervisor,
 };
 use backend::{
     api, blog, handlers, jobs, utils, AdminAlertRepository, AiConfig, AppState, LlmUsageRepository,
@@ -1727,6 +1728,11 @@ async fn main() {
     tokio::spawn(async move {
         jobs::scheduler::start_scheduler(state_for_scheduler).await;
     });
+
+    if let Some(responder) = state.light_tool_responder.clone() {
+        let pool = state.pg_pool.clone();
+        tokio::spawn(start_light_tool_run_supervisor(pool, responder));
+    }
 
     let state_for_tuwunel_purge = state.clone();
     tokio::spawn(async move {
