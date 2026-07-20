@@ -1,18 +1,20 @@
 use axum::{
     extract::State,
-    http::{HeaderMap, StatusCode},
-    response::IntoResponse,
+    http::{header::CACHE_CONTROL, HeaderMap, HeaderValue, StatusCode},
+    response::{IntoResponse, Response},
     Json,
 };
 use diesel::prelude::*;
 use diesel::sql_types::{Integer, Nullable, Text};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::AppState;
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+const STORAGE_HEALTH_TIMEOUT: Duration = Duration::from_secs(10);
+const DEFAULT_STORAGE_HEALTH_SCRIPT: &str = "/app/storage-health.sh";
 
 #[derive(Serialize)]
 pub struct DeepHealthResponse {
@@ -23,6 +25,61 @@ pub struct DeepHealthResponse {
     pub resend: String,
     pub overall: String,
     pub checked_at: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct StorageHealthResponse {
+    pub timestamp: String,
+    pub filesystems: StorageFilesystems,
+    pub reserve: StorageReserve,
+    pub tuwunel: TuwunelStorage,
+    pub postgres: StorageBytes,
+    pub tuwunel_backup_engine: StorageBytes,
+    pub supervisor_logs: StorageBytes,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct StorageFilesystems {
+    pub root: FilesystemMetrics,
+    pub tmp: FilesystemMetrics,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct FilesystemMetrics {
+    pub size_kib: u64,
+    pub used_kib: u64,
+    pub avail_kib: u64,
+    pub use_pct: u64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct StorageReserve {
+    #[serde(rename = "path", skip_serializing)]
+    _path: Option<String>,
+    pub present: bool,
+    pub bytes: u64,
+    pub projected_root_avail_kib: u64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct TuwunelStorage {
+    pub total_bytes: u64,
+    pub media: StorageBucket,
+    pub rocksdb_sst: StorageBucket,
+    pub rocksdb_archive_log: StorageBucket,
+    pub rocksdb_meta_logs: StorageBucket,
+    pub other: StorageBucket,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct StorageBucket {
+    pub count: u64,
+    pub bytes: u64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct StorageBytes {
+    pub bytes: u64,
 }
 
 /// Deep health probe. Protected by `X-Maintenance-Secret` header (same secret as
@@ -86,6 +143,76 @@ pub async fn deep_health(
         StatusCode::SERVICE_UNAVAILABLE
     };
     (status, Json(resp)).into_response()
+}
+
+/// Current aggregate enclave storage metrics. This intentionally exposes only
+/// the sanitized JSON counters from storage-health.sh, not the full diagnostic
+/// report containing internal paths, room IDs, or logs.
+pub async fn storage_health(headers: HeaderMap) -> Response {
+    if !crate::handlers::maintenance_handlers::check_secret(&headers) {
+        return no_store_json(
+            StatusCode::FORBIDDEN,
+            serde_json::json!({"error": "forbidden"}),
+        );
+    }
+
+    let script = std::env::var("STORAGE_HEALTH_SCRIPT")
+        .unwrap_or_else(|_| DEFAULT_STORAGE_HEALTH_SCRIPT.to_string());
+    let mut command = tokio::process::Command::new(&script);
+    command.arg("json").kill_on_drop(true);
+
+    let output = match tokio::time::timeout(STORAGE_HEALTH_TIMEOUT, command.output()).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(error)) => {
+            tracing::warn!(script = %script, %error, "storage health command failed to start");
+            return no_store_json(
+                StatusCode::SERVICE_UNAVAILABLE,
+                serde_json::json!({"error": "storage_metrics_unavailable"}),
+            );
+        }
+        Err(_) => {
+            tracing::warn!(script = %script, "storage health command timed out");
+            return no_store_json(
+                StatusCode::GATEWAY_TIMEOUT,
+                serde_json::json!({"error": "storage_metrics_timeout"}),
+            );
+        }
+    };
+
+    if !output.status.success() {
+        tracing::warn!(
+            script = %script,
+            exit_code = output.status.code(),
+            "storage health command returned a failure"
+        );
+        return no_store_json(
+            StatusCode::SERVICE_UNAVAILABLE,
+            serde_json::json!({"error": "storage_metrics_unavailable"}),
+        );
+    }
+
+    match parse_storage_health_json(&output.stdout) {
+        Ok(metrics) => no_store_json(StatusCode::OK, metrics),
+        Err(error) => {
+            tracing::warn!(%error, "storage health command returned invalid JSON");
+            no_store_json(
+                StatusCode::SERVICE_UNAVAILABLE,
+                serde_json::json!({"error": "storage_metrics_invalid"}),
+            )
+        }
+    }
+}
+
+pub fn parse_storage_health_json(stdout: &[u8]) -> Result<StorageHealthResponse, String> {
+    serde_json::from_slice(stdout).map_err(|error| error.to_string())
+}
+
+fn no_store_json<T: Serialize>(status: StatusCode, body: T) -> Response {
+    let mut response = (status, Json(body)).into_response();
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 async fn probe_db(state: Arc<AppState>) -> String {

@@ -1608,6 +1608,10 @@ async fn main() {
             get(handlers::maintenance_handlers::maintenance_status),
         )
         .route(
+            "/api/internal/health/storage",
+            get(handlers::health_handlers::storage_health),
+        )
+        .route(
             "/api/internal/recover-users",
             post(admin_handlers::recover_users_from_external),
         )
