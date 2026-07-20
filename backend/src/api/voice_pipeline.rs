@@ -679,11 +679,11 @@ pub async fn issue_web_voice_ticket(
         })?;
 
     // Check credits (web calls use voice pricing - no Twilio leg)
-    if let Err(e) = crate::utils::usage::check_user_credits(&state, &user, "voice", None).await {
+    if let Err(e) = crate::utils::usage::check_user_credits(state, &user, "voice", None).await {
         return Err((StatusCode::FORBIDDEN, Json(serde_json::json!({"error": e}))));
     }
 
-    if voice_provider_for_user(&state, user_id) == VoiceProvider::OpenAiRealtime
+    if voice_provider_for_user(state, user_id) == VoiceProvider::OpenAiRealtime
         && !openai_realtime_available()
     {
         return Err((
