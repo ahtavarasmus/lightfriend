@@ -1,5 +1,8 @@
 use axum::{routing::get, Router};
-use backend::handlers::health_handlers::{parse_storage_health_json, storage_health};
+use backend::handlers::health_handlers::{
+    parse_hourly_backup_status_json, parse_storage_health_json, storage_health,
+};
+use chrono::{TimeZone, Utc};
 
 #[test]
 fn storage_health_is_a_valid_axum_get_handler() {
@@ -41,4 +44,94 @@ fn storage_health_json_accepts_aggregate_metrics() {
 #[test]
 fn storage_health_json_rejects_malformed_output() {
     assert!(parse_storage_health_json(b"not json").is_err());
+}
+
+#[test]
+fn hourly_backup_health_reports_a_fresh_success() {
+    let now = Utc
+        .with_ymd_and_hms(2026, 7, 23, 18, 30, 0)
+        .single()
+        .expect("valid current time");
+    let health = parse_hourly_backup_status_json(
+        br#"{
+            "status":"SUCCESS",
+            "timestamp":"20260723T180000Z",
+            "file":"lightfriend-full-backup-secret-name.tar.gz.enc",
+            "size_bytes":123
+        }"#,
+        now,
+    );
+
+    let response = serde_json::to_value(health).expect("serialize backup health");
+    assert_eq!(response["status"], "success");
+    assert_eq!(response["last_attempt_at"], "2026-07-23T18:00:00Z");
+    assert_eq!(response["age_seconds"], 1800);
+    assert_eq!(response["stale"], false);
+    assert!(response.get("file").is_none());
+    assert!(response.get("size_bytes").is_none());
+}
+
+#[test]
+fn hourly_backup_health_reports_a_sanitized_failure() {
+    let now = Utc
+        .with_ymd_and_hms(2026, 7, 23, 18, 10, 0)
+        .single()
+        .expect("valid current time");
+    let health = parse_hourly_backup_status_json(
+        br#"{
+            "status":"FAILED",
+            "timestamp":"20260723T180500Z",
+            "error":"raw internal diagnostic that must not be exposed",
+            "step":"upload-s3",
+            "path":"/internal/path"
+        }"#,
+        now,
+    );
+
+    let response = serde_json::to_value(health).expect("serialize backup health");
+    assert_eq!(response["status"], "failed");
+    assert_eq!(response["last_attempt_at"], "2026-07-23T18:05:00Z");
+    assert_eq!(response["age_seconds"], 300);
+    assert_eq!(response["stale"], false);
+    assert_eq!(response["failed_step"], "upload-s3");
+    assert!(response.get("error").is_none());
+    assert!(response.get("path").is_none());
+}
+
+#[test]
+fn hourly_backup_health_marks_old_or_unreadable_status_as_stale() {
+    let now = Utc
+        .with_ymd_and_hms(2026, 7, 23, 20, 0, 1)
+        .single()
+        .expect("valid current time");
+    let old = parse_hourly_backup_status_json(
+        br#"{"status":"SUCCESS","timestamp":"20260723T180000Z"}"#,
+        now,
+    );
+    let unreadable = parse_hourly_backup_status_json(b"not json", now);
+
+    assert!(old.stale);
+    assert_eq!(old.age_seconds, Some(7201));
+    assert_eq!(unreadable.status, "unknown");
+    assert!(unreadable.stale);
+    assert_eq!(unreadable.age_seconds, None);
+}
+
+#[test]
+fn hourly_backup_health_drops_unsafe_failure_steps() {
+    let now = Utc
+        .with_ymd_and_hms(2026, 7, 23, 18, 10, 0)
+        .single()
+        .expect("valid current time");
+    let health = parse_hourly_backup_status_json(
+        br#"{
+            "status":"FAILED",
+            "timestamp":"20260723T180500Z",
+            "step":"upload failed at /internal/path"
+        }"#,
+        now,
+    );
+
+    assert_eq!(health.status, "failed");
+    assert_eq!(health.failed_step, None);
 }

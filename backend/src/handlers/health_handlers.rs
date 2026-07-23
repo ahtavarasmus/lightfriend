@@ -4,6 +4,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use chrono::{DateTime, NaiveDateTime, SecondsFormat, Utc};
 use diesel::prelude::*;
 use diesel::sql_types::{Integer, Nullable, Text};
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,8 @@ use crate::AppState;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const STORAGE_HEALTH_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_STORAGE_HEALTH_SCRIPT: &str = "/app/storage-health.sh";
+const DEFAULT_BACKUP_STATUS_FILE: &str = "/data/seed/export-status.json";
+const BACKUP_STALE_AFTER_SECONDS: u64 = 2 * 60 * 60;
 
 #[derive(Serialize)]
 pub struct DeepHealthResponse {
@@ -36,6 +39,8 @@ pub struct StorageHealthResponse {
     pub postgres: StorageBytes,
     pub tuwunel_backup_engine: StorageBytes,
     pub supervisor_logs: StorageBytes,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hourly_backup: Option<HourlyBackupHealth>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -80,6 +85,22 @@ pub struct StorageBucket {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct StorageBytes {
     pub bytes: u64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct HourlyBackupHealth {
+    pub status: String,
+    pub last_attempt_at: Option<String>,
+    pub age_seconds: Option<u64>,
+    pub stale: bool,
+    pub failed_step: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ExportStatusRecord {
+    status: Option<String>,
+    timestamp: Option<String>,
+    step: Option<String>,
 }
 
 /// Deep health probe. Protected by `X-Maintenance-Secret` header (same secret as
@@ -192,7 +213,10 @@ pub async fn storage_health(headers: HeaderMap) -> Response {
     }
 
     match parse_storage_health_json(&output.stdout) {
-        Ok(metrics) => no_store_json(StatusCode::OK, metrics),
+        Ok(mut metrics) => {
+            metrics.hourly_backup = Some(read_hourly_backup_health().await);
+            no_store_json(StatusCode::OK, metrics)
+        }
         Err(error) => {
             tracing::warn!(%error, "storage health command returned invalid JSON");
             no_store_json(
@@ -205,6 +229,78 @@ pub async fn storage_health(headers: HeaderMap) -> Response {
 
 pub fn parse_storage_health_json(stdout: &[u8]) -> Result<StorageHealthResponse, String> {
     serde_json::from_slice(stdout).map_err(|error| error.to_string())
+}
+
+pub fn parse_hourly_backup_status_json(input: &[u8], now: DateTime<Utc>) -> HourlyBackupHealth {
+    let record = match serde_json::from_slice::<ExportStatusRecord>(input) {
+        Ok(record) => record,
+        Err(_) => return unknown_hourly_backup_health(),
+    };
+
+    let status = match record.status.as_deref() {
+        Some(value) if value.eq_ignore_ascii_case("SUCCESS") => "success",
+        Some(value) if value.eq_ignore_ascii_case("FAILED") => "failed",
+        _ => "unknown",
+    };
+    let attempted_at = record.timestamp.as_deref().and_then(parse_export_timestamp);
+    let age_seconds = attempted_at
+        .map(|timestamp| now.signed_duration_since(timestamp).num_seconds().max(0) as u64);
+    let stale = status == "unknown"
+        || age_seconds
+            .map(|age| age > BACKUP_STALE_AFTER_SECONDS)
+            .unwrap_or(true);
+    let failed_step = if status == "failed" {
+        record.step.as_deref().and_then(sanitize_backup_step)
+    } else {
+        None
+    };
+
+    HourlyBackupHealth {
+        status: status.to_string(),
+        last_attempt_at: attempted_at
+            .map(|timestamp| timestamp.to_rfc3339_opts(SecondsFormat::Secs, true)),
+        age_seconds,
+        stale,
+        failed_step,
+    }
+}
+
+async fn read_hourly_backup_health() -> HourlyBackupHealth {
+    let path = std::env::var("LIGHTFRIEND_BACKUP_STATUS_FILE")
+        .unwrap_or_else(|_| DEFAULT_BACKUP_STATUS_FILE.to_string());
+    match tokio::fs::read(path).await {
+        Ok(input) => parse_hourly_backup_status_json(&input, Utc::now()),
+        Err(_) => unknown_hourly_backup_health(),
+    }
+}
+
+fn parse_export_timestamp(value: &str) -> Option<DateTime<Utc>> {
+    NaiveDateTime::parse_from_str(value, "%Y%m%dT%H%M%SZ")
+        .ok()
+        .map(|timestamp| timestamp.and_utc())
+}
+
+fn sanitize_backup_step(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty()
+        || value.len() > 64
+        || !value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+    {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+fn unknown_hourly_backup_health() -> HourlyBackupHealth {
+    HourlyBackupHealth {
+        status: "unknown".to_string(),
+        last_attempt_at: None,
+        age_seconds: None,
+        stale: true,
+        failed_step: None,
+    }
 }
 
 fn no_store_json<T: Serialize>(status: StatusCode, body: T) -> Response {
