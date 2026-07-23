@@ -129,6 +129,7 @@ pub mod models {
 pub mod repositories {
     pub mod admin_alert_repository;
     pub mod bandwidth_repository;
+    pub mod billing_repository;
     pub mod commitment_repository;
     pub mod light_tool_devices_repository;
     pub mod light_tool_pairing_repository;
@@ -170,9 +171,11 @@ pub mod services {
     pub mod light_tool_trial;
     pub mod mcp_client;
     pub mod metrics_service;
+    pub mod metronome_billing;
     pub mod signup_service;
     pub mod twilio_message_service;
     pub mod twilio_status_service;
+    pub mod usage_pricing;
 }
 pub mod pg_models;
 pub mod pg_schema;
@@ -203,6 +206,7 @@ pub use api::matrix_client::{
 pub use api::twilio_client::RealTwilioClient;
 pub use repositories::admin_alert_repository::AdminAlertRepository;
 pub use repositories::bandwidth_repository::BandwidthRepository;
+pub use repositories::billing_repository::BillingRepository;
 pub use repositories::commitment_repository::CommitmentRepository;
 pub use repositories::llm_usage_repository::LlmUsageRepository;
 pub use repositories::metrics_repository::MetricsRepository;

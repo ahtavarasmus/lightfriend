@@ -727,6 +727,10 @@ async fn main() {
         .merge(voice_auth_routes);
     let auth_built_in_webhook_routes = Router::new()
         .route("/api/stripe/webhook", post(stripe_handlers::stripe_webhook))
+        .route(
+            "/api/metronome/webhook",
+            post(billing_handlers::metronome_webhook),
+        )
         .route("/api/auth/tesla/callback", get(tesla_auth::tesla_callback))
         .route(
             "/api/auth/youtube/callback",
@@ -1186,6 +1190,10 @@ async fn main() {
         .route(
             "/api/billing/recent-usage",
             get(billing_handlers::get_recent_usage),
+        )
+        .route(
+            "/api/billing/overage",
+            get(billing_handlers::get_overage_status).put(billing_handlers::update_overage),
         )
         .route(
             "/api/billing/update-auto-topup/{user_id}",

@@ -432,54 +432,77 @@ pub async fn start_rule_test(
         ));
     }
 
-    let user =
-        crate::utils::usage::ensure_current_included_usage_window(&state, &user).map_err(|e| {
+    let charged_amount = if crate::services::metronome_billing::metronome_enabled() {
+        let entitled = crate::services::metronome_billing::has_usage_entitlement(&state, user.id)
+            .map_err(|error| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e })),
+                Json(json!({ "error": format!("Billing check failed: {}", error) })),
             )
         })?;
-
-    let is_us_or_ca = user.phone_number.starts_with("+1");
-    let (credits_left_cost, credits_cost) = if is_us_or_ca {
-        (WEB_CHAT_COST_US, WEB_CHAT_COST_EUR)
+        if !entitled {
+            return Err((
+                StatusCode::PAYMENT_REQUIRED,
+                Json(
+                    json!({ "error": "Included usage depleted. Enable overage billing to continue." }),
+                ),
+            ));
+        }
+        crate::services::metronome_billing::enqueue_usage(
+            &state,
+            user.id,
+            "rule_test",
+            WEB_CHAT_COST_EUR,
+            None,
+        )
+        .map_err(|error| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("Failed to queue usage: {}", error) })),
+            )
+        })?;
+        WEB_CHAT_COST_EUR
     } else {
-        (WEB_CHAT_COST_EUR, WEB_CHAT_COST_EUR)
-    };
-
-    let has_credits = user.credits_left >= credits_left_cost || user.credits >= credits_cost;
-    if !has_credits {
-        return Err((
-            StatusCode::PAYMENT_REQUIRED,
-            Json(json!({ "error": "Insufficient credits" })),
-        ));
-    }
-
-    // Deduct
-    let charged_amount = if user.credits_left >= credits_left_cost {
-        let new_val = user.credits_left - credits_left_cost;
-        state
-            .user_repository
-            .update_user_credits_left(auth_user.user_id, new_val)
+        let user = crate::utils::usage::ensure_current_included_usage_window(&state, &user)
             .map_err(|e| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": format!("Credit deduction failed: {}", e) })),
+                    Json(json!({ "error": e })),
                 )
             })?;
-        credits_left_cost
-    } else {
-        let new_val = user.credits - credits_cost;
-        state
-            .user_repository
-            .update_user_credits(auth_user.user_id, new_val)
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": format!("Credit deduction failed: {}", e) })),
-                )
-            })?;
-        credits_cost
+        let credits_left_cost = if user.phone_number.starts_with("+1") {
+            WEB_CHAT_COST_US
+        } else {
+            WEB_CHAT_COST_EUR
+        };
+        if user.credits_left >= credits_left_cost {
+            state
+                .user_repository
+                .update_user_credits_left(user.id, user.credits_left - credits_left_cost)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": format!("Credit deduction failed: {}", e) })),
+                    )
+                })?;
+            credits_left_cost
+        } else if user.credits >= WEB_CHAT_COST_EUR {
+            state
+                .user_repository
+                .update_user_credits(user.id, user.credits - WEB_CHAT_COST_EUR)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": format!("Credit deduction failed: {}", e) })),
+                    )
+                })?;
+            WEB_CHAT_COST_EUR
+        } else {
+            return Err((
+                StatusCode::PAYMENT_REQUIRED,
+                Json(json!({ "error": "Insufficient credits" })),
+            ));
+        }
     };
 
     let _ = state.user_repository.log_usage(LogUsageParams {

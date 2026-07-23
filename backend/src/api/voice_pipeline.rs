@@ -1768,6 +1768,40 @@ async fn handle_openai_reader(
                 }
             }
             "response.done" => {
+                if let Some((response_id, usage)) =
+                    crate::services::usage_pricing::openai_realtime_usage_from_event(&event)
+                {
+                    if !state.user_core.is_byot_user(init.user.id) {
+                        let provider_cost =
+                            crate::services::usage_pricing::openai_realtime_cost_usd(usage);
+                        let billed_cost =
+                            crate::services::usage_pricing::billable_customer_cost_usd(
+                                provider_cost,
+                            );
+                        if crate::services::metronome_billing::metronome_enabled()
+                            && billed_cost > 0.0
+                        {
+                            let source = match session.mode {
+                                OpenAiRealtimeAudioMode::TwilioPcmu => "phone_voice_ai",
+                                OpenAiRealtimeAudioMode::WebPcm24 => "web_voice_ai",
+                            };
+                            if let Err(error) = crate::services::metronome_billing::enqueue_usage(
+                                &state,
+                                init.user.id,
+                                source,
+                                billed_cost as f32,
+                                Some(format!("openai-realtime-{response_id}")),
+                            ) {
+                                tracing::error!(
+                                    user_id = init.user.id,
+                                    response_id,
+                                    billed_cost,
+                                    "Failed to queue OpenAI Realtime usage: {error}"
+                                );
+                            }
+                        }
+                    }
+                }
                 if let Some(items) = event
                     .get("response")
                     .and_then(|r| r.get("output"))
@@ -1967,12 +2001,22 @@ async fn handle_openai_twilio_session(
                     duration_secs,
                     event_type
                 );
-                if let Err(e) = crate::utils::usage::deduct_user_credits(
-                    &state,
-                    user_id,
-                    event_type,
-                    Some(duration_secs),
-                ) {
+                let deduction = if crate::services::metronome_billing::metronome_enabled() {
+                    crate::utils::usage::deduct_hosted_voice_phone_leg(
+                        &state,
+                        user_id,
+                        event_type,
+                        duration_secs,
+                    )
+                } else {
+                    crate::utils::usage::deduct_user_credits(
+                        &state,
+                        user_id,
+                        event_type,
+                        Some(duration_secs),
+                    )
+                };
+                if let Err(e) = deduction {
                     tracing::error!(
                         "Failed to deduct credits for OpenAI Realtime call user {}: {}",
                         user_id,
@@ -2070,14 +2114,17 @@ async fn handle_openai_web_ws(state: Arc<AppState>, socket: WebSocket, user_id: 
         user_id,
         duration_secs
     );
-    if let Err(e) =
-        crate::utils::usage::deduct_user_credits(&state, user_id, "voice", Some(duration_secs))
-    {
-        tracing::error!(
-            "Failed to deduct credits for OpenAI Realtime web call user {}: {}",
-            user_id,
-            e
-        );
+    // Realtime response usage is billed as it arrives. Web voice has no carrier leg.
+    if !crate::services::metronome_billing::metronome_enabled() {
+        if let Err(e) =
+            crate::utils::usage::deduct_user_credits(&state, user_id, "voice", Some(duration_secs))
+        {
+            tracing::error!(
+                "Failed to deduct credits for OpenAI Realtime web call user {}: {}",
+                user_id,
+                e
+            );
+        }
     }
 }
 

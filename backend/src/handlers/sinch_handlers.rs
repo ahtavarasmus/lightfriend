@@ -266,7 +266,13 @@ pub async fn sinch_status(
     if mapped_status == "delivered" {
         if let Some(uid) = user_id {
             let price = sinch_price_usd_per_message();
-            match crate::utils::usage::deduct_from_twilio_price(&state, uid, price) {
+            match crate::utils::usage::deduct_from_twilio_price(
+                &state,
+                uid,
+                price,
+                Some(&payload.batch_id),
+                "sinch",
+            ) {
                 Ok(cost) => {
                     tracing::info!(
                         "Sinch deducted {:.4} credits for user {} (batch: {})",

@@ -286,7 +286,13 @@ pub async fn telnyx_status(
     if is_final && mapped_status == "delivered" {
         if let Some(uid) = user_id {
             let price = telnyx_price_usd_per_message();
-            match crate::utils::usage::deduct_from_twilio_price(&state, uid, price) {
+            match crate::utils::usage::deduct_from_twilio_price(
+                &state,
+                uid,
+                price,
+                Some(&payload.id),
+                "telnyx",
+            ) {
                 Ok(cost) => {
                     tracing::info!(
                         "Telnyx deducted {:.4} credits for user {} (id: {})",

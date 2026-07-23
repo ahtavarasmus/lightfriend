@@ -196,6 +196,28 @@ impl LightToolResponder for LightToolAgentResponder {
                 let input = build_account_agent_input(&state, &user, user_message).await?;
                 persist_account_turn(&state, user.id, "user", user_message, input.current_time);
                 let reply = execute_account_agent(&state, &user, input, activity_tx).await?;
+                if crate::services::metronome_billing::metronome_enabled() {
+                    let billed_cost = crate::services::usage_pricing::billable_customer_cost_usd(
+                        reply.provider_cost_usd,
+                    );
+                    if billed_cost > 0.0 {
+                        crate::services::metronome_billing::enqueue_usage(
+                            &state,
+                            user.id,
+                            "light_tool",
+                            billed_cost as f32,
+                            None,
+                        )
+                        .map_err(|error| {
+                            tracing::error!(
+                                user_id,
+                                billed_cost,
+                                "Failed to queue Light Tool usage: {error}"
+                            );
+                            "Billing is temporarily unavailable".to_string()
+                        })?;
+                    }
+                }
                 let user_facing = nonempty_reply(reply.user_facing)?;
                 persist_account_turn(
                     &state,
@@ -216,6 +238,7 @@ impl LightToolResponder for LightToolAgentResponder {
 struct PreparedAgentReply {
     user_facing: String,
     history: String,
+    provider_cost_usd: f64,
 }
 
 async fn execute_anonymous_agent(
@@ -254,6 +277,7 @@ async fn execute_anonymous_agent(
         Ok(PreparedAgentReply {
             history: output.final_response.clone(),
             user_facing: output.final_response,
+            provider_cost_usd: output.provider_cost_usd,
         })
     };
     relay_agent_activity(future, reasoning_rx, status_rx, activity_tx).await
@@ -295,6 +319,7 @@ async fn execute_account_agent(
                 return Ok(PreparedAgentReply {
                     history: message.clone(),
                     user_facing: message,
+                    provider_cost_usd: 0.0,
                 });
             }
             Err(error) => return Err(map_agent_error(error)),
@@ -334,6 +359,7 @@ async fn finalize_account_reply(
         fail: output.fail,
         active_provider: output.active_provider,
         sticky_provider: output.sticky_provider,
+        provider_cost_usd: output.provider_cost_usd,
         reasoning_tx,
         status_tx: Some(status_tx),
     })
@@ -341,6 +367,7 @@ async fn finalize_account_reply(
     Ok(PreparedAgentReply {
         user_facing: finalized.user_facing_text,
         history: finalized.history_for_storage,
+        provider_cost_usd: finalized.provider_cost_usd,
     })
 }
 

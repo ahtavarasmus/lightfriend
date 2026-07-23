@@ -150,7 +150,7 @@ fn test_callback_deduction_from_credits_left() {
     assert_eq!(user.credits, 5.0);
 
     // Simulate Twilio callback with $0.0075 price (typical US SMS)
-    let cost = deduct_from_twilio_price(&state, user.id, 0.0075).unwrap();
+    let cost = deduct_from_twilio_price(&state, user.id, 0.0075, None, "twilio").unwrap();
 
     // Expected: $0.0075 * 1.3 margin = $0.00975
     assert!(cost > 0.0, "Should have deducted some credits");
@@ -174,7 +174,7 @@ fn test_callback_deduction_fallback_when_credits_left_exhausted() {
     assert_eq!(user.credits, 5.0);
 
     // Simulate Twilio callback - should fall back to credits pool
-    let cost = deduct_from_twilio_price(&state, user.id, 0.0075).unwrap();
+    let cost = deduct_from_twilio_price(&state, user.id, 0.0075, None, "twilio").unwrap();
     assert!(cost > 0.0);
 
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
@@ -193,7 +193,7 @@ fn test_callback_deduction_finland_user() {
     assert_eq!(user.credits, 2.5);
 
     // Simulate Twilio callback with typical Finland SMS price
-    let cost = deduct_from_twilio_price(&state, user.id, 0.06).unwrap();
+    let cost = deduct_from_twilio_price(&state, user.id, 0.06, None, "twilio").unwrap();
     assert!(cost > 0.0);
 
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
@@ -212,7 +212,7 @@ fn test_callback_deduction_uk_user() {
     let user = create_test_user(&state, &params);
 
     // Simulate Twilio callback with typical UK SMS price
-    let cost = deduct_from_twilio_price(&state, user.id, 0.04).unwrap();
+    let cost = deduct_from_twilio_price(&state, user.id, 0.04, None, "twilio").unwrap();
     assert!(cost > 0.0);
 
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
@@ -231,7 +231,7 @@ fn test_callback_deduction_germany_user() {
     let user = create_test_user(&state, &params);
 
     // Simulate Twilio callback with typical Germany SMS price
-    let cost = deduct_from_twilio_price(&state, user.id, 0.07).unwrap();
+    let cost = deduct_from_twilio_price(&state, user.id, 0.07, None, "twilio").unwrap();
     assert!(cost > 0.0);
 
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
@@ -1381,7 +1381,7 @@ async fn test_contract_successful_message_charges_user() {
 
     // Simulate Twilio callback - this is where deduction happens
     let before_credits = get_total_credits(&state, user.id);
-    deduct_from_twilio_price(&state, user.id, 0.0075).unwrap();
+    deduct_from_twilio_price(&state, user.id, 0.0075, None, "twilio").unwrap();
     let after_credits = get_total_credits(&state, user.id);
     assert_charged(before_credits, after_credits);
 }

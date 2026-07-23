@@ -15,6 +15,7 @@ pub(crate) struct FinalizeSmsResponseInput<'a> {
     pub fail: bool,
     pub active_provider: AiProvider,
     pub sticky_provider: Option<AiProvider>,
+    pub provider_cost_usd: f64,
     pub reasoning_tx: &'a Option<tokio::sync::mpsc::Sender<String>>,
     pub status_tx: Option<&'a tokio::sync::mpsc::Sender<ChatStatus>>,
 }
@@ -23,6 +24,7 @@ pub(crate) struct FinalizedSmsResponse {
     pub response_for_delivery: String,
     pub user_facing_text: String,
     pub history_for_storage: String,
+    pub provider_cost_usd: f64,
 }
 
 pub(crate) async fn finalize_sms_response(
@@ -32,7 +34,7 @@ pub(crate) async fn finalize_sms_response(
     let mut active_provider = input.active_provider;
     let mut sticky_provider = input.sticky_provider;
 
-    let (final_response, history_for_storage) = if !input.fail {
+    let (final_response, history_for_storage, verification_cost_usd) = if !input.fail {
         verify_response_with_retries(
             input.state,
             input.user_id,
@@ -47,10 +49,10 @@ pub(crate) async fn finalize_sms_response(
         )
         .await
     } else {
-        (input.final_response.clone(), input.final_response)
+        (input.final_response.clone(), input.final_response, 0.0)
     };
 
-    let final_response = if !input.fail {
+    let sms_response = if !input.fail {
         let condense_sticky_provider = if active_provider == AiProvider::Near {
             Some(active_provider)
         } else {
@@ -63,10 +65,11 @@ pub(crate) async fn finalize_sms_response(
             condense_sticky_provider,
         )
         .await
-        .into_inner()
     } else {
-        SmsResponse::truncated(final_response).into_inner()
+        SmsResponse::truncated(final_response)
     };
+    let condense_cost_usd = sms_response.provider_cost_usd;
+    let final_response = sms_response.into_inner();
 
     let response_for_delivery = append_media_results(final_response.clone(), &media_results_tag);
 
@@ -74,6 +77,7 @@ pub(crate) async fn finalize_sms_response(
         response_for_delivery,
         user_facing_text: final_response,
         history_for_storage,
+        provider_cost_usd: input.provider_cost_usd + verification_cost_usd + condense_cost_usd,
     }
 }
 
@@ -110,9 +114,10 @@ async fn verify_response_with_retries(
     loop_messages: &mut Vec<chat_completion::ChatCompletionMessage>,
     active_provider: &mut AiProvider,
     sticky_provider: &mut Option<AiProvider>,
-) -> (String, String) {
+) -> (String, String, f64) {
     let valid_ids = crate::utils::id_verifier::collect_tool_result_ids(loop_messages);
     let mut verified = crate::utils::id_verifier::verify(final_response, &valid_ids);
+    let mut provider_cost_usd = 0.0;
 
     if verified.dropped_line || verified.missing_citations {
         for retry in 1..=5 {
@@ -164,6 +169,7 @@ async fn verify_response_with_retries(
             .await
             {
                 Ok(result) => {
+                    provider_cost_usd += result.provider_cost_usd;
                     *active_provider = result.provider;
                     if result.fallback_from.is_some() || sticky_provider.is_some() {
                         *sticky_provider = Some(result.provider);
@@ -201,7 +207,7 @@ async fn verify_response_with_retries(
         }
     }
 
-    (verified.user_facing, verified.history)
+    (verified.user_facing, verified.history, provider_cost_usd)
 }
 
 fn append_media_results(final_response: String, media_results_tag: &str) -> String {
@@ -216,6 +222,7 @@ fn append_media_results(final_response: String, media_results_tag: &str) -> Stri
 
 pub(super) struct SmsResponse {
     content: String,
+    provider_cost_usd: f64,
 }
 
 impl SmsResponse {
@@ -227,14 +234,17 @@ impl SmsResponse {
         user_id: i32,
         sticky_provider: Option<AiProvider>,
     ) -> Self {
-        let content = if raw.chars().count() > Self::MAX_LENGTH {
+        let (content, provider_cost_usd) = if raw.chars().count() > Self::MAX_LENGTH {
             condense_response(state, &raw, Self::MAX_LENGTH, user_id, sticky_provider)
                 .await
-                .unwrap_or_else(|_| truncate_nicely(&raw, Self::MAX_LENGTH))
+                .unwrap_or_else(|_| (truncate_nicely(&raw, Self::MAX_LENGTH), 0.0))
         } else {
-            raw
+            (raw, 0.0)
         };
-        Self { content }
+        Self {
+            content,
+            provider_cost_usd,
+        }
     }
 
     fn truncated(raw: String) -> Self {
@@ -243,7 +253,10 @@ impl SmsResponse {
         } else {
             raw
         };
-        Self { content }
+        Self {
+            content,
+            provider_cost_usd: 0.0,
+        }
     }
 
     fn into_inner(self) -> String {
@@ -287,7 +300,7 @@ async fn condense_response(
     max_chars: usize,
     user_id: i32,
     sticky_provider: Option<AiProvider>,
-) -> Result<String, String> {
+) -> Result<(String, f64), String> {
     use openai_api_rs::v1::chat_completion::{
         ChatCompletionMessage, ChatCompletionRequest, Content, MessageRole,
     };
@@ -330,9 +343,12 @@ async fn condense_response(
                 if let Some(content) = &choice.message.content {
                     let condensed = content.trim().to_string();
                     if condensed.chars().count() > max_chars {
-                        return Ok(truncate_nicely(&condensed, max_chars));
+                        return Ok((
+                            truncate_nicely(&condensed, max_chars),
+                            result.provider_cost_usd,
+                        ));
                     }
-                    return Ok(condensed);
+                    return Ok((condensed, result.provider_cost_usd));
                 }
             }
             Err("No response from condensing".to_string())

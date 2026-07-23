@@ -333,7 +333,7 @@ impl ContextBuilder {
             None
         };
 
-        // 5. History (opt-in, last 48h capped at 200 messages)
+        // 5. History (opt-in, last 48h capped at 200 messages / ~10k tokens)
         let conversation_history = if self.want_history {
             let raw = self
                 .state

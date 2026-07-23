@@ -134,6 +134,8 @@ pub struct AgentLoopOutput {
     pub created_item_id: Option<i32>,
     pub active_provider: AiProvider,
     pub sticky_provider: Option<AiProvider>,
+    /// Sum of direct LLM provider costs for every model round in this interaction.
+    pub provider_cost_usd: f64,
 }
 
 pub async fn run_agent_loop(
@@ -149,6 +151,7 @@ pub async fn run_agent_loop(
     let mut created_item_id: Option<i32> = None;
     let mut loop_messages = std::mem::take(&mut input.completion_messages);
     let mut final_response = String::new();
+    let mut provider_cost_usd = 0.0;
 
     'agentic: for round in 0..MAX_ROUNDS {
         tracing::debug!("Agentic loop round {}/{}", round + 1, MAX_ROUNDS);
@@ -162,6 +165,7 @@ pub async fn run_agent_loop(
                     .await
                     .map(|r| {
                         apply_provider_result(&mut active_provider, &mut sticky_provider, &r);
+                        provider_cost_usd += r.provider_cost_usd;
                         r.response
                     })?
             }
@@ -170,6 +174,7 @@ pub async fn run_agent_loop(
                 .await
                 .map(|r| {
                     apply_provider_result(&mut active_provider, &mut sticky_provider, &r);
+                    provider_cost_usd += r.provider_cost_usd;
                     r.response
                 })?
         };
@@ -432,6 +437,7 @@ pub async fn run_agent_loop(
         created_item_id,
         active_provider,
         sticky_provider,
+        provider_cost_usd,
     })
 }
 

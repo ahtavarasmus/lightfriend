@@ -24,6 +24,36 @@ struct SubscriptionMigrationStatus {
     has_legacy_subscription: bool,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct OverageStatus {
+    billing_system: String,
+    provisioned: bool,
+    overage_enabled: bool,
+    payment_ready: bool,
+    usage_entitled: bool,
+    charge_threshold_usd: i32,
+    invoice_cadence: String,
+    consent_version: String,
+    available_usage_usd: Option<f64>,
+    resets_at: Option<String>,
+}
+
+fn format_reset_date(value: &str) -> String {
+    let date = js_sys::Date::new(&JsValue::from_str(value));
+    if date.get_time().is_nan() {
+        return value.to_string();
+    }
+    let months = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
+        "Dec",
+    ];
+    format!(
+        "{} {}",
+        months.get(date.get_month() as usize).unwrap_or(&""),
+        date.get_date()
+    )
+}
+
 fn format_activity_type(activity_type: &str) -> &str {
     match activity_type {
         "_critical" | "_priority_sms" | "noti_msg" => "SMS notification",
@@ -106,6 +136,8 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
     // Recent usage feed state
     let usage_feed = use_state(|| None::<Vec<UsageLogEntry>>);
     let migration_status = use_state(|| None::<SubscriptionMigrationStatus>);
+    let overage_status = use_state(|| None::<OverageStatus>);
+    let overage_updating = use_state(|| false);
 
     // Fetch recent usage on mount
     {
@@ -125,6 +157,25 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                             web_sys::console::log_1(
                                 &format!("Failed to fetch recent usage: {:?}", e).into(),
                             );
+                        }
+                    }
+                });
+                || ()
+            },
+            (),
+        );
+    }
+
+    {
+        let overage_status = overage_status.clone();
+        use_effect_with_deps(
+            move |_| {
+                spawn_local(async move {
+                    if let Ok(response) = Api::get("/api/billing/overage").send().await {
+                        if response.ok() {
+                            if let Ok(status) = response.json::<OverageStatus>().await {
+                                overage_status.set(Some(status));
+                            }
                         }
                     }
                 });
@@ -528,6 +579,65 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
         })
     };
 
+    let toggle_overage = {
+        let overage_status = overage_status.clone();
+        let overage_updating = overage_updating.clone();
+        let error = error.clone();
+        let success = success.clone();
+        Callback::from(move |_| {
+            let Some(current) = (*overage_status).clone() else {
+                return;
+            };
+            let enabled = !current.overage_enabled;
+            let overage_status = overage_status.clone();
+            let overage_updating = overage_updating.clone();
+            let error = error.clone();
+            let success = success.clone();
+            overage_updating.set(true);
+            spawn_local(async move {
+                let request = json!({
+                    "enabled": enabled,
+                    "consent_version": if enabled {
+                        Some(current.consent_version.as_str())
+                    } else {
+                        None
+                    }
+                });
+                match Api::put("/api/billing/overage")
+                    .json(&request)
+                    .expect("Failed to serialize overage setting")
+                    .send()
+                    .await
+                {
+                    Ok(response) if response.ok() => {
+                        if let Ok(updated) = response.json::<OverageStatus>().await {
+                            let message = if updated.overage_enabled {
+                                "Overage billing enabled"
+                            } else {
+                                "Overage billing disabled"
+                            };
+                            overage_status.set(Some(updated));
+                            success.set(Some(message.to_string()));
+                        }
+                    }
+                    Ok(response) => {
+                        let message = response
+                            .json::<Value>()
+                            .await
+                            .ok()
+                            .and_then(|body| body["error"].as_str().map(ToString::to_string))
+                            .unwrap_or_else(|| "Could not update overage billing".to_string());
+                        error.set(Some(message));
+                    }
+                    Err(network_error) => {
+                        error.set(Some(format!("Network error: {:?}", network_error)));
+                    }
+                }
+                overage_updating.set(false);
+            });
+        })
+    };
+
     // Determine plan display name
     let plan_name = match user_profile.plan_type.as_deref() {
         Some("assistant") | Some("autopilot") => "Autopilot",
@@ -546,6 +656,10 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
             .map(|status| status.show_current_plans)
             .unwrap_or(false);
     let uses_own_twilio = user_profile.own_twilio_enabled;
+    let uses_metronome = overage_status
+        .as_ref()
+        .map(|status| status.billing_system == "metronome")
+        .unwrap_or(false);
 
     html! {
         <>
@@ -614,6 +728,29 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                 <div style="color: #B3D1FF; font-size: 0.95rem;">
                                     {"Own Twilio enabled - you pay Twilio directly for phone usage"}
                                 </div>
+                            }
+                        } else if has_plan && uses_metronome {
+                            html! {
+                                <>
+                                    <div style="color: #4ade80; font-size: 1.1rem; font-weight: 600; margin-bottom: 6px;">
+                                        {
+                                            overage_status
+                                                .as_ref()
+                                                .and_then(|status| status.available_usage_usd)
+                                                .map(|amount| format!("${:.2} usage available", amount))
+                                                .unwrap_or_else(|| "$25 included usage each month".to_string())
+                                        }
+                                    </div>
+                                    <div style="color: #888; font-size: 0.85rem;">
+                                        {
+                                            overage_status
+                                                .as_ref()
+                                                .and_then(|status| status.resets_at.as_deref())
+                                                .map(|date| format!("Monthly allowance resets {}.", format_reset_date(date)))
+                                                .unwrap_or_else(|| "Usage and allowance are metered by Stripe Metronome.".to_string())
+                                        }
+                                    </div>
+                                </>
                             }
                         } else if has_plan {
                             html! {
@@ -735,8 +872,68 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                     }
                 </div>
 
-                // Overage Credits & Buy/Top-up section
-                <div class="usage-projection-card" style={format!("margin-bottom: 16px;{}", if uses_own_twilio { " opacity: 0.6;" } else { "" })}>
+                if uses_metronome && has_plan && !uses_own_twilio {
+                    <div class="usage-projection-card overage-billing-card" style="margin-bottom: 16px;">
+                        <div class="usage-header">
+                            <h3>{"Overage billing"}</h3>
+                            <span class={classes!(
+                                "overage-status",
+                                overage_status.as_ref().map(|status| status.overage_enabled).unwrap_or(false).then_some("enabled")
+                            )}>
+                                {
+                                    if overage_status.as_ref().map(|status| status.overage_enabled).unwrap_or(false) {
+                                        "Enabled"
+                                    } else {
+                                        "Off"
+                                    }
+                                }
+                            </span>
+                        </div>
+                        <p class="overage-copy">
+                            {format!(
+                                "After your included $25 is used, continue on usage-based billing. Your saved payment method is charged whenever overage reaches ${} or {}, whichever comes first.",
+                                overage_status.as_ref().map(|status| status.charge_threshold_usd).unwrap_or(10),
+                                overage_status.as_ref().map(|status| status.invoice_cadence.as_str()).unwrap_or("weekly")
+                            )}
+                        </p>
+                        {
+                            if let Some(status) = overage_status.as_ref() {
+                                html! {
+                                    <>
+                                        if !status.provisioned {
+                                            <div class="billing-note">{"Finishing billing setup…"}</div>
+                                        } else if !status.payment_ready {
+                                            <div class="billing-note">{"A valid default payment method is required. Use Manage billing below to update it."}</div>
+                                        }
+                                        <button
+                                            class={classes!("overage-toggle-button", status.overage_enabled.then_some("danger"))}
+                                            disabled={*overage_updating || !status.provisioned || (!status.payment_ready && !status.overage_enabled)}
+                                            onclick={toggle_overage.clone()}
+                                        >
+                                            {
+                                                if *overage_updating {
+                                                    "Saving…"
+                                                } else if status.overage_enabled {
+                                                    "Disable overage billing"
+                                                } else {
+                                                    "Enable overage billing"
+                                                }
+                                            }
+                                        </button>
+                                        <div class="overage-terms">
+                                            {"By enabling, you authorize off-session usage charges to your saved payment method. You can disable overage at any time; usage already incurred remains billable."}
+                                        </div>
+                                    </>
+                                }
+                            } else {
+                                html! { <div class="billing-note">{"Loading billing settings…"}</div> }
+                            }
+                        }
+                    </div>
+                }
+
+                // Legacy credits UI remains available only until the Metronome cutover flag is enabled.
+                <div class="usage-projection-card" style={format!("margin-bottom: 16px;{}{}", if uses_own_twilio { " opacity: 0.6;" } else { "" }, if uses_metronome { " display: none;" } else { "" })}>
                     <div class="usage-header">
                         <h3>{"Overage Credits"}</h3>
                         <span class="usage-percentage" style="font-size: 1.2rem;">{format!("${:.2}", one_time_credits)}</span>
@@ -1097,6 +1294,53 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
     font-size: 0.9rem;
     line-height: 1.4;
     margin-bottom: 1rem;
+}
+
+.overage-status {
+    color: #9ca3af;
+    font-size: 0.82rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.overage-status.enabled {
+    color: #4ade80;
+}
+
+.overage-copy {
+    color: #cbd5e1;
+    line-height: 1.55;
+    margin: 0 0 1rem;
+}
+
+.overage-toggle-button {
+    min-height: 44px;
+    border: 0;
+    border-radius: 8px;
+    padding: 0.7rem 1rem;
+    background: linear-gradient(45deg, #1e90ff, #4169e1);
+    color: white;
+    font-weight: 650;
+    cursor: pointer;
+}
+
+.overage-toggle-button.danger {
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #fca5a5;
+}
+
+.overage-toggle-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+.overage-terms {
+    color: #7f8b9d;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    margin-top: 0.75rem;
 }
 
 .plan-switch-buttons {

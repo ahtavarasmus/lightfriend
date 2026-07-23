@@ -172,6 +172,8 @@ pub async fn twilio_status_callback(
                         &state,
                         user_info.user_id,
                         price,
+                        Some(&payload.MessageSid),
+                        "twilio",
                     ) {
                         Ok(cost) => {
                             tracing::info!(

@@ -512,10 +512,34 @@ pub async fn process_sms(
         fail: agent_loop_output.fail,
         active_provider: agent_loop_output.active_provider,
         sticky_provider: agent_loop_output.sticky_provider,
+        provider_cost_usd: agent_loop_output.provider_cost_usd,
         reasoning_tx: &reasoning_tx,
         status_tx: options.status_tx.as_ref(),
     })
     .await;
+
+    if options.channel == MessageChannel::WebChat
+        && crate::services::metronome_billing::metronome_enabled()
+    {
+        let billed_cost = crate::services::usage_pricing::billable_customer_cost_usd(
+            finalized_response.provider_cost_usd,
+        );
+        if billed_cost > 0.0 {
+            if let Err(error) = crate::services::metronome_billing::enqueue_usage(
+                state,
+                user.id,
+                "web_chat",
+                billed_cost as f32,
+                None,
+            ) {
+                tracing::error!(
+                    user_id = user.id,
+                    billed_cost,
+                    "Failed to queue actual web chat usage: {error}"
+                );
+            }
+        }
+    }
 
     let processing_time_secs = start_time.elapsed().as_secs();
 

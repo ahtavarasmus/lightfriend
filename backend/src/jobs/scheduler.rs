@@ -515,12 +515,47 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         reconcile_matrix_users(state_for_first_tick).await;
     });
 
+    if crate::services::metronome_billing::metronome_enabled() {
+        let billing_state = Arc::clone(&state);
+        tokio::spawn(async move {
+            crate::services::metronome_billing::provision_subscribers(Arc::clone(&billing_state))
+                .await;
+            crate::services::metronome_billing::flush_usage_outbox(billing_state).await;
+        });
+    }
+
     // Initialize smartphone-free days metric if it doesn't exist
     initialize_smartphone_free_days_metric(Arc::clone(&state)).await;
 
     let sched = JobScheduler::new()
         .await
         .expect("Failed to create scheduler");
+
+    let state_clone = Arc::clone(&state);
+    let metronome_usage_job = Job::new_async("*/10 * * * * *", move |_, _| {
+        let state = Arc::clone(&state_clone);
+        Box::pin(async move {
+            crate::services::metronome_billing::flush_usage_outbox(state).await;
+        })
+    })
+    .expect("Failed to create Metronome usage job");
+    sched
+        .add(metronome_usage_job)
+        .await
+        .expect("Failed to add Metronome usage job");
+
+    let state_clone = Arc::clone(&state);
+    let metronome_provisioning_job = Job::new_async("15 */5 * * * *", move |_, _| {
+        let state = Arc::clone(&state_clone);
+        Box::pin(async move {
+            crate::services::metronome_billing::provision_subscribers(state).await;
+        })
+    })
+    .expect("Failed to create Metronome provisioning job");
+    sched
+        .add(metronome_provisioning_job)
+        .await
+        .expect("Failed to add Metronome provisioning job");
 
     // Create a job that runs every 10 minutes to check for new IMAP messages
     let state_clone = Arc::clone(&state);
@@ -781,6 +816,9 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     let included_usage_refresh_job = Job::new_async("0 30 2 * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
+            if crate::services::metronome_billing::metronome_enabled() {
+                return;
+            }
             debug!("Running included usage window refresh...");
 
             match state.user_core.get_users_by_tier("tier 2") {

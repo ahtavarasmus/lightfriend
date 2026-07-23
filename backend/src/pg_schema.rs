@@ -565,6 +565,49 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    billing_accounts (user_id) {
+        user_id -> Int4,
+        metronome_customer_id -> Nullable<Text>,
+        metronome_contract_id -> Nullable<Text>,
+        overage_enabled -> Bool,
+        overage_consent_at -> Nullable<Int4>,
+        overage_consent_version -> Nullable<Text>,
+        payment_ready -> Bool,
+        usage_entitled -> Bool,
+        provisioning_status -> Text,
+        provisioning_error -> Nullable<Text>,
+        legacy_credit_migrated -> Bool,
+        legacy_overage_preference_migrated -> Bool,
+        created_at -> Int4,
+        updated_at -> Int4,
+    }
+}
+
+diesel::table! {
+    billing_usage_events (transaction_id) {
+        transaction_id -> Text,
+        user_id -> Int4,
+        event_type -> Text,
+        cost_microusd -> Int8,
+        occurred_at -> Int4,
+        status -> Text,
+        attempts -> Int4,
+        next_attempt_at -> Int4,
+        last_error -> Nullable<Text>,
+        created_at -> Int4,
+        sent_at -> Nullable<Int4>,
+    }
+}
+
+diesel::table! {
+    billing_webhook_events (event_id) {
+        event_id -> Text,
+        event_type -> Text,
+        received_at -> Int4,
+    }
+}
+
 // Commitment detection signal tables (migration 35)
 
 diesel::table! {
@@ -696,6 +739,8 @@ diesel::joinable!(ont_person_edits -> ont_persons (person_id));
 diesel::joinable!(ont_channels -> ont_persons (person_id));
 
 diesel::joinable!(refund_info -> users (user_id));
+diesel::joinable!(billing_accounts -> users (user_id));
+diesel::joinable!(billing_usage_events -> users (user_id));
 diesel::joinable!(user_settings -> users (user_id));
 diesel::joinable!(light_tool_devices -> users (user_id));
 diesel::joinable!(light_tool_push_registrations -> light_tool_devices (device_id));
@@ -752,4 +797,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     light_tool_pairing_sessions,
     webhook_tokens,
     webhook_idempotency_keys,
+    billing_accounts,
+    billing_usage_events,
+    billing_webhook_events,
 );

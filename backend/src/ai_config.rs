@@ -55,6 +55,8 @@ pub struct AiChatResult {
     pub provider: AiProvider,
     pub model: String,
     pub fallback_from: Option<AiProvider>,
+    /// Direct provider cost for this response, before Lightfriend's usage margin.
+    pub provider_cost_usd: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -398,11 +400,18 @@ impl AiConfig {
                             "AI provider fallback succeeded"
                         );
                     }
+                    let provider_cost_usd = crate::services::usage_pricing::text_llm_cost_usd(
+                        provider,
+                        &model,
+                        response.usage.prompt_tokens,
+                        response.usage.completion_tokens,
+                    );
                     return Ok(AiChatResult {
                         response,
                         provider,
                         model,
                         fallback_from,
+                        provider_cost_usd,
                     });
                 }
                 Err(err) => {

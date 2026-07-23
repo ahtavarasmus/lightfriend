@@ -256,6 +256,23 @@ async fn setup_user_subscription(
         product_id
     );
 
+    if crate::services::metronome_billing::metronome_enabled() {
+        if let Ok(Some(user)) = state.user_core.find_by_id(user_id) {
+            let billing_state = Arc::clone(state);
+            tokio::spawn(async move {
+                if let Err(error) =
+                    crate::services::metronome_billing::provision_user(&billing_state, &user).await
+                {
+                    tracing::error!(
+                        "Failed to provision new subscriber {} in Metronome: {}",
+                        user.id,
+                        error
+                    );
+                }
+            });
+        }
+    }
+
     Ok(())
 }
 
@@ -1041,6 +1058,14 @@ pub async fn create_checkout_session(
     Path(user_id): Path<i32>,
     Json(payload): Json<BuyCreditsRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if crate::services::metronome_billing::metronome_enabled() {
+        return Err((
+            StatusCode::GONE,
+            Json(
+                json!({"error": "Credit purchases have been replaced by optional overage billing"}),
+            ),
+        ));
+    }
     // Security: Verify user can only create checkout for themselves
     if auth_user.user_id != user_id {
         return Err((

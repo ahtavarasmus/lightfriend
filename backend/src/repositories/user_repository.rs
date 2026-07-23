@@ -52,6 +52,10 @@ const HISTORY_WINDOW_SECS: i32 = 48 * 3600;
 /// a tool call or two. Bounds context size for very chatty users.
 const HISTORY_MAX_MESSAGES: i64 = 200;
 
+/// Approximate 10k-token ceiling for persisted conversational context. Messages are loaded
+/// newest-first, so the current conversation is retained while older turns fall away.
+const HISTORY_MAX_CHARACTERS: usize = 40_000;
+
 pub const SYSTEM_ALERT_ACTIVITY_TYPES: &[&str] = &[
     "system_important",
     "system_important_sms",
@@ -97,17 +101,34 @@ impl UserRepository {
             .load::<crate::pg_models::PgMessageHistory>(&mut conn)?;
 
         let mut decrypted_messages = Vec::new();
+        let mut remaining_characters = HISTORY_MAX_CHARACTERS;
         for mut msg in encrypted_messages {
             match encryption::decrypt(&msg.encrypted_content) {
-                Ok(decrypted_content) => {
+                Ok(mut decrypted_content) => {
                     if msg.role == "assistant"
                         && decrypted_content.is_empty()
                         && msg.tool_calls_json.is_none()
                     {
                         continue;
                     }
+                    let character_count = decrypted_content.chars().count();
+                    if character_count > remaining_characters {
+                        if remaining_characters == 0 {
+                            break;
+                        }
+                        decrypted_content = decrypted_content
+                            .chars()
+                            .take(remaining_characters)
+                            .collect();
+                        remaining_characters = 0;
+                    } else {
+                        remaining_characters -= character_count;
+                    }
                     msg.encrypted_content = decrypted_content;
                     decrypted_messages.push(msg);
+                    if remaining_characters == 0 {
+                        break;
+                    }
                 }
                 Err(e) => {
                     tracing::error!("Failed to decrypt message content: {:?}", e);

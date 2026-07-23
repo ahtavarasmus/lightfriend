@@ -1804,6 +1804,44 @@ pub async fn delete_user(
 const WEB_CHAT_COST_EUR: f32 = 0.01; // €0.01 per message for Euro countries
 const WEB_CHAT_COST_US: f32 = 0.5; // 0.5 messages for US/CA (uses credits_left as message count)
 
+fn charge_web_chat_usage(
+    state: &Arc<AppState>,
+    user: &crate::models::user_models::User,
+) -> Result<f32, String> {
+    if crate::services::metronome_billing::metronome_enabled() {
+        if !crate::services::metronome_billing::has_usage_entitlement(state, user.id)
+            .map_err(|error| format!("Failed to check billing entitlement: {}", error))?
+        {
+            return Err("Included usage depleted. Enable overage billing to continue.".to_string());
+        }
+        // Exact token cost is queued after the shared agent (including tool-call rounds and
+        // response finalization) completes. This preflight only gates access.
+        return Ok(0.0);
+    }
+
+    let user = crate::utils::usage::ensure_current_included_usage_window(state, user)?;
+    let included_cost = if user.phone_number.starts_with("+1") {
+        WEB_CHAT_COST_US
+    } else {
+        WEB_CHAT_COST_EUR
+    };
+    if user.credits_left >= included_cost {
+        state
+            .user_repository
+            .update_user_credits_left(user.id, user.credits_left - included_cost)
+            .map_err(|error| format!("Failed to charge credits: {}", error))?;
+        Ok(included_cost)
+    } else if user.credits >= WEB_CHAT_COST_EUR {
+        state
+            .user_repository
+            .update_user_credits(user.id, user.credits - WEB_CHAT_COST_EUR)
+            .map_err(|error| format!("Failed to charge credits: {}", error))?;
+        Ok(WEB_CHAT_COST_EUR)
+    } else {
+        Err("Insufficient credits. Please add more credits to continue.".to_string())
+    }
+}
+
 #[derive(Deserialize)]
 pub struct WebChatRequest {
     pub message: String,
@@ -1863,52 +1901,8 @@ pub async fn web_chat(
         ));
     }
 
-    let user = crate::utils::usage::ensure_current_included_usage_window(&state, &user)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
-
-    // Determine cost based on region (US/CA uses message count, others use euro value)
-    let is_us_or_ca = user.phone_number.starts_with("+1");
-    let (credits_left_cost, credits_cost) = if is_us_or_ca {
-        (WEB_CHAT_COST_US, WEB_CHAT_COST_EUR) // US: 0.5 from credits_left (message count), or €0.01 from credits
-    } else {
-        (WEB_CHAT_COST_EUR, WEB_CHAT_COST_EUR) // Euro: €0.01 from either
-    };
-
-    // Check if user has sufficient credits
-    let has_credits = user.credits_left >= credits_left_cost || user.credits >= credits_cost;
-    if !has_credits {
-        return Err((
-            StatusCode::PAYMENT_REQUIRED,
-            Json(json!({"error": "Insufficient credits. Please add more credits to continue."})),
-        ));
-    }
-
-    // Deduct credits (prefer credits_left, then credits)
-    let charged_amount = if user.credits_left >= credits_left_cost {
-        let new_credits_left = user.credits_left - credits_left_cost;
-        state
-            .user_repository
-            .update_user_credits_left(auth_user.user_id, new_credits_left)
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Failed to charge credits: {}", e)})),
-                )
-            })?;
-        credits_left_cost
-    } else {
-        let new_credits = user.credits - credits_cost;
-        state
-            .user_repository
-            .update_user_credits(auth_user.user_id, new_credits)
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Failed to charge credits: {}", e)})),
-                )
-            })?;
-        credits_cost
-    };
+    let charged_amount = charge_web_chat_usage(&state, &user)
+        .map_err(|error| (StatusCode::PAYMENT_REQUIRED, Json(json!({"error": error}))))?;
 
     // Log the usage
     let _ = state.user_repository.log_usage(LogUsageParams {
@@ -2047,50 +2041,14 @@ pub async fn web_chat_stream(
             return;
         }
 
-        let user = match crate::utils::usage::ensure_current_included_usage_window(&state, &user) {
-            Ok(user) => user,
-            Err(e) => {
+        let charged_amount = match charge_web_chat_usage(&state, &user) {
+            Ok(amount) => amount,
+            Err(error) => {
                 yield Ok(axum::response::sse::Event::default().data(
-                    serde_json::json!({"step": "error", "message": e}).to_string(),
+                    serde_json::json!({"step": "error", "message": error}).to_string(),
                 ));
                 return;
             }
-        };
-
-        let is_us_or_ca = user.phone_number.starts_with("+1");
-        let (credits_left_cost, credits_cost) = if is_us_or_ca {
-            (WEB_CHAT_COST_US, WEB_CHAT_COST_EUR)
-        } else {
-            (WEB_CHAT_COST_EUR, WEB_CHAT_COST_EUR)
-        };
-
-        let has_credits = user.credits_left >= credits_left_cost || user.credits >= credits_cost;
-        if !has_credits {
-            yield Ok(axum::response::sse::Event::default().data(
-                serde_json::json!({"step": "error", "message": "Insufficient credits. Please add more credits to continue."}).to_string(),
-            ));
-            return;
-        }
-
-        // Deduct credits
-        let charged_amount = if user.credits_left >= credits_left_cost {
-            let new_credits_left = user.credits_left - credits_left_cost;
-            if let Err(e) = state.user_repository.update_user_credits_left(auth_user.user_id, new_credits_left) {
-                yield Ok(axum::response::sse::Event::default().data(
-                    serde_json::json!({"step": "error", "message": format!("Failed to charge credits: {}", e)}).to_string(),
-                ));
-                return;
-            }
-            credits_left_cost
-        } else {
-            let new_credits = user.credits - credits_cost;
-            if let Err(e) = state.user_repository.update_user_credits(auth_user.user_id, new_credits) {
-                yield Ok(axum::response::sse::Event::default().data(
-                    serde_json::json!({"step": "error", "message": format!("Failed to charge credits: {}", e)}).to_string(),
-                ));
-                return;
-            }
-            credits_cost
         };
 
         let _ = state.user_repository.log_usage(crate::repositories::user_repository::LogUsageParams {
@@ -2391,52 +2349,8 @@ pub async fn web_chat_with_image(
         ));
     }
 
-    let user = crate::utils::usage::ensure_current_included_usage_window(&state, &user)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
-
-    // Determine cost based on region
-    let is_us_or_ca = user.phone_number.starts_with("+1");
-    let (credits_left_cost, credits_cost) = if is_us_or_ca {
-        (WEB_CHAT_COST_US, WEB_CHAT_COST_EUR)
-    } else {
-        (WEB_CHAT_COST_EUR, WEB_CHAT_COST_EUR)
-    };
-
-    // Check if user has sufficient credits
-    let has_credits = user.credits_left >= credits_left_cost || user.credits >= credits_cost;
-    if !has_credits {
-        return Err((
-            StatusCode::PAYMENT_REQUIRED,
-            Json(json!({"error": "Insufficient credits. Please add more credits to continue."})),
-        ));
-    }
-
-    // Deduct credits
-    let charged_amount = if user.credits_left >= credits_left_cost {
-        let new_credits_left = user.credits_left - credits_left_cost;
-        state
-            .user_repository
-            .update_user_credits_left(auth_user.user_id, new_credits_left)
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Failed to charge credits: {}", e)})),
-                )
-            })?;
-        credits_left_cost
-    } else {
-        let new_credits = user.credits - credits_cost;
-        state
-            .user_repository
-            .update_user_credits(auth_user.user_id, new_credits)
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Failed to charge credits: {}", e)})),
-                )
-            })?;
-        credits_cost
-    };
+    let charged_amount = charge_web_chat_usage(&state, &user)
+        .map_err(|error| (StatusCode::PAYMENT_REQUIRED, Json(json!({"error": error}))))?;
 
     // Log the usage
     let _ = state.user_repository.log_usage(LogUsageParams {

@@ -40,6 +40,9 @@ pub fn ensure_current_included_usage_window(
     state: &Arc<AppState>,
     user: &crate::models::user_models::User,
 ) -> Result<crate::models::user_models::User, String> {
+    if crate::services::metronome_billing::metronome_enabled() {
+        return Ok(user.clone());
+    }
     if user.sub_tier.as_deref() != Some("tier 2") || state.user_core.is_byot_user(user.id) {
         if user.credits_left > 0.0
             || user.included_usage_window_start_timestamp.is_some()
@@ -113,6 +116,39 @@ pub async fn check_user_credits(
     // BYOT users pay Twilio directly - no credit check
     if state.user_core.is_byot_user(user.id) {
         return Ok(());
+    }
+
+    if crate::services::metronome_billing::metronome_enabled() {
+        if crate::services::metronome_billing::has_usage_entitlement(state, user.id)
+            .map_err(|error| format!("Failed to check billing entitlement: {}", error))?
+        {
+            return Ok(());
+        }
+
+        if user.last_credits_notification.is_none() && event_type != "digest" {
+            let current_time = chrono::Utc::now().timestamp() as i32;
+            let _ = state
+                .user_core
+                .update_last_credits_notification(user.id, current_time);
+            let user_clone = user.clone();
+            let state_clone = state.clone();
+            tokio::spawn(async move {
+                let reset_date = crate::services::metronome_billing::customer_reset_date_label(
+                    &state_clone,
+                    user_clone.id,
+                )
+                .await
+                .unwrap_or_else(|| "your billing date".to_string());
+                let message = format!("$25 used. Resets {}. Enable overage?", reset_date);
+                let _ = state_clone
+                    .channel_router
+                    .send_to_user(&user_clone, &message, None)
+                    .await;
+            });
+        }
+        return Err(
+            "Monthly usage used. Resets next month; enable overage to continue.".to_string(),
+        );
     }
 
     let user = ensure_current_included_usage_window(state, user)?;
@@ -259,11 +295,17 @@ pub fn deduct_user_credits(
         return Ok(());
     }
 
-    let user = ensure_current_included_usage_window(state, &user)?;
-
     // Calculate deduction for voice/web events
     let cost = get_activity_cost(state, &user.phone_number, event_type, amount);
     if cost <= 0.0 {
+        return Ok(());
+    }
+
+    let user = ensure_current_included_usage_window(state, &user)?;
+
+    if crate::services::metronome_billing::metronome_enabled() {
+        crate::services::metronome_billing::enqueue_usage(state, user_id, event_type, cost, None)
+            .map_err(|error| format!("Failed to queue usage: {}", error))?;
         return Ok(());
     }
 
@@ -297,6 +339,43 @@ pub fn deduct_user_credits(
         }
     }
 
+    Ok(())
+}
+
+/// Queues only the hosted Twilio phone leg for an OpenAI Realtime call.
+/// The AI portion is metered independently from each `response.done` usage payload.
+pub fn deduct_hosted_voice_phone_leg(
+    state: &Arc<AppState>,
+    user_id: i32,
+    event_type: &str,
+    duration_secs: i32,
+) -> Result<(), String> {
+    let user = state
+        .user_core
+        .find_by_id(user_id)
+        .map_err(|error| format!("Database error: {error}"))?
+        .ok_or_else(|| "User not found".to_string())?;
+    if state.user_core.is_byot_user(user_id) {
+        return Ok(());
+    }
+
+    let country_code = get_country_code_from_phone(&user.phone_number);
+    let pricing = country_code.and_then(|code| {
+        crate::api::twilio_pricing::get_cached_notification_pricing_sync(state, &code)
+    });
+    let per_minute = match event_type {
+        "voice" => pricing
+            .map(|value| value.inbound_voice_price)
+            .unwrap_or(0.03),
+        "noti_call" => pricing
+            .map(|value| value.calculated_voice_price)
+            .unwrap_or(0.13),
+        _ => return Err("Invalid voice event type".to_string()),
+    };
+    let minutes = (duration_secs.max(1) as f32 / 60.0).ceil();
+    let cost = minutes * per_minute * TWILIO_COST_MARGIN;
+    crate::services::metronome_billing::enqueue_usage(state, user_id, "twilio_voice", cost, None)
+        .map_err(|error| format!("Failed to queue phone usage: {error}"))?;
     Ok(())
 }
 
@@ -343,6 +422,8 @@ pub fn deduct_from_twilio_price(
     state: &Arc<AppState>,
     user_id: i32,
     twilio_price_usd: f32,
+    transaction_id: Option<&str>,
+    provider: &str,
 ) -> Result<f32, String> {
     let user = match state.user_core.find_by_id(user_id) {
         Ok(Some(user)) => user,
@@ -355,8 +436,6 @@ pub fn deduct_from_twilio_price(
         return Ok(0.0);
     }
 
-    let user = ensure_current_included_usage_window(state, &user)?;
-
     let abs_price = twilio_price_usd.abs();
     if abs_price == 0.0 {
         return Ok(0.0);
@@ -364,6 +443,20 @@ pub fn deduct_from_twilio_price(
 
     // Apply margin. Twilio price already reflects country-specific costs.
     let cost = abs_price * TWILIO_COST_MARGIN;
+
+    if crate::services::metronome_billing::metronome_enabled() {
+        crate::services::metronome_billing::enqueue_usage(
+            state,
+            user_id,
+            &format!("{}_sms", provider),
+            cost,
+            transaction_id.map(|id| format!("{}-sms-{}", provider, id)),
+        )
+        .map_err(|error| format!("Failed to queue usage: {}", error))?;
+        return Ok(cost);
+    }
+
+    let user = ensure_current_included_usage_window(state, &user)?;
 
     // Deduct: prefer credits_left, fall back to credits
     if user.credits_left >= cost {
