@@ -332,7 +332,7 @@ print_deleted_open_file_accounting() {
 
 print_tuwunel_purge_audit() {
     echo "--- Tuwunel purge compact audit ---"
-    echo "historical_audit_policy backfill_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_ENABLED:-false} audit_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_ENABLED:-true} execute_verified_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_EXECUTE_VERIFIED_ENABLED:-false} batch_size=${TUWUNEL_EVENT_PURGE_BACKFILL_BATCH_SIZE:-25} scan_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_SCAN_SECS:-3600} min_age_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_MIN_AGE_SECS:-86400} recheck_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_RECHECK_SECS:-86400} max_pages=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_MAX_PAGES:-100} page_size=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_PAGE_SIZE:-100}"
+    echo "historical_audit_policy backfill_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_ENABLED:-true} audit_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_ENABLED:-true} execute_verified_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_EXECUTE_VERIFIED_ENABLED:-true} execute_blocked_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_EXECUTE_BLOCKED_ENABLED:-true} batch_size=${TUWUNEL_EVENT_PURGE_BACKFILL_BATCH_SIZE:-25} scan_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_SCAN_SECS:-3600} min_age_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_MIN_AGE_SECS:-86400} recheck_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_RECHECK_SECS:-86400} max_pages=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_MAX_PAGES:-100} page_size=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_PAGE_SIZE:-100}"
     echo "disconnected_bridge_policy audit_enabled=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_AUDIT_ENABLED:-true} execute_enabled=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_ENABLED:-true} orphan_execute_enabled=${TUWUNEL_DISCONNECTED_BRIDGE_ORPHAN_PURGE_ENABLED:-false} grace_secs=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_GRACE_SECS:-120} batch_size=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_BATCH_SIZE:-5} room_delete_limit=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_ROOM_LIMIT:-1}"
     if ! command -v psql >/dev/null 2>&1 || [ -z "${PG_DATABASE_URL:-}" ]; then
         echo "psql or PG_DATABASE_URL unavailable"
@@ -378,6 +378,19 @@ print_tuwunel_purge_audit() {
          WHERE status IN ('\''backfill_audit_verified'\'', '\''backfill_audit_blocked'\'')
          GROUP BY status, service, split_part(COALESCE(last_error, '\''reason unavailable'\''), '\'' '\'', 1)
          ORDER BY rows DESC, status, service, reason_code;
+
+        SELECT COALESCE(last_command_kind, '\''unknown'\'') AS historical_execution_kind,
+               status,
+               count(*) AS rows,
+               count(DISTINCT room_id) AS rooms,
+               to_char(to_timestamp(max(updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS last_updated
+          FROM tuwunel_cleanup_events
+         WHERE last_command_kind IN (
+                   '\''historical_backfill_verified'\'',
+                   '\''historical_backfill_forced_unverified'\''
+               )
+         GROUP BY COALESCE(last_command_kind, '\''unknown'\''), status
+         ORDER BY historical_execution_kind, status;
 
         SELECT cleanup.status,
                cleanup.user_id,

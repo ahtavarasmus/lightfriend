@@ -2,9 +2,9 @@ use backend::utils::disconnected_bridge_cleanup::{
     bridge_cleanup_execution_allowed, build_delete_room_url, build_room_members_url,
 };
 use backend::utils::tuwunel_event_cleanup::{
-    build_purge_history_url, build_purge_status_url, historical_event_requires_proof,
-    is_matrix_event_id, is_tuwunel_admin_redaction_reason, next_backfill_scan_timestamp,
-    purge_history_request,
+    build_purge_history_url, build_purge_status_url, historical_backfill_execution_kind,
+    historical_event_requires_proof, is_matrix_event_id, is_tuwunel_admin_redaction_reason,
+    next_backfill_scan_timestamp, purge_history_request,
 };
 use serde_json::json;
 
@@ -137,4 +137,24 @@ fn historical_audit_allows_state_and_non_payload_housekeeping() {
     assert!(!historical_event_requires_proof("m.room.member", true));
     assert!(!historical_event_requires_proof("m.reaction", false));
     assert!(!historical_event_requires_proof("m.room.redaction", false));
+}
+
+#[test]
+fn historical_backfill_keeps_verified_and_forced_paths_distinct() {
+    assert_eq!(
+        historical_backfill_execution_kind(true, true, true, true),
+        Some("historical_backfill_verified")
+    );
+    assert_eq!(
+        historical_backfill_execution_kind(false, true, true, true),
+        Some("historical_backfill_forced_unverified")
+    );
+    assert_eq!(
+        historical_backfill_execution_kind(false, true, true, false),
+        None
+    );
+    assert_eq!(
+        historical_backfill_execution_kind(false, false, true, true),
+        None
+    );
 }

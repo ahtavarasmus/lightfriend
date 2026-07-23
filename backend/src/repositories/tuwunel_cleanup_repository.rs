@@ -903,12 +903,40 @@ impl TuwunelCleanupRepository {
         candidate: &HistoricalBackfillCandidate,
         audit_summary: &str,
     ) -> Result<()> {
+        self.enqueue_audited_historical_backfill(
+            candidate,
+            STATUS_BACKFILL_AUDIT_VERIFIED,
+            "historical_backfill_verified",
+            audit_summary,
+        )
+    }
+
+    pub fn enqueue_forced_historical_backfill(
+        &self,
+        candidate: &HistoricalBackfillCandidate,
+        audit_summary: &str,
+    ) -> Result<()> {
+        self.enqueue_audited_historical_backfill(
+            candidate,
+            STATUS_BACKFILL_AUDIT_BLOCKED,
+            "historical_backfill_forced_unverified",
+            audit_summary,
+        )
+    }
+
+    fn enqueue_audited_historical_backfill(
+        &self,
+        candidate: &HistoricalBackfillCandidate,
+        required_status: &str,
+        command_kind: &str,
+        audit_summary: &str,
+    ) -> Result<()> {
         let mut conn = self.connection()?;
         let now = now_timestamp();
         let updated = diesel::update(
             tuwunel_cleanup_events::table
                 .filter(tuwunel_cleanup_events::event_id.eq(&candidate.event_id))
-                .filter(tuwunel_cleanup_events::status.eq(STATUS_BACKFILL_AUDIT_VERIFIED)),
+                .filter(tuwunel_cleanup_events::status.eq(required_status)),
         )
         .set((
             tuwunel_cleanup_events::ontology_message_id.eq(candidate.ontology_message_id),
@@ -917,7 +945,7 @@ impl TuwunelCleanupRepository {
             tuwunel_cleanup_events::commands_accepted.eq(0),
             tuwunel_cleanup_events::attempt_count.eq(0),
             tuwunel_cleanup_events::status.eq(STATUS_PENDING_PURGE),
-            tuwunel_cleanup_events::last_command_kind.eq(Some("historical_backfill_verified")),
+            tuwunel_cleanup_events::last_command_kind.eq(Some(command_kind)),
             tuwunel_cleanup_events::last_error.eq(Some(trim_error(audit_summary))),
             tuwunel_cleanup_events::enqueued_at.eq(now),
             tuwunel_cleanup_events::last_attempted_at.eq(None::<i32>),
@@ -927,8 +955,9 @@ impl TuwunelCleanupRepository {
         .execute(&mut conn)?;
         if updated != 1 {
             return Err(anyhow!(
-                "verified historical boundary {} was not in an auditable state",
-                candidate.event_id
+                "historical boundary {} was not in required audit state {}",
+                candidate.event_id,
+                required_status
             ));
         }
         Ok(())
