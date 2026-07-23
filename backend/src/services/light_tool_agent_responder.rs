@@ -123,6 +123,49 @@ pub fn build_anonymous_chat_request(
     chat_completion::ChatCompletionRequest::new(String::new(), messages)
 }
 
+pub fn attach_image_to_latest_user_message(
+    messages: &mut [chat_completion::ChatCompletionMessage],
+    image_data_url: Option<&str>,
+) {
+    let Some(image_data_url) = image_data_url else {
+        return;
+    };
+    let Some(message) = messages
+        .iter_mut()
+        .rev()
+        .find(|message| message.role == chat_completion::MessageRole::user)
+    else {
+        return;
+    };
+
+    let existing_content = std::mem::replace(
+        &mut message.content,
+        chat_completion::Content::Text(String::new()),
+    );
+    let mut parts = match existing_content {
+        chat_completion::Content::Text(text) => {
+            let mut parts = Vec::new();
+            if !text.trim().is_empty() {
+                parts.push(chat_completion::ImageUrl {
+                    r#type: chat_completion::ContentType::text,
+                    text: Some(text),
+                    image_url: None,
+                });
+            }
+            parts
+        }
+        chat_completion::Content::ImageUrl(parts) => parts,
+    };
+    parts.push(chat_completion::ImageUrl {
+        r#type: chat_completion::ContentType::image_url,
+        text: None,
+        image_url: Some(chat_completion::ImageUrlType {
+            url: image_data_url.to_string(),
+        }),
+    });
+    message.content = chat_completion::Content::ImageUrl(parts);
+}
+
 fn chat_message(
     role: chat_completion::MessageRole,
     content: String,
@@ -249,10 +292,11 @@ async fn execute_anonymous_agent(
     device_id: i32,
     ai_config: &AiConfig,
     tools: Vec<chat_completion::Tool>,
-    completion_messages: Vec<chat_completion::ChatCompletionMessage>,
+    mut completion_messages: Vec<chat_completion::ChatCompletionMessage>,
     image_data_url: Option<&str>,
     activity_tx: mpsc::Sender<String>,
 ) -> Result<PreparedAgentReply, String> {
+    attach_image_to_latest_user_message(&mut completion_messages, image_data_url);
     let (reasoning_tx, reasoning_rx) = mpsc::channel::<String>(8);
     let (status_tx, status_rx) = mpsc::channel::<AgentStatus>(8);
     let reasoning_sender = Some(reasoning_tx);
@@ -291,10 +335,11 @@ async fn execute_anonymous_agent(
 async fn execute_account_agent(
     state: &Arc<AppState>,
     user: &User,
-    input: AccountLightToolAgentInput,
+    mut input: AccountLightToolAgentInput,
     image_data_url: Option<&str>,
     activity_tx: mpsc::Sender<String>,
 ) -> Result<PreparedAgentReply, String> {
+    attach_image_to_latest_user_message(&mut input.completion_messages, image_data_url);
     let (reasoning_tx, reasoning_rx) = mpsc::channel::<String>(8);
     let (status_tx, status_rx) = mpsc::channel::<AgentStatus>(8);
     let reasoning_sender = Some(reasoning_tx);

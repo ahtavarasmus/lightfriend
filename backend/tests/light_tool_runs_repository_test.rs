@@ -15,7 +15,8 @@ use backend::{
     },
     services::{
         light_tool_agent_responder::{
-            build_account_agent_input, build_anonymous_chat_request, LightToolAgentResponder,
+            attach_image_to_latest_user_message, build_account_agent_input,
+            build_anonymous_chat_request, LightToolAgentResponder,
         },
         light_tool_bootstrap::{
             LightToolBootstrapService, TRIAL_DURATION_SECONDS, TRIAL_MESSAGE_LIMIT,
@@ -85,6 +86,44 @@ fn anonymous_ai_request_contains_only_system_and_user_messages() {
         _ => panic!("expected a text user message"),
     };
     assert_eq!(user_message, "What is my name?");
+}
+
+#[test]
+fn image_attachment_makes_the_latest_user_message_multimodal() {
+    let history = vec![LightToolConversationTurn {
+        user_message: "Earlier question".to_string(),
+        assistant_message: "Earlier answer".to_string(),
+    }];
+    let mut request = build_anonymous_chat_request(&history, "What is in this photo?");
+
+    attach_image_to_latest_user_message(
+        &mut request.messages,
+        Some("data:image/jpeg;base64,dGVzdA=="),
+    );
+
+    assert!(matches!(
+        &request.messages[1].content,
+        openai_api_rs::v1::chat_completion::Content::Text(text)
+            if text == "Earlier question"
+    ));
+    let openai_api_rs::v1::chat_completion::Content::ImageUrl(parts) = &request.messages[3].content
+    else {
+        panic!("expected multimodal user content");
+    };
+    assert_eq!(parts.len(), 2);
+    assert_eq!(
+        parts[0].r#type,
+        openai_api_rs::v1::chat_completion::ContentType::text
+    );
+    assert_eq!(parts[0].text.as_deref(), Some("What is in this photo?"));
+    assert_eq!(
+        parts[1].r#type,
+        openai_api_rs::v1::chat_completion::ContentType::image_url
+    );
+    assert_eq!(
+        parts[1].image_url.as_ref().map(|image| image.url.as_str()),
+        Some("data:image/jpeg;base64,dGVzdA==")
+    );
 }
 
 #[test]
