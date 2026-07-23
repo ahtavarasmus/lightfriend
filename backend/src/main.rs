@@ -225,7 +225,7 @@ async fn bootstrap_admin_if_needed(
         credits: 1000.0,
         credits_left: 1000.0,
         charge_when_under: false,
-        sub_tier: Some("2".to_string()), // tier 2 = sentinel (full access)
+        sub_tier: Some("tier 2".to_string()), // hosted subscription (full access)
     };
 
     match user_core.create_user(new_user) {
