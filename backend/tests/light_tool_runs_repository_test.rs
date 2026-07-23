@@ -353,6 +353,7 @@ async fn account_responder_returns_subscription_guidance_without_calling_the_mod
             },
             &[],
             "Check my email",
+            None,
             activity_tx,
         )
         .await
@@ -837,6 +838,7 @@ impl LightToolResponder for FakeResponder {
         _principal: LightToolRunPrincipal,
         history: &[LightToolConversationTurn],
         _user_message: &str,
+        _image_data_url: Option<&str>,
         activity_tx: mpsc::Sender<String>,
     ) -> Result<String, String> {
         assert_eq!(history, self.expected_history);

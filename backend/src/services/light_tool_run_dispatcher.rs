@@ -36,6 +36,7 @@ pub trait LightToolResponder: Send + Sync {
         principal: LightToolRunPrincipal,
         history: &[LightToolConversationTurn],
         user_message: &str,
+        image_data_url: Option<&str>,
         activity_tx: mpsc::Sender<String>,
     ) -> Result<String, String>;
 }
@@ -98,7 +99,13 @@ pub async fn dispatch_light_tool_run(
             device_id: run.device_id,
         },
     };
-    let response = responder.respond(principal, &history, &run.user_message, activity_tx);
+    let response = responder.respond(
+        principal,
+        &history,
+        &run.user_message,
+        run.image_data_url.as_deref(),
+        activity_tx,
+    );
     tokio::pin!(response);
     let mut activity_closed = false;
 

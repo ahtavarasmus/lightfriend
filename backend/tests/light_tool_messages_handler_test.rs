@@ -22,7 +22,10 @@ use backend::{
 };
 use diesel::prelude::*;
 use serde_json::{json, Value};
-use std::sync::{Arc, Mutex};
+use std::{
+    io::Cursor,
+    sync::{Arc, Mutex},
+};
 use tokio::sync::mpsc;
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -170,6 +173,7 @@ impl LightToolResponder for ImmediateFakeResponder {
         _principal: LightToolRunPrincipal,
         _history: &[backend::services::light_tool_run_dispatcher::LightToolConversationTurn],
         _user_message: &str,
+        _image_data_url: Option<&str>,
         activity_tx: mpsc::Sender<String>,
     ) -> Result<String, String> {
         activity_tx.send("ANSWERING".to_string()).await.unwrap();
@@ -181,6 +185,25 @@ struct PrincipalCapturingResponder {
     principal: Arc<Mutex<Option<LightToolRunPrincipal>>>,
 }
 
+struct ImageCapturingResponder {
+    image_data_url: Arc<Mutex<Option<String>>>,
+}
+
+#[async_trait]
+impl LightToolResponder for ImageCapturingResponder {
+    async fn respond(
+        &self,
+        _principal: LightToolRunPrincipal,
+        _history: &[backend::services::light_tool_run_dispatcher::LightToolConversationTurn],
+        _user_message: &str,
+        image_data_url: Option<&str>,
+        _activity_tx: mpsc::Sender<String>,
+    ) -> Result<String, String> {
+        *self.image_data_url.lock().unwrap() = image_data_url.map(str::to_string);
+        Ok("I received the photo.".to_string())
+    }
+}
+
 #[async_trait]
 impl LightToolResponder for PrincipalCapturingResponder {
     async fn respond(
@@ -188,11 +211,72 @@ impl LightToolResponder for PrincipalCapturingResponder {
         principal: LightToolRunPrincipal,
         _history: &[backend::services::light_tool_run_dispatcher::LightToolConversationTurn],
         _user_message: &str,
+        _image_data_url: Option<&str>,
         _activity_tx: mpsc::Sender<String>,
     ) -> Result<String, String> {
         *self.principal.lock().unwrap() = Some(principal);
         Ok("Connected reply".to_string())
     }
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn image_message_is_normalized_dispatched_and_removed_after_completion() {
+    std::env::set_var("ENCRYPTION_KEY", TEST_ENCRYPTION_KEY);
+    let captured_image = Arc::new(Mutex::new(None));
+    let mut state = create_test_state();
+    Arc::get_mut(&mut state).unwrap().light_tool_responder =
+        Some(Arc::new(ImageCapturingResponder {
+            image_data_url: captured_image.clone(),
+        }));
+    let now = chrono::Utc::now().timestamp() as i32;
+    let session =
+        LightToolBootstrapService::new(LightToolDevicesRepository::new(state.pg_pool.clone()))
+            .bootstrap(INSTALLATION_ID, None, now)
+            .unwrap();
+    let device = LightToolDevicesRepository::new(state.pg_pool.clone())
+        .find_active_by_token_hash(&hash_device_token(&session.device_token).unwrap())
+        .unwrap()
+        .unwrap();
+    let app = light_tool_router(state.clone());
+    let client_message_id = Uuid::new_v4().to_string();
+    let mut png = Cursor::new(Vec::new());
+    image::DynamicImage::new_rgb8(2, 2)
+        .write_to(&mut png, image::ImageOutputFormat::Png)
+        .unwrap();
+
+    let response = send_image_request(
+        &app,
+        &session.device_token,
+        &client_message_id,
+        png.get_ref(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let run_id = response_json(response).await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let mut completed = false;
+    for _ in 0..100 {
+        let run = LightToolRunsRepository::new(state.pg_pool.clone())
+            .find_by_id_for_device(&run_id, device.id)
+            .unwrap()
+            .unwrap();
+        if run.status == "completed" {
+            assert_eq!(run.image_data_url, None);
+            completed = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(completed, "image run did not complete");
+    assert!(captured_image
+        .lock()
+        .unwrap()
+        .as_deref()
+        .is_some_and(|value| value.starts_with("data:image/jpeg;base64,")));
 }
 
 #[tokio::test]
@@ -508,6 +592,10 @@ fn light_tool_router(state: std::sync::Arc<backend::AppState>) -> Router {
             post(light_tool_handlers::send_message).get(light_tool_handlers::get_message_history),
         )
         .route(
+            "/api/light-tool/messages/image",
+            post(light_tool_handlers::send_image_message),
+        )
+        .route(
             "/api/light-tool/runs/{run_id}",
             get(light_tool_handlers::get_run_status),
         )
@@ -546,6 +634,50 @@ async fn send_request(
                     })
                     .to_string(),
                 ))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+async fn send_image_request(
+    app: &Router,
+    device_token: &str,
+    client_message_id: &str,
+    image: &[u8],
+) -> axum::response::Response {
+    let boundary = "lightfriend-test-boundary";
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"client_message_id\"\r\n\r\n{client_message_id}\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(
+        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"text\"\r\n\r\nPhoto\r\n")
+            .as_bytes(),
+    );
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"photo.png\"\r\nContent-Type: image/png\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(image);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/light-tool/messages/image")
+                .header("authorization", format!("Bearer {device_token}"))
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
                 .unwrap(),
         )
         .await

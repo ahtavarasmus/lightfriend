@@ -225,7 +225,7 @@ async fn bootstrap_admin_if_needed(
         credits: 1000.0,
         credits_left: 1000.0,
         charge_when_under: false,
-        sub_tier: Some("2".to_string()), // tier 2 = sentinel (full access)
+        sub_tier: Some("tier 2".to_string()), // hosted subscription (full access)
     };
 
     match user_core.create_user(new_user) {
@@ -748,6 +748,11 @@ async fn main() {
             post(handlers::light_tool_handlers::send_message)
                 .get(handlers::light_tool_handlers::get_message_history)
                 .layer(DefaultBodyLimit::max(16 * 1024)),
+        )
+        .route(
+            "/api/light-tool/messages/image",
+            post(handlers::light_tool_handlers::send_image_message)
+                .layer(DefaultBodyLimit::max(6 * 1024 * 1024)),
         )
         .route(
             "/api/light-tool/runs/{run_id}",
