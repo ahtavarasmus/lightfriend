@@ -16,6 +16,7 @@ pub struct LightToolRunRecord {
     pub account_user_id: Option<i32>,
     pub client_message_id: String,
     pub user_message: String,
+    pub image_data_url: Option<String>,
     pub activity_text: Option<String>,
     pub assistant_message: Option<String>,
     pub error_message: Option<String>,
@@ -75,6 +76,25 @@ impl LightToolRunsRepository {
         now: i32,
         message_limit: i32,
     ) -> Result<AnonymousTrialRunCreation, LightToolRunsRepositoryError> {
+        self.create_anonymous_trial_run_with_image(
+            device_id,
+            client_message_id,
+            user_message,
+            None,
+            now,
+            message_limit,
+        )
+    }
+
+    pub fn create_anonymous_trial_run_with_image(
+        &self,
+        device_id: i32,
+        client_message_id: &str,
+        user_message: &str,
+        image_data_url: Option<&str>,
+        now: i32,
+        message_limit: i32,
+    ) -> Result<AnonymousTrialRunCreation, LightToolRunsRepositoryError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         conn.transaction::<AnonymousTrialRunCreation, LightToolRunsRepositoryError, _>(|conn| {
@@ -105,8 +125,12 @@ impl LightToolRunsRepository {
                 if existing.account_user_id.is_some() {
                     return Ok(AnonymousTrialRunCreation::IdempotencyConflict);
                 }
+                let existing = decrypt_run(existing)?;
+                if existing.image_data_url.as_deref() != image_data_url {
+                    return Ok(AnonymousTrialRunCreation::IdempotencyConflict);
+                }
                 return Ok(AnonymousTrialRunCreation::Existing {
-                    run: decrypt_run(existing)?,
+                    run: existing,
                     messages_remaining: remaining_messages(&device, message_limit),
                 });
             }
@@ -137,6 +161,7 @@ impl LightToolRunsRepository {
                 account_user_id: None,
                 client_message_id: client_message_id.to_string(),
                 encrypted_user_message: encrypt(user_message)?,
+                encrypted_image_data_url: image_data_url.map(encrypt).transpose()?,
                 created_at: now,
                 updated_at: now,
             };
@@ -160,6 +185,25 @@ impl LightToolRunsRepository {
         account_user_id: i32,
         client_message_id: &str,
         user_message: &str,
+        now: i32,
+    ) -> Result<AccountRunCreation, LightToolRunsRepositoryError> {
+        self.create_account_run_with_image(
+            device_id,
+            account_user_id,
+            client_message_id,
+            user_message,
+            None,
+            now,
+        )
+    }
+
+    pub fn create_account_run_with_image(
+        &self,
+        device_id: i32,
+        account_user_id: i32,
+        client_message_id: &str,
+        user_message: &str,
+        image_data_url: Option<&str>,
         now: i32,
     ) -> Result<AccountRunCreation, LightToolRunsRepositoryError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -191,7 +235,11 @@ impl LightToolRunsRepository {
                 if existing.account_user_id != Some(account_user_id) {
                     return Ok(AccountRunCreation::IdempotencyConflict);
                 }
-                return Ok(AccountRunCreation::Existing(decrypt_run(existing)?));
+                let existing = decrypt_run(existing)?;
+                if existing.image_data_url.as_deref() != image_data_url {
+                    return Ok(AccountRunCreation::IdempotencyConflict);
+                }
+                return Ok(AccountRunCreation::Existing(existing));
             }
 
             let new_run = NewLightToolRun {
@@ -200,6 +248,7 @@ impl LightToolRunsRepository {
                 account_user_id: Some(account_user_id),
                 client_message_id: client_message_id.to_string(),
                 encrypted_user_message: encrypt(user_message)?,
+                encrypted_image_data_url: image_data_url.map(encrypt).transpose()?,
                 created_at: now,
                 updated_at: now,
             };
@@ -351,6 +400,7 @@ impl LightToolRunsRepository {
         .set((
             light_tool_runs::status.eq("completed"),
             light_tool_runs::encrypted_activity_text.eq::<Option<String>>(None),
+            light_tool_runs::encrypted_image_data_url.eq::<Option<String>>(None),
             light_tool_runs::encrypted_assistant_message.eq(Some(encrypted_assistant_message)),
             light_tool_runs::encrypted_error_message.eq::<Option<String>>(None),
             light_tool_runs::updated_at.eq(now),
@@ -377,6 +427,7 @@ impl LightToolRunsRepository {
         .set((
             light_tool_runs::status.eq("failed"),
             light_tool_runs::encrypted_activity_text.eq::<Option<String>>(None),
+            light_tool_runs::encrypted_image_data_url.eq::<Option<String>>(None),
             light_tool_runs::encrypted_assistant_message.eq::<Option<String>>(None),
             light_tool_runs::encrypted_error_message.eq(Some(encrypted_error_message)),
             light_tool_runs::updated_at.eq(now),
@@ -405,6 +456,7 @@ impl LightToolRunsRepository {
         .set((
             light_tool_runs::status.eq("failed"),
             light_tool_runs::encrypted_activity_text.eq::<Option<String>>(None),
+            light_tool_runs::encrypted_image_data_url.eq::<Option<String>>(None),
             light_tool_runs::encrypted_assistant_message.eq::<Option<String>>(None),
             light_tool_runs::encrypted_error_message.eq(Some(encrypted_error_message)),
             light_tool_runs::updated_at.eq(now),
@@ -439,6 +491,7 @@ fn decrypt_run(run: LightToolRun) -> Result<LightToolRunRecord, EncryptionError>
         account_user_id: run.account_user_id,
         client_message_id: run.client_message_id,
         user_message: decrypt(&run.encrypted_user_message)?,
+        image_data_url: decrypt_optional(run.encrypted_image_data_url)?,
         activity_text: decrypt_optional(run.encrypted_activity_text)?,
         assistant_message: decrypt_optional(run.encrypted_assistant_message)?,
         error_message: decrypt_optional(run.encrypted_error_message)?,

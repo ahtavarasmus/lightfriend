@@ -678,6 +678,7 @@ diesel::table! {
         account_user_id -> Nullable<Int4>,
         client_message_id -> Text,
         encrypted_user_message -> Text,
+        encrypted_image_data_url -> Nullable<Text>,
         encrypted_activity_text -> Nullable<Text>,
         encrypted_assistant_message -> Nullable<Text>,
         encrypted_error_message -> Nullable<Text>,

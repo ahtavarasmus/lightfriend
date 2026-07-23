@@ -155,6 +155,7 @@ impl LightToolResponder for LightToolAgentResponder {
         principal: LightToolRunPrincipal,
         history: &[LightToolConversationTurn],
         user_message: &str,
+        image_data_url: Option<&str>,
         activity_tx: mpsc::Sender<String>,
     ) -> Result<String, String> {
         let _ = activity_tx.send(CONTACTING_ACTIVITY.to_string()).await;
@@ -167,6 +168,7 @@ impl LightToolResponder for LightToolAgentResponder {
                     &self.ai_config,
                     anonymous_light_tool_tools(),
                     request.messages,
+                    image_data_url,
                     activity_tx,
                 )
                 .await?;
@@ -195,7 +197,9 @@ impl LightToolResponder for LightToolAgentResponder {
 
                 let input = build_account_agent_input(&state, &user, user_message).await?;
                 persist_account_turn(&state, user.id, "user", user_message, input.current_time);
-                let reply = execute_account_agent(&state, &user, input, activity_tx).await?;
+                let reply =
+                    execute_account_agent(&state, &user, input, image_data_url, activity_tx)
+                        .await?;
                 if crate::services::metronome_billing::metronome_enabled() {
                     let billed_cost = crate::services::usage_pricing::billable_customer_cost_usd(
                         reply.provider_cost_usd,
@@ -246,6 +250,7 @@ async fn execute_anonymous_agent(
     ai_config: &AiConfig,
     tools: Vec<chat_completion::Tool>,
     completion_messages: Vec<chat_completion::ChatCompletionMessage>,
+    image_data_url: Option<&str>,
     activity_tx: mpsc::Sender<String>,
 ) -> Result<PreparedAgentReply, String> {
     let (reasoning_tx, reasoning_rx) = mpsc::channel::<String>(8);
@@ -261,7 +266,7 @@ async fn execute_anonymous_agent(
             },
             model_purpose: ModelPurpose::Default,
             user_given_info: "",
-            image_url: None,
+            image_url: image_data_url,
             tools: &tools,
             completion_messages,
             skip_sms: true,
@@ -287,6 +292,7 @@ async fn execute_account_agent(
     state: &Arc<AppState>,
     user: &User,
     input: AccountLightToolAgentInput,
+    image_data_url: Option<&str>,
     activity_tx: mpsc::Sender<String>,
 ) -> Result<PreparedAgentReply, String> {
     let (reasoning_tx, reasoning_rx) = mpsc::channel::<String>(8);
@@ -299,7 +305,7 @@ async fn execute_account_agent(
             principal: AgentPrincipal::Account { state, user },
             model_purpose: input.model_purpose,
             user_given_info: &input.user_given_info,
-            image_url: None,
+            image_url: image_data_url,
             tools: &input.tools,
             completion_messages: input.completion_messages,
             skip_sms: true,

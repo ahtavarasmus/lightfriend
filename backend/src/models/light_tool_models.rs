@@ -42,6 +42,7 @@ pub struct LightToolRun {
     pub account_user_id: Option<i32>,
     pub client_message_id: String,
     pub encrypted_user_message: String,
+    pub encrypted_image_data_url: Option<String>,
     pub encrypted_activity_text: Option<String>,
     pub encrypted_assistant_message: Option<String>,
     pub encrypted_error_message: Option<String>,
@@ -60,6 +61,7 @@ pub struct NewLightToolRun {
     pub account_user_id: Option<i32>,
     pub client_message_id: String,
     pub encrypted_user_message: String,
+    pub encrypted_image_data_url: Option<String>,
     pub created_at: i32,
     pub updated_at: i32,
 }

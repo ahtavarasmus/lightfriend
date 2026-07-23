@@ -27,19 +27,23 @@ use crate::{
     AppState, UserCoreOps,
 };
 use axum::{
-    extract::{Path, State},
+    extract::{Multipart, Path, State},
     http::{HeaderMap, StatusCode},
     Json,
 };
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chrono::SecondsFormat;
+use image::{codecs::jpeg::JpegEncoder, io::Limits, io::Reader as ImageReader};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::net::IpAddr;
-use std::sync::Arc;
+use std::{io::Cursor, net::IpAddr, sync::Arc};
 use url::{Host, Url};
 use uuid::Uuid;
 
 const MAX_MESSAGE_TEXT_BYTES: usize = 8_000;
+const MAX_IMAGE_UPLOAD_BYTES: usize = 5 * 1024 * 1024;
+const MAX_IMAGE_DIMENSION: u32 = 8_192;
+const MAX_IMAGE_DECODE_BYTES: u64 = 96 * 1024 * 1024;
 const MESSAGE_HISTORY_RUN_LIMIT: i64 = 50;
 const MAX_PUSH_ENDPOINT_BYTES: usize = 2_048;
 
@@ -406,10 +410,75 @@ pub async fn send_message(
     auth: LightToolDeviceAuth,
     Json(request): Json<SendMessageRequest>,
 ) -> Result<(StatusCode, Json<SendMessageResponse>), ApiError> {
-    let client_message_id = Uuid::parse_str(&request.client_message_id)
+    enqueue_message(state, auth, request.client_message_id, request.text, None)
+}
+
+pub async fn send_image_message(
+    State(state): State<Arc<AppState>>,
+    auth: LightToolDeviceAuth,
+    mut multipart: Multipart,
+) -> Result<(StatusCode, Json<SendMessageResponse>), ApiError> {
+    let mut client_message_id = None;
+    let mut text = None;
+    let mut image_data_url = None;
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|_| bad_request("invalid multipart request"))?
+    {
+        match field.name() {
+            Some("client_message_id") if client_message_id.is_none() => {
+                client_message_id = Some(
+                    field
+                        .text()
+                        .await
+                        .map_err(|_| bad_request("invalid client_message_id"))?,
+                );
+            }
+            Some("text") if text.is_none() => {
+                text = Some(
+                    field
+                        .text()
+                        .await
+                        .map_err(|_| bad_request("invalid text"))?,
+                );
+            }
+            Some("image") if image_data_url.is_none() => {
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|_| bad_request("invalid image"))?;
+                if bytes.is_empty() || bytes.len() > MAX_IMAGE_UPLOAD_BYTES {
+                    return Err(bad_request("image must be between 1 byte and 5 MB"));
+                }
+                image_data_url = Some(normalize_image_data_url(&bytes)?);
+            }
+            Some("client_message_id" | "text" | "image") => {
+                return Err(bad_request("multipart fields must not be repeated"));
+            }
+            _ => {}
+        }
+    }
+
+    let client_message_id =
+        client_message_id.ok_or_else(|| bad_request("client_message_id is required"))?;
+    let text = text.unwrap_or_else(|| "Photo".to_string());
+    let image_data_url = image_data_url.ok_or_else(|| bad_request("image is required"))?;
+    enqueue_message(state, auth, client_message_id, text, Some(image_data_url))
+}
+
+fn enqueue_message(
+    state: Arc<AppState>,
+    auth: LightToolDeviceAuth,
+    client_message_id: String,
+    text: String,
+    image_data_url: Option<String>,
+) -> Result<(StatusCode, Json<SendMessageResponse>), ApiError> {
+    let client_message_id = Uuid::parse_str(&client_message_id)
         .map_err(|_| bad_request("client_message_id must be a UUID"))?
         .to_string();
-    let text = request.text.trim();
+    let text = text.trim();
     if text.is_empty() {
         return Err(bad_request("text cannot be blank"));
     }
@@ -421,7 +490,14 @@ pub async fn send_message(
     let now = chrono::Utc::now().timestamp() as i32;
     let (run, should_dispatch): (LightToolRunRecord, bool) = match auth.device.user_id {
         Some(user_id) => match repository
-            .create_account_run(auth.device.id, user_id, &client_message_id, text, now)
+            .create_account_run_with_image(
+                auth.device.id,
+                user_id,
+                &client_message_id,
+                text,
+                image_data_url.as_deref(),
+                now,
+            )
             .map_err(map_run_repository_error)?
         {
             AccountRunCreation::Created(run) => (run, true),
@@ -434,10 +510,11 @@ pub async fn send_message(
             AccountRunCreation::IdempotencyConflict => return Err(idempotency_conflict()),
         },
         None => match repository
-            .create_anonymous_trial_run(
+            .create_anonymous_trial_run_with_image(
                 auth.device.id,
                 &client_message_id,
                 text,
+                image_data_url.as_deref(),
                 now,
                 TRIAL_MESSAGE_LIMIT,
             )
@@ -497,6 +574,32 @@ pub async fn send_message(
         StatusCode::ACCEPTED,
         Json(SendMessageResponse { run_id: run.id }),
     ))
+}
+
+fn normalize_image_data_url(bytes: &[u8]) -> Result<String, ApiError> {
+    let mut reader = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|_| bad_request("image format could not be read"))?;
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(MAX_IMAGE_DIMENSION);
+    limits.max_image_height = Some(MAX_IMAGE_DIMENSION);
+    limits.max_alloc = Some(MAX_IMAGE_DECODE_BYTES);
+    reader.limits(limits);
+    let image = reader
+        .decode()
+        .map_err(|_| bad_request("image must be a valid JPEG, PNG, or WebP file"))?;
+
+    let mut jpeg = Vec::new();
+    JpegEncoder::new_with_quality(&mut jpeg, 82)
+        .encode_image(&image)
+        .map_err(|error| {
+            tracing::error!("Light Tool image normalization failed: {error}");
+            internal_error("image processing failed")
+        })?;
+    if jpeg.len() > MAX_IMAGE_UPLOAD_BYTES {
+        return Err(bad_request("normalized image exceeds 5 MB"));
+    }
+    Ok(format!("data:image/jpeg;base64,{}", STANDARD.encode(jpeg)))
 }
 
 pub async fn get_message_history(
@@ -729,9 +832,7 @@ fn conflict(message: &str) -> ApiError {
 fn idempotency_conflict() -> ApiError {
     (
         StatusCode::CONFLICT,
-        Json(
-            json!({ "error": "client_message_id was already used under a different account state" }),
-        ),
+        Json(json!({ "error": "client_message_id was already used with different content" })),
     )
 }
 

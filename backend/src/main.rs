@@ -750,6 +750,11 @@ async fn main() {
                 .layer(DefaultBodyLimit::max(16 * 1024)),
         )
         .route(
+            "/api/light-tool/messages/image",
+            post(handlers::light_tool_handlers::send_image_message)
+                .layer(DefaultBodyLimit::max(6 * 1024 * 1024)),
+        )
+        .route(
             "/api/light-tool/runs/{run_id}",
             get(handlers::light_tool_handlers::get_run_status),
         )
