@@ -46,6 +46,7 @@ struct EventPurgeConfig {
     backfill_enabled: bool,
     backfill_audit_enabled: bool,
     backfill_execute_verified_enabled: bool,
+    backfill_execute_blocked_enabled: bool,
     backfill_batch_size: usize,
     backfill_scan_secs: u64,
     backfill_min_age_secs: u64,
@@ -59,6 +60,7 @@ struct EventPurgeConfig {
 #[derive(Debug, Default)]
 struct PurgeCycleOutcome {
     backfilled: usize,
+    forced_backfilled: usize,
     audited: usize,
 }
 
@@ -317,6 +319,7 @@ pub async fn start_tuwunel_event_purge_worker(state: Arc<AppState>) {
                 backfill_enabled = config.backfill_enabled,
                 backfill_audit_enabled = config.backfill_audit_enabled,
                 backfill_execute_verified_enabled = config.backfill_execute_verified_enabled,
+                backfill_execute_blocked_enabled = config.backfill_execute_blocked_enabled,
                 backfill_batch_size = config.backfill_batch_size,
                 backfill_scan_secs = config.backfill_scan_secs,
                 backfill_min_age_secs = config.backfill_min_age_secs,
@@ -329,8 +332,9 @@ pub async fn start_tuwunel_event_purge_worker(state: Arc<AppState>) {
             );
         }
         let now = now_timestamp();
-        let destructive_backfill_enabled =
-            config.backfill_enabled && config.backfill_execute_verified_enabled;
+        let destructive_backfill_enabled = config.backfill_enabled
+            && (config.backfill_execute_verified_enabled
+                || config.backfill_execute_blocked_enabled);
         let run_backfill = (config.backfill_audit_enabled || destructive_backfill_enabled)
             && now >= next_backfill_scan_at;
         match run_purge_cycle(&state, &config, run_backfill).await {
@@ -349,6 +353,7 @@ pub async fn start_tuwunel_event_purge_worker(state: Arc<AppState>) {
                 tracing::info!(
                     audited = outcome.audited,
                     enqueued = outcome.backfilled,
+                    forced_enqueued = outcome.forced_backfilled,
                     next_backfill_scan_at,
                     destructive_backfill_enabled,
                     "Tuwunel historical audit cycle scheduled"
@@ -419,10 +424,10 @@ async fn run_purge_cycle(
         );
     }
 
-    let (audited, backfilled) = if run_backfill {
+    let (audited, backfilled, forced_backfilled) = if run_backfill {
         run_historical_backfill_audit(state, config, now).await?
     } else {
-        (0, 0)
+        (0, 0, 0)
     };
 
     log_stale_blockers(state, stale_ingest_cutoff, now)?;
@@ -446,6 +451,7 @@ async fn run_purge_cycle(
         }
         return Ok(PurgeCycleOutcome {
             backfilled,
+            forced_backfilled,
             audited,
         });
     }
@@ -453,6 +459,7 @@ async fn run_purge_cycle(
     if due.is_empty() && submitted.is_empty() {
         return Ok(PurgeCycleOutcome {
             backfilled,
+            forced_backfilled,
             audited,
         });
     }
@@ -472,6 +479,7 @@ async fn run_purge_cycle(
 
     Ok(PurgeCycleOutcome {
         backfilled,
+        forced_backfilled,
         audited,
     })
 }
@@ -480,13 +488,16 @@ async fn run_historical_backfill_audit(
     state: &Arc<AppState>,
     config: &EventPurgeConfig,
     now: i32,
-) -> Result<(usize, usize)> {
+) -> Result<(usize, usize, usize)> {
     let boundary_cutoff =
         now.saturating_sub(config.backfill_min_age_secs.min(i32::MAX as u64) as i32);
-    let audit_recheck_cutoff =
-        now.saturating_sub(config.backfill_audit_recheck_secs.min(i32::MAX as u64) as i32);
-    let destructive_backfill_enabled =
-        config.backfill_enabled && config.backfill_execute_verified_enabled;
+    let destructive_backfill_enabled = config.backfill_enabled
+        && (config.backfill_execute_verified_enabled || config.backfill_execute_blocked_enabled);
+    let audit_recheck_cutoff = if destructive_backfill_enabled {
+        now
+    } else {
+        now.saturating_sub(config.backfill_audit_recheck_secs.min(i32::MAX as u64) as i32)
+    };
     let batch_size = if destructive_backfill_enabled {
         config.backfill_batch_size
     } else {
@@ -498,6 +509,7 @@ async fn run_historical_backfill_audit(
 
     let mut audited = 0;
     let mut enqueued = 0;
+    let mut forced_enqueued = 0;
     for candidate in candidates {
         let audit = match audit_historical_backfill_candidate(state, config, &candidate).await {
             Ok(audit) => audit,
@@ -511,27 +523,64 @@ async fn run_historical_backfill_audit(
             .record_historical_backfill_audit(&candidate, audit.verified, &audit.summary)?;
         audited += 1;
 
-        if audit.verified && destructive_backfill_enabled {
-            state
-                .tuwunel_cleanup_repository
-                .enqueue_verified_historical_backfill(&candidate, &audit.summary)?;
-            enqueued += 1;
+        let execution_kind = historical_backfill_execution_kind(
+            audit.verified,
+            config.backfill_enabled,
+            config.backfill_execute_verified_enabled,
+            config.backfill_execute_blocked_enabled,
+        );
+        match execution_kind {
+            Some("historical_backfill_verified") => {
+                state
+                    .tuwunel_cleanup_repository
+                    .enqueue_verified_historical_backfill(&candidate, &audit.summary)?;
+                enqueued += 1;
+            }
+            Some("historical_backfill_forced_unverified") => {
+                state
+                    .tuwunel_cleanup_repository
+                    .enqueue_forced_historical_backfill(&candidate, &audit.summary)?;
+                enqueued += 1;
+                forced_enqueued += 1;
+            }
+            Some(_) | None => {}
         }
 
-        tracing::info!(
+        let forced = execution_kind == Some("historical_backfill_forced_unverified");
+        tracing::warn!(
             user_id = candidate.user_id,
             service = candidate.service,
             room_id = candidate.room_id,
             boundary_event_id = candidate.event_id,
             boundary_created_at = candidate.created_at,
             verified = audit.verified,
-            enqueued = audit.verified && destructive_backfill_enabled,
+            enqueued = execution_kind.is_some(),
+            forced,
+            execution_kind = execution_kind.unwrap_or("audit_only"),
             audit = audit.summary,
             "Tuwunel historical room audit completed"
         );
     }
 
-    Ok((audited, enqueued))
+    Ok((audited, enqueued, forced_enqueued))
+}
+
+pub fn historical_backfill_execution_kind(
+    verified: bool,
+    backfill_enabled: bool,
+    execute_verified_enabled: bool,
+    execute_blocked_enabled: bool,
+) -> Option<&'static str> {
+    if !backfill_enabled {
+        return None;
+    }
+    if verified && execute_verified_enabled {
+        return Some("historical_backfill_verified");
+    }
+    if !verified && execute_blocked_enabled {
+        return Some("historical_backfill_forced_unverified");
+    }
+    None
 }
 
 async fn audit_historical_backfill_candidate(
@@ -1031,11 +1080,15 @@ impl EventPurgeConfig {
                 1,
             )
             .min(100) as usize,
-            backfill_enabled: env_flag("TUWUNEL_EVENT_PURGE_BACKFILL_ENABLED", false),
+            backfill_enabled: env_flag("TUWUNEL_EVENT_PURGE_BACKFILL_ENABLED", true),
             backfill_audit_enabled: env_flag("TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_ENABLED", true),
             backfill_execute_verified_enabled: env_flag(
                 "TUWUNEL_EVENT_PURGE_BACKFILL_EXECUTE_VERIFIED_ENABLED",
-                false,
+                true,
+            ),
+            backfill_execute_blocked_enabled: env_flag(
+                "TUWUNEL_EVENT_PURGE_BACKFILL_EXECUTE_BLOCKED_ENABLED",
+                true,
             ),
             backfill_batch_size: env_u64(
                 "TUWUNEL_EVENT_PURGE_BACKFILL_BATCH_SIZE",
