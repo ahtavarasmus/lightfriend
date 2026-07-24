@@ -774,10 +774,62 @@ async fn submit_purge(
     }
 
     let url = build_purge_history_url(&config.homeserver_url, &candidate.room_id);
+    let forced_historical =
+        candidate.last_command_kind.as_deref() == Some("historical_backfill_forced_unverified");
+    let (request, boundary_mode, boundary_timestamp_ms) = if forced_historical {
+        let created_at = match state
+            .tuwunel_cleanup_repository
+            .ontology_message_created_at(candidate.ontology_message_id)
+        {
+            Ok(Some(created_at)) if created_at > 0 => created_at,
+            Ok(Some(created_at)) => {
+                record_purge_failure(
+                    state,
+                    config,
+                    candidate,
+                    attempt,
+                    &format!(
+                        "forced historical purge has invalid ontology boundary timestamp: {created_at}"
+                    ),
+                );
+                return;
+            }
+            Ok(None) => {
+                record_purge_failure(
+                    state,
+                    config,
+                    candidate,
+                    attempt,
+                    "forced historical purge boundary ontology message is missing",
+                );
+                return;
+            }
+            Err(error) => {
+                record_purge_failure(
+                    state,
+                    config,
+                    candidate,
+                    attempt,
+                    &format!("failed to load forced historical purge timestamp: {error}"),
+                );
+                return;
+            }
+        };
+        let timestamp_ms = u64::try_from(created_at)
+            .unwrap_or_default()
+            .saturating_mul(1_000);
+        (
+            purge_history_timestamp_request(timestamp_ms),
+            "ontology_timestamp",
+            Some(timestamp_ms),
+        )
+    } else {
+        (purge_history_request(&candidate.event_id), "event_id", None)
+    };
     let response = client
         .post(url)
         .bearer_auth(access_token)
-        .json(&purge_history_request(&candidate.event_id))
+        .json(&request)
         .send()
         .await;
 
@@ -802,6 +854,9 @@ async fn submit_purge(
                 purge_id = %submitted.purge_id,
                 attempt,
                 delete_local_events = true,
+                forced_historical,
+                boundary_mode,
+                boundary_timestamp_ms = ?boundary_timestamp_ms,
                 "Tuwunel room-history purge submitted"
             );
         }
@@ -1029,6 +1084,13 @@ pub fn build_purge_status_url(homeserver_url: &str, purge_id: &str) -> String {
 pub fn purge_history_request(event_id: &str) -> Value {
     json!({
         "purge_up_to_event_id": event_id,
+        "delete_local_events": true
+    })
+}
+
+pub fn purge_history_timestamp_request(timestamp_ms: u64) -> Value {
+    json!({
+        "purge_up_to_ts": timestamp_ms,
         "delete_local_events": true
     })
 }

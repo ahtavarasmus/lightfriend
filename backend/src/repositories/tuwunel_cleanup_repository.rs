@@ -898,6 +898,15 @@ impl TuwunelCleanupRepository {
             .collect())
     }
 
+    pub fn ontology_message_created_at(&self, ontology_message_id: i64) -> Result<Option<i32>> {
+        let mut conn = self.connection()?;
+        Ok(ont_messages::table
+            .find(ontology_message_id)
+            .select(ont_messages::created_at)
+            .first::<i32>(&mut conn)
+            .optional()?)
+    }
+
     pub fn enqueue_verified_historical_backfill(
         &self,
         candidate: &HistoricalBackfillCandidate,
