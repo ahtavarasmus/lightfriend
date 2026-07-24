@@ -48,6 +48,16 @@ pub fn cost_to_microusd(cost_usd: f64) -> Result<i64> {
     Ok((cost_usd * 1_000_000.0).round() as i64)
 }
 
+fn hour_boundary(now: chrono::DateTime<chrono::Utc>) -> chrono::DateTime<chrono::Utc> {
+    let hour_timestamp = now.timestamp().div_euclid(3600) * 3600;
+    chrono::DateTime::<chrono::Utc>::from_timestamp(hour_timestamp, 0)
+        .expect("a valid DateTime has a valid hour boundary")
+}
+
+pub fn contract_starting_at(now: chrono::DateTime<chrono::Utc>) -> String {
+    hour_boundary(now).to_rfc3339()
+}
+
 /// Returns the one-time Metronome overage state to persist during cutover.
 ///
 /// Existing users who explicitly enabled legacy auto top-up keep that opt-in
@@ -308,7 +318,7 @@ impl MetronomeClient {
     }
 
     async fn create_contract(&self, user_id: i32, customer_id: &str) -> Result<String> {
-        let starting_at = chrono::Utc::now().to_rfc3339();
+        let starting_at = contract_starting_at(chrono::Utc::now());
         let body = json!({
             "customer_id": customer_id,
             "starting_at": starting_at,
@@ -334,18 +344,16 @@ impl MetronomeClient {
         }
     }
 
-    pub async fn set_overage(&self, account: &BillingAccount, enabled: bool) -> Result<()> {
-        let customer_id = account
-            .metronome_customer_id
-            .as_deref()
-            .ok_or_else(|| anyhow!("Billing account is not provisioned"))?;
-        let contract_id = account
-            .metronome_contract_id
-            .as_deref()
-            .ok_or_else(|| anyhow!("Billing contract is not provisioned"))?;
+    async fn set_contract_overage(
+        &self,
+        customer_id: &str,
+        contract_id: &str,
+        user_id: i32,
+        enabled: bool,
+    ) -> Result<()> {
         let operation_id = format!(
             "lightfriend-overage-{}-{}-{}",
-            account.user_id,
+            user_id,
             enabled,
             chrono::Utc::now().timestamp_millis()
         );
@@ -363,6 +371,19 @@ impl MetronomeClient {
         Ok(())
     }
 
+    pub async fn set_overage(&self, account: &BillingAccount, enabled: bool) -> Result<()> {
+        let customer_id = account
+            .metronome_customer_id
+            .as_deref()
+            .ok_or_else(|| anyhow!("Billing account is not provisioned"))?;
+        let contract_id = account
+            .metronome_contract_id
+            .as_deref()
+            .ok_or_else(|| anyhow!("Billing contract is not provisioned"))?;
+        self.set_contract_overage(customer_id, contract_id, account.user_id, enabled)
+            .await
+    }
+
     async fn migrate_legacy_credit(
         &self,
         user: &User,
@@ -378,32 +399,37 @@ impl MetronomeClient {
         let Some(credit_type_id) = self.config.credit_type_id.as_deref() else {
             return Ok(false);
         };
-        let starting_at = chrono::Utc::now();
+        let starting_at = hour_boundary(chrono::Utc::now());
         let ending_before = starting_at + chrono::Duration::days(3650);
         let amount_cents = (user.credits as f64 * 100.0).round() as i64;
-        self.post(
-            "/v1/contracts/customerCredits/create",
-            &json!({
-                "customer_id": customer_id,
-                "name": "Migrated Lightfriend credit balance",
-                "description": "One-time balance imported during the Metronome cutover",
-                "priority": 1,
-                "product_id": product_id,
-                "applicable_contract_ids": [contract_id],
-                "uniqueness_key": format!("lightfriend-legacy-credit-{}", user.id),
-                "access_schedule": {
-                    "credit_type_id": credit_type_id,
-                    "schedule_items": [{
-                        "amount": amount_cents,
-                        "starting_at": starting_at.to_rfc3339(),
-                        "ending_before": ending_before.to_rfc3339()
-                    }]
-                }
-            }),
-            &format!("lightfriend-legacy-credit-{}", user.id),
-        )
-        .await?;
-        Ok(true)
+        let result = self
+            .post(
+                "/v1/contracts/customerCredits/create",
+                &json!({
+                    "customer_id": customer_id,
+                    "name": "Migrated Lightfriend credit balance",
+                    "description": "One-time balance imported during the Metronome cutover",
+                    "priority": 1,
+                    "product_id": product_id,
+                    "applicable_contract_ids": [contract_id],
+                    "uniqueness_key": format!("lightfriend-legacy-credit-{}", user.id),
+                    "access_schedule": {
+                        "credit_type_id": credit_type_id,
+                        "schedule_items": [{
+                            "amount": amount_cents,
+                            "starting_at": starting_at.to_rfc3339(),
+                            "ending_before": ending_before.to_rfc3339()
+                        }]
+                    }
+                }),
+                &format!("lightfriend-legacy-credit-{}", user.id),
+            )
+            .await;
+        match result {
+            Ok(_) => Ok(true),
+            Err(error) if error.to_string().contains("409") => Ok(true),
+            Err(error) => Err(error),
+        }
     }
 
     pub async fn ingest(&self, events: &[BillingUsageEvent]) -> Result<()> {
@@ -596,6 +622,12 @@ pub async fn provision_user(state: &Arc<AppState>, user: &User) -> Result<Billin
     let payment_ready = ensure_stripe_payment_method(user).await.unwrap_or(false);
     let customer_id = client.create_customer(user, stripe_customer_id).await?;
     let contract_id = client.create_contract(user.id, &customer_id).await?;
+    // Packages can carry an enabled spend threshold by default. Disable it
+    // before exposing the contract to usage ingestion, then apply any migrated
+    // legacy opt-in after payment readiness is known.
+    client
+        .set_contract_overage(&customer_id, &contract_id, user.id, false)
+        .await?;
     repository.mark_provisioned(user.id, &customer_id, &contract_id, payment_ready)?;
     enqueue_cutover_usage(&repository, user)?;
 

@@ -1,5 +1,6 @@
 use backend::services::metronome_billing::{
-    cost_to_microusd, legacy_overage_migration_target, verify_webhook_signature,
+    contract_starting_at, cost_to_microusd, legacy_overage_migration_target,
+    verify_webhook_signature,
 };
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -45,6 +46,15 @@ fn converts_fractional_dollar_costs_without_float_ledger_values() {
     assert_eq!(cost_to_microusd(25.0).unwrap(), 25_000_000);
     assert!(cost_to_microusd(0.0).is_err());
     assert!(cost_to_microusd(f64::NAN).is_err());
+}
+
+#[test]
+fn rounds_contract_start_to_the_current_hour() {
+    let now = chrono::DateTime::parse_from_rfc3339("2026-07-24T15:47:31.987654321Z")
+        .unwrap()
+        .to_utc();
+
+    assert_eq!(contract_starting_at(now), "2026-07-24T15:00:00+00:00");
 }
 
 #[test]
