@@ -4,7 +4,7 @@ use backend::utils::disconnected_bridge_cleanup::{
 use backend::utils::tuwunel_event_cleanup::{
     build_purge_history_url, build_purge_status_url, historical_backfill_execution_kind,
     historical_event_requires_proof, is_matrix_event_id, is_tuwunel_admin_redaction_reason,
-    next_backfill_scan_timestamp, purge_history_request,
+    next_backfill_scan_timestamp, purge_history_request, purge_history_timestamp_request,
 };
 use serde_json::json;
 
@@ -76,6 +76,17 @@ fn purge_request_deletes_local_events_before_ingested_boundary() {
         purge_history_request("$abc123:localhost"),
         json!({
             "purge_up_to_event_id": "$abc123:localhost",
+            "delete_local_events": true
+        })
+    );
+}
+
+#[test]
+fn forced_historical_purge_uses_timestamp_when_event_boundary_is_missing() {
+    assert_eq!(
+        purge_history_timestamp_request(1_784_889_600_000),
+        json!({
+            "purge_up_to_ts": 1_784_889_600_000_u64,
             "delete_local_events": true
         })
     );
