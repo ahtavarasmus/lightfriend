@@ -737,8 +737,8 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                             overage_status
                                                 .as_ref()
                                                 .and_then(|status| status.available_usage_usd)
-                                                .map(|amount| format!("${:.2} usage available", amount))
-                                                .unwrap_or_else(|| "$25 included usage each month".to_string())
+                                                .map(|amount| format!("Included usage remaining: ${:.2}", amount))
+                                                .unwrap_or_else(|| "$25 monthly included-usage allowance".to_string())
                                         }
                                     </div>
                                     <div style="color: #888; font-size: 0.85rem;">
@@ -891,7 +891,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                         </div>
                         <p class="overage-copy">
                             {format!(
-                                "After your included $25 is used, continue on usage-based billing. Your saved payment method is charged whenever overage reaches ${} or {}, whichever comes first.",
+                                "Your subscription includes a $25 monthly allowance for metered usage. If you use it up, overage lets you continue on pay-as-you-go billing. Your saved payment method is charged whenever overage reaches ${} or {}, whichever comes first.",
                                 overage_status.as_ref().map(|status| status.charge_threshold_usd).unwrap_or(10),
                                 overage_status.as_ref().map(|status| status.invoice_cadence.as_str()).unwrap_or("weekly")
                             )}
@@ -903,7 +903,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                         if !status.provisioned {
                                             <div class="billing-note">{"Finishing billing setup…"}</div>
                                         } else if !status.payment_ready {
-                                            <div class="billing-note">{"A valid default payment method is required. Use Manage billing below to update it."}</div>
+                                            <div class="billing-note">{"A valid default payment method is required. Use Manage or cancel subscription below to update it."}</div>
                                         }
                                         <button
                                             class={classes!("overage-toggle-button", status.overage_enabled.then_some("danger"))}
@@ -1266,9 +1266,9 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                     >
                         {
                             if show_current_plan_picker {
-                                "Manage old plan / payment methods"
+                                "Manage or cancel old plan"
                             } else {
-                                "Manage billing"
+                                "Manage or cancel subscription"
                             }
                         }
                     </button>

@@ -148,15 +148,18 @@ pub fn landing() -> Html {
             "How much usage is included?",
             html! {
                 <>
-                    <p>{"Every billing timeline includes $25/month in messaging credits for SMS and voice delivery. The cap is mainly there to prevent abuse and runaway spam. For normal use - asking questions when needed and receiving updates through the day on Autopilot - it should be more than enough."}</p>
-                    <p>{"Actual usage depends on Twilio delivery costs in your country. US and Canada SMS is usually around 1.5 cents per message. Europe is often around 15-30 cents per message, and some countries can be closer to $1 depending on destination and carrier fees."}</p>
-                    <p>
-                        {"You can check current costs on Twilio's "}
-                        <a href="https://www.twilio.com/en-us/sms/pricing" target="_blank" rel="noopener noreferrer">{"SMS pricing"}</a>
-                        {" and "}
-                        <a href="https://www.twilio.com/en-us/voice/pricing/us" target="_blank" rel="noopener noreferrer">{"Voice pricing"}</a>
-                        {" pages."}
-                    </p>
+                    <p>{"Every subscription includes a $25 monthly allowance for metered usage, including annual subscriptions. This allowance is separate from the subscription price: your subscription pays for access to Lightfriend and its integrations, while the allowance covers AI processing and hosted SMS and voice usage."}</p>
+                    <p>{"The allowance renews each month and does not roll over. For normal personal use - asking questions when needed and receiving updates through the day on Autopilot - it should be more than enough."}</p>
+                    <p>{"Your exact usage depends on AI processing, message destination, carrier fees, and call duration. You can see each charge and your remaining allowance under Billing. If you use up the allowance, Lightfriend pauses metered usage unless you choose to enable pay-as-you-go overage."}</p>
+                </>
+            },
+        ),
+        (
+            "How do I manage or cancel my subscription?",
+            html! {
+                <>
+                    <p>{"Open Settings, choose Billing, then select Manage or cancel subscription. Stripe's secure customer portal lets you cancel your subscription, update your payment method, and view invoices."}</p>
+                    <p>{"Subscription cancellation is self-service; you do not need to email us."}</p>
                 </>
             },
         ),

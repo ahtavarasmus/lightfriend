@@ -255,16 +255,16 @@ pub fn terms_and_conditions() -> Html {
                 <h3>{"Payment Processing"}</h3>
                 <p>{"Payment processing is handled by Stripe, Inc. We do not store your credit card information. All payment data is processed by Stripe in accordance with PCI DSS standards. Your use of payment features is also subject to "}<a href="https://stripe.com/legal" target="_blank" rel="noopener noreferrer">{"Stripe's terms of service"}</a>{"."}</p>
 
-                <h3>{"Prepaid Credits"}</h3>
+                <h3>{"Subscriptions and Included Usage"}</h3>
                 <ul>
-                    <li>{"The Service operates on a prepaid credit model where you purchase credits in advance to use for calling and texting features."}</li>
-                    <li>{"Usage is deducted from your credit balance based on your actual consumption of the Service's features."}</li>
-                    <li>{"You can optionally enable automatic top-up to add more credits to your account when your balance runs low, ensuring uninterrupted service."}</li>
-                    <li>{"Detailed usage information and credit history can be accessed through your account profile billing section."}</li>
+                    <li>{"A paid subscription provides access to the Service and includes a non-rollover monthly allowance for metered usage. The allowance is separate from the subscription price and renews each month, including on annual subscriptions."}</li>
+                    <li>{"AI processing, hosted messaging, and voice usage are deducted from the allowance based on actual usage."}</li>
+                    <li>{"You may optionally enable pay-as-you-go overage through the billing settings. If enabled, you authorize usage charges to your saved payment method. You may disable overage at any time, but usage already incurred remains billable."}</li>
+                    <li>{"Detailed activity, your remaining allowance, and overage settings are available under Settings > Billing."}</li>
                 </ul>
 
                 <h3>{"EU Right of Withdrawal"}</h3>
-                <p>{"Under the EU Consumer Rights Directive (2011/83/EU), you have a 14-day right of withdrawal for online purchases. However, by purchasing credits, you expressly consent that the digital content (credits) becomes available for use immediately upon purchase. You acknowledge that you thereby lose your right of withdrawal once credits are added to your account, pursuant to Article 16(m) of Directive 2011/83/EU."}</p>
+                <p>{"If you are an EU consumer, any mandatory withdrawal rights under applicable consumer law continue to apply. Nothing in these Terms limits your mandatory consumer rights. Where required, information about beginning the Service during a withdrawal period will be provided during purchase."}</p>
 
                 <h3>{"AI Assistant Services"}</h3>
                 <ul>
@@ -305,8 +305,8 @@ pub fn terms_and_conditions() -> Html {
             <section>
                 <h2>{"6. Termination"}</h2>
                 <p>{"We may suspend or terminate your access to the Service immediately and without notice for conduct that violates these Terms or is harmful to other users or the Service."}</p>
-                <p>{"If we terminate your account for reasons other than a violation of these Terms, we will provide 14 days' notice and refund any unused prepaid credits."}</p>
-                <p>{"You may terminate your account at any time through your account settings or by contacting us."}</p>
+                <p>{"If we terminate your account for reasons other than a violation of these Terms, we will provide 14 days' notice. Any refund required by applicable law will be returned through the original payment method."}</p>
+                <p>{"You may cancel your paid subscription at any time through the Stripe Customer Portal under Settings > Billing. Subscription cancellation is self-service; you do not need to contact us."}</p>
             </section>
 
             <section>
