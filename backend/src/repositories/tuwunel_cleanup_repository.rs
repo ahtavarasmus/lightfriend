@@ -69,6 +69,16 @@ pub struct PortalCensusTarget {
     pub room_cursor: Option<String>,
 }
 
+pub struct PortalCensusScan<'a> {
+    pub user_id: i32,
+    pub service: &'a str,
+    pub status: &'a str,
+    pub room_count: usize,
+    pub room_cursor: Option<&'a str>,
+    pub error: Option<&'a str>,
+    pub scanned_at: i32,
+}
+
 #[derive(Debug, QueryableByName)]
 pub struct RoomHistoryPurge {
     #[diesel(sql_type = diesel::sql_types::Integer)]
@@ -185,16 +195,7 @@ impl TuwunelCleanupRepository {
         .load::<PortalCensusTarget>(&mut conn)?)
     }
 
-    pub fn record_portal_census_scan(
-        &self,
-        user_id: i32,
-        service: &str,
-        status: &str,
-        room_count: usize,
-        room_cursor: Option<&str>,
-        error: Option<&str>,
-        scanned_at: i32,
-    ) -> Result<()> {
+    pub fn record_portal_census_scan(&self, scan: PortalCensusScan<'_>) -> Result<()> {
         let mut conn = self.connection()?;
         diesel::sql_query(
             "INSERT INTO tuwunel_portal_census_scans \
@@ -205,15 +206,15 @@ impl TuwunelCleanupRepository {
                  room_cursor = EXCLUDED.room_cursor, last_error = EXCLUDED.last_error, \
                  last_scanned_at = EXCLUDED.last_scanned_at",
         )
-        .bind::<diesel::sql_types::Integer, _>(user_id)
-        .bind::<diesel::sql_types::Text, _>(service)
-        .bind::<diesel::sql_types::Text, _>(status)
-        .bind::<diesel::sql_types::Integer, _>(i32::try_from(room_count).unwrap_or(i32::MAX))
+        .bind::<diesel::sql_types::Integer, _>(scan.user_id)
+        .bind::<diesel::sql_types::Text, _>(scan.service)
+        .bind::<diesel::sql_types::Text, _>(scan.status)
+        .bind::<diesel::sql_types::Integer, _>(i32::try_from(scan.room_count).unwrap_or(i32::MAX))
         .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(
-            room_cursor.map(str::to_string),
+            scan.room_cursor.map(str::to_string),
         )
-        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(error.map(trim_error))
-        .bind::<diesel::sql_types::Integer, _>(scanned_at)
+        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(scan.error.map(trim_error))
+        .bind::<diesel::sql_types::Integer, _>(scan.scanned_at)
         .execute(&mut conn)?;
         Ok(())
     }

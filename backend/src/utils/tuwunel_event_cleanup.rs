@@ -583,13 +583,15 @@ async fn run_portal_room_census(
                     let detail = error.to_string();
                     if let Err(record_error) =
                         state.tuwunel_cleanup_repository.record_portal_census_scan(
-                            target.user_id,
-                            &target.service,
-                            "matrix_session_failed",
-                            0,
-                            target.room_cursor.as_deref(),
-                            Some(&detail),
-                            now,
+                            crate::repositories::tuwunel_cleanup_repository::PortalCensusScan {
+                                user_id: target.user_id,
+                                service: &target.service,
+                                status: "matrix_session_failed",
+                                room_count: 0,
+                                room_cursor: target.room_cursor.as_deref(),
+                                error: Some(&detail),
+                                scanned_at: now,
+                            },
                         )
                     {
                         tracing::error!(
@@ -615,13 +617,15 @@ async fn run_portal_room_census(
                     let detail = error.to_string();
                     if let Err(record_error) =
                         state.tuwunel_cleanup_repository.record_portal_census_scan(
-                            target.user_id,
-                            &target.service,
-                            "room_enumeration_failed",
-                            0,
-                            target.room_cursor.as_deref(),
-                            Some(&detail),
-                            now,
+                            crate::repositories::tuwunel_cleanup_repository::PortalCensusScan {
+                                user_id: target.user_id,
+                                service: &target.service,
+                                status: "room_enumeration_failed",
+                                room_count: 0,
+                                room_cursor: target.room_cursor.as_deref(),
+                                error: Some(&detail),
+                                scanned_at: now,
+                            },
                         )
                     {
                         tracing::error!(
@@ -663,13 +667,15 @@ async fn run_portal_room_census(
                 now,
             )?;
         state.tuwunel_cleanup_repository.record_portal_census_scan(
-            target.user_id,
-            &target.service,
-            "succeeded",
-            discovered,
-            next_room_cursor.as_deref(),
-            None,
-            now,
+            crate::repositories::tuwunel_cleanup_repository::PortalCensusScan {
+                user_id: target.user_id,
+                service: &target.service,
+                status: "succeeded",
+                room_count: discovered,
+                room_cursor: next_room_cursor.as_deref(),
+                error: None,
+                scanned_at: now,
+            },
         )?;
         scanned_targets += 1;
         recorded_rooms += recorded;
