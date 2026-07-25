@@ -1,6 +1,6 @@
 use backend::services::metronome_billing::{
     contract_starting_at, cost_to_microusd, legacy_overage_migration_target,
-    verify_webhook_signature,
+    ordered_payment_method_candidates, payment_method_owner_matches, verify_webhook_signature,
 };
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -82,4 +82,36 @@ fn waits_for_payment_setup_before_preserving_legacy_opt_in() {
 fn never_reapplies_an_already_migrated_preference() {
     assert_eq!(legacy_overage_migration_target(true, true, true), None);
     assert_eq!(legacy_overage_migration_target(false, true, true), None);
+}
+
+#[test]
+fn prefers_current_subscription_payment_method_over_legacy_reference() {
+    assert_eq!(
+        ordered_payment_method_candidates(["pm_current".to_string()], Some("pm_stale_legacy")),
+        vec!["pm_current".to_string(), "pm_stale_legacy".to_string()]
+    );
+}
+
+#[test]
+fn deduplicates_payment_method_candidates() {
+    assert_eq!(
+        ordered_payment_method_candidates(
+            ["pm_current".to_string(), "pm_current".to_string()],
+            Some("pm_current")
+        ),
+        vec!["pm_current".to_string()]
+    );
+}
+
+#[test]
+fn accepts_only_payment_methods_attached_to_the_current_customer() {
+    assert!(payment_method_owner_matches(
+        "cus_current",
+        Some("cus_current")
+    ));
+    assert!(!payment_method_owner_matches(
+        "cus_current",
+        Some("cus_other")
+    ));
+    assert!(!payment_method_owner_matches("cus_current", None));
 }

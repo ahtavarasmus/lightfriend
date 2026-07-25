@@ -463,9 +463,38 @@ impl MetronomeClient {
     }
 }
 
+pub fn ordered_payment_method_candidates(
+    subscription_payment_method_ids: impl IntoIterator<Item = String>,
+    stored_payment_method_id: Option<&str>,
+) -> Vec<String> {
+    let mut candidates = Vec::new();
+    for payment_method_id in subscription_payment_method_ids {
+        if !payment_method_id.is_empty() && !candidates.contains(&payment_method_id) {
+            candidates.push(payment_method_id);
+        }
+    }
+    if let Some(payment_method_id) = stored_payment_method_id.filter(|id| !id.is_empty()) {
+        if !candidates
+            .iter()
+            .any(|candidate| candidate == payment_method_id)
+        {
+            candidates.push(payment_method_id.to_string());
+        }
+    }
+    candidates
+}
+
+pub fn payment_method_owner_matches(
+    expected_customer_id: &str,
+    payment_method_customer_id: Option<&str>,
+) -> bool {
+    payment_method_customer_id == Some(expected_customer_id)
+}
+
 async fn ensure_stripe_payment_method(user: &User) -> Result<bool> {
     use stripe::{
-        Client, Customer, CustomerInvoiceSettings, ListSubscriptions, Subscription, UpdateCustomer,
+        Client, Customer, CustomerInvoiceSettings, ListSubscriptions, PaymentMethod, Subscription,
+        SubscriptionStatus, UpdateCustomer,
     };
     let Some(customer_id) = user.stripe_customer_id.as_deref() else {
         return Ok(false);
@@ -482,41 +511,122 @@ async fn ensure_stripe_payment_method(user: &User) -> Result<bool> {
     {
         return Ok(true);
     }
-    let payment_method_id = if let Some(payment_method_id) = user.stripe_payment_method_id.clone() {
-        Some(payment_method_id)
-    } else {
-        let subscriptions = Subscription::list(
-            &client,
-            &ListSubscriptions {
-                customer: Some(customer_id.clone()),
-                limit: Some(10),
-                ..Default::default()
-            },
-        )
-        .await?;
-        subscriptions.data.iter().find_map(|subscription| {
-            subscription
-                .default_payment_method
-                .as_ref()
-                .map(|payment_method| payment_method.id().to_string())
-        })
-    };
-    let Some(payment_method_id) = payment_method_id else {
-        return Ok(false);
-    };
-    Customer::update(
+    let subscriptions = Subscription::list(
         &client,
-        &customer_id,
-        UpdateCustomer {
-            invoice_settings: Some(CustomerInvoiceSettings {
-                default_payment_method: Some(payment_method_id),
-                ..Default::default()
-            }),
+        &ListSubscriptions {
+            customer: Some(customer_id.clone()),
+            limit: Some(100),
             ..Default::default()
         },
     )
     .await?;
-    Ok(true)
+    let subscription_payment_method_ids = subscriptions
+        .data
+        .iter()
+        .filter(|subscription| {
+            matches!(
+                subscription.status,
+                SubscriptionStatus::Active
+                    | SubscriptionStatus::Trialing
+                    | SubscriptionStatus::PastDue
+                    | SubscriptionStatus::Unpaid
+            )
+        })
+        .filter_map(|subscription| {
+            subscription
+                .default_payment_method
+                .as_ref()
+                .map(|payment_method| payment_method.id().to_string())
+        });
+    let candidates = ordered_payment_method_candidates(
+        subscription_payment_method_ids,
+        user.stripe_payment_method_id.as_deref(),
+    );
+    if candidates.is_empty() {
+        return Ok(false);
+    }
+
+    let mut last_update_error = None;
+    for (candidate_index, payment_method_id) in candidates.into_iter().enumerate() {
+        let parsed_payment_method_id = match payment_method_id.parse() {
+            Ok(payment_method_id) => payment_method_id,
+            Err(error) => {
+                tracing::warn!(
+                    user_id = user.id,
+                    candidate_index,
+                    "Ignoring invalid Stripe payment method ID: {error}"
+                );
+                continue;
+            }
+        };
+        let payment_method =
+            match PaymentMethod::retrieve(&client, &parsed_payment_method_id, &[]).await {
+                Ok(payment_method) => payment_method,
+                Err(error) => {
+                    tracing::warn!(
+                        user_id = user.id,
+                        candidate_index,
+                        "Could not retrieve Stripe payment method candidate: {error}"
+                    );
+                    continue;
+                }
+            };
+        let owner_id = payment_method
+            .customer
+            .as_ref()
+            .map(|customer| customer.id());
+        if !payment_method_owner_matches(customer_id.as_ref(), owner_id.as_ref().map(AsRef::as_ref))
+        {
+            tracing::warn!(
+                user_id = user.id,
+                candidate_index,
+                "Ignoring Stripe payment method attached to a different customer"
+            );
+            continue;
+        }
+
+        match Customer::update(
+            &client,
+            &customer_id,
+            UpdateCustomer {
+                invoice_settings: Some(CustomerInvoiceSettings {
+                    default_payment_method: Some(payment_method_id),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        {
+            Ok(_) => return Ok(true),
+            Err(error) => {
+                tracing::warn!(
+                    user_id = user.id,
+                    candidate_index,
+                    "Could not set Stripe invoice default payment method: {error}"
+                );
+                last_update_error = Some(error);
+            }
+        }
+    }
+
+    if let Some(error) = last_update_error {
+        return Err(error.into());
+    }
+    Ok(false)
+}
+
+async fn stripe_payment_ready(user: &User) -> bool {
+    match ensure_stripe_payment_method(user).await {
+        Ok(payment_ready) => payment_ready,
+        Err(error) => {
+            tracing::warn!(
+                user_id = user.id,
+                "Stripe payment readiness check failed: {error}"
+            );
+            false
+        }
+    }
 }
 
 fn enqueue_cutover_usage(repository: &BillingRepository, user: &User) -> Result<()> {
@@ -606,7 +716,7 @@ pub async fn provision_user(state: &Arc<AppState>, user: &User) -> Result<Billin
         }
         let mut current_account = account;
         if !current_account.payment_ready {
-            let payment_ready = ensure_stripe_payment_method(user).await.unwrap_or(false);
+            let payment_ready = stripe_payment_ready(user).await;
             repository.set_payment_ready(user.id, payment_ready)?;
             current_account = repository
                 .get_account(user.id)?
@@ -619,7 +729,7 @@ pub async fn provision_user(state: &Arc<AppState>, user: &User) -> Result<Billin
         .stripe_customer_id
         .as_deref()
         .ok_or_else(|| anyhow!("User has no Stripe customer ID"))?;
-    let payment_ready = ensure_stripe_payment_method(user).await.unwrap_or(false);
+    let payment_ready = stripe_payment_ready(user).await;
     let customer_id = client.create_customer(user, stripe_customer_id).await?;
     let contract_id = client.create_contract(user.id, &customer_id).await?;
     // Packages can carry an enabled spend threshold by default. Disable it
