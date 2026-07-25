@@ -878,7 +878,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
     let expanded_event_id = use_state(|| None::<i32>);
     let event_details = use_state(std::collections::HashMap::<i32, EventDetailResponse>::new);
     let event_detail_loading = use_state(std::collections::HashSet::<i32>::new);
-    let settings_initial_tab = use_state(|| SettingsTab::Capabilities);
+    let settings_initial_tab = use_state(|| SettingsTab::Connections);
     let dismissed_ids = use_state(get_dismissed_ids);
     let action_items_expanded = use_state(|| false);
     let chat_prefill = use_state(|| None::<String>);
@@ -1160,7 +1160,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                             if let Some(tab) = params.get("settings") {
                                 let tab_enum = match tab.to_lowercase().as_str() {
                                     "capabilities" | "connections" => {
-                                        Some(SettingsTab::Capabilities)
+                                        Some(SettingsTab::Connections)
                                     }
                                     "account" => Some(SettingsTab::Account),
                                     "billing" => Some(SettingsTab::Billing),
@@ -1390,12 +1390,12 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
         Callback::from(move |_| settings_open.set(false))
     };
 
-    let open_capabilities = {
+    let open_connections = {
         let settings_open = settings_open.clone();
         let settings_initial_tab = settings_initial_tab.clone();
         Callback::from(move |e: web_sys::MouseEvent| {
             e.prevent_default();
-            settings_initial_tab.set(SettingsTab::Capabilities);
+            settings_initial_tab.set(SettingsTab::Connections);
             settings_open.set(true);
         })
     };
@@ -1634,7 +1634,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                 <span>{"Email"}</span>
                             </div>
                         </div>
-                        <button class="setup-connect-btn" onclick={open_capabilities.clone()}>
+                        <button class="setup-connect-btn" onclick={open_connections.clone()}>
                             {"Connect your first app"}
                         </button>
                         <div class="setup-chat-hint">{"Or chat with your assistant directly"}</div>
@@ -1912,13 +1912,13 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                 <i class="fa-brands fa-signal-messenger" style="color: #3A76F0; margin-right: 0.2rem;"></i>
                                 <i class="fa-brands fa-telegram" style="color: #26A5E4; margin-right: 0.4rem;"></i>
                                 {"Connect a messaging app. "}
-                                <a href="#" onclick={open_capabilities.clone()}>{"Set up connections"}</a>
+                                <a href="#" onclick={open_connections.clone()}>{"Set up connections"}</a>
                             </div>
                         } else if !*has_email {
                             <div class="connect-prompt">
                                 <i class="fa-solid fa-envelope" style="color: #EA4335; margin-right: 0.4rem;"></i>
                                 {"Connect your email. "}
-                                <a href="#" onclick={open_capabilities.clone()}>{"Set up connections"}</a>
+                                <a href="#" onclick={open_connections.clone()}>{"Set up connections"}</a>
                             </div>
                         }
                     </div>

@@ -58,7 +58,7 @@ mod dashboard {
     pub mod emoji_utils;
     pub mod light_phone_panel;
     pub mod media_panel;
-    pub mod people_list;
+    pub mod phone_device_panel;
     pub mod rule_builder;
     pub mod rules_section;
     pub mod settings_panel;

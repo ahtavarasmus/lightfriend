@@ -1,5 +1,4 @@
-use super::light_phone_panel::LightPhonePanel;
-use super::people_list::PeopleList;
+use super::phone_device_panel::PhoneDevicePanel;
 use super::webhooks_panel::WebhooksPanel;
 use crate::auth::connect::Connect;
 use crate::profile::billing_credits::BillingPage;
@@ -24,7 +23,7 @@ const SETTINGS_STYLES: &str = r#"
     height: 100%;
     background: #1a1a1a;
     overflow-y: auto;
-    animation: slideInPanel 0.3s ease;
+    animation: slideInPanel 240ms ease-out;
 }
 @keyframes slideInPanel {
     from { transform: translateX(100%); }
@@ -48,6 +47,8 @@ const SETTINGS_STYLES: &str = r#"
     margin: 0;
 }
 .settings-header .close-btn {
+    min-width: 36px;
+    min-height: 36px;
     background: transparent;
     border: none;
     color: #888;
@@ -68,6 +69,7 @@ const SETTINGS_STYLES: &str = r#"
 }
 .settings-tab {
     flex: 0 0 auto;
+    min-height: 44px;
     background: transparent;
     border: none;
     color: #888;
@@ -75,7 +77,7 @@ const SETTINGS_STYLES: &str = r#"
     font-size: 0.9rem;
     cursor: pointer;
     border-bottom: 2px solid transparent;
-    transition: all 0.2s;
+    transition: color 180ms ease, border-color 180ms ease;
     white-space: nowrap;
 }
 .settings-tab:hover {
@@ -96,18 +98,108 @@ const SETTINGS_STYLES: &str = r#"
 .settings-hint {
     color: #666;
     font-size: 0.85rem;
-    margin-bottom: 1.5rem;
+    line-height: 1.5;
+    margin: 0 0 1.5rem;
+}
+.connections-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+.connections-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+.connections-group-header h4 {
+    color: #fff;
+    font-size: 0.95rem;
+    margin: 0;
+}
+.connections-group-header p {
+    color: #777;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    margin: 0.25rem 0 0;
+}
+.connections-group .apps-icons-row {
+    gap: 1rem;
+    margin: 0;
+    padding: 0.75rem 0;
+}
+.connections-group .apps-icons-row.builtin-row {
+    padding-top: 0.5rem;
+}
+.connections-group .builtin-tools-label {
+    padding: 0;
+}
+.connections-group .app-icon {
+    min-width: 40px;
+    min-height: 40px;
+    transition: background 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+.connections-group .app-icon:active {
+    transform: scale(0.96);
+}
+.connections-disclosure {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.025);
+    overflow: hidden;
+}
+.connections-disclosure summary {
+    min-height: 48px;
+    padding: 0.75rem 0.9rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    color: #ddd;
+    cursor: pointer;
+    font-size: 0.88rem;
+    font-weight: 600;
+    list-style: none;
+}
+.connections-disclosure summary::-webkit-details-marker {
+    display: none;
+}
+.connections-disclosure summary::after {
+    content: "+";
+    color: #7eb2ff;
+    font-size: 1.1rem;
+    font-weight: 400;
+}
+.connections-disclosure[open] summary::after {
+    content: "−";
+}
+.connections-disclosure summary:focus-visible {
+    outline: 2px solid rgba(126, 178, 255, 0.7);
+    outline-offset: -2px;
+}
+.connections-disclosure-copy {
+    display: block;
+    color: #777;
+    font-size: 0.72rem;
+    font-weight: 400;
+    margin-top: 0.15rem;
+}
+.connections-disclosure-body {
+    padding: 0 0.9rem 0.9rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-top: 0.9rem;
+}
+@media (prefers-reduced-motion: reduce) {
+    .settings-panel {
+        animation: none;
+    }
 }
 "#;
 
 #[derive(Clone, PartialEq, Copy)]
 pub enum SettingsTab {
-    Capabilities,
-    People,
-    LightPhone,
+    Connections,
     Account,
     Billing,
-    Webhooks,
 }
 
 #[derive(Properties, PartialEq, Clone)]
@@ -116,7 +208,7 @@ pub struct SettingsPanelProps {
     pub user_profile: Option<UserProfile>,
     pub on_close: Callback<()>,
     pub on_profile_update: Callback<UserProfile>,
-    #[prop_or(SettingsTab::Capabilities)]
+    #[prop_or(SettingsTab::Connections)]
     pub initial_tab: SettingsTab,
 }
 
@@ -187,37 +279,59 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
     }
 
     let tab_content = match *active_tab {
-        SettingsTab::Capabilities => {
+        SettingsTab::Connections => {
             if let Some(profile) = props.user_profile.as_ref() {
                 html! {
                     <div class="settings-content">
-                        <h3>{"Capabilities"}</h3>
-                        <Connect
-                            user_id={profile.id}
-                            sub_tier={profile.sub_tier.clone()}
-                            phone_number={profile.phone_number.clone()}
-                            estimated_monitoring_cost={profile.estimated_monitoring_cost.clone()}
-                        />
+                        <h3>{"Connections"}</h3>
+                        <p class="settings-hint">
+                            {"Choose how Lightfriend reaches you and connect the services it can use."}
+                        </p>
+                        <div class="connections-stack">
+                            <section class="connections-group" aria-labelledby="phone-device-title">
+                                <div class="connections-group-header">
+                                    <h4 id="phone-device-title">{"Phone & device"}</h4>
+                                    <p>{"Manage calls, texts, and your Light Phone tool."}</p>
+                                </div>
+                                <PhoneDevicePanel
+                                    user_profile={profile.clone()}
+                                    on_profile_update={props.on_profile_update.clone()}
+                                />
+                            </section>
+
+                            <section class="connections-group" aria-labelledby="services-tools-title">
+                                <div class="connections-group-header">
+                                    <h4 id="services-tools-title">{"Services & tools"}</h4>
+                                    <p>{"Connect accounts and see the tools already available to Lightfriend."}</p>
+                                </div>
+                                <Connect
+                                    user_id={profile.id}
+                                    sub_tier={profile.sub_tier.clone()}
+                                    phone_number={profile.phone_number.clone()}
+                                    estimated_monitoring_cost={profile.estimated_monitoring_cost.clone()}
+                                />
+                            </section>
+
+                            <section class="connections-group" aria-label="Webhooks and API">
+                                <details class="connections-disclosure">
+                                    <summary>
+                                        <span>
+                                            {"Webhooks & API"}
+                                            <span class="connections-disclosure-copy">
+                                                {"Send Lightfriend messages from scripts, services, and external assistants."}
+                                            </span>
+                                        </span>
+                                    </summary>
+                                    <div class="connections-disclosure-body">
+                                        <WebhooksPanel />
+                                    </div>
+                                </details>
+                            </section>
+                        </div>
                     </div>
                 }
             } else {
                 html! { <div class="settings-content"><div class="loading-spinner-inline"></div></div> }
-            }
-        }
-        SettingsTab::People => {
-            html! {
-                <div class="settings-content">
-                    <h3>{"People"}</h3>
-                    <PeopleList />
-                </div>
-            }
-        }
-        SettingsTab::LightPhone => {
-            html! {
-                <div class="settings-content">
-                    <h3>{"Light Phone"}</h3>
-                    <LightPhonePanel />
-                </div>
             }
         }
         SettingsTab::Account => {
@@ -248,14 +362,6 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                 html! { <div class="settings-content"><div class="loading-spinner-inline"></div></div> }
             }
         }
-        SettingsTab::Webhooks => {
-            html! {
-                <div class="settings-content">
-                    <h3>{"Webhooks"}</h3>
-                    <WebhooksPanel />
-                </div>
-            }
-        }
     };
 
     let overlay_click = {
@@ -278,6 +384,7 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                     <h2>{"Settings"}</h2>
                     <button
                         class="close-btn"
+                        aria-label="Close settings"
                         onclick={{
                             let cb = props.on_close.clone();
                             Callback::from(move |_| cb.emit(()))
@@ -286,36 +393,22 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                         {"x"}
                     </button>
                 </div>
-                <div class="settings-tabs">
+                <div class="settings-tabs" role="tablist" aria-label="Settings sections">
                     <button
-                        class={classes!("settings-tab", (*active_tab == SettingsTab::Capabilities).then(|| "active"))}
+                        class={classes!("settings-tab", (*active_tab == SettingsTab::Connections).then(|| "active"))}
+                        role="tab"
+                        aria-selected={(*active_tab == SettingsTab::Connections).to_string()}
                         onclick={{
                             let active_tab = active_tab.clone();
-                            Callback::from(move |_| active_tab.set(SettingsTab::Capabilities))
+                            Callback::from(move |_| active_tab.set(SettingsTab::Connections))
                         }}
                     >
-                        {"Capabilities"}
-                    </button>
-                    <button
-                        class={classes!("settings-tab", (*active_tab == SettingsTab::People).then(|| "active"))}
-                        onclick={{
-                            let active_tab = active_tab.clone();
-                            Callback::from(move |_| active_tab.set(SettingsTab::People))
-                        }}
-                    >
-                        {"People"}
-                    </button>
-                    <button
-                        class={classes!("settings-tab", (*active_tab == SettingsTab::LightPhone).then(|| "active"))}
-                        onclick={{
-                            let active_tab = active_tab.clone();
-                            Callback::from(move |_| active_tab.set(SettingsTab::LightPhone))
-                        }}
-                    >
-                        {"Light Phone"}
+                        {"Connections"}
                     </button>
                     <button
                         class={classes!("settings-tab", (*active_tab == SettingsTab::Account).then(|| "active"))}
+                        role="tab"
+                        aria-selected={(*active_tab == SettingsTab::Account).to_string()}
                         onclick={{
                             let active_tab = active_tab.clone();
                             Callback::from(move |_| active_tab.set(SettingsTab::Account))
@@ -325,21 +418,14 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                     </button>
                     <button
                         class={classes!("settings-tab", (*active_tab == SettingsTab::Billing).then(|| "active"))}
+                        role="tab"
+                        aria-selected={(*active_tab == SettingsTab::Billing).to_string()}
                         onclick={{
                             let active_tab = active_tab.clone();
                             Callback::from(move |_| active_tab.set(SettingsTab::Billing))
                         }}
                     >
                         {"Billing"}
-                    </button>
-                    <button
-                        class={classes!("settings-tab", (*active_tab == SettingsTab::Webhooks).then(|| "active"))}
-                        onclick={{
-                            let active_tab = active_tab.clone();
-                            Callback::from(move |_| active_tab.set(SettingsTab::Webhooks))
-                        }}
-                    >
-                        {"Webhooks"}
                     </button>
                 </div>
                 <div class="settings-body">
