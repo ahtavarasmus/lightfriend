@@ -162,12 +162,39 @@ fn format_remaining(seconds: i64) -> String {
 #[function_component(LightPhonePanel)]
 pub fn light_phone_panel() -> Html {
     let offer = use_state(|| None::<PairingOffer>);
-    let loading = use_state(|| false);
+    let loading = use_state(|| true);
     let error = use_state(|| None::<String>);
     let now = use_state(|| chrono::Utc::now().timestamp());
     let connected = use_state(|| false);
     let server_expired = use_state(|| false);
     let poll_epoch = use_mut_ref(|| 0_u64);
+
+    {
+        let loading = loading.clone();
+        let connected = connected.clone();
+        use_effect_with_deps(
+            move |_| {
+                spawn_local(async move {
+                    match Api::get("/api/me/light-tool/pairing-sessions").send().await {
+                        Ok(response) if response.ok() => {
+                            if let Ok(response) = response.json::<PairingStatusResponse>().await {
+                                connected.set(matches!(response.status, PairingStatus::Connected));
+                            }
+                        }
+                        Ok(_) => {
+                            // Pairing remains available even if status could not be loaded.
+                        }
+                        Err(_) => {
+                            // Pairing remains available even if status could not be loaded.
+                        }
+                    }
+                    loading.set(false);
+                });
+                || ()
+            },
+            (),
+        );
+    }
 
     {
         let now = now.clone();
@@ -317,6 +344,10 @@ pub fn light_phone_panel() -> Html {
                     {if *loading { "Creating..." } else { "Pair another Light Phone" }}
                 </button>
             </>
+        }
+    } else if *loading {
+        html! {
+            <span class="light-phone-expiry" role="status">{"Checking connection..."}</span>
         }
     } else if *server_expired {
         html! {

@@ -710,7 +710,7 @@ pub fn tesla_quick_panel(props: &TeslaQuickPanelProps) -> Html {
                                         html! {
                                             <div class="tesla-preview-banner">
                                                 <span>{"Connect your Tesla to use these controls"}</span>
-                                                <a href="/?settings=capabilities">{"Connect"}</a>
+                                                <a href="/?settings=connections">{"Connect"}</a>
                                             </div>
                                         }
                                     } else {

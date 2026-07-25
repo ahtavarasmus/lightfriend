@@ -954,7 +954,7 @@ pub fn youtube_quick_panel(props: &YouTubeQuickPanelProps) -> Html {
                                         html! {
                                             <div class="youtube-preview-banner">
                                                 <span>{"Connect YouTube to see your subscriptions"}</span>
-                                                <a href="/?settings=capabilities">{"Connect"}</a>
+                                                <a href="/?settings=connections">{"Connect"}</a>
                                             </div>
                                         }
                                     } else {
