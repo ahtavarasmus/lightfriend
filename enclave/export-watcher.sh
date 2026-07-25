@@ -102,6 +102,8 @@ while true; do
 
         if [ "${EXIT_CODE}" -eq 0 ]; then
             echo "export-watcher: ${EXPORT_TYPE} export succeeded at ${FINISHED_AT} duration_sec=${DURATION_SEC}"
+            /app/compact-tuwunel-after-backup.sh 2>&1 | tee -a "$LAST_RUN_LOG" || true
+            cap_last_run_log
         else
             ERROR_TAIL=$(sanitize_log_tail 80)
             echo "export-watcher: storage report after failure:"

@@ -22,13 +22,13 @@ LARGE_FILE_MIN_KB="${STORAGE_HEALTH_LARGE_FILE_MIN_KB:-1024}"
 GROWTH_REPORT_MIN_KB="${STORAGE_HEALTH_GROWTH_REPORT_MIN_KB:-10240}"
 TUWUNEL_BUCKET_GROWTH_REPORT_MIN_KB="${STORAGE_HEALTH_TUWUNEL_BUCKET_GROWTH_REPORT_MIN_KB:-1024}"
 TUWUNEL_MEDIA_DIR="${TUWUNEL_MEDIA_DIR:-/var/lib/tuwunel/media}"
-TUWUNEL_MEDIA_MAX_BYTES="${TUWUNEL_MEDIA_MAX_BYTES:-8388608}"        # 8 MiB alarm cap
+TUWUNEL_MEDIA_MAX_BYTES="${TUWUNEL_MEDIA_MAX_BYTES:-1048576}"        # 1 MiB alarm cap
 TUWUNEL_MEDIA_RETENTION_SECS="${TUWUNEL_MEDIA_RETENTION_SECS:-${TUWUNEL_MEDIA_MIN_AGE_SECS:-60}}"
 TUWUNEL_MEDIA_MIN_AGE_SECS="${TUWUNEL_MEDIA_MIN_AGE_SECS:-$TUWUNEL_MEDIA_RETENTION_SECS}" # backwards-compatible alias
 TUWUNEL_MEDIA_DELETE_LOG_LIMIT="${TUWUNEL_MEDIA_DELETE_LOG_LIMIT:-200}"
 TUWUNEL_ARCHIVE_LOG_DIR="${TUWUNEL_ARCHIVE_LOG_DIR:-/var/lib/tuwunel/archive}"
-TUWUNEL_ARCHIVE_LOG_MAX_BYTES="${TUWUNEL_ARCHIVE_LOG_MAX_BYTES:-33554432}" # 32 MiB cap
-TUWUNEL_ARCHIVE_LOG_RETENTION_SECS="${TUWUNEL_ARCHIVE_LOG_RETENTION_SECS:-21600}" # 6 hours
+TUWUNEL_ARCHIVE_LOG_MAX_BYTES="${TUWUNEL_ARCHIVE_LOG_MAX_BYTES:-8388608}" # 8 MiB cap
+TUWUNEL_ARCHIVE_LOG_RETENTION_SECS="${TUWUNEL_ARCHIVE_LOG_RETENTION_SECS:-3600}" # 1 hour
 TUWUNEL_ARCHIVE_LOG_MIN_AGE_SECS="${TUWUNEL_ARCHIVE_LOG_MIN_AGE_SECS:-600}" # cap pruning skips very fresh logs
 TUWUNEL_ARCHIVE_LOG_DELETE_LOG_LIMIT="${TUWUNEL_ARCHIVE_LOG_DELETE_LOG_LIMIT:-200}"
 BACKUP_ARTIFACT_LOCK_FILE="${LIGHTFRIEND_BACKUP_ARTIFACT_LOCK_FILE:-/tmp/lightfriend-backup-artifacts.lock}"
@@ -332,8 +332,15 @@ print_deleted_open_file_accounting() {
 
 print_tuwunel_purge_audit() {
     echo "--- Tuwunel purge compact audit ---"
-    echo "historical_audit_policy backfill_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_ENABLED:-true} audit_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_ENABLED:-true} execute_verified_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_EXECUTE_VERIFIED_ENABLED:-true} execute_blocked_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_EXECUTE_BLOCKED_ENABLED:-true} batch_size=${TUWUNEL_EVENT_PURGE_BACKFILL_BATCH_SIZE:-25} scan_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_SCAN_SECS:-3600} min_age_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_MIN_AGE_SECS:-86400} recheck_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_RECHECK_SECS:-86400} max_pages=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_MAX_PAGES:-100} page_size=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_PAGE_SIZE:-100}"
-    echo "disconnected_bridge_policy audit_enabled=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_AUDIT_ENABLED:-true} execute_enabled=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_ENABLED:-true} orphan_execute_enabled=${TUWUNEL_DISCONNECTED_BRIDGE_ORPHAN_PURGE_ENABLED:-false} grace_secs=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_GRACE_SECS:-120} batch_size=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_BATCH_SIZE:-5} room_delete_limit=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_ROOM_LIMIT:-1}"
+    echo "historical_audit_policy backfill_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_ENABLED:-true} audit_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_ENABLED:-true} execute_verified_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_EXECUTE_VERIFIED_ENABLED:-true} execute_blocked_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_EXECUTE_BLOCKED_ENABLED:-true} proof_scan_bypassed=${TUWUNEL_EVENT_PURGE_BACKFILL_EXECUTE_BLOCKED_ENABLED:-true} batch_size=${TUWUNEL_EVENT_PURGE_BACKFILL_BATCH_SIZE:-50} scan_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_SCAN_SECS:-60} min_age_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_MIN_AGE_SECS:-60} recheck_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_RECHECK_SECS:-300} max_pages=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_MAX_PAGES:-100} page_size=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_PAGE_SIZE:-100}"
+    echo "portal_census_policy enabled=${TUWUNEL_PORTAL_CENSUS_PURGE_ENABLED:-true} scan_secs=${TUWUNEL_PORTAL_CENSUS_SCAN_SECS:-300} target_batch=${TUWUNEL_PORTAL_CENSUS_TARGET_BATCH_SIZE:-5} room_batch=${TUWUNEL_PORTAL_CENSUS_ROOM_BATCH_SIZE:-100} purge_batch=${TUWUNEL_PORTAL_CENSUS_PURGE_BATCH_SIZE:-20}"
+    echo "compaction_policy enabled=${TUWUNEL_COMPACTION_AFTER_BACKUP_ENABLED:-true} cooldown_secs=${TUWUNEL_COMPACTION_COOLDOWN_SECS:-86400} safety_bytes=${TUWUNEL_COMPACTION_SAFETY_BYTES:-134217728} max_backup_age_secs=${TUWUNEL_COMPACTION_MAX_BACKUP_AGE_SECS:-600}"
+    if [ -f /data/seed/tuwunel-compaction-status.json ]; then
+        echo "compaction_status=$(cat /data/seed/tuwunel-compaction-status.json 2>/dev/null | tr '\n' ' ' | cut -c1-2000)"
+    else
+        echo "compaction_status=never_requested"
+    fi
+    echo "disconnected_bridge_policy audit_enabled=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_AUDIT_ENABLED:-true} execute_enabled=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_ENABLED:-true} orphan_execute_enabled=${TUWUNEL_DISCONNECTED_BRIDGE_ORPHAN_PURGE_ENABLED:-true} grace_secs=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_GRACE_SECS:-120} orphan_scan_secs=${TUWUNEL_DISCONNECTED_BRIDGE_ORPHAN_SCAN_SECS:-300} orphan_proof_recheck_secs=${TUWUNEL_DISCONNECTED_BRIDGE_ORPHAN_PROOF_RECHECK_SECS:-300} batch_size=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_BATCH_SIZE:-10} room_delete_limit=${TUWUNEL_DISCONNECTED_BRIDGE_PURGE_ROOM_LIMIT:-5}"
     if ! command -v psql >/dev/null 2>&1 || [ -z "${PG_DATABASE_URL:-}" ]; then
         echo "psql or PG_DATABASE_URL unavailable"
         return 0
@@ -475,6 +482,7 @@ print_tuwunel_purge_audit() {
                trigger_kind,
                status,
                portal_cleanup_status,
+               to_char(to_timestamp(portal_cleanup_confirmed_at), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS cleanup_proof_at,
                left(COALESCE(portal_cleanup_error, '\''none'\''), 200) AS portal_cleanup_error,
                round(rootfs_free_before_bytes / 1048576.0, 1) AS rootfs_before_mib,
                round(rootfs_free_after_bytes / 1048576.0, 1) AS rootfs_after_mib,
@@ -494,6 +502,28 @@ print_tuwunel_purge_audit() {
                CASE WHEN lease_until > extract(epoch from now())::INT4 THEN '\''active'\'' ELSE '\''expired'\'' END AS lease_state
           FROM bridge_connection_leases
          ORDER BY updated_at DESC;
+
+        SELECT status,
+               service,
+               count(*) AS rows,
+               count(DISTINCT room_id) AS rooms,
+               to_char(to_timestamp(min(updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS oldest_updated,
+               to_char(to_timestamp(max(updated_at)), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS newest_updated,
+               left(COALESCE(max(last_error), '\''none'\''), 300) AS sample_error
+          FROM tuwunel_room_history_purges
+         GROUP BY status, service
+         ORDER BY rows DESC, status, service;
+
+        SELECT user_id,
+               service,
+               status,
+               room_count,
+               COALESCE(room_cursor, '\''complete'\'') AS room_cursor,
+               to_char(to_timestamp(last_scanned_at), '\''YYYY-MM-DD"T"HH24:MI:SS"Z"'\'') AS last_scanned_at,
+               left(COALESCE(last_error, '\''none'\''), 300) AS last_error
+          FROM tuwunel_portal_census_scans
+         ORDER BY last_scanned_at DESC
+         LIMIT 50;
     ' 2>/dev/null || echo "purge audit query failed"
 }
 

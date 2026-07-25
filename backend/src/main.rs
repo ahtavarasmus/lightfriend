@@ -1621,6 +1621,10 @@ async fn main() {
             get(handlers::maintenance_handlers::maintenance_status),
         )
         .route(
+            "/api/internal/tuwunel/compact",
+            post(handlers::maintenance_handlers::compact_tuwunel),
+        )
+        .route(
             "/api/internal/health/storage",
             get(handlers::health_handlers::storage_health),
         )

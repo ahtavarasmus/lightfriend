@@ -48,7 +48,7 @@ write_status() {
     shift
     if [ "$status" = "SUCCESS" ]; then
         cat > "${STATUS_FILE}" <<EOF
-{"status": "SUCCESS", "timestamp": "${TIMESTAMP}", "file": "${BACKUP_NAME}.tar.gz.enc", "size_bytes": $1, "user_count": $2}
+{"status":"SUCCESS","timestamp":"${TIMESTAMP}","completed_epoch":$(date +%s),"file":"${BACKUP_NAME}.tar.gz.enc","size_bytes":$1,"user_count":$2,"archive_verified":true,"s3_uploaded":true,"backup_sha256":"${BACKUP_SHA:-}","backup_s3_key":"${BACKUP_S3_KEY:-}","export_type":"${EXPORT_TYPE:-unknown}"}
 EOF
     else
         local error="$1"

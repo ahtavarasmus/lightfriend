@@ -17,6 +17,13 @@ pub const STATUS_PURGE_EXHAUSTED: &str = "purge_exhausted";
 pub const STATUS_BACKFILL_AUDIT_VERIFIED: &str = "backfill_audit_verified";
 pub const STATUS_BACKFILL_AUDIT_BLOCKED: &str = "backfill_audit_blocked";
 
+pub const ROOM_HISTORY_PENDING: &str = "pending";
+pub const ROOM_HISTORY_ATTEMPTING: &str = "attempting";
+pub const ROOM_HISTORY_SUBMITTED: &str = "submitted";
+pub const ROOM_HISTORY_RETRYING: &str = "retrying";
+pub const ROOM_HISTORY_SUCCEEDED: &str = "succeeded";
+pub const ROOM_HISTORY_EXHAUSTED: &str = "exhausted";
+
 pub const BRIDGE_JOB_AUDIT_PENDING: &str = "audit_pending";
 pub const BRIDGE_JOB_AUDIT_READY: &str = "audit_ready";
 pub const BRIDGE_JOB_PENDING: &str = "pending";
@@ -53,6 +60,38 @@ pub struct HistoricalBackfillCandidate {
 }
 
 #[derive(Debug, QueryableByName)]
+pub struct PortalCensusTarget {
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    pub user_id: i32,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub service: String,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+    pub room_cursor: Option<String>,
+}
+
+#[derive(Debug, QueryableByName)]
+pub struct RoomHistoryPurge {
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    pub id: i32,
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    pub user_id: i32,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub service: String,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub room_id: String,
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    pub cutoff_ts: i32,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Integer>)]
+    pub submitted_cutoff_ts: Option<i32>,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+    pub purge_id: Option<String>,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub status: String,
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    pub attempt_count: i32,
+}
+
+#[derive(Debug, QueryableByName)]
 pub struct BridgeCleanupJob {
     #[diesel(sql_type = diesel::sql_types::Integer)]
     pub id: i32,
@@ -74,6 +113,8 @@ pub struct BridgeCleanupJob {
     pub attempt_count: i32,
     #[diesel(sql_type = diesel::sql_types::Text)]
     pub portal_cleanup_status: String,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Integer>)]
+    pub portal_cleanup_confirmed_at: Option<i32>,
 }
 
 #[derive(Debug, QueryableByName)]
@@ -118,6 +159,287 @@ pub struct TuwunelCleanupRepository {
 impl TuwunelCleanupRepository {
     pub fn new(pool: PgDbPool) -> Self {
         Self { pool }
+    }
+
+    pub fn list_portal_census_targets(&self, limit: i64) -> Result<Vec<PortalCensusTarget>> {
+        let mut conn = self.connection()?;
+        Ok(diesel::sql_query(
+            "SELECT targets.user_id, targets.service, targets.room_cursor \
+             FROM ( \
+                 SELECT b.user_id, b.bridge_type AS service, scans.room_cursor, \
+                        COALESCE(scans.last_scanned_at, 0) AS last_scanned_at, \
+                        ROW_NUMBER() OVER ( \
+                            PARTITION BY b.user_id, b.bridge_type ORDER BY b.id DESC \
+                        ) AS row_number \
+                 FROM bridges b \
+                 LEFT JOIN tuwunel_portal_census_scans scans \
+                   ON scans.user_id = b.user_id AND scans.service = b.bridge_type \
+                 WHERE b.status = 'connected' \
+                   AND b.bridge_type IN ('whatsapp', 'signal', 'telegram') \
+             ) targets \
+             WHERE targets.row_number = 1 \
+             ORDER BY targets.last_scanned_at ASC, targets.user_id ASC, targets.service ASC \
+             LIMIT $1",
+        )
+        .bind::<diesel::sql_types::BigInt, _>(limit)
+        .load::<PortalCensusTarget>(&mut conn)?)
+    }
+
+    pub fn record_portal_census_scan(
+        &self,
+        user_id: i32,
+        service: &str,
+        status: &str,
+        room_count: usize,
+        room_cursor: Option<&str>,
+        error: Option<&str>,
+        scanned_at: i32,
+    ) -> Result<()> {
+        let mut conn = self.connection()?;
+        diesel::sql_query(
+            "INSERT INTO tuwunel_portal_census_scans \
+                 (user_id, service, status, room_count, room_cursor, last_error, last_scanned_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7) \
+             ON CONFLICT (user_id, service) DO UPDATE SET \
+                 status = EXCLUDED.status, room_count = EXCLUDED.room_count, \
+                 room_cursor = EXCLUDED.room_cursor, last_error = EXCLUDED.last_error, \
+                 last_scanned_at = EXCLUDED.last_scanned_at",
+        )
+        .bind::<diesel::sql_types::Integer, _>(user_id)
+        .bind::<diesel::sql_types::Text, _>(service)
+        .bind::<diesel::sql_types::Text, _>(status)
+        .bind::<diesel::sql_types::Integer, _>(i32::try_from(room_count).unwrap_or(i32::MAX))
+        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(
+            room_cursor.map(str::to_string),
+        )
+        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(error.map(trim_error))
+        .bind::<diesel::sql_types::Integer, _>(scanned_at)
+        .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn record_portal_census_rooms(
+        &self,
+        user_id: i32,
+        service: &str,
+        room_ids: &[String],
+        cutoff_ts: i32,
+        discovered_at: i32,
+    ) -> Result<usize> {
+        let mut conn = self.connection()?;
+        conn.transaction::<usize, diesel::result::Error, _>(|conn| {
+            let mut recorded = 0;
+            for room_id in room_ids {
+                recorded += diesel::sql_query(
+                    "INSERT INTO tuwunel_room_history_purges \
+                         (user_id, service, room_id, cutoff_ts, status, attempt_count, \
+                          last_discovered_at, updated_at) \
+                     VALUES ($1, $2, $3, $4, 'pending', 0, $5, $5) \
+                     ON CONFLICT (user_id, service, room_id) DO UPDATE SET \
+                         cutoff_ts = CASE \
+                             WHEN tuwunel_room_history_purges.status = 'submitted' \
+                                 THEN tuwunel_room_history_purges.cutoff_ts \
+                             ELSE GREATEST(tuwunel_room_history_purges.cutoff_ts, EXCLUDED.cutoff_ts) \
+                         END, \
+                         status = CASE \
+                             WHEN tuwunel_room_history_purges.status = 'submitted' \
+                                 THEN tuwunel_room_history_purges.status \
+                             WHEN EXCLUDED.cutoff_ts > COALESCE(tuwunel_room_history_purges.submitted_cutoff_ts, 0) \
+                                 THEN 'pending' \
+                             ELSE tuwunel_room_history_purges.status \
+                         END, \
+                         attempt_count = CASE \
+                             WHEN tuwunel_room_history_purges.status = 'submitted' \
+                                 THEN tuwunel_room_history_purges.attempt_count \
+                             WHEN EXCLUDED.cutoff_ts > COALESCE(tuwunel_room_history_purges.submitted_cutoff_ts, 0) \
+                                 THEN 0 \
+                             ELSE tuwunel_room_history_purges.attempt_count \
+                         END, \
+                         last_error = CASE \
+                             WHEN tuwunel_room_history_purges.status = 'submitted' \
+                                 THEN tuwunel_room_history_purges.last_error \
+                             ELSE NULL \
+                         END, \
+                         last_discovered_at = EXCLUDED.last_discovered_at, \
+                         updated_at = EXCLUDED.updated_at",
+                )
+                .bind::<diesel::sql_types::Integer, _>(user_id)
+                .bind::<diesel::sql_types::Text, _>(service)
+                .bind::<diesel::sql_types::Text, _>(room_id)
+                .bind::<diesel::sql_types::Integer, _>(cutoff_ts)
+                .bind::<diesel::sql_types::Integer, _>(discovered_at)
+                .execute(conn)?;
+            }
+            Ok(recorded)
+        })
+        .map_err(Into::into)
+    }
+
+    pub fn list_due_room_history_purges(&self, limit: i64) -> Result<Vec<RoomHistoryPurge>> {
+        let mut conn = self.connection()?;
+        Ok(diesel::sql_query(
+            "SELECT due.id, due.user_id, due.service, due.room_id, due.cutoff_ts, \
+                    due.submitted_cutoff_ts, due.purge_id, due.status, due.attempt_count \
+             FROM ( \
+                 SELECT DISTINCT ON (p.room_id) \
+                        p.id, p.user_id, p.service, p.room_id, p.cutoff_ts, \
+                        p.submitted_cutoff_ts, p.purge_id, p.status, p.attempt_count, p.updated_at \
+                 FROM tuwunel_room_history_purges p \
+                 WHERE p.status IN ('pending', 'attempting', 'retrying') \
+                   AND NOT EXISTS ( \
+                       SELECT 1 FROM tuwunel_room_history_purges active \
+                       WHERE active.room_id = p.room_id AND active.status = 'submitted' \
+                   ) \
+                   AND NOT EXISTS ( \
+                       SELECT 1 FROM tuwunel_cleanup_events e \
+                       WHERE e.room_id = p.room_id \
+                         AND e.status IN ('ingesting', 'ingest_failed', 'purge_attempting', 'purge_submitted') \
+                   ) \
+                 ORDER BY p.room_id, p.cutoff_ts DESC, p.updated_at ASC \
+             ) due \
+             ORDER BY due.updated_at ASC \
+             LIMIT $1",
+        )
+        .bind::<diesel::sql_types::BigInt, _>(limit)
+        .load::<RoomHistoryPurge>(&mut conn)?)
+    }
+
+    pub fn list_submitted_room_history_purges(&self, limit: i64) -> Result<Vec<RoomHistoryPurge>> {
+        let mut conn = self.connection()?;
+        Ok(diesel::sql_query(
+            "SELECT id, user_id, service, room_id, cutoff_ts, submitted_cutoff_ts, \
+                    purge_id, status, attempt_count \
+             FROM tuwunel_room_history_purges \
+             WHERE status = 'submitted' \
+             ORDER BY updated_at ASC \
+             LIMIT $1",
+        )
+        .bind::<diesel::sql_types::BigInt, _>(limit)
+        .load::<RoomHistoryPurge>(&mut conn)?)
+    }
+
+    pub fn active_room_history_purge_rooms(&self) -> Result<HashSet<String>> {
+        let mut conn = self.connection()?;
+        #[derive(QueryableByName)]
+        struct RoomIdRow {
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            room_id: String,
+        }
+        Ok(diesel::sql_query(
+            "SELECT room_id FROM tuwunel_room_history_purges WHERE status = 'submitted'",
+        )
+        .load::<RoomIdRow>(&mut conn)?
+        .into_iter()
+        .map(|row| row.room_id)
+        .collect())
+    }
+
+    pub fn record_room_history_attempt(&self, id: i32, attempt: i32) -> Result<()> {
+        let mut conn = self.connection()?;
+        let now = now_timestamp();
+        diesel::sql_query(
+            "UPDATE tuwunel_room_history_purges \
+             SET status = 'attempting', attempt_count = $2, \
+                 last_attempted_at = $3, updated_at = $3 \
+             WHERE id = $1",
+        )
+        .bind::<diesel::sql_types::Integer, _>(id)
+        .bind::<diesel::sql_types::Integer, _>(attempt)
+        .bind::<diesel::sql_types::Integer, _>(now)
+        .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn record_room_history_submitted(
+        &self,
+        id: i32,
+        attempt: i32,
+        cutoff_ts: i32,
+        purge_id: &str,
+    ) -> Result<()> {
+        let mut conn = self.connection()?;
+        let now = now_timestamp();
+        diesel::sql_query(
+            "UPDATE tuwunel_room_history_purges \
+             SET status = 'submitted', attempt_count = $2, submitted_cutoff_ts = $3, \
+                 purge_id = $4, last_error = NULL, updated_at = $5 \
+             WHERE id = $1",
+        )
+        .bind::<diesel::sql_types::Integer, _>(id)
+        .bind::<diesel::sql_types::Integer, _>(attempt)
+        .bind::<diesel::sql_types::Integer, _>(cutoff_ts)
+        .bind::<diesel::sql_types::Text, _>(purge_id)
+        .bind::<diesel::sql_types::Integer, _>(now)
+        .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn record_room_history_succeeded(&self, id: i32) -> Result<()> {
+        let mut conn = self.connection()?;
+        let now = now_timestamp();
+        diesel::sql_query(
+            "WITH completed AS ( \
+                 SELECT room_id, submitted_cutoff_ts FROM tuwunel_room_history_purges WHERE id = $1 \
+             ) \
+             UPDATE tuwunel_room_history_purges p \
+             SET status = 'succeeded', purge_id = NULL, last_error = NULL, \
+                 completed_at = $2, updated_at = $2 \
+             FROM completed \
+             WHERE p.room_id = completed.room_id \
+               AND p.cutoff_ts <= COALESCE(completed.submitted_cutoff_ts, 0)",
+        )
+        .bind::<diesel::sql_types::Integer, _>(id)
+        .bind::<diesel::sql_types::Integer, _>(now)
+        .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn record_room_history_failure(
+        &self,
+        id: i32,
+        attempt: i32,
+        max_attempts: i32,
+        error: &str,
+    ) -> Result<()> {
+        let status = if attempt >= max_attempts {
+            ROOM_HISTORY_EXHAUSTED
+        } else {
+            ROOM_HISTORY_RETRYING
+        };
+        let mut conn = self.connection()?;
+        let now = now_timestamp();
+        diesel::sql_query(
+            "UPDATE tuwunel_room_history_purges \
+             SET status = $2, attempt_count = $3, purge_id = NULL, last_error = $4, \
+                 completed_at = CASE WHEN $2 = 'exhausted' THEN $5 ELSE NULL END, \
+                 updated_at = $5 \
+             WHERE id = $1",
+        )
+        .bind::<diesel::sql_types::Integer, _>(id)
+        .bind::<diesel::sql_types::Text, _>(status)
+        .bind::<diesel::sql_types::Integer, _>(attempt)
+        .bind::<diesel::sql_types::Text, _>(trim_error(error))
+        .bind::<diesel::sql_types::Integer, _>(now)
+        .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn requeue_exhausted_room_history(&self, cutoff: i32, limit: i64) -> Result<usize> {
+        let mut conn = self.connection()?;
+        Ok(diesel::sql_query(
+            "UPDATE tuwunel_room_history_purges \
+             SET status = 'retrying', attempt_count = 0, purge_id = NULL, \
+                 last_attempted_at = NULL, completed_at = NULL, updated_at = $1 \
+             WHERE id IN ( \
+                 SELECT id FROM tuwunel_room_history_purges \
+                 WHERE status = 'exhausted' AND updated_at <= $2 \
+                 ORDER BY updated_at ASC LIMIT $3 \
+             )",
+        )
+        .bind::<diesel::sql_types::Integer, _>(now_timestamp())
+        .bind::<diesel::sql_types::Integer, _>(cutoff)
+        .bind::<diesel::sql_types::BigInt, _>(limit)
+        .execute(&mut conn)?)
     }
 
     /// Persist a disconnect before its bridge row is removed, then snapshot every
@@ -243,7 +565,7 @@ impl TuwunelCleanupRepository {
             let metadata = diesel::sql_query(
                 "SELECT id, user_id, bridge_type, trigger_kind, expected_bridge_id,
                         expected_bridge_created_at, management_room_id, status,
-                        attempt_count, portal_cleanup_status
+                        attempt_count, portal_cleanup_status, portal_cleanup_confirmed_at
                    FROM bridge_cleanup_jobs WHERE id = $1",
             )
             .bind::<diesel::sql_types::Integer, _>(row.id)
@@ -269,7 +591,7 @@ impl TuwunelCleanupRepository {
         Ok(diesel::sql_query(
             "SELECT id, user_id, bridge_type, trigger_kind, expected_bridge_id,
                     expected_bridge_created_at, management_room_id, status, attempt_count,
-                    portal_cleanup_status
+                    portal_cleanup_status, portal_cleanup_confirmed_at
                FROM bridge_cleanup_jobs
               WHERE status IN ('pending', 'audit_pending', 'audit_ready', 'retrying')
                 AND not_before <= $1
@@ -423,6 +745,44 @@ impl TuwunelCleanupRepository {
         .bind::<diesel::sql_types::Integer, _>(now)
         .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(error.map(trim_error))
         .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn record_orphan_bridge_login_proof(
+        &self,
+        job_id: i32,
+        proof_status: &str,
+        first_absent_at: Option<i32>,
+        not_before: i32,
+        detail: &str,
+    ) -> Result<()> {
+        let mut conn = self.connection()?;
+        let now = now_timestamp();
+        let updated = diesel::sql_query(
+            "UPDATE bridge_cleanup_jobs
+                SET status = 'audit_ready',
+                    portal_cleanup_status = $2,
+                    portal_cleanup_confirmed_at = $3,
+                    portal_cleanup_error = $4,
+                    last_error = $4,
+                    not_before = $5,
+                    updated_at = $6,
+                    completed_at = NULL
+              WHERE id = $1
+                AND trigger_kind = 'orphan_audit'",
+        )
+        .bind::<diesel::sql_types::Integer, _>(job_id)
+        .bind::<diesel::sql_types::Text, _>(proof_status)
+        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Integer>, _>(first_absent_at)
+        .bind::<diesel::sql_types::Text, _>(trim_error(detail))
+        .bind::<diesel::sql_types::Integer, _>(not_before)
+        .bind::<diesel::sql_types::Integer, _>(now)
+        .execute(&mut conn)?;
+        if updated != 1 {
+            return Err(anyhow!(
+                "orphan bridge login proof job {job_id} was not updateable"
+            ));
+        }
         Ok(())
     }
 
@@ -1071,7 +1431,7 @@ impl TuwunelCleanupRepository {
         limit: usize,
     ) -> Result<Vec<TuwunelCleanupEvent>> {
         let mut conn = self.connection()?;
-        let blocked_rooms: HashSet<String> = tuwunel_cleanup_events::table
+        let mut blocked_rooms: HashSet<String> = tuwunel_cleanup_events::table
             .filter(tuwunel_cleanup_events::status.eq_any([
                 STATUS_INGESTING,
                 STATUS_INGEST_FAILED,
@@ -1081,6 +1441,7 @@ impl TuwunelCleanupRepository {
             .load::<String>(&mut conn)?
             .into_iter()
             .collect();
+        blocked_rooms.extend(self.active_room_history_purge_rooms()?);
 
         let candidates = tuwunel_cleanup_events::table
             .filter(tuwunel_cleanup_events::status.eq_any([

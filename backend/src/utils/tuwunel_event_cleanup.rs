@@ -1,5 +1,7 @@
 use crate::pg_models::TuwunelCleanupEvent;
-use crate::repositories::tuwunel_cleanup_repository::{now_timestamp, HistoricalBackfillCandidate};
+use crate::repositories::tuwunel_cleanup_repository::{
+    now_timestamp, HistoricalBackfillCandidate, RoomHistoryPurge,
+};
 use crate::AppState;
 use anyhow::{anyhow, Result};
 use reqwest::StatusCode;
@@ -16,13 +18,17 @@ const DEFAULT_ADMIN_USER_ID: i32 = 1;
 const DEFAULT_RETENTION_SECS: u64 = 60;
 const DEFAULT_POLL_SECS: u64 = 30;
 const DEFAULT_MAX_ATTEMPTS: i32 = 5;
-const DEFAULT_BATCH_SIZE: usize = 10;
-const DEFAULT_BACKFILL_BATCH_SIZE: usize = 25;
-const DEFAULT_BACKFILL_SCAN_SECS: u64 = 3600;
-const DEFAULT_BACKFILL_MIN_AGE_SECS: u64 = 86_400;
-const DEFAULT_BACKFILL_AUDIT_RECHECK_SECS: u64 = 86_400;
+const DEFAULT_BATCH_SIZE: usize = 50;
+const DEFAULT_BACKFILL_BATCH_SIZE: usize = 50;
+const DEFAULT_BACKFILL_SCAN_SECS: u64 = 60;
+const DEFAULT_BACKFILL_MIN_AGE_SECS: u64 = 60;
+const DEFAULT_BACKFILL_AUDIT_RECHECK_SECS: u64 = 300;
 const DEFAULT_BACKFILL_AUDIT_MAX_PAGES: usize = 100;
 const DEFAULT_BACKFILL_AUDIT_PAGE_SIZE: u64 = 100;
+const DEFAULT_PORTAL_CENSUS_SCAN_SECS: u64 = 300;
+const DEFAULT_PORTAL_CENSUS_TARGET_BATCH_SIZE: usize = 5;
+const DEFAULT_PORTAL_CENSUS_ROOM_BATCH_SIZE: usize = 100;
+const DEFAULT_PORTAL_CENSUS_PURGE_BATCH_SIZE: usize = 20;
 const DEFAULT_STALE_INGEST_SECS: u64 = 300;
 const DEFAULT_EXHAUSTED_RETRY_SECS: u64 = 900;
 const BLOCKER_LOG_INTERVAL_SECS: i64 = 600;
@@ -53,6 +59,11 @@ struct EventPurgeConfig {
     backfill_audit_recheck_secs: u64,
     backfill_audit_max_pages: usize,
     backfill_audit_page_size: u64,
+    portal_census_enabled: bool,
+    portal_census_scan_secs: u64,
+    portal_census_target_batch_size: usize,
+    portal_census_room_batch_size: usize,
+    portal_census_purge_batch_size: usize,
     stale_ingest_secs: u64,
     exhausted_retry_secs: u64,
 }
@@ -62,6 +73,8 @@ struct PurgeCycleOutcome {
     backfilled: usize,
     forced_backfilled: usize,
     audited: usize,
+    census_targets: usize,
+    census_rooms: usize,
 }
 
 #[derive(Debug)]
@@ -306,6 +319,7 @@ pub fn record_unproven_bridge_event_blocker(
 pub async fn start_tuwunel_event_purge_worker(state: Arc<AppState>) {
     tracing::info!("Tuwunel event purge worker started");
     let mut next_backfill_scan_at = 0_i32;
+    let mut next_portal_census_at = 0_i32;
     loop {
         let config = EventPurgeConfig::from_env();
         if CONFIG_LOGGED.set(()).is_ok() {
@@ -326,6 +340,11 @@ pub async fn start_tuwunel_event_purge_worker(state: Arc<AppState>) {
                 backfill_audit_recheck_secs = config.backfill_audit_recheck_secs,
                 backfill_audit_max_pages = config.backfill_audit_max_pages,
                 backfill_audit_page_size = config.backfill_audit_page_size,
+                portal_census_enabled = config.portal_census_enabled,
+                portal_census_scan_secs = config.portal_census_scan_secs,
+                portal_census_target_batch_size = config.portal_census_target_batch_size,
+                portal_census_room_batch_size = config.portal_census_room_batch_size,
+                portal_census_purge_batch_size = config.portal_census_purge_batch_size,
                 stale_ingest_secs = config.stale_ingest_secs,
                 exhausted_retry_secs = config.exhausted_retry_secs,
                 "Tuwunel event purge policy loaded"
@@ -337,29 +356,41 @@ pub async fn start_tuwunel_event_purge_worker(state: Arc<AppState>) {
                 || config.backfill_execute_blocked_enabled);
         let run_backfill = (config.backfill_audit_enabled || destructive_backfill_enabled)
             && now >= next_backfill_scan_at;
-        match run_purge_cycle(&state, &config, run_backfill).await {
-            Ok(outcome) if run_backfill => {
-                next_backfill_scan_at = next_backfill_scan_timestamp(
-                    now,
-                    if destructive_backfill_enabled {
-                        outcome.backfilled
-                    } else {
-                        0
-                    },
-                    config.backfill_batch_size,
-                    config.poll_secs,
-                    config.backfill_scan_secs,
-                );
-                tracing::info!(
-                    audited = outcome.audited,
-                    enqueued = outcome.backfilled,
-                    forced_enqueued = outcome.forced_backfilled,
-                    next_backfill_scan_at,
-                    destructive_backfill_enabled,
-                    "Tuwunel historical audit cycle scheduled"
-                );
+        let run_portal_census = config.portal_census_enabled && now >= next_portal_census_at;
+        match run_purge_cycle(&state, &config, run_backfill, run_portal_census).await {
+            Ok(outcome) => {
+                if run_backfill {
+                    next_backfill_scan_at = next_backfill_scan_timestamp(
+                        now,
+                        if destructive_backfill_enabled {
+                            outcome.backfilled
+                        } else {
+                            0
+                        },
+                        config.backfill_batch_size,
+                        config.poll_secs,
+                        config.backfill_scan_secs,
+                    );
+                    tracing::info!(
+                        audited = outcome.audited,
+                        enqueued = outcome.backfilled,
+                        forced_enqueued = outcome.forced_backfilled,
+                        next_backfill_scan_at,
+                        destructive_backfill_enabled,
+                        "Tuwunel historical audit cycle scheduled"
+                    );
+                }
+                if run_portal_census {
+                    next_portal_census_at = now
+                        .saturating_add(config.portal_census_scan_secs.min(i32::MAX as u64) as i32);
+                    tracing::info!(
+                        targets = outcome.census_targets,
+                        rooms = outcome.census_rooms,
+                        next_portal_census_at,
+                        "Tuwunel portal-room census cycle scheduled"
+                    );
+                }
             }
-            Ok(_) => {}
             Err(error) => {
                 tracing::error!(error = %error, "Tuwunel event purge cycle failed");
             }
@@ -387,6 +418,7 @@ async fn run_purge_cycle(
     state: &Arc<AppState>,
     config: &EventPurgeConfig,
     run_backfill: bool,
+    run_portal_census: bool,
 ) -> Result<PurgeCycleOutcome> {
     if !config.enabled {
         if DISABLED_LOGGED.set(()).is_ok() {
@@ -423,11 +455,29 @@ async fn run_purge_cycle(
             "Requeued exhausted Tuwunel purge candidates after cooldown"
         );
     }
+    let room_history_requeued = state
+        .tuwunel_cleanup_repository
+        .requeue_exhausted_room_history(
+            exhausted_cutoff,
+            config.portal_census_purge_batch_size as i64,
+        )?;
+    if room_history_requeued > 0 {
+        tracing::warn!(
+            requeued = room_history_requeued,
+            exhausted_retry_secs = config.exhausted_retry_secs,
+            "Requeued exhausted portal-census room-history purges after cooldown"
+        );
+    }
 
     let (audited, backfilled, forced_backfilled) = if run_backfill {
         run_historical_backfill_audit(state, config, now).await?
     } else {
         (0, 0, 0)
+    };
+    let (census_targets, census_rooms) = if run_portal_census {
+        run_portal_room_census(state, config, now).await?
+    } else {
+        (0, 0)
     };
 
     log_stale_blockers(state, stale_ingest_cutoff, now)?;
@@ -439,12 +489,25 @@ async fn run_purge_cycle(
     let submitted = state
         .tuwunel_cleanup_repository
         .list_submitted(config.batch_size as i64)?;
+    let submitted_room_history = state
+        .tuwunel_cleanup_repository
+        .list_submitted_room_history_purges(config.portal_census_purge_batch_size as i64)?;
+    let due_room_history = state
+        .tuwunel_cleanup_repository
+        .list_due_room_history_purges(config.portal_census_purge_batch_size as i64)?;
 
     if config.dry_run {
-        if DRY_RUN_LOGGED.set(()).is_ok() || !due.is_empty() || !submitted.is_empty() {
+        if DRY_RUN_LOGGED.set(()).is_ok()
+            || !due.is_empty()
+            || !submitted.is_empty()
+            || !due_room_history.is_empty()
+            || !submitted_room_history.is_empty()
+        {
             tracing::warn!(
                 due_rooms = due.len(),
                 submitted_tasks = submitted.len(),
+                census_due_rooms = due_room_history.len(),
+                census_submitted_tasks = submitted_room_history.len(),
                 retention_secs = config.retention_secs,
                 "Tuwunel event purge dry-run: no purge API calls made"
             );
@@ -453,14 +516,22 @@ async fn run_purge_cycle(
             backfilled,
             forced_backfilled,
             audited,
+            census_targets,
+            census_rooms,
         });
     }
 
-    if due.is_empty() && submitted.is_empty() {
+    if due.is_empty()
+        && submitted.is_empty()
+        && due_room_history.is_empty()
+        && submitted_room_history.is_empty()
+    {
         return Ok(PurgeCycleOutcome {
             backfilled,
             forced_backfilled,
             audited,
+            census_targets,
+            census_rooms,
         });
     }
 
@@ -472,16 +543,351 @@ async fn run_purge_cycle(
     for candidate in submitted {
         poll_submitted_purge(state, config, &client, &access_token, &candidate).await;
     }
+    for candidate in submitted_room_history {
+        poll_submitted_room_history_purge(state, config, &client, &access_token, &candidate).await;
+    }
 
     for candidate in due {
         submit_purge(state, config, &client, &access_token, &candidate).await;
+    }
+    for candidate in due_room_history {
+        submit_room_history_purge(state, config, &client, &access_token, &candidate).await;
     }
 
     Ok(PurgeCycleOutcome {
         backfilled,
         forced_backfilled,
         audited,
+        census_targets,
+        census_rooms,
     })
+}
+
+async fn run_portal_room_census(
+    state: &Arc<AppState>,
+    config: &EventPurgeConfig,
+    now: i32,
+) -> Result<(usize, usize)> {
+    let targets = state
+        .tuwunel_cleanup_repository
+        .list_portal_census_targets(config.portal_census_target_batch_size as i64)?;
+    let cutoff_ts = now.saturating_sub(config.retention_secs.min(i32::MAX as u64) as i32);
+    let mut scanned_targets = 0;
+    let mut recorded_rooms = 0;
+
+    for target in targets {
+        let matrix_client =
+            match crate::utils::matrix_auth::get_cached_client(target.user_id, state).await {
+                Ok(client) => client,
+                Err(error) => {
+                    let detail = error.to_string();
+                    if let Err(record_error) =
+                        state.tuwunel_cleanup_repository.record_portal_census_scan(
+                            target.user_id,
+                            &target.service,
+                            "matrix_session_failed",
+                            0,
+                            target.room_cursor.as_deref(),
+                            Some(&detail),
+                            now,
+                        )
+                    {
+                        tracing::error!(
+                            user_id = target.user_id,
+                            service = target.service,
+                            error = %record_error,
+                            "Failed to persist portal census session failure"
+                        );
+                    }
+                    tracing::warn!(
+                        user_id = target.user_id,
+                        service = target.service,
+                        error = %detail,
+                        "Tuwunel portal census skipped unavailable Matrix session"
+                    );
+                    continue;
+                }
+            };
+        let rooms =
+            match crate::utils::bridge::get_service_rooms(&matrix_client, &target.service).await {
+                Ok(rooms) => rooms,
+                Err(error) => {
+                    let detail = error.to_string();
+                    if let Err(record_error) =
+                        state.tuwunel_cleanup_repository.record_portal_census_scan(
+                            target.user_id,
+                            &target.service,
+                            "room_enumeration_failed",
+                            0,
+                            target.room_cursor.as_deref(),
+                            Some(&detail),
+                            now,
+                        )
+                    {
+                        tracing::error!(
+                            user_id = target.user_id,
+                            service = target.service,
+                            error = %record_error,
+                            "Failed to persist portal census enumeration failure"
+                        );
+                    }
+                    tracing::warn!(
+                        user_id = target.user_id,
+                        service = target.service,
+                        error = %detail,
+                        "Tuwunel portal census failed to enumerate service rooms"
+                    );
+                    continue;
+                }
+            };
+        let mut room_ids: Vec<String> = rooms
+            .into_iter()
+            .map(|room| room.room_id)
+            .filter(|room_id| room_id.starts_with('!'))
+            .collect();
+        room_ids.sort();
+        room_ids.dedup();
+        let discovered = room_ids.len();
+        let (room_ids, next_room_cursor) = select_portal_census_room_batch(
+            &room_ids,
+            target.room_cursor.as_deref(),
+            config.portal_census_room_batch_size,
+        );
+        let recorded = state
+            .tuwunel_cleanup_repository
+            .record_portal_census_rooms(
+                target.user_id,
+                &target.service,
+                &room_ids,
+                cutoff_ts,
+                now,
+            )?;
+        state.tuwunel_cleanup_repository.record_portal_census_scan(
+            target.user_id,
+            &target.service,
+            "succeeded",
+            discovered,
+            next_room_cursor.as_deref(),
+            None,
+            now,
+        )?;
+        scanned_targets += 1;
+        recorded_rooms += recorded;
+        tracing::info!(
+            user_id = target.user_id,
+            service = target.service,
+            discovered_rooms = discovered,
+            recorded_rooms = recorded,
+            room_limit = config.portal_census_room_batch_size,
+            cutoff_ts,
+            "Tuwunel portal census persisted room-history purge boundaries"
+        );
+    }
+
+    Ok((scanned_targets, recorded_rooms))
+}
+
+pub fn select_portal_census_room_batch(
+    sorted_room_ids: &[String],
+    cursor: Option<&str>,
+    limit: usize,
+) -> (Vec<String>, Option<String>) {
+    if sorted_room_ids.is_empty() || limit == 0 {
+        return (Vec::new(), None);
+    }
+    let start = cursor
+        .map(|cursor| sorted_room_ids.partition_point(|room_id| room_id.as_str() <= cursor))
+        .unwrap_or(0);
+    let selected: Vec<String> = sorted_room_ids
+        .iter()
+        .skip(start.min(sorted_room_ids.len()))
+        .take(limit)
+        .cloned()
+        .collect();
+    let next_cursor = if start.saturating_add(selected.len()) < sorted_room_ids.len() {
+        selected.last().cloned()
+    } else {
+        None
+    };
+    (selected, next_cursor)
+}
+
+async fn submit_room_history_purge(
+    state: &Arc<AppState>,
+    config: &EventPurgeConfig,
+    client: &reqwest::Client,
+    access_token: &str,
+    candidate: &RoomHistoryPurge,
+) {
+    let attempt = candidate.attempt_count.saturating_add(1);
+    if let Err(error) = state
+        .tuwunel_cleanup_repository
+        .record_room_history_attempt(candidate.id, attempt)
+    {
+        tracing::error!(
+            purge_row_id = candidate.id,
+            room_id = candidate.room_id,
+            error = %error,
+            "Failed to record portal-census purge attempt"
+        );
+        return;
+    }
+
+    let timestamp_ms = (candidate.cutoff_ts.max(1) as u64).saturating_mul(1000);
+    let response = client
+        .post(build_purge_history_url(
+            &config.homeserver_url,
+            &candidate.room_id,
+        ))
+        .bearer_auth(access_token)
+        .json(&purge_history_timestamp_request(timestamp_ms))
+        .send()
+        .await;
+    match parse_submit_response(response).await {
+        Ok(submitted) => {
+            if let Err(error) = state
+                .tuwunel_cleanup_repository
+                .record_room_history_submitted(
+                    candidate.id,
+                    attempt,
+                    candidate.cutoff_ts,
+                    &submitted.purge_id,
+                )
+            {
+                tracing::error!(
+                    purge_row_id = candidate.id,
+                    room_id = candidate.room_id,
+                    purge_id = submitted.purge_id,
+                    error = %error,
+                    "Portal-census purge was accepted but durable status update failed"
+                );
+                return;
+            }
+            tracing::info!(
+                purge_row_id = candidate.id,
+                user_id = candidate.user_id,
+                service = candidate.service,
+                room_id = candidate.room_id,
+                cutoff_ts = candidate.cutoff_ts,
+                purge_id = submitted.purge_id,
+                attempt,
+                "Submitted durable portal-census room-history purge"
+            );
+        }
+        Err(error) => {
+            record_room_history_purge_failure(state, config, candidate, attempt, &error.to_string())
+        }
+    }
+}
+
+async fn poll_submitted_room_history_purge(
+    state: &Arc<AppState>,
+    config: &EventPurgeConfig,
+    client: &reqwest::Client,
+    access_token: &str,
+    candidate: &RoomHistoryPurge,
+) {
+    let Some(purge_id) = candidate.purge_id.as_deref() else {
+        record_room_history_purge_failure(
+            state,
+            config,
+            candidate,
+            candidate.attempt_count,
+            "submitted portal-census purge is missing purge_id",
+        );
+        return;
+    };
+    let response = client
+        .get(build_purge_status_url(&config.homeserver_url, purge_id))
+        .bearer_auth(access_token)
+        .send()
+        .await;
+    match parse_status_response(response).await {
+        Ok(status) if status.status == "complete" => {
+            match state
+                .tuwunel_cleanup_repository
+                .record_room_history_succeeded(candidate.id)
+            {
+                Ok(()) => tracing::info!(
+                    purge_row_id = candidate.id,
+                    user_id = candidate.user_id,
+                    service = candidate.service,
+                    room_id = candidate.room_id,
+                    submitted_cutoff_ts = candidate.submitted_cutoff_ts,
+                    purge_id,
+                    "Portal-census room-history purge completed"
+                ),
+                Err(error) => tracing::error!(
+                    purge_row_id = candidate.id,
+                    room_id = candidate.room_id,
+                    error = %error,
+                    "Failed to persist completed portal-census purge"
+                ),
+            }
+        }
+        Ok(status) if status.status == "failed" => record_room_history_purge_failure(
+            state,
+            config,
+            candidate,
+            candidate.attempt_count,
+            status
+                .error
+                .as_deref()
+                .unwrap_or("Tuwunel portal-census purge task failed"),
+        ),
+        Ok(status) if status.status == "active" => tracing::debug!(
+            purge_row_id = candidate.id,
+            room_id = candidate.room_id,
+            purge_id,
+            "Portal-census room-history purge remains active"
+        ),
+        Ok(status) => record_room_history_purge_failure(
+            state,
+            config,
+            candidate,
+            candidate.attempt_count,
+            &format!("unknown Tuwunel purge status: {}", status.status),
+        ),
+        Err(error) => tracing::warn!(
+            purge_row_id = candidate.id,
+            room_id = candidate.room_id,
+            purge_id,
+            error = %error,
+            "Could not poll portal-census purge; retaining submitted state"
+        ),
+    }
+}
+
+fn record_room_history_purge_failure(
+    state: &Arc<AppState>,
+    config: &EventPurgeConfig,
+    candidate: &RoomHistoryPurge,
+    attempt: i32,
+    error: &str,
+) {
+    if let Err(record_error) = state
+        .tuwunel_cleanup_repository
+        .record_room_history_failure(candidate.id, attempt, config.max_attempts, error)
+    {
+        tracing::error!(
+            purge_row_id = candidate.id,
+            room_id = candidate.room_id,
+            error,
+            record_error = %record_error,
+            "Failed to persist portal-census purge failure"
+        );
+        return;
+    }
+    tracing::warn!(
+        purge_row_id = candidate.id,
+        user_id = candidate.user_id,
+        service = candidate.service,
+        room_id = candidate.room_id,
+        attempt,
+        max_attempts = config.max_attempts,
+        error,
+        "Portal-census room-history purge failed"
+    );
 }
 
 async fn run_historical_backfill_audit(
@@ -511,12 +917,22 @@ async fn run_historical_backfill_audit(
     let mut enqueued = 0;
     let mut forced_enqueued = 0;
     for candidate in candidates {
-        let audit = match audit_historical_backfill_candidate(state, config, &candidate).await {
-            Ok(audit) => audit,
-            Err(error) => HistoricalBackfillAudit {
+        let audit = if historical_backfill_requires_proof_scan(
+            config.backfill_enabled,
+            config.backfill_execute_blocked_enabled,
+        ) {
+            match audit_historical_backfill_candidate(state, config, &candidate).await {
+                Ok(audit) => audit,
+                Err(error) => HistoricalBackfillAudit {
+                    verified: false,
+                    summary: format!("audit_error={error}"),
+                },
+            }
+        } else {
+            HistoricalBackfillAudit {
                 verified: false,
-                summary: format!("audit_error={error}"),
-            },
+                summary: "proof_scan_bypassed=forced_unverified_policy".to_string(),
+            }
         };
         state
             .tuwunel_cleanup_repository
@@ -581,6 +997,13 @@ pub fn historical_backfill_execution_kind(
         return Some("historical_backfill_forced_unverified");
     }
     None
+}
+
+pub fn historical_backfill_requires_proof_scan(
+    backfill_enabled: bool,
+    execute_blocked_enabled: bool,
+) -> bool {
+    !(backfill_enabled && execute_blocked_enabled)
 }
 
 async fn audit_historical_backfill_candidate(
@@ -1127,8 +1550,8 @@ impl EventPurgeConfig {
                 .and_then(|value| value.parse().ok())
                 .filter(|value| *value > 0)
                 .unwrap_or(DEFAULT_ADMIN_USER_ID),
-            enabled: env_flag("TUWUNEL_EVENT_PURGE_ENABLED", false),
-            dry_run: env_flag("TUWUNEL_EVENT_PURGE_DRY_RUN", true),
+            enabled: env_flag("TUWUNEL_EVENT_PURGE_ENABLED", true),
+            dry_run: env_flag("TUWUNEL_EVENT_PURGE_DRY_RUN", false),
             retention_secs: env_u64(
                 "TUWUNEL_EVENT_PURGE_RETENTION_SECS",
                 DEFAULT_RETENTION_SECS,
@@ -1166,12 +1589,12 @@ impl EventPurgeConfig {
             backfill_min_age_secs: env_u64(
                 "TUWUNEL_EVENT_PURGE_BACKFILL_MIN_AGE_SECS",
                 DEFAULT_BACKFILL_MIN_AGE_SECS,
-                3600,
+                60,
             ),
             backfill_audit_recheck_secs: env_u64(
                 "TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_RECHECK_SECS",
                 DEFAULT_BACKFILL_AUDIT_RECHECK_SECS,
-                3600,
+                60,
             ),
             backfill_audit_max_pages: env_u64(
                 "TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_MAX_PAGES",
@@ -1185,6 +1608,30 @@ impl EventPurgeConfig {
                 10,
             )
             .min(100),
+            portal_census_enabled: env_flag("TUWUNEL_PORTAL_CENSUS_PURGE_ENABLED", true),
+            portal_census_scan_secs: env_u64(
+                "TUWUNEL_PORTAL_CENSUS_SCAN_SECS",
+                DEFAULT_PORTAL_CENSUS_SCAN_SECS,
+                60,
+            ),
+            portal_census_target_batch_size: env_u64(
+                "TUWUNEL_PORTAL_CENSUS_TARGET_BATCH_SIZE",
+                DEFAULT_PORTAL_CENSUS_TARGET_BATCH_SIZE as u64,
+                1,
+            )
+            .min(50) as usize,
+            portal_census_room_batch_size: env_u64(
+                "TUWUNEL_PORTAL_CENSUS_ROOM_BATCH_SIZE",
+                DEFAULT_PORTAL_CENSUS_ROOM_BATCH_SIZE as u64,
+                1,
+            )
+            .min(1000) as usize,
+            portal_census_purge_batch_size: env_u64(
+                "TUWUNEL_PORTAL_CENSUS_PURGE_BATCH_SIZE",
+                DEFAULT_PORTAL_CENSUS_PURGE_BATCH_SIZE as u64,
+                1,
+            )
+            .min(100) as usize,
             stale_ingest_secs: env_u64(
                 "TUWUNEL_EVENT_PURGE_STALE_INGEST_SECS",
                 DEFAULT_STALE_INGEST_SECS,

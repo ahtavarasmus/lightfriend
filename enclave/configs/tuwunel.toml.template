@@ -2,7 +2,7 @@
 server_name = "localhost"
 database_path = "/var/lib/tuwunel"
 database_backup_path = "/var/lib/tuwunel-backup"
-database_backups_to_keep = 2
+database_backups_to_keep = 1
 
 # Capture per-column SST sizes and tombstone counts once per enclave boot.
 # Ignore command errors so diagnostics can never prevent Tuwunel startup.

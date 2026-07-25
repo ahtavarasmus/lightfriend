@@ -99,7 +99,7 @@ echo "--- Tuwunel purge and historical audit instrumentation across backend logs
 echo "Tuwunel server version:"
 curl -sf http://localhost:8008/_synapse/admin/v1/server_version 2>/dev/null || echo "  unavailable"
 echo ""
-TUWUNEL_CLEANUP_LOG_LINES=$(grep -hEi "Tuwunel.*purge|purge.*Tuwunel|purge API|purge candidate|Tuwunel event retained|Tuwunel historical room audit|backfill_audit|audit_error" \
+TUWUNEL_CLEANUP_LOG_LINES=$(grep -hEi "Tuwunel.*purge|purge.*Tuwunel|purge API|purge candidate|Tuwunel event retained|Tuwunel historical room audit|portal.census|backfill_audit|audit_error|compaction" \
     /var/log/supervisor/lightfriend.log /var/log/supervisor/lightfriend.log.1 /var/log/supervisor/lightfriend.log.2 \
     /var/log/supervisor/lightfriend-err.log /var/log/supervisor/lightfriend-err.log.1 /var/log/supervisor/lightfriend-err.log.2 \
     2>/dev/null | tail -120 || true)

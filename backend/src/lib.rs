@@ -130,6 +130,7 @@ pub mod repositories {
     pub mod admin_alert_repository;
     pub mod bandwidth_repository;
     pub mod billing_repository;
+    pub mod bridge_login_repository;
     pub mod commitment_repository;
     pub mod light_tool_devices_repository;
     pub mod light_tool_pairing_repository;

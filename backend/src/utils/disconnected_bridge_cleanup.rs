@@ -1,3 +1,4 @@
+use crate::repositories::bridge_login_repository::BridgeLoginRepository;
 use crate::repositories::tuwunel_cleanup_repository::{
     now_timestamp, BridgeCleanupJob, BridgeCleanupRoom, BRIDGE_JOB_AUDIT_READY,
     BRIDGE_JOB_CANCELLED_RECONNECTED, BRIDGE_JOB_EXHAUSTED, BRIDGE_JOB_RETRYING,
@@ -17,12 +18,19 @@ const DEFAULT_POLL_SECS: u64 = 30;
 const DEFAULT_GRACE_SECS: i32 = 120;
 const DEFAULT_MAX_ATTEMPTS: i32 = 5;
 const DEFAULT_RETRY_SECS: i32 = 300;
-const DEFAULT_ORPHAN_SCAN_SECS: i32 = 3600;
-const DEFAULT_BATCH_SIZE: i64 = 5;
-const DEFAULT_ROOM_DELETE_LIMIT: i64 = 1;
+const DEFAULT_ORPHAN_SCAN_SECS: i32 = 300;
+const DEFAULT_ORPHAN_PROOF_RECHECK_SECS: i32 = 300;
+const DEFAULT_BATCH_SIZE: i64 = 10;
+const DEFAULT_ROOM_DELETE_LIMIT: i64 = 5;
 const DEFAULT_ADMIN_USER_ID: i32 = 1;
 const HTTP_TIMEOUT_SECS: u64 = 20;
 const CONNECTION_LEASE_SECS: i32 = 300;
+const BRIDGE_LOGIN_PROBE_TIMEOUT_SECS: u64 = 10;
+
+pub const ORPHAN_LOGIN_ABSENCE_OBSERVED: &str = "bridge_login_absence_observed";
+pub const ORPHAN_LOGIN_ABSENT_VERIFIED: &str = "bridge_login_absent_verified";
+pub const ORPHAN_LOGIN_PRESENT: &str = "bridge_login_present";
+pub const ORPHAN_LOGIN_PROBE_FAILED: &str = "bridge_login_probe_failed";
 
 #[derive(Debug, Clone)]
 struct Config {
@@ -36,6 +44,7 @@ struct Config {
     max_attempts: i32,
     retry_secs: i32,
     orphan_scan_secs: i32,
+    orphan_proof_recheck_secs: i32,
     batch_size: i64,
     room_delete_limit: i64,
 }
@@ -72,6 +81,21 @@ impl Drop for BridgeConnectionLease {
                 "Failed to release bridge connection lease"
             );
         }
+    }
+}
+
+impl BridgeConnectionLease {
+    fn renew(&self) -> Result<bool> {
+        let now = now_timestamp();
+        self.state
+            .tuwunel_cleanup_repository
+            .try_acquire_bridge_connection_lease(
+                self.user_id,
+                &self.bridge_type,
+                "cleanup",
+                &self.owner_token,
+                now.saturating_add(CONNECTION_LEASE_SECS),
+            )
     }
 }
 
@@ -240,6 +264,7 @@ pub async fn start_disconnected_bridge_cleanup_worker(state: Arc<AppState>) {
         grace_secs = config.grace_secs,
         max_attempts = config.max_attempts,
         orphan_scan_secs = config.orphan_scan_secs,
+        orphan_proof_recheck_secs = config.orphan_proof_recheck_secs,
         batch_size = config.batch_size,
         room_delete_limit = config.room_delete_limit,
         "Disconnected-bridge Tuwunel cleanup policy loaded"
@@ -298,6 +323,262 @@ async fn run_cycle(state: &Arc<AppState>, config: &Config) -> Result<()> {
             &mut remaining_room_deletes,
         )
         .await;
+    }
+    Ok(())
+}
+
+pub fn orphan_absence_ready_for_verification(
+    proof_status: &str,
+    first_absent_at: Option<i32>,
+    now: i32,
+    recheck_secs: i32,
+) -> bool {
+    proof_status == ORPHAN_LOGIN_ABSENCE_OBSERVED
+        && first_absent_at
+            .map(|observed_at| now.saturating_sub(observed_at) >= recheck_secs)
+            .unwrap_or(false)
+}
+
+async fn matrix_user_id_for_user(state: &Arc<AppState>, user_id: i32) -> Result<String> {
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, state)
+        .await
+        .map_err(|error| anyhow!("matrix client unavailable: {error}"))?;
+    client
+        .user_id()
+        .map(ToString::to_string)
+        .ok_or_else(|| anyhow!("matrix client has no user id"))
+}
+
+async fn bridge_login_count(bridge_type: &str, matrix_user_ids: Vec<String>) -> Result<i64> {
+    let bridge_type = bridge_type.to_string();
+    tokio::time::timeout(
+        Duration::from_secs(BRIDGE_LOGIN_PROBE_TIMEOUT_SECS),
+        tokio::task::spawn_blocking(move || {
+            BridgeLoginRepository::login_count(&bridge_type, &matrix_user_ids)
+        }),
+    )
+    .await
+    .map_err(|_| anyhow!("bridge login database probe timed out"))?
+    .map_err(|error| anyhow!("bridge login database probe task failed: {error}"))?
+}
+
+async fn prepare_orphan_login_proof(
+    state: &Arc<AppState>,
+    config: &Config,
+    job: &BridgeCleanupJob,
+    now: i32,
+) -> bool {
+    let matrix_user_id = match matrix_user_id_for_user(state, job.user_id).await {
+        Ok(matrix_user_id) => matrix_user_id,
+        Err(error) => {
+            let detail = format!("orphan login proof inconclusive: {error}");
+            let _ = state
+                .tuwunel_cleanup_repository
+                .record_orphan_bridge_login_proof(
+                    job.id,
+                    ORPHAN_LOGIN_PROBE_FAILED,
+                    None,
+                    now.saturating_add(config.retry_secs),
+                    &detail,
+                );
+            tracing::warn!(
+                job_id = job.id,
+                user_id = job.user_id,
+                service = job.bridge_type,
+                error = %error,
+                "Retaining orphaned Tuwunel rooms because Matrix identity proof failed"
+            );
+            return false;
+        }
+    };
+
+    match bridge_login_count(&job.bridge_type, vec![matrix_user_id]).await {
+        Ok(count) if count > 0 => {
+            let detail = format!("bridge_login_rows={count}; rooms retained");
+            let _ = state
+                .tuwunel_cleanup_repository
+                .record_orphan_bridge_login_proof(
+                    job.id,
+                    ORPHAN_LOGIN_PRESENT,
+                    None,
+                    now.saturating_add(config.orphan_scan_secs),
+                    &detail,
+                );
+            tracing::info!(
+                job_id = job.id,
+                user_id = job.user_id,
+                service = job.bridge_type,
+                bridge_login_rows = count,
+                "Retaining orphaned Tuwunel rooms because bridge-side login state exists"
+            );
+            false
+        }
+        Ok(_) if job.portal_cleanup_status == ORPHAN_LOGIN_ABSENT_VERIFIED => true,
+        Ok(_)
+            if orphan_absence_ready_for_verification(
+                &job.portal_cleanup_status,
+                job.portal_cleanup_confirmed_at,
+                now,
+                config.orphan_proof_recheck_secs,
+            ) =>
+        {
+            let first_absent_at = job.portal_cleanup_confirmed_at;
+            let detail = format!(
+                "bridge_login_rows=0 second_observation=true first_absent_at={}",
+                first_absent_at.unwrap_or(now)
+            );
+            if let Err(error) = state
+                .tuwunel_cleanup_repository
+                .record_orphan_bridge_login_proof(
+                    job.id,
+                    ORPHAN_LOGIN_ABSENT_VERIFIED,
+                    first_absent_at,
+                    now,
+                    &detail,
+                )
+            {
+                tracing::error!(
+                    job_id = job.id,
+                    error = %error,
+                    "Could not persist verified orphan bridge-login absence"
+                );
+                return false;
+            }
+            tracing::warn!(
+                job_id = job.id,
+                user_id = job.user_id,
+                service = job.bridge_type,
+                first_absent_at,
+                "Verified orphan bridge-login absence after two observations"
+            );
+            true
+        }
+        Ok(_) => {
+            let detail = "bridge_login_rows=0 first_observation=true";
+            let _ = state
+                .tuwunel_cleanup_repository
+                .record_orphan_bridge_login_proof(
+                    job.id,
+                    ORPHAN_LOGIN_ABSENCE_OBSERVED,
+                    Some(now),
+                    now.saturating_add(config.orphan_proof_recheck_secs),
+                    detail,
+                );
+            tracing::info!(
+                job_id = job.id,
+                user_id = job.user_id,
+                service = job.bridge_type,
+                recheck_secs = config.orphan_proof_recheck_secs,
+                "Observed absent orphan bridge login; waiting for independent recheck"
+            );
+            false
+        }
+        Err(error) => {
+            let detail = format!("orphan login proof inconclusive: {error}");
+            let _ = state
+                .tuwunel_cleanup_repository
+                .record_orphan_bridge_login_proof(
+                    job.id,
+                    ORPHAN_LOGIN_PROBE_FAILED,
+                    None,
+                    now.saturating_add(config.retry_secs),
+                    &detail,
+                );
+            tracing::warn!(
+                job_id = job.id,
+                user_id = job.user_id,
+                service = job.bridge_type,
+                error = %error,
+                "Retaining orphaned Tuwunel rooms because bridge login probe failed"
+            );
+            false
+        }
+    }
+}
+
+async fn final_orphan_login_absence_check(
+    state: &Arc<AppState>,
+    config: &Config,
+    job: &BridgeCleanupJob,
+    now: i32,
+) -> bool {
+    let result = match matrix_user_id_for_user(state, job.user_id).await {
+        Ok(matrix_user_id) => bridge_login_count(&job.bridge_type, vec![matrix_user_id]).await,
+        Err(error) => Err(error),
+    };
+    match result {
+        Ok(0) => true,
+        Ok(count) => {
+            let detail = format!("final bridge login recheck found rows={count}; rooms retained");
+            let _ = state
+                .tuwunel_cleanup_repository
+                .record_orphan_bridge_login_proof(
+                    job.id,
+                    ORPHAN_LOGIN_PRESENT,
+                    None,
+                    now.saturating_add(config.orphan_scan_secs),
+                    &detail,
+                );
+            tracing::warn!(
+                job_id = job.id,
+                user_id = job.user_id,
+                service = job.bridge_type,
+                bridge_login_rows = count,
+                "Cancelled orphan cleanup after final bridge-login recheck"
+            );
+            false
+        }
+        Err(error) => {
+            let detail = format!("final bridge login recheck failed: {error}");
+            let _ = state
+                .tuwunel_cleanup_repository
+                .record_orphan_bridge_login_proof(
+                    job.id,
+                    ORPHAN_LOGIN_PROBE_FAILED,
+                    None,
+                    now.saturating_add(config.retry_secs),
+                    &detail,
+                );
+            tracing::warn!(
+                job_id = job.id,
+                user_id = job.user_id,
+                service = job.bridge_type,
+                error = %error,
+                "Cancelled orphan cleanup because final bridge-login recheck was inconclusive"
+            );
+            false
+        }
+    }
+}
+
+async fn refresh_cleanup_guard(
+    state: &Arc<AppState>,
+    config: &Config,
+    job: &BridgeCleanupJob,
+    lease: &BridgeConnectionLease,
+) -> Result<()> {
+    if !lease.renew()? {
+        return Err(anyhow!("cleanup lease renewal was rejected"));
+    }
+
+    match state
+        .tuwunel_cleanup_repository
+        .bridge_generation_present(job)?
+    {
+        None => {}
+        Some((current_id, current_status, current_created_at)) => {
+            return Err(anyhow!(
+                "bridge reappeared id={current_id} created_at={current_created_at:?} status={current_status}"
+            ));
+        }
+    }
+
+    if job.trigger_kind == "orphan_audit"
+        && !final_orphan_login_absence_check(state, config, job, now_timestamp()).await
+    {
+        return Err(anyhow!(
+            "orphan bridge-login absence could not be reconfirmed"
+        ));
     }
     Ok(())
 }
@@ -363,6 +644,14 @@ async fn process_job(
         }
     }
 
+    let mut portal_cleanup_status = job.portal_cleanup_status.clone();
+    if job.trigger_kind == "orphan_audit" && config.orphan_execute_enabled {
+        if !prepare_orphan_login_proof(state, config, job, now).await {
+            return;
+        }
+        portal_cleanup_status = ORPHAN_LOGIN_ABSENT_VERIFIED.to_string();
+    }
+
     discover_visible_service_rooms(state, job).await;
 
     let rooms = match state
@@ -385,7 +674,7 @@ async fn process_job(
         && (job.trigger_kind != "orphan_audit" || config.orphan_execute_enabled);
     let execute = bridge_cleanup_execution_allowed(
         &job.trigger_kind,
-        &job.portal_cleanup_status,
+        &portal_cleanup_status,
         config.execute_enabled,
         config.orphan_execute_enabled,
     );
@@ -427,6 +716,12 @@ async fn process_job(
                 );
                 return;
             }
+        }
+
+        if job.trigger_kind == "orphan_audit"
+            && !final_orphan_login_absence_check(state, config, job, now).await
+        {
+            return;
         }
 
         match state
@@ -485,7 +780,7 @@ async fn process_job(
                 let reason = if execute_requested {
                     format!(
                         "blocked: portal cleanup status={} (confirmed required)",
-                        job.portal_cleanup_status
+                        portal_cleanup_status
                     )
                 } else {
                     "eligible; destructive execution disabled by policy".to_string()
@@ -510,13 +805,43 @@ async fn process_job(
                     false,
                 );
             }
-            Ok(()) => match delete_room(state, config, client, access_token, job, &room).await {
-                Ok(()) => {
-                    deleted += 1;
-                    *remaining_room_deletes = (*remaining_room_deletes).saturating_sub(1);
+            Ok(()) => {
+                let Some(lease) = cleanup_lease.as_ref() else {
+                    retry_job(
+                        state,
+                        config,
+                        job,
+                        "cleanup lease missing before room delete",
+                    );
+                    return;
+                };
+                if let Err(error) = refresh_cleanup_guard(state, config, job, lease).await {
+                    let reason = format!("pre-delete safety recheck failed: {error}");
+                    let _ = state.tuwunel_cleanup_repository.update_bridge_cleanup_room(
+                        room.id,
+                        BRIDGE_ROOM_BLOCKED_ACTIVE,
+                        room.attempt_count,
+                        None,
+                        Some(&reason),
+                        false,
+                    );
+                    retry_job(state, config, job, &reason);
+                    tracing::warn!(
+                        job_id = job.id,
+                        room_id = room.room_id,
+                        error = %error,
+                        "Stopped bridge cleanup before room deletion"
+                    );
+                    return;
                 }
-                Err(()) => failed += 1,
-            },
+                match delete_room(state, config, client, access_token, job, &room).await {
+                    Ok(()) => {
+                        deleted += 1;
+                        *remaining_room_deletes = (*remaining_room_deletes).saturating_sub(1);
+                    }
+                    Err(()) => failed += 1,
+                }
+            }
             Err(reason) => {
                 blocked += 1;
                 let _ = state.tuwunel_cleanup_repository.update_bridge_cleanup_room(
@@ -558,7 +883,7 @@ async fn process_job(
     }
     let summary = format!(
         "rooms_deleted={deleted} rooms_blocked={blocked} rooms_failed={failed} rooms_deferred={deferred} execute={execute} portal_cleanup_status={} canary_limit={}",
-        job.portal_cleanup_status, config.room_delete_limit
+        portal_cleanup_status, config.room_delete_limit
     );
     if failed > 0 {
         retry_job(state, config, job, &summary);
@@ -752,6 +1077,28 @@ async fn audit_room(
             "shared room has {active_members} other active Matrix member(s)"
         ));
     }
+
+    let owner_matrix_user_id = matrix_user_id_for_user(state, job.user_id)
+        .await
+        .map_err(|error| format!("room owner Matrix identity check failed: {error}"))?;
+    let other_members: Vec<String> = members
+        .members
+        .into_iter()
+        .filter(|member| member != &owner_matrix_user_id)
+        .collect();
+    match bridge_login_count(&job.bridge_type, other_members).await {
+        Ok(0) => {}
+        Ok(count) => {
+            return Err(format!(
+                "shared room has {count} bridge-side login(s) outside cleanup owner"
+            ));
+        }
+        Err(error) => {
+            return Err(format!(
+                "shared room bridge-login safety check failed: {error}"
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -894,9 +1241,13 @@ pub fn bridge_cleanup_execution_allowed(
     execute_enabled: bool,
     orphan_execute_enabled: bool,
 ) -> bool {
-    execute_enabled
-        && portal_cleanup_status == "confirmed"
-        && (trigger_kind != "orphan_audit" || orphan_execute_enabled)
+    if !execute_enabled {
+        return false;
+    }
+    if trigger_kind == "orphan_audit" {
+        return orphan_execute_enabled && portal_cleanup_status == ORPHAN_LOGIN_ABSENT_VERIFIED;
+    }
+    portal_cleanup_status == "confirmed"
 }
 
 impl Config {
@@ -909,7 +1260,7 @@ impl Config {
             execute_enabled: env_flag("TUWUNEL_DISCONNECTED_BRIDGE_PURGE_ENABLED", true),
             orphan_execute_enabled: env_flag(
                 "TUWUNEL_DISCONNECTED_BRIDGE_ORPHAN_PURGE_ENABLED",
-                false,
+                true,
             ),
             poll_secs: env_u64(
                 "TUWUNEL_DISCONNECTED_BRIDGE_PURGE_POLL_SECS",
@@ -935,6 +1286,11 @@ impl Config {
                 "TUWUNEL_DISCONNECTED_BRIDGE_ORPHAN_SCAN_SECS",
                 DEFAULT_ORPHAN_SCAN_SECS,
                 300,
+            ),
+            orphan_proof_recheck_secs: env_i32(
+                "TUWUNEL_DISCONNECTED_BRIDGE_ORPHAN_PROOF_RECHECK_SECS",
+                DEFAULT_ORPHAN_PROOF_RECHECK_SECS,
+                60,
             ),
             batch_size: i64::from(
                 env_i32(

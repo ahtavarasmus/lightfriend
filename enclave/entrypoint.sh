@@ -107,6 +107,7 @@ fi
 # ── 0b. Set internal defaults ────────────────────────────────────────────────
 export PG_DATABASE_URL="${PG_DATABASE_URL:-postgres://lightfriend:lightfriend@localhost:5432/lightfriend_db?sslmode=disable}"
 export WHATSAPP_BRIDGE_DATABASE_URL="${WHATSAPP_BRIDGE_DATABASE_URL:-postgres://whatsapp_user:whatsapp_password@localhost:5432/whatsapp_db?sslmode=disable}"
+export SIGNAL_BRIDGE_DATABASE_URL="${SIGNAL_BRIDGE_DATABASE_URL:-postgres://signal_user:signal_password@localhost:5432/signal_db?sslmode=disable}"
 export TELEGRAM_BRIDGE_DATABASE_URL="${TELEGRAM_BRIDGE_DATABASE_URL:-postgres://telegram_user:telegram_password@localhost:5432/telegram_db?sslmode=disable}"
 export MATRIX_HOMESERVER="${MATRIX_HOMESERVER:-http://localhost:8008}"
 export MATRIX_HOMESERVER_PERSISTENT_STORE_PATH="${MATRIX_HOMESERVER_PERSISTENT_STORE_PATH:-/app/matrix_store}"
