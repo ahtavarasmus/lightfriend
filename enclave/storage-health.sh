@@ -336,7 +336,7 @@ print_tuwunel_purge_audit() {
     echo "portal_census_policy enabled=${TUWUNEL_PORTAL_CENSUS_PURGE_ENABLED:-true} scan_secs=${TUWUNEL_PORTAL_CENSUS_SCAN_SECS:-300} target_batch=${TUWUNEL_PORTAL_CENSUS_TARGET_BATCH_SIZE:-5} room_batch=${TUWUNEL_PORTAL_CENSUS_ROOM_BATCH_SIZE:-100} purge_batch=${TUWUNEL_PORTAL_CENSUS_PURGE_BATCH_SIZE:-20}"
     echo "compaction_policy enabled=${TUWUNEL_COMPACTION_AFTER_BACKUP_ENABLED:-true} cooldown_secs=${TUWUNEL_COMPACTION_COOLDOWN_SECS:-86400} safety_bytes=${TUWUNEL_COMPACTION_SAFETY_BYTES:-134217728} max_backup_age_secs=${TUWUNEL_COMPACTION_MAX_BACKUP_AGE_SECS:-600}"
     if [ -f /data/seed/tuwunel-compaction-status.json ]; then
-        echo "compaction_status=$(cat /data/seed/tuwunel-compaction-status.json 2>/dev/null | tr '\n' ' ' | cut -c1-2000)"
+        echo "compaction_status=$(tr '\n' ' ' < /data/seed/tuwunel-compaction-status.json 2>/dev/null | cut -c1-2000)"
     else
         echo "compaction_status=never_requested"
     fi
