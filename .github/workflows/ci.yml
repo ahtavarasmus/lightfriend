@@ -161,7 +161,9 @@ jobs:
           shellcheck -s bash enclave/verify.sh
           shellcheck -s bash enclave/enter-maintenance.sh
           shellcheck -s bash enclave/tests/backup-artifact-lock-test.sh
+          shellcheck -s bash enclave/tests/tuwunel-rocksdb-diagnostics-test.sh
           bash enclave/tests/backup-artifact-lock-test.sh
+          bash enclave/tests/tuwunel-rocksdb-diagnostics-test.sh
 
       - name: Validate Dockerfile builds
         run: |

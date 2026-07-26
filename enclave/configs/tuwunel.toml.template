@@ -15,8 +15,11 @@ admin_execute = ["debug database-files"]
 save_unredacted_events = false
 redaction_retention_seconds = 0
 
-# SIGUSR2 triggers these admin commands (used by export.sh for backups)
-admin_signal_execute = ["server backup-database"]
+# SIGUSR2 is used by export.sh. BackupEngine always runs first; the read-only
+# file inventory refreshes per-column diagnostics only after it completes.
+# Command errors are ignored above and export.sh independently verifies the
+# backup artifact, so diagnostic failure cannot masquerade as backup success.
+admin_signal_execute = ["server backup-database", "debug database-files"]
 
 address = "0.0.0.0"
 port = 8008

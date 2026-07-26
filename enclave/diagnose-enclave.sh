@@ -290,54 +290,11 @@ else
 fi
 echo ""
 
-echo "--- Tuwunel RocksDB columns from latest startup database-files report ---"
-TUWUNEL_DB_FILE_ROWS=$(
-    cat /var/log/supervisor/tuwunel.log.2 /var/log/supervisor/tuwunel.log.1 /var/log/supervisor/tuwunel.log 2>/dev/null \
-        | awk '
-            /\|[[:space:]]*lev[[:space:]]*\|[[:space:]]*sst[[:space:]]*\|[[:space:]]*keys[[:space:]]*\|/ {
-                rows = ""
-                capture = 1
-                next
-            }
-            capture && /^\|[[:space:]]*---/ { next }
-            capture && /^\|[[:space:]]*[0-9]+[[:space:]]*\|/ {
-                rows = rows $0 "\n"
-                next
-            }
-            capture { capture = 0 }
-            END { printf "%s", rows }
-        ' || true
-)
-if [ -n "$TUWUNEL_DB_FILE_ROWS" ]; then
-    printf "bytes\tentries\tdeletions\tsst_files\tcolumn\n"
-    printf '%s\n' "$TUWUNEL_DB_FILE_ROWS" \
-        | awk -F'|' '
-            NF >= 8 {
-                entries = $4
-                deletions = $5
-                bytes = $6
-                column = $7
-                gsub(/[^0-9]/, "", entries)
-                gsub(/[^0-9]/, "", deletions)
-                gsub(/[^0-9]/, "", bytes)
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", column)
-                if (column != "" && bytes != "") {
-                    total_bytes[column] += bytes
-                    total_entries[column] += entries
-                    total_deletions[column] += deletions
-                    files[column] += 1
-                }
-            }
-            END {
-                for (column in total_bytes) {
-                    printf "%d\t%d\t%d\t%d\t%s\n", total_bytes[column], total_entries[column], total_deletions[column], files[column], column
-                }
-            }
-        ' \
-        | sort -nr \
-        | head -40
+if [ -x /app/storage-health.sh ]; then
+    /app/storage-health.sh rocksdb-columns 2>&1
 else
-    echo "  unavailable; startup database-files output not found"
+    echo "--- Tuwunel RocksDB column accounting ---"
+    echo "status=unavailable reason=storage_health_script_missing"
 fi
 echo ""
 

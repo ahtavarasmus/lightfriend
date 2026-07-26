@@ -36,9 +36,64 @@ fn storage_health_json_accepts_aggregate_metrics() {
     assert_eq!(metrics.filesystems.root.use_pct, 75);
     assert!(metrics.reserve.present);
     assert_eq!(metrics.tuwunel.total_bytes, 275_139_319_u64);
+    assert_eq!(metrics.tuwunel.allocated_bytes, 0);
+    assert!(metrics.tuwunel.rocksdb_columns.columns.is_empty());
 
     let response = serde_json::to_value(metrics).expect("serialize storage metrics");
     assert!(response["reserve"].get("path").is_none());
+}
+
+#[test]
+fn storage_health_json_accepts_detailed_rocksdb_metrics() {
+    let input = br#"{
+        "timestamp":"2026-07-26T08:10:03Z",
+        "filesystems":{
+            "root":{"size_kib":3250585,"used_kib":2645401,"avail_kib":605184,"use_pct":81},
+            "tmp":{"size_kib":4096000,"used_kib":2400,"avail_kib":4093600,"use_pct":1}
+        },
+        "reserve":{"path":"/internal/path","present":false,"bytes":0,"projected_root_avail_kib":605184},
+        "tuwunel":{
+            "total_bytes":218452003,
+            "allocated_bytes":260046848,
+            "allocation_overhead_bytes":41594845,
+            "media":{"count":1,"bytes":40},
+            "rocksdb_sst":{"count":91,"bytes":215124408},
+            "rocksdb_archive_log":{"count":20,"bytes":1335908},
+            "rocksdb_meta_logs":{"count":24,"bytes":3327555},
+            "other":{"count":3,"bytes":52},
+            "rocksdb_columns":{
+                "status":"available",
+                "actual_sst_bytes":215124408,
+                "mapped_sst_bytes":215124408,
+                "unmapped_sst_bytes":0,
+                "columns":[{
+                    "name":"pduid_pdu",
+                    "bytes":21844971,
+                    "entries":1000,
+                    "deletions":125,
+                    "estimated_live_entries":875,
+                    "sst_files":1,
+                    "level0_files":0,
+                    "max_level":6
+                }]
+            }
+        },
+        "postgres":{"bytes":345670065},
+        "tuwunel_backup_engine":{"bytes":0},
+        "supervisor_logs":{"bytes":4718592}
+    }"#;
+
+    let metrics = parse_storage_health_json(input).expect("valid detailed storage metrics");
+
+    assert_eq!(metrics.tuwunel.allocated_bytes, 260_046_848);
+    assert_eq!(metrics.tuwunel.allocation_overhead_bytes, 41_594_845);
+    assert_eq!(metrics.tuwunel.rocksdb_columns.status, "available");
+    assert_eq!(metrics.tuwunel.rocksdb_columns.columns.len(), 1);
+    assert_eq!(metrics.tuwunel.rocksdb_columns.columns[0].name, "pduid_pdu");
+    assert_eq!(
+        metrics.tuwunel.rocksdb_columns.columns[0].estimated_live_entries,
+        875
+    );
 }
 
 #[test]

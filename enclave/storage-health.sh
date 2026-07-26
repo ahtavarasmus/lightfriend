@@ -14,6 +14,10 @@ HISTORY_FILE="${STORAGE_HEALTH_HISTORY_FILE:-/tmp/storage-health-history.log}"
 MAX_HISTORY_BYTES="${STORAGE_MAX_HISTORY_BYTES:-1048576}"
 SNAPSHOT_FILE="${STORAGE_HEALTH_SNAPSHOT_FILE:-/tmp/storage-health-snapshot.tsv}"
 TUWUNEL_BUCKET_SNAPSHOT_FILE="${STORAGE_HEALTH_TUWUNEL_BUCKET_SNAPSHOT_FILE:-/tmp/tuwunel-storage-bucket-snapshot.tsv}"
+TUWUNEL_COLUMN_SNAPSHOT_FILE="${STORAGE_HEALTH_TUWUNEL_COLUMN_SNAPSHOT_FILE:-/tmp/tuwunel-rocksdb-column-snapshot.tsv}"
+TUWUNEL_COLUMN_GROWTH_REPORT_MIN_KB="${STORAGE_HEALTH_TUWUNEL_COLUMN_GROWTH_REPORT_MIN_KB:-256}"
+TUWUNEL_LOG_DIR="${TUWUNEL_LOG_DIR:-/var/log/supervisor}"
+TUWUNEL_DATA_DIR="${TUWUNEL_DATA_DIR:-/var/lib/tuwunel}"
 TOP_DIR_LINES="${STORAGE_HEALTH_TOP_DIR_LINES:-80}"
 TOP_FILE_LINES="${STORAGE_HEALTH_TOP_FILE_LINES:-40}"
 HOT_PATH_DIR_LINES="${STORAGE_HEALTH_HOT_PATH_DIR_LINES:-60}"
@@ -692,6 +696,229 @@ print_tuwunel_bucket_growth_since_last_snapshot() {
     mv "$tmp_snapshot" "$TUWUNEL_BUCKET_SNAPSHOT_FILE" 2>/dev/null || rm -f "$tmp_snapshot"
 }
 
+tuwunel_database_file_rows() {
+    cat \
+        "$TUWUNEL_LOG_DIR/tuwunel.log.2" \
+        "$TUWUNEL_LOG_DIR/tuwunel.log.1" \
+        "$TUWUNEL_LOG_DIR/tuwunel.log" \
+        2>/dev/null \
+        | awk '
+            function commit_report() {
+                if (candidate != "") {
+                    latest = candidate
+                }
+                candidate = ""
+            }
+            {
+                pipe = index($0, "|")
+                line = pipe > 0 ? substr($0, pipe) : ""
+            }
+            line ~ /^\|[[:space:]]*lev[[:space:]]*\|[[:space:]]*sst[[:space:]]*\|[[:space:]]*keys[[:space:]]*\|[[:space:]]*dels[[:space:]]*\|[[:space:]]*size[[:space:]]*\|[[:space:]]*column[[:space:]]*\|/ {
+                commit_report()
+                capture = 1
+                next
+            }
+            capture && line ~ /^\|[[:space:]]*---/ {
+                next
+            }
+            capture && line ~ /^\|[[:space:]]*[0-9]+[[:space:]]*\|/ {
+                candidate = candidate line "\n"
+                next
+            }
+            capture {
+                commit_report()
+                capture = 0
+            }
+            END {
+                commit_report()
+                printf "%s", latest
+            }
+        ' || true
+}
+
+tuwunel_rocksdb_columns_tsv() {
+    tuwunel_database_file_rows \
+        | awk -F '|' '
+            NF >= 8 {
+                level = $2
+                entries = $4
+                deletions = $5
+                bytes = $6
+                column = $7
+                gsub(/[^0-9]/, "", level)
+                gsub(/[^0-9]/, "", entries)
+                gsub(/[^0-9]/, "", deletions)
+                gsub(/[^0-9]/, "", bytes)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", column)
+                if (column == "" || bytes == "") {
+                    next
+                }
+                total_bytes[column] += bytes
+                total_entries[column] += entries
+                total_deletions[column] += deletions
+                files[column] += 1
+                if ((level + 0) == 0) {
+                    level_zero_files[column] += 1
+                }
+                if (!(column in max_level) || (level + 0) > max_level[column]) {
+                    max_level[column] = level + 0
+                }
+            }
+            END {
+                for (column in total_bytes) {
+                    estimated_live = total_entries[column] - total_deletions[column]
+                    if (estimated_live < 0) {
+                        estimated_live = 0
+                    }
+                    printf "%.0f\t%.0f\t%.0f\t%.0f\t%d\t%d\t%d\t%s\n",
+                        total_bytes[column],
+                        total_entries[column],
+                        total_deletions[column],
+                        estimated_live,
+                        files[column],
+                        level_zero_files[column] + 0,
+                        max_level[column] + 0,
+                        column
+                }
+            }
+        ' \
+        | sort -t $'\t' -k1,1nr
+}
+
+print_tuwunel_column_growth_since_last_snapshot() {
+    local current_file
+    current_file="${TUWUNEL_COLUMN_SNAPSHOT_FILE}.$$"
+    tuwunel_rocksdb_columns_tsv > "$current_file" 2>/dev/null || true
+
+    echo "--- Tuwunel RocksDB column growth since previous report (>= ${TUWUNEL_COLUMN_GROWTH_REPORT_MIN_KB} KiB) ---"
+    if [ -s "$TUWUNEL_COLUMN_SNAPSHOT_FILE" ] && [ -s "$current_file" ]; then
+        awk -F '\t' -v min_kb="$TUWUNEL_COLUMN_GROWTH_REPORT_MIN_KB" '
+            FNR == NR {
+                previous_bytes[$8] = $1
+                previous_entries[$8] = $2
+                previous_deletions[$8] = $3
+                next
+            }
+            {
+                column = $8
+                old_bytes = column in previous_bytes ? previous_bytes[column] : 0
+                old_entries = column in previous_entries ? previous_entries[column] : 0
+                old_deletions = column in previous_deletions ? previous_deletions[column] : 0
+                delta_bytes = $1 - old_bytes
+                delta_kb = int(delta_bytes / 1024)
+                if (delta_kb >= min_kb || delta_kb <= -min_kb) {
+                    printf "%+10d KiB entries_delta=%+.0f deletions_delta=%+.0f now_bytes=%.0f was_bytes=%.0f column=%s\n",
+                        delta_kb,
+                        $2 - old_entries,
+                        $3 - old_deletions,
+                        $1,
+                        old_bytes,
+                        column
+                }
+            }
+        ' "$TUWUNEL_COLUMN_SNAPSHOT_FILE" "$current_file" | sort -nr || true
+    elif [ -s "$current_file" ]; then
+        echo "no previous RocksDB column snapshot"
+    else
+        echo "unavailable; no complete database-files report found in Tuwunel logs"
+    fi
+
+    if [ -s "$current_file" ]; then
+        mv "$current_file" "$TUWUNEL_COLUMN_SNAPSHOT_FILE" 2>/dev/null || rm -f "$current_file"
+    else
+        rm -f "$current_file"
+    fi
+}
+
+print_tuwunel_rocksdb_columns() {
+    local columns_file mapped_sst_bytes actual_sst_bytes unmapped_sst_bytes
+    local apparent_bytes allocated_bytes allocation_overhead_bytes coverage_milli_pct
+    columns_file="/tmp/tuwunel-rocksdb-columns.$$"
+    tuwunel_rocksdb_columns_tsv > "$columns_file" 2>/dev/null || true
+
+    apparent_bytes=$(du_bytes "$TUWUNEL_DATA_DIR")
+    allocated_bytes=$(du_allocated_bytes "$TUWUNEL_DATA_DIR")
+    allocation_overhead_bytes=$((allocated_bytes - apparent_bytes))
+    actual_sst_bytes=$(sum_sst_file_sizes "$TUWUNEL_DATA_DIR")
+    actual_sst_bytes=${actual_sst_bytes:-0}
+
+    echo "--- Tuwunel RocksDB column accounting ---"
+    printf "tuwunel_apparent_bytes=%d tuwunel_allocated_bytes=%d allocation_overhead_bytes=%d\n" \
+        "$apparent_bytes" "$allocated_bytes" "$allocation_overhead_bytes"
+
+    if [ ! -s "$columns_file" ]; then
+        printf "status=unavailable actual_sst_bytes=%d reason=no_complete_database_files_report\n" "$actual_sst_bytes"
+        echo "Run source: admin_execute/admin_signal_execute debug database-files"
+        rm -f "$columns_file"
+        return 0
+    fi
+
+    mapped_sst_bytes=$(awk -F '\t' '{sum += $1} END {printf "%.0f", sum + 0}' "$columns_file")
+    mapped_sst_bytes=${mapped_sst_bytes:-0}
+    unmapped_sst_bytes=$((actual_sst_bytes - mapped_sst_bytes))
+    if [ "$actual_sst_bytes" -gt 0 ]; then
+        coverage_milli_pct=$((mapped_sst_bytes * 100000 / actual_sst_bytes))
+    else
+        coverage_milli_pct=0
+    fi
+    printf "status=available actual_sst_bytes=%d mapped_sst_bytes=%d unmapped_sst_bytes=%d coverage_pct=%d.%03d\n" \
+        "$actual_sst_bytes" \
+        "$mapped_sst_bytes" \
+        "$unmapped_sst_bytes" \
+        $((coverage_milli_pct / 1000)) \
+        $((coverage_milli_pct % 1000))
+    echo -e "bytes\tentries\tdeletions\testimated_live_entries\tsst_files\tlevel0_files\tmax_level\tcolumn"
+    cat "$columns_file"
+    rm -f "$columns_file"
+}
+
+tuwunel_rocksdb_columns_json() {
+    local columns_file actual_sst_bytes mapped_sst_bytes unmapped_sst_bytes columns_json status
+    columns_file="/tmp/tuwunel-rocksdb-columns-json.$$"
+    tuwunel_rocksdb_columns_tsv > "$columns_file" 2>/dev/null || true
+    actual_sst_bytes=$(sum_sst_file_sizes "$TUWUNEL_DATA_DIR")
+    actual_sst_bytes=${actual_sst_bytes:-0}
+
+    if [ -s "$columns_file" ]; then
+        status="available"
+        mapped_sst_bytes=$(awk -F '\t' '{sum += $1} END {printf "%.0f", sum + 0}' "$columns_file")
+        columns_json=$(awk -F '\t' '
+            function escape_json(value) {
+                gsub(/\\/, "\\\\", value)
+                gsub(/"/, "\\\"", value)
+                return value
+            }
+            BEGIN {
+                printf "["
+            }
+            {
+                if (count++ > 0) {
+                    printf ","
+                }
+                printf "{\"name\":\"%s\",\"bytes\":%.0f,\"entries\":%.0f,\"deletions\":%.0f,\"estimated_live_entries\":%.0f,\"sst_files\":%d,\"level0_files\":%d,\"max_level\":%d}",
+                    escape_json($8), $1, $2, $3, $4, $5, $6, $7
+            }
+            END {
+                printf "]"
+            }
+        ' "$columns_file")
+    else
+        status="unavailable"
+        mapped_sst_bytes=0
+        columns_json="[]"
+    fi
+    mapped_sst_bytes=${mapped_sst_bytes:-0}
+    unmapped_sst_bytes=$((actual_sst_bytes - mapped_sst_bytes))
+    rm -f "$columns_file"
+
+    printf '{"status":"%s","actual_sst_bytes":%d,"mapped_sst_bytes":%d,"unmapped_sst_bytes":%d,"columns":%s}' \
+        "$status" \
+        "$actual_sst_bytes" \
+        "$mapped_sst_bytes" \
+        "$unmapped_sst_bytes" \
+        "$columns_json"
+}
+
 print_tuwunel_detailed_breakdown() {
     echo "--- tuwunel detailed storage ---"
     if [ ! -d /var/lib/tuwunel ]; then
@@ -1224,6 +1451,44 @@ du_bytes() {
     echo "${bytes:-0}"
 }
 
+du_allocated_bytes() {
+    local path="$1"
+    if [ ! -e "$path" ]; then
+        echo 0
+        return 0
+    fi
+
+    local bytes
+    bytes=$(du -s --block-size=1 "$path" 2>/dev/null | awk 'NR == 1 {print $1 + 0; seen = 1} END {if (!seen) print ""}')
+    if [ -n "$bytes" ]; then
+        echo "$bytes"
+        return 0
+    fi
+
+    bytes=$(du -sk "$path" 2>/dev/null | awk 'NR == 1 {print ($1 + 0) * 1024; seen = 1} END {if (!seen) print 0}')
+    echo "${bytes:-0}"
+}
+
+sum_sst_file_sizes() {
+    local path="$1"
+    if [ ! -d "$path" ]; then
+        echo 0
+        return 0
+    fi
+
+    local bytes
+    bytes=$(find "$path" -xdev -type f -name '*.sst' -exec stat -c%s {} + 2>/dev/null \
+        | awk '{sum += $1} END {if (NR > 0) printf "%.0f", sum}')
+    if [ -n "$bytes" ]; then
+        echo "$bytes"
+        return 0
+    fi
+
+    bytes=$(find "$path" -xdev -type f -name '*.sst' -exec stat -f%z {} + 2>/dev/null \
+        | awk '{sum += $1} END {printf "%.0f", sum + 0}')
+    echo "${bytes:-0}"
+}
+
 df_metrics() {
     local path="$1"
     df -Pk "$path" 2>/dev/null | awk '
@@ -1478,7 +1743,8 @@ print_json_metrics() {
     local timestamp reserve_file reserve_file_json reserve_present
     local root_size root_used root_avail root_pct tmp_size tmp_used tmp_avail tmp_pct
     local reserve_bytes reserve_kib projected_root_avail_kib
-    local tuwunel_total_bytes postgres_bytes tuwunel_backup_bytes supervisor_logs_bytes
+    local tuwunel_total_bytes tuwunel_allocated_bytes tuwunel_allocation_overhead_bytes
+    local tuwunel_rocksdb_columns postgres_bytes tuwunel_backup_bytes supervisor_logs_bytes
 
     timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     reserve_file="$ROOTFS_RESERVE_FILE"
@@ -1498,6 +1764,9 @@ print_json_metrics() {
     projected_root_avail_kib=$((root_avail + reserve_kib))
 
     tuwunel_total_bytes=$(du_bytes /var/lib/tuwunel)
+    tuwunel_allocated_bytes=$(du_allocated_bytes /var/lib/tuwunel)
+    tuwunel_allocation_overhead_bytes=$((tuwunel_allocated_bytes - tuwunel_total_bytes))
+    tuwunel_rocksdb_columns=$(tuwunel_rocksdb_columns_json)
     postgres_bytes=$(du_bytes /var/lib/postgresql)
     tuwunel_backup_bytes=$(du_bytes /var/lib/tuwunel-backup)
     supervisor_logs_bytes=$(du_bytes /var/log/supervisor)
@@ -1515,7 +1784,7 @@ print_json_metrics() {
     eval "$(tuwunel_bucket_assignments)"
 
     cat <<EOF
-{"timestamp":"${timestamp}","filesystems":{"root":{"size_kib":${root_size},"used_kib":${root_used},"avail_kib":${root_avail},"use_pct":${root_pct}},"tmp":{"size_kib":${tmp_size},"used_kib":${tmp_used},"avail_kib":${tmp_avail},"use_pct":${tmp_pct}}},"reserve":{"path":"${reserve_file_json}","present":${reserve_present},"bytes":${reserve_bytes},"projected_root_avail_kib":${projected_root_avail_kib}},"tuwunel":{"total_bytes":${tuwunel_total_bytes},"media":{"count":${TUWUNEL_MEDIA_COUNT},"bytes":${TUWUNEL_MEDIA_BYTES}},"rocksdb_sst":{"count":${TUWUNEL_ROCKSDB_SST_COUNT},"bytes":${TUWUNEL_ROCKSDB_SST_BYTES}},"rocksdb_archive_log":{"count":${TUWUNEL_ROCKSDB_ARCHIVE_LOG_COUNT},"bytes":${TUWUNEL_ROCKSDB_ARCHIVE_LOG_BYTES}},"rocksdb_meta_logs":{"count":${TUWUNEL_ROCKSDB_META_LOGS_COUNT},"bytes":${TUWUNEL_ROCKSDB_META_LOGS_BYTES}},"other":{"count":${TUWUNEL_OTHER_COUNT},"bytes":${TUWUNEL_OTHER_BYTES}}},"postgres":{"bytes":${postgres_bytes}},"tuwunel_backup_engine":{"bytes":${tuwunel_backup_bytes}},"supervisor_logs":{"bytes":${supervisor_logs_bytes}}}
+{"timestamp":"${timestamp}","filesystems":{"root":{"size_kib":${root_size},"used_kib":${root_used},"avail_kib":${root_avail},"use_pct":${root_pct}},"tmp":{"size_kib":${tmp_size},"used_kib":${tmp_used},"avail_kib":${tmp_avail},"use_pct":${tmp_pct}}},"reserve":{"path":"${reserve_file_json}","present":${reserve_present},"bytes":${reserve_bytes},"projected_root_avail_kib":${projected_root_avail_kib}},"tuwunel":{"total_bytes":${tuwunel_total_bytes},"allocated_bytes":${tuwunel_allocated_bytes},"allocation_overhead_bytes":${tuwunel_allocation_overhead_bytes},"media":{"count":${TUWUNEL_MEDIA_COUNT},"bytes":${TUWUNEL_MEDIA_BYTES}},"rocksdb_sst":{"count":${TUWUNEL_ROCKSDB_SST_COUNT},"bytes":${TUWUNEL_ROCKSDB_SST_BYTES}},"rocksdb_archive_log":{"count":${TUWUNEL_ROCKSDB_ARCHIVE_LOG_COUNT},"bytes":${TUWUNEL_ROCKSDB_ARCHIVE_LOG_BYTES}},"rocksdb_meta_logs":{"count":${TUWUNEL_ROCKSDB_META_LOGS_COUNT},"bytes":${TUWUNEL_ROCKSDB_META_LOGS_BYTES}},"other":{"count":${TUWUNEL_OTHER_COUNT},"bytes":${TUWUNEL_OTHER_BYTES}},"rocksdb_columns":${tuwunel_rocksdb_columns}},"postgres":{"bytes":${postgres_bytes}},"tuwunel_backup_engine":{"bytes":${tuwunel_backup_bytes}},"supervisor_logs":{"bytes":${supervisor_logs_bytes}}}
 EOF
 }
 
@@ -1533,6 +1802,8 @@ print_report() {
     print_hot_path_accounting
     print_deleted_open_file_accounting
     print_tuwunel_purge_audit
+    print_tuwunel_rocksdb_columns
+    print_tuwunel_column_growth_since_last_snapshot
     print_tuwunel_detailed_breakdown
     print_largest_dirs_by_filesystem
     print_largest_files_by_filesystem
@@ -1648,8 +1919,11 @@ case "${1:-report}" in
     json)
         print_json_metrics
         ;;
+    rocksdb-columns)
+        print_tuwunel_rocksdb_columns
+        ;;
     *)
-        echo "Usage: $0 [report|check|cleanup|cleanup-media|cleanup-archive-logs|cleanup-backup-artifacts|json]" >&2
+        echo "Usage: $0 [report|check|cleanup|cleanup-media|cleanup-archive-logs|cleanup-backup-artifacts|json|rocksdb-columns]" >&2
         exit 2
         ;;
 esac

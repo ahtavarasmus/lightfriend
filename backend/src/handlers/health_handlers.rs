@@ -69,11 +69,38 @@ pub struct StorageReserve {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TuwunelStorage {
     pub total_bytes: u64,
+    #[serde(default)]
+    pub allocated_bytes: u64,
+    #[serde(default)]
+    pub allocation_overhead_bytes: i64,
     pub media: StorageBucket,
     pub rocksdb_sst: StorageBucket,
     pub rocksdb_archive_log: StorageBucket,
     pub rocksdb_meta_logs: StorageBucket,
     pub other: StorageBucket,
+    #[serde(default)]
+    pub rocksdb_columns: RocksDbColumnDiagnostics,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct RocksDbColumnDiagnostics {
+    pub status: String,
+    pub actual_sst_bytes: u64,
+    pub mapped_sst_bytes: u64,
+    pub unmapped_sst_bytes: i64,
+    pub columns: Vec<RocksDbColumnMetrics>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct RocksDbColumnMetrics {
+    pub name: String,
+    pub bytes: u64,
+    pub entries: u64,
+    pub deletions: u64,
+    pub estimated_live_entries: u64,
+    pub sst_files: u64,
+    pub level0_files: u64,
+    pub max_level: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
