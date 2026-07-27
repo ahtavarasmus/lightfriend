@@ -1767,6 +1767,14 @@ async fn main() {
         .await;
     });
 
+    let state_for_tuwunel_storage_diagnostics = state.clone();
+    tokio::spawn(async move {
+        backend::utils::tuwunel_storage_diagnostics::start_tuwunel_storage_diagnostics_worker(
+            state_for_tuwunel_storage_diagnostics,
+        )
+        .await;
+    });
+
     let state_for_disconnected_bridge_cleanup = state.clone();
     tokio::spawn(async move {
         backend::utils::disconnected_bridge_cleanup::start_disconnected_bridge_cleanup_worker(

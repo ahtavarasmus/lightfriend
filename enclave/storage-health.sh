@@ -15,6 +15,7 @@ MAX_HISTORY_BYTES="${STORAGE_MAX_HISTORY_BYTES:-1048576}"
 SNAPSHOT_FILE="${STORAGE_HEALTH_SNAPSHOT_FILE:-/tmp/storage-health-snapshot.tsv}"
 TUWUNEL_BUCKET_SNAPSHOT_FILE="${STORAGE_HEALTH_TUWUNEL_BUCKET_SNAPSHOT_FILE:-/tmp/tuwunel-storage-bucket-snapshot.tsv}"
 TUWUNEL_COLUMN_SNAPSHOT_FILE="${STORAGE_HEALTH_TUWUNEL_COLUMN_SNAPSHOT_FILE:-/tmp/tuwunel-rocksdb-column-snapshot.tsv}"
+TUWUNEL_DATABASE_FILES_SNAPSHOT_FILE="${TUWUNEL_ROCKSDB_DIAGNOSTICS_SNAPSHOT_FILE:-/tmp/tuwunel-rocksdb-database-files.md}"
 TUWUNEL_COLUMN_GROWTH_REPORT_MIN_KB="${STORAGE_HEALTH_TUWUNEL_COLUMN_GROWTH_REPORT_MIN_KB:-256}"
 TUWUNEL_LOG_DIR="${TUWUNEL_LOG_DIR:-/var/log/supervisor}"
 TUWUNEL_DATA_DIR="${TUWUNEL_DATA_DIR:-/var/lib/tuwunel}"
@@ -696,12 +697,43 @@ print_tuwunel_bucket_growth_since_last_snapshot() {
     mv "$tmp_snapshot" "$TUWUNEL_BUCKET_SNAPSHOT_FILE" 2>/dev/null || rm -f "$tmp_snapshot"
 }
 
-tuwunel_database_file_rows() {
+tuwunel_database_files_source() {
+    if [ -s "$TUWUNEL_DATABASE_FILES_SNAPSHOT_FILE" ]; then
+        printf "matrix_admin_snapshot"
+    else
+        printf "supervisor_log_fallback"
+    fi
+}
+
+tuwunel_database_files_snapshot_age_seconds() {
+    local modified_at now age
+    if [ ! -s "$TUWUNEL_DATABASE_FILES_SNAPSHOT_FILE" ]; then
+        printf "%d" -1
+        return 0
+    fi
+    modified_at=$(stat -c %Y "$TUWUNEL_DATABASE_FILES_SNAPSHOT_FILE" 2>/dev/null || printf "0")
+    now=$(date +%s)
+    age=$((now - modified_at))
+    if [ "$age" -lt 0 ]; then
+        age=0
+    fi
+    printf "%d" "$age"
+}
+
+tuwunel_database_files_input() {
+    if [ -s "$TUWUNEL_DATABASE_FILES_SNAPSHOT_FILE" ]; then
+        cat "$TUWUNEL_DATABASE_FILES_SNAPSHOT_FILE"
+        return 0
+    fi
     cat \
         "$TUWUNEL_LOG_DIR/tuwunel.log.2" \
         "$TUWUNEL_LOG_DIR/tuwunel.log.1" \
         "$TUWUNEL_LOG_DIR/tuwunel.log" \
-        2>/dev/null \
+        2>/dev/null || true
+}
+
+tuwunel_database_file_rows() {
+    tuwunel_database_files_input \
         | awk '
             function commit_report() {
                 if (candidate != "") {
@@ -833,6 +865,7 @@ print_tuwunel_column_growth_since_last_snapshot() {
 print_tuwunel_rocksdb_columns() {
     local columns_file mapped_sst_bytes actual_sst_bytes unmapped_sst_bytes
     local apparent_bytes allocated_bytes allocation_overhead_bytes coverage_milli_pct
+    local report_source snapshot_age_seconds
     columns_file="/tmp/tuwunel-rocksdb-columns.$$"
     tuwunel_rocksdb_columns_tsv > "$columns_file" 2>/dev/null || true
 
@@ -841,14 +874,18 @@ print_tuwunel_rocksdb_columns() {
     allocation_overhead_bytes=$((allocated_bytes - apparent_bytes))
     actual_sst_bytes=$(sum_sst_file_sizes "$TUWUNEL_DATA_DIR")
     actual_sst_bytes=${actual_sst_bytes:-0}
+    report_source=$(tuwunel_database_files_source)
+    snapshot_age_seconds=$(tuwunel_database_files_snapshot_age_seconds)
 
     echo "--- Tuwunel RocksDB column accounting ---"
     printf "tuwunel_apparent_bytes=%d tuwunel_allocated_bytes=%d allocation_overhead_bytes=%d\n" \
         "$apparent_bytes" "$allocated_bytes" "$allocation_overhead_bytes"
+    printf "report_source=%s snapshot_age_seconds=%d snapshot_file=%s\n" \
+        "$report_source" "$snapshot_age_seconds" "$TUWUNEL_DATABASE_FILES_SNAPSHOT_FILE"
 
     if [ ! -s "$columns_file" ]; then
         printf "status=unavailable actual_sst_bytes=%d reason=no_complete_database_files_report\n" "$actual_sst_bytes"
-        echo "Run source: admin_execute/admin_signal_execute debug database-files"
+        echo "Refresh source: backend Matrix admin-room diagnostics worker"
         rm -f "$columns_file"
         return 0
     fi
@@ -874,10 +911,18 @@ print_tuwunel_rocksdb_columns() {
 
 tuwunel_rocksdb_columns_json() {
     local columns_file actual_sst_bytes mapped_sst_bytes unmapped_sst_bytes columns_json status
+    local report_source snapshot_age_seconds snapshot_age_json
     columns_file="/tmp/tuwunel-rocksdb-columns-json.$$"
     tuwunel_rocksdb_columns_tsv > "$columns_file" 2>/dev/null || true
     actual_sst_bytes=$(sum_sst_file_sizes "$TUWUNEL_DATA_DIR")
     actual_sst_bytes=${actual_sst_bytes:-0}
+    report_source=$(tuwunel_database_files_source)
+    snapshot_age_seconds=$(tuwunel_database_files_snapshot_age_seconds)
+    if [ "$snapshot_age_seconds" -ge 0 ]; then
+        snapshot_age_json="$snapshot_age_seconds"
+    else
+        snapshot_age_json="null"
+    fi
 
     if [ -s "$columns_file" ]; then
         status="available"
@@ -911,8 +956,10 @@ tuwunel_rocksdb_columns_json() {
     unmapped_sst_bytes=$((actual_sst_bytes - mapped_sst_bytes))
     rm -f "$columns_file"
 
-    printf '{"status":"%s","actual_sst_bytes":%d,"mapped_sst_bytes":%d,"unmapped_sst_bytes":%d,"columns":%s}' \
+    printf '{"status":"%s","source":"%s","snapshot_age_seconds":%s,"actual_sst_bytes":%d,"mapped_sst_bytes":%d,"unmapped_sst_bytes":%d,"columns":%s}' \
         "$status" \
+        "$report_source" \
+        "$snapshot_age_json" \
         "$actual_sst_bytes" \
         "$mapped_sst_bytes" \
         "$unmapped_sst_bytes" \

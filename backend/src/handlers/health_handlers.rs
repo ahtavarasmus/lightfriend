@@ -85,6 +85,10 @@ pub struct TuwunelStorage {
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct RocksDbColumnDiagnostics {
     pub status: String,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub snapshot_age_seconds: Option<u64>,
     pub actual_sst_bytes: u64,
     pub mapped_sst_bytes: u64,
     pub unmapped_sst_bytes: i64,

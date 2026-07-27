@@ -70,6 +70,7 @@ pub mod utils {
     pub mod tesla_keys;
     pub mod tool_exec;
     pub mod tuwunel_event_cleanup;
+    pub mod tuwunel_storage_diagnostics;
     pub mod twilio_error_codes;
     pub mod usage;
     pub mod webauthn_config;

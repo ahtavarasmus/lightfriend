@@ -63,6 +63,8 @@ fn storage_health_json_accepts_detailed_rocksdb_metrics() {
             "other":{"count":3,"bytes":52},
             "rocksdb_columns":{
                 "status":"available",
+                "source":"matrix_admin_snapshot",
+                "snapshot_age_seconds":42,
                 "actual_sst_bytes":215124408,
                 "mapped_sst_bytes":215124408,
                 "unmapped_sst_bytes":0,
@@ -88,6 +90,14 @@ fn storage_health_json_accepts_detailed_rocksdb_metrics() {
     assert_eq!(metrics.tuwunel.allocated_bytes, 260_046_848);
     assert_eq!(metrics.tuwunel.allocation_overhead_bytes, 41_594_845);
     assert_eq!(metrics.tuwunel.rocksdb_columns.status, "available");
+    assert_eq!(
+        metrics.tuwunel.rocksdb_columns.source,
+        "matrix_admin_snapshot"
+    );
+    assert_eq!(
+        metrics.tuwunel.rocksdb_columns.snapshot_age_seconds,
+        Some(42)
+    );
     assert_eq!(metrics.tuwunel.rocksdb_columns.columns.len(), 1);
     assert_eq!(metrics.tuwunel.rocksdb_columns.columns[0].name, "pduid_pdu");
     assert_eq!(
