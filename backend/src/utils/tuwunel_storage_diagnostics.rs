@@ -458,7 +458,11 @@ async fn write_worker_status(path: &Path, status: &str) {
 impl Config {
     fn from_env() -> Self {
         Self {
-            enabled: env_bool("TUWUNEL_ROCKSDB_DIAGNOSTICS_ENABLED", false),
+            enabled: diagnostics_enabled_from_value(
+                std::env::var("TUWUNEL_ROCKSDB_DIAGNOSTICS_ENABLED")
+                    .ok()
+                    .as_deref(),
+            ),
             admin_user_id: env_i32("TUWUNEL_ADMIN_USER_ID", DEFAULT_ADMIN_USER_ID, 1),
             initial_delay: Duration::from_secs(env_u64(
                 "TUWUNEL_ROCKSDB_DIAGNOSTICS_INITIAL_DELAY_SECS",
@@ -490,15 +494,14 @@ impl Config {
     }
 }
 
-fn env_bool(name: &str, default: bool) -> bool {
-    std::env::var(name)
-        .ok()
+pub fn diagnostics_enabled_from_value(value: Option<&str>) -> bool {
+    value
         .and_then(|value| match value.trim().to_ascii_lowercase().as_str() {
             "1" | "true" | "yes" | "on" => Some(true),
             "0" | "false" | "no" | "off" => Some(false),
             _ => None,
         })
-        .unwrap_or(default)
+        .unwrap_or(true)
 }
 
 fn env_i32(name: &str, default: i32, minimum: i32) -> i32 {

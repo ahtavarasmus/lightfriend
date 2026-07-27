@@ -1,4 +1,6 @@
-use backend::utils::tuwunel_storage_diagnostics::extract_correlated_database_files_report;
+use backend::utils::tuwunel_storage_diagnostics::{
+    diagnostics_enabled_from_value, extract_correlated_database_files_report,
+};
 use serde_json::{json, Value};
 
 fn reply(event_id: &str, sender: &str, timestamp: u64, target: &str, body: &str) -> Value {
@@ -128,4 +130,14 @@ fn rejects_incomplete_or_malformed_report() {
         "@conduit:localhost"
     )
     .is_none());
+}
+
+#[test]
+fn diagnostics_default_enabled_but_allow_explicit_disable() {
+    assert!(diagnostics_enabled_from_value(None));
+    assert!(diagnostics_enabled_from_value(Some("true")));
+    assert!(diagnostics_enabled_from_value(Some("1")));
+    assert!(!diagnostics_enabled_from_value(Some("false")));
+    assert!(!diagnostics_enabled_from_value(Some("0")));
+    assert!(diagnostics_enabled_from_value(Some("invalid")));
 }
