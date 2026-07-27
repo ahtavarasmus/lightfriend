@@ -16,6 +16,7 @@ SNAPSHOT_FILE="${STORAGE_HEALTH_SNAPSHOT_FILE:-/tmp/storage-health-snapshot.tsv}
 TUWUNEL_BUCKET_SNAPSHOT_FILE="${STORAGE_HEALTH_TUWUNEL_BUCKET_SNAPSHOT_FILE:-/tmp/tuwunel-storage-bucket-snapshot.tsv}"
 TUWUNEL_COLUMN_SNAPSHOT_FILE="${STORAGE_HEALTH_TUWUNEL_COLUMN_SNAPSHOT_FILE:-/tmp/tuwunel-rocksdb-column-snapshot.tsv}"
 TUWUNEL_DATABASE_FILES_SNAPSHOT_FILE="${TUWUNEL_ROCKSDB_DIAGNOSTICS_SNAPSHOT_FILE:-/tmp/tuwunel-rocksdb-database-files.md}"
+TUWUNEL_DATABASE_FILES_STATUS_FILE="${TUWUNEL_ROCKSDB_DIAGNOSTICS_STATUS_FILE:-/tmp/tuwunel-rocksdb-diagnostics-status.txt}"
 TUWUNEL_COLUMN_GROWTH_REPORT_MIN_KB="${STORAGE_HEALTH_TUWUNEL_COLUMN_GROWTH_REPORT_MIN_KB:-256}"
 TUWUNEL_LOG_DIR="${TUWUNEL_LOG_DIR:-/var/log/supervisor}"
 TUWUNEL_DATA_DIR="${TUWUNEL_DATA_DIR:-/var/lib/tuwunel}"
@@ -882,6 +883,13 @@ print_tuwunel_rocksdb_columns() {
         "$apparent_bytes" "$allocated_bytes" "$allocation_overhead_bytes"
     printf "report_source=%s snapshot_age_seconds=%d snapshot_file=%s\n" \
         "$report_source" "$snapshot_age_seconds" "$TUWUNEL_DATABASE_FILES_SNAPSHOT_FILE"
+    if [ -s "$TUWUNEL_DATABASE_FILES_STATUS_FILE" ]; then
+        printf "worker_status_file=%s " "$TUWUNEL_DATABASE_FILES_STATUS_FILE"
+        tr '\r\n' '  ' < "$TUWUNEL_DATABASE_FILES_STATUS_FILE"
+        printf "\n"
+    else
+        printf "worker_status_file=%s status=missing\n" "$TUWUNEL_DATABASE_FILES_STATUS_FILE"
+    fi
 
     if [ ! -s "$columns_file" ]; then
         printf "status=unavailable actual_sst_bytes=%d reason=no_complete_database_files_report\n" "$actual_sst_bytes"

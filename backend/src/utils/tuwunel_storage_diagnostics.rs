@@ -1,7 +1,7 @@
 use crate::AppState;
 use anyhow::{anyhow, Context, Result};
 use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
-use matrix_sdk::ruma::{OwnedRoomAliasId, UInt};
+use matrix_sdk::ruma::{EventId, OwnedRoomAliasId, UInt};
 use matrix_sdk::Room;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -17,6 +17,7 @@ const DEFAULT_REFRESH_SECS: u64 = 300;
 const DEFAULT_RESPONSE_TIMEOUT_SECS: u64 = 60;
 const DEFAULT_MAX_HISTORY_PAGES: usize = 50;
 const DEFAULT_SNAPSHOT_FILE: &str = "/tmp/tuwunel-rocksdb-database-files.md";
+const DEFAULT_STATUS_FILE: &str = "/tmp/tuwunel-rocksdb-diagnostics-status.txt";
 const MESSAGE_PAGE_SIZE: u64 = 100;
 const RESPONSE_SETTLE_TIME: Duration = Duration::from_secs(2);
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -31,6 +32,7 @@ struct Config {
     response_timeout: Duration,
     max_history_pages: usize,
     snapshot_file: PathBuf,
+    status_file: PathBuf,
 }
 
 #[derive(Debug)]
@@ -64,12 +66,20 @@ pub async fn start_tuwunel_storage_diagnostics_worker(state: Arc<AppState>) {
         response_timeout_secs = config.response_timeout.as_secs(),
         max_history_pages = config.max_history_pages,
         snapshot_file = %config.snapshot_file.display(),
+        status_file = %config.status_file.display(),
         "Tuwunel RocksDB diagnostics worker enabled"
     );
+    write_worker_status(&config.status_file, "status=waiting_for_initial_refresh").await;
     tokio::time::sleep(config.initial_delay).await;
 
     loop {
         if let Err(error) = refresh_snapshot(&state, &config).await {
+            let error_text = error.to_string().replace(['\r', '\n'], " ");
+            write_worker_status(
+                &config.status_file,
+                &format!("status=error error={error_text}"),
+            )
+            .await;
             tracing::warn!(
                 error = %error,
                 snapshot_file = %config.snapshot_file.display(),
@@ -103,13 +113,22 @@ async fn refresh_snapshot(state: &Arc<AppState>, config: &Config) -> Result<()> 
         .context("could not send Tuwunel database-files command")?;
     let report = await_database_files_report(
         &room,
-        sent.event_id.as_str(),
+        &sent.event_id,
         &server_user,
         config.response_timeout,
         config.max_history_pages,
     )
     .await?;
     write_snapshot_atomically(&config.snapshot_file, &report).await?;
+    write_worker_status(
+        &config.status_file,
+        &format!(
+            "status=success command_event_id={} report_bytes={}",
+            sent.event_id,
+            report.len()
+        ),
+    )
+    .await;
 
     tracing::info!(
         room_id = %resolved.room_id,
@@ -123,7 +142,7 @@ async fn refresh_snapshot(state: &Arc<AppState>, config: &Config) -> Result<()> 
 
 async fn await_database_files_report(
     room: &Room,
-    command_event_id: &str,
+    command_event_id: &EventId,
     server_user: &str,
     response_timeout: Duration,
     max_history_pages: usize,
@@ -134,7 +153,7 @@ async fn await_database_files_report(
     let mut last_scan = ResponseScan::default();
 
     while Instant::now() < deadline {
-        let scan = scan_response_history(
+        let scan = scan_response_context(
             room,
             command_event_id,
             server_user,
@@ -143,9 +162,11 @@ async fn await_database_files_report(
         )
         .await?;
 
-        if let Some(report) =
-            extract_correlated_database_files_report(&scan.events, command_event_id, server_user)
-        {
+        if let Some(report) = extract_correlated_database_files_report(
+            &scan.events,
+            command_event_id.as_str(),
+            server_user,
+        ) {
             if candidate.as_ref() != Some(&report) {
                 candidate = Some(report);
                 candidate_seen_at = Some(Instant::now());
@@ -173,25 +194,58 @@ async fn await_database_files_report(
     })
 }
 
-async fn scan_response_history(
+async fn scan_response_context(
     room: &Room,
-    command_event_id: &str,
+    command_event_id: &EventId,
     server_user: &str,
     max_history_pages: usize,
     deadline: Instant,
 ) -> Result<ResponseScan> {
     let mut scan = ResponseScan::default();
-    let mut from = None;
     let mut seen_tokens = HashSet::new();
 
-    for _ in 0..max_history_pages {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return Ok(scan);
+    }
+
+    let context_size = UInt::new(MESSAGE_PAGE_SIZE).expect("valid Matrix context size");
+    let context = tokio::time::timeout(
+        REQUEST_TIMEOUT.min(remaining),
+        room.event_with_context(command_event_id, false, context_size, None),
+    )
+    .await
+    .map_err(|_| anyhow!("Tuwunel admin room event context request timed out"))?
+    .context("could not read Tuwunel admin command event context")?;
+    scan.pages_scanned += 1;
+
+    for timeline_event in context.event.into_iter().chain(context.events_after) {
+        let Ok(event) = timeline_event.raw().deserialize_as::<Value>() else {
+            continue;
+        };
+        scan.events_scanned += 1;
+        scan.command_seen |=
+            event.get("event_id").and_then(Value::as_str) == Some(command_event_id.as_str());
+        scan.server_replies_seen += usize::from(parse_reply_event(&event, server_user).is_some());
+        scan.events.push(event);
+    }
+
+    let mut from = context.next_batch_token;
+    if let Some(token) = &from {
+        seen_tokens.insert(token.clone());
+    }
+
+    for _ in 1..max_history_pages {
+        let Some(current_token) = from.take() else {
+            break;
+        };
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             break;
         }
 
-        let mut options = matrix_sdk::room::MessagesOptions::backward();
-        options.from = from.clone();
+        let mut options = matrix_sdk::room::MessagesOptions::forward();
+        options.from = Some(current_token);
         options.limit = UInt::new(MESSAGE_PAGE_SIZE).expect("valid Matrix message page size");
         let messages = tokio::time::timeout(REQUEST_TIMEOUT.min(remaining), room.messages(options))
             .await
@@ -205,13 +259,13 @@ async fn scan_response_history(
             };
             scan.events_scanned += 1;
             scan.command_seen |=
-                event.get("event_id").and_then(Value::as_str) == Some(command_event_id);
+                event.get("event_id").and_then(Value::as_str) == Some(command_event_id.as_str());
             scan.server_replies_seen +=
                 usize::from(parse_reply_event(&event, server_user).is_some());
             scan.events.push(event);
         }
 
-        if scan.command_seen || messages.chunk.is_empty() {
+        if messages.chunk.is_empty() {
             break;
         }
         let Some(next_token) = messages.end else {
@@ -388,6 +442,19 @@ async fn write_snapshot_atomically(path: &Path, report: &str) -> Result<()> {
     Ok(())
 }
 
+async fn write_worker_status(path: &Path, status: &str) {
+    let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    if let Err(error) =
+        write_snapshot_atomically(path, &format!("timestamp={timestamp} {status}\n")).await
+    {
+        tracing::warn!(
+            error = %error,
+            status_file = %path.display(),
+            "Could not persist Tuwunel RocksDB diagnostics worker status"
+        );
+    }
+}
+
 impl Config {
     fn from_env() -> Self {
         Self {
@@ -416,6 +483,9 @@ impl Config {
             snapshot_file: std::env::var("TUWUNEL_ROCKSDB_DIAGNOSTICS_SNAPSHOT_FILE")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| PathBuf::from(DEFAULT_SNAPSHOT_FILE)),
+            status_file: std::env::var("TUWUNEL_ROCKSDB_DIAGNOSTICS_STATUS_FILE")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from(DEFAULT_STATUS_FILE)),
         }
     }
 }
