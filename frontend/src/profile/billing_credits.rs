@@ -44,8 +44,7 @@ fn format_reset_date(value: &str) -> String {
         return value.to_string();
     }
     let months = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
-        "Dec",
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
     format!(
         "{} {}",
@@ -709,12 +708,12 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                 }
 
                 // Section A: Plan + Credits Summary
-                <div class="usage-projection-card" style="margin-bottom: 16px;">
+                <div class="usage-projection-card billing-summary-card" style="margin-bottom: 16px;">
                     <div class="usage-header">
                         <h3>
                             {
                                 if has_plan {
-                                    format!("{} Plan", plan_name)
+                                    format!("{} plan", plan_name)
                                 } else {
                                     "No active plan".to_string()
                                 }
@@ -725,14 +724,14 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                     {
                         if uses_own_twilio {
                             html! {
-                                <div style="color: #B3D1FF; font-size: 0.95rem;">
-                                    {"Own Twilio enabled - you pay Twilio directly for phone usage"}
+                                <div class="billing-summary-note">
+                                    {"Own Twilio is enabled. You pay Twilio directly for phone usage."}
                                 </div>
                             }
                         } else if has_plan && uses_metronome {
                             html! {
                                 <>
-                                    <div style="color: #4ade80; font-size: 1.1rem; font-weight: 600; margin-bottom: 6px;">
+                                    <div class="billing-primary-value">
                                         {
                                             overage_status
                                                 .as_ref()
@@ -741,7 +740,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                 .unwrap_or_else(|| "$25 monthly included-usage allowance".to_string())
                                         }
                                     </div>
-                                    <div style="color: #888; font-size: 0.85rem;">
+                                    <div class="billing-muted">
                                         {
                                             overage_status
                                                 .as_ref()
@@ -755,16 +754,16 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                         } else if has_plan {
                             html! {
                                 <>
-                                    <div style="display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 12px;">
-                                        <div>
-                                            <div style="color: #888; font-size: 0.8rem; margin-bottom: 4px;">{"Included usage this month"}</div>
-                                            <div style="color: #4ade80; font-size: 1.4rem; font-weight: 600;">
+                                    <div class="billing-stats">
+                                        <div class="billing-stat">
+                                            <div class="billing-stat-label">{"Included usage this month"}</div>
+                                            <div class="billing-stat-value">
                                                 {format!("${:.2}", user_profile.credits_left)}
                                             </div>
                                         </div>
-                                        <div>
-                                            <div style="color: #888; font-size: 0.8rem; margin-bottom: 4px;">{"Overage credits"}</div>
-                                            <div style="color: #7EB2FF; font-size: 1.4rem; font-weight: 600;">
+                                        <div class="billing-stat">
+                                            <div class="billing-stat-label">{"Overage credits"}</div>
+                                            <div class="billing-stat-value">
                                                 {format!("${:.2}", one_time_credits)}
                                             </div>
                                         </div>
@@ -776,9 +775,9 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                             let formatted_date = reset_date.format("%B %d, %Y").to_string();
                                             let days = user_profile.days_until_usage_reset.unwrap_or(0);
                                             html! {
-                                                <div style="color: #888; font-size: 0.85rem;">
+                                                <div class="billing-muted">
                                                     {"Included usage renews "}
-                                                    <span style="color: #ccc;">{formatted_date}</span>
+                                                    <span class="billing-reset-date">{formatted_date}</span>
                                                     {format!(" ({} days)", days)}
                                                 </div>
                                             }
@@ -790,7 +789,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                             }
                         } else {
                             html! {
-                                <div style="color: #888; font-size: 0.9rem;">
+                                <div class="billing-muted">
                                     {"Subscribe to a plan to start using Lightfriend."}
                                 </div>
                             }
@@ -799,15 +798,13 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                 </div>
 
                 // Section B: Recent Usage Feed
-                <div class="usage-projection-card" style="margin-bottom: 16px;">
-                    <div class="usage-header">
-                        <h3>{"Recent Usage"}</h3>
-                    </div>
+                <details class="billing-disclosure" style="margin-bottom: 16px;">
+                    <summary class="billing-disclosure-summary">{"Recent usage"}</summary>
                     {
                         if let Some(entries) = (*usage_feed).as_ref() {
                             if entries.is_empty() {
                                 html! {
-                                    <div style="color: #666; font-size: 0.9rem; padding: 8px 0;">
+                                    <div class="billing-empty">
                                         {"No usage recorded in this included-usage window."}
                                     </div>
                                 }
@@ -864,13 +861,13 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                             }
                         } else {
                             html! {
-                                <div style="color: #666; font-size: 0.9rem; padding: 8px 0;">
+                                <div class="billing-empty">
                                     {"Loading..."}
                                 </div>
                             }
                         }
                     }
-                </div>
+                </details>
 
                 if uses_metronome && has_plan && !uses_own_twilio {
                     <div class="usage-projection-card overage-billing-card" style="margin-bottom: 16px;">
@@ -935,7 +932,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                 // Legacy credits UI remains available only until the Metronome cutover flag is enabled.
                 <div class="usage-projection-card" style={format!("margin-bottom: 16px;{}{}", if uses_own_twilio { " opacity: 0.6;" } else { "" }, if uses_metronome { " display: none;" } else { "" })}>
                     <div class="usage-header">
-                        <h3>{"Overage Credits"}</h3>
+                        <h3>{"Overage credits"}</h3>
                         <span class="usage-percentage" style="font-size: 1.2rem;">{format!("${:.2}", one_time_credits)}</span>
                     </div>
                     <div style="margin-bottom: 12px; color: #888; font-size: 0.8rem;">
@@ -954,7 +951,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                             disabled=true
                                             style="opacity: 0.5; cursor: not-allowed;"
                                         >
-                                            {"Buy Credits"}
+                                            {"Buy credits"}
                                         </button>
                                     </div>
                                     <div class="tooltip" style="color: #888; font-size: 0.85rem;">
@@ -980,7 +977,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                         class="buy-credits-button"
                                         onclick={toggle_buy_credits_modal.clone()}
                                     >
-                                        {"Buy Credits"}
+                                            {"Buy credits"}
                                     </button>
                                 </>
                             }
@@ -993,7 +990,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                         title="Subscribe to enable credit purchases"
                                         disabled=true
                                     >
-                                        {"Buy Credits"}
+                                        {"Buy credits"}
                                     </button>
                                 </div>
                                 <div class="tooltip">
@@ -1769,7 +1766,383 @@ input:checked + .slider:before {
     margin-top: 8px;
 }
 
-h3 {
+/* Quiet dashboard billing theme */
+.billing-section {
+    display: flex;
+    flex-direction: column;
+    padding: 0.25rem 1rem 1rem;
+    color: #ddd;
+}
+
+.billing-section .usage-projection-card,
+.billing-section .billing-disclosure {
+    margin-bottom: 0 !important;
+    padding: 1.25rem 0;
+    border: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0;
+    background: transparent;
+}
+
+.billing-section .billing-summary-card {
+    padding-top: 0.5rem;
+    border-top: 0;
+}
+
+.billing-section .usage-header {
+    margin-bottom: 0.8rem;
+}
+
+.billing-section .usage-header h3,
+.billing-section .auto-topup-modal h3,
+.billing-section .buy-credits-modal h3,
+.billing-section .confirmation-modal h3 {
+    margin: 0;
+    color: #f1f1f1;
+    font-size: 0.92rem;
+    font-weight: 600;
+}
+
+.billing-summary-note,
+.billing-muted,
+.billing-note,
+.billing-empty,
+.billing-section .tooltip {
+    color: #818181;
+    font-size: 0.8rem;
+    line-height: 1.5;
+}
+
+.billing-primary-value {
+    margin-bottom: 0.3rem;
+    color: #f5f5f5;
+    font-size: 1.05rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.billing-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2rem;
+    margin-bottom: 0.75rem;
+}
+
+.billing-stat {
+    min-width: 140px;
+}
+
+.billing-stat-label {
+    margin-bottom: 0.25rem;
+    color: #777;
+    font-size: 0.74rem;
+}
+
+.billing-stat-value,
+.billing-section .usage-percentage {
+    color: #f5f5f5;
+    font-size: 1.45rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.billing-reset-date {
+    color: #bbb;
+}
+
+.billing-disclosure {
+    color: #ddd;
+}
+
+.billing-disclosure-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 40px;
+    color: #ddd;
+    cursor: pointer;
+    font-size: 0.88rem;
+    font-weight: 600;
+    list-style: none;
+}
+
+.billing-disclosure-summary::-webkit-details-marker {
+    display: none;
+}
+
+.billing-disclosure-summary::after {
+    content: "+";
+    color: #7eb2ff;
+    font-size: 1rem;
+    font-weight: 400;
+}
+
+.billing-disclosure[open] .billing-disclosure-summary::after {
+    content: "−";
+}
+
+.billing-disclosure-summary:focus-visible {
+    outline: 2px solid rgba(126, 178, 255, 0.7);
+    outline-offset: 3px;
+}
+
+.billing-section .usage-feed {
+    max-height: 320px;
+    margin-top: 0.6rem;
+}
+
+.billing-section .usage-feed-day {
+    margin: 0.5rem 0 0.2rem;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    color: #777;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+}
+
+.billing-section .usage-feed-entry {
+    min-height: 36px;
+    padding: 0.35rem 0;
+    border-radius: 0;
+}
+
+.billing-section .usage-feed-entry:hover {
+    background: transparent;
+}
+
+.billing-section .usage-feed-label {
+    color: #bbb;
+    font-size: 0.8rem;
+}
+
+.billing-section .usage-feed-meta {
+    gap: 0.75rem;
+}
+
+.billing-section .usage-feed-cost,
+.billing-section .usage-feed-time {
+    color: #777;
+    font-family: inherit;
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.billing-section .overage-status {
+    color: #777;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+}
+
+.billing-section .overage-status.enabled {
+    color: #78d69b;
+}
+
+.billing-section .overage-copy,
+.billing-section .overage-terms {
+    color: #818181;
+    font-size: 0.78rem;
+    line-height: 1.5;
+}
+
+.billing-section .overage-copy {
+    margin: 0 0 0.8rem;
+}
+
+.billing-section .overage-terms {
+    margin-top: 0.65rem;
+}
+
+.billing-section .overage-toggle-button,
+.billing-section .auto-topup-button,
+.billing-section .buy-credits-button,
+.billing-section .save-button,
+.billing-section .buy-now-button,
+.billing-section .confirm-button {
+    min-height: 36px;
+    margin: 0.75rem 0 0;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid rgba(126, 178, 255, 0.38);
+    border-radius: 6px;
+    background: rgba(126, 178, 255, 0.08);
+    box-shadow: none;
+    color: #a9ccff;
+    cursor: pointer;
+    font-size: 0.78rem;
+    font-weight: 600;
+    transition: background 180ms ease, border-color 180ms ease, transform 180ms ease;
+}
+
+.billing-section .overage-toggle-button:hover:not(:disabled),
+.billing-section .auto-topup-button:hover:not(:disabled),
+.billing-section .buy-credits-button:hover:not(:disabled),
+.billing-section .save-button:hover:not(:disabled),
+.billing-section .buy-now-button:hover:not(:disabled),
+.billing-section .confirm-button:hover:not(:disabled) {
+    transform: none;
+    border-color: rgba(126, 178, 255, 0.62);
+    background: rgba(126, 178, 255, 0.13);
+    box-shadow: none;
+}
+
+.billing-section .overage-toggle-button:active:not(:disabled),
+.billing-section .auto-topup-button:active:not(:disabled),
+.billing-section .buy-credits-button:active:not(:disabled),
+.billing-section .save-button:active:not(:disabled),
+.billing-section .buy-now-button:active:not(:disabled),
+.billing-section .confirm-button:active:not(:disabled) {
+    transform: scale(0.98);
+}
+
+.billing-section .overage-toggle-button.danger {
+    border-color: rgba(239, 120, 120, 0.3);
+    background: transparent;
+    color: #e9a0a0;
+}
+
+.billing-section .buy-credits-button.disabled,
+.billing-section button:disabled {
+    border-color: rgba(255, 255, 255, 0.1);
+    background: transparent;
+    color: #666;
+    cursor: not-allowed;
+    opacity: 0.65;
+}
+
+.billing-section .customer-portal-button {
+    align-self: flex-start;
+    min-height: 32px;
+    margin: 0.75rem 0 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    color: #7eb2ff;
+    cursor: pointer;
+    font-size: 0.78rem;
+    transition: color 180ms ease, transform 180ms ease;
+}
+
+.billing-section .customer-portal-button:hover {
+    transform: none;
+    color: #a8ccff;
+    text-decoration: underline;
+    text-underline-offset: 0.2rem;
+    box-shadow: none;
+}
+
+.billing-section .customer-portal-button:active {
+    transform: scale(0.98);
+}
+
+.billing-section .auto-topup-modal,
+.billing-section .buy-credits-modal,
+.billing-section .confirmation-modal {
+    width: min(340px, calc(100vw - 3rem));
+    padding: 1.1rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    background: #1d1d1d;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
+    color: #ddd;
+}
+
+.billing-section .confirmation-modal p,
+.billing-section .auto-topup-toggle span,
+.billing-section .toggle-status,
+.billing-section .current-balance span,
+.billing-section .amount-input-container label,
+.billing-section .topup-settings p {
+    color: #aaa;
+    font-size: 0.82rem;
+}
+
+.billing-section .amount-input {
+    min-height: 40px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 6px;
+    background: transparent;
+    color: #eee;
+}
+
+.billing-section .amount-input:focus {
+    border-color: rgba(126, 178, 255, 0.7);
+    outline: 2px solid rgba(126, 178, 255, 0.15);
+    box-shadow: none;
+}
+
+.billing-section .cancel-button {
+    min-height: 36px;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    background: transparent;
+    color: #aaa;
+    font-size: 0.78rem;
+    transition: background 180ms ease, transform 180ms ease;
+}
+
+.billing-section .cancel-button:hover {
+    transform: none;
+    background: rgba(255, 255, 255, 0.05);
+    box-shadow: none;
+}
+
+.billing-section .cancel-button:active {
+    transform: scale(0.98);
+}
+
+.billing-section .switch {
+    width: 42px;
+    height: 24px;
+}
+
+.billing-section .slider {
+    border-color: rgba(255, 255, 255, 0.12);
+    background: #444;
+    transition: background 180ms ease;
+}
+
+.billing-section .slider::before {
+    width: 18px;
+    height: 18px;
+    left: 2px;
+    bottom: 2px;
+    box-shadow: none;
+    transition: transform 180ms ease;
+}
+
+.billing-section input:checked + .slider {
+    background: #1e90ff;
+}
+
+.billing-section input:checked + .slider::before {
+    transform: translateX(18px);
+}
+
+.billing-section .success-message,
+.billing-section .error-message {
+    padding: 0.65rem 0.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    background: transparent;
+    color: #aaa;
+    font-size: 0.78rem;
+    text-align: left;
+}
+
+.billing-section .success-message {
+    border-color: rgba(120, 214, 155, 0.25);
+    color: #8bd9a8;
+}
+
+.billing-section .error-message {
+    border-color: rgba(239, 120, 120, 0.25);
+    color: #e9a0a0;
+}
+
+.billing-section h3 {
     margin: 0;
 }
             "#}

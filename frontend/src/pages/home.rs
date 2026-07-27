@@ -1,4 +1,5 @@
 use crate::dashboard::dashboard_view::DashboardView;
+use crate::dashboard::focused_dashboard::FocusedDashboardView;
 use crate::dashboard::settings_panel::{SettingsPanel, SettingsTab};
 use crate::pages::landing::Landing;
 use crate::profile::billing_models::UserProfile;
@@ -26,6 +27,11 @@ pub fn Home() -> Html {
     let user_verified = use_state(|| true);
     let error = use_state(|| None::<String>);
     let location = use_location().unwrap();
+    let show_legacy_dashboard = web_sys::UrlSearchParams::new_with_str(location.query_str())
+        .ok()
+        .and_then(|params| params.get("dashboard"))
+        .as_deref()
+        == Some("legacy");
     let success = use_state(|| None::<String>);
     let post_checkout_success = use_state(|| false);
     let totp_enabled = use_state(|| None::<bool>);
@@ -83,9 +89,10 @@ pub fn Home() -> Html {
         let success = success.clone();
         let post_checkout_success = post_checkout_success.clone();
         let refresh_trigger = refresh_trigger.clone();
+        let oauth_location = location.clone();
         use_effect_with_deps(
             move |_| {
-                let query = location.query_str();
+                let query = oauth_location.query_str();
                 if let Ok(params) = web_sys::UrlSearchParams::new_with_str(query) {
                     // Check for subscription success
                     if params.get("subscription").as_deref() == Some("success") {
@@ -215,7 +222,7 @@ pub fn Home() -> Html {
         let auth_status_dep = (*auth_status).clone();
         use_effect_with_deps(
             move |auth: &Option<bool>| {
-                if *auth == Some(true) {
+                if *auth == Some(true) && show_legacy_dashboard {
                     let totp_enabled = totp_enabled.clone();
                     spawn_local(async move {
                         if let Ok(resp) = Api::get("/api/totp/status").send().await {
@@ -348,7 +355,10 @@ pub fn Home() -> Html {
                         <h1 class="panel-title">{"Dashboard"}</h1>
                         // 2FA banner
                         {
-                            if *totp_enabled == Some(false) && !*banner_dismissed {
+                            if show_legacy_dashboard
+                                && *totp_enabled == Some(false)
+                                && !*banner_dismissed
+                            {
                                 html! {
                                     <div class="twofa-banner">
                                         <div class="twofa-banner-content">
@@ -388,11 +398,20 @@ pub fn Home() -> Html {
                         {
                             if let Some(profile) = (*profile_data).as_ref() {
                                 if profile.sub_tier.is_some() {
-                                    html! {
-                                        <DashboardView
-                                            user_profile={profile.clone()}
-                                            on_profile_update={on_profile_update}
-                                        />
+                                    if show_legacy_dashboard {
+                                        html! {
+                                            <DashboardView
+                                                user_profile={profile.clone()}
+                                                on_profile_update={on_profile_update}
+                                            />
+                                        }
+                                    } else {
+                                        html! {
+                                            <FocusedDashboardView
+                                                user_profile={profile.clone()}
+                                                on_profile_update={on_profile_update}
+                                            />
+                                        }
                                     }
                                 } else {
                                     // Non-subscribed user - show the pricing table directly.

@@ -101,6 +101,12 @@ const SETTINGS_STYLES: &str = r#"
     line-height: 1.5;
     margin: 0 0 1.5rem;
 }
+.settings-connection-prompt {
+    color: #ddd;
+    font-size: 1rem;
+    line-height: 1.5;
+    margin: 0 0 1.5rem;
+}
 .connections-stack {
     display: flex;
     flex-direction: column;
@@ -127,19 +133,34 @@ const SETTINGS_STYLES: &str = r#"
     margin: 0;
     padding: 0.75rem 0;
 }
-.connections-group .apps-icons-row.builtin-row {
-    padding-top: 0.5rem;
-}
-.connections-group .builtin-tools-label {
-    padding: 0;
-}
 .connections-group .app-icon {
     min-width: 40px;
     min-height: 40px;
-    transition: background 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+    transition: background 180ms ease, border-color 180ms ease, transform 180ms ease;
 }
 .connections-group .app-icon:active {
     transform: scale(0.96);
+}
+.phone-disclosure summary {
+    gap: 1rem;
+}
+.phone-disclosure .connections-disclosure-body {
+    padding-left: 0;
+    padding-right: 0;
+    padding-bottom: 0;
+}
+.connection-summary-line {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    width: 100%;
+}
+.connection-summary-status {
+    color: #888;
+    font-size: 0.76rem;
+    font-weight: 400;
+    text-align: right;
 }
 .connections-disclosure {
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -278,38 +299,49 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
         return html! {};
     }
 
+    let panel_title = match *active_tab {
+        SettingsTab::Connections => "Connections",
+        SettingsTab::Billing => "Billing",
+        SettingsTab::Account => "Settings",
+    };
+
     let tab_content = match *active_tab {
         SettingsTab::Connections => {
             if let Some(profile) = props.user_profile.as_ref() {
                 html! {
                     <div class="settings-content">
-                        <h3>{"Connections"}</h3>
-                        <p class="settings-hint">
-                            {"Choose how Lightfriend reaches you and connect the services it can use."}
-                        </p>
+                        <p class="settings-connection-prompt">{"Choose what Lightfriend can watch."}</p>
                         <div class="connections-stack">
-                            <section class="connections-group" aria-labelledby="phone-device-title">
-                                <div class="connections-group-header">
-                                    <h4 id="phone-device-title">{"Phone & device"}</h4>
-                                    <p>{"Manage calls, texts, and your Light Phone tool."}</p>
-                                </div>
-                                <PhoneDevicePanel
-                                    user_profile={profile.clone()}
-                                    on_profile_update={props.on_profile_update.clone()}
-                                />
-                            </section>
-
-                            <section class="connections-group" aria-labelledby="services-tools-title">
-                                <div class="connections-group-header">
-                                    <h4 id="services-tools-title">{"Services & tools"}</h4>
-                                    <p>{"Connect accounts and see the tools already available to Lightfriend."}</p>
-                                </div>
+                            <section class="connections-group" aria-label="Apps">
                                 <Connect
                                     user_id={profile.id}
                                     sub_tier={profile.sub_tier.clone()}
                                     phone_number={profile.phone_number.clone()}
                                     estimated_monitoring_cost={profile.estimated_monitoring_cost.clone()}
                                 />
+                            </section>
+
+                            <section class="connections-group" aria-label="Phone and device">
+                                <details class="connections-disclosure phone-disclosure">
+                                    <summary>
+                                        <span class="connection-summary-line">
+                                            <span>{"Phone & device"}</span>
+                                            <span class="connection-summary-status">
+                                                if profile.phone_number.trim().is_empty() {
+                                                    {"Not set up"}
+                                                } else {
+                                                    {format!("Connected · {}", profile.phone_number)}
+                                                }
+                                            </span>
+                                        </span>
+                                    </summary>
+                                    <div class="connections-disclosure-body">
+                                        <PhoneDevicePanel
+                                            user_profile={profile.clone()}
+                                            on_profile_update={props.on_profile_update.clone()}
+                                        />
+                                    </div>
+                                </details>
                             </section>
 
                             <section class="connections-group" aria-label="Webhooks and API">
@@ -354,7 +386,6 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
             if let Some(profile) = props.user_profile.as_ref() {
                 html! {
                     <div class="settings-content">
-                        <h3>{"Billing"}</h3>
                         <BillingPage user_profile={profile.clone()} />
                     </div>
                 }
@@ -381,7 +412,7 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
             <div class="settings-panel-overlay" onclick={overlay_click} role="dialog" aria-modal="true" aria-label="Settings">
                 <div class="settings-panel" onclick={stop_propagation}>
                 <div class="settings-header">
-                    <h2>{"Settings"}</h2>
+                    <h2>{panel_title}</h2>
                     <button
                         class="close-btn"
                         aria-label="Close settings"

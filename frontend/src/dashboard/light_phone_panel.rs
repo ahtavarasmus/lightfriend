@@ -11,11 +11,12 @@ const LIGHT_PHONE_STYLES: &str = r#"
 .light-phone-pairing {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    align-items: flex-start;
+    gap: 0.6rem;
 }
 .light-phone-copy {
-    color: #999;
-    font-size: 0.85rem;
+    color: #777;
+    font-size: 0.76rem;
     line-height: 1.5;
     margin: 0;
 }
@@ -26,18 +27,25 @@ const LIGHT_PHONE_STYLES: &str = r#"
     flex-wrap: wrap;
 }
 .light-phone-button {
-    min-height: 38px;
-    padding: 0.55rem 0.9rem;
-    border: 1px solid rgba(126, 178, 255, 0.35);
-    border-radius: 6px;
-    background: rgba(126, 178, 255, 0.14);
-    color: #b9d3ff;
+    min-height: 32px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #7eb2ff;
     cursor: pointer;
-    font-size: 0.82rem;
+    font-size: 0.78rem;
     font-weight: 500;
 }
 .light-phone-button:hover:not(:disabled) {
-    background: rgba(126, 178, 255, 0.22);
+    text-decoration: underline;
+    text-underline-offset: 0.2rem;
+}
+.light-phone-button:active:not(:disabled) {
+    transform: scale(0.98);
+}
+.light-phone-button:focus-visible {
+    outline: 2px solid rgba(126, 178, 255, 0.7);
+    outline-offset: 3px;
 }
 .light-phone-button:disabled {
     cursor: wait;
@@ -65,18 +73,11 @@ const LIGHT_PHONE_STYLES: &str = r#"
 }
 .light-phone-connected {
     color: #78d69b;
-    background: rgba(52, 168, 94, 0.08);
-    border: 1px solid rgba(52, 168, 94, 0.24);
-    border-radius: 4px;
-    padding: 0.65rem 0.75rem;
-    font-size: 0.85rem;
+    font-size: 0.78rem;
 }
 .light-phone-error {
     color: #f88;
-    background: rgba(220, 50, 50, 0.08);
-    border: 1px solid rgba(220, 50, 50, 0.2);
-    border-radius: 4px;
-    padding: 0.55rem 0.65rem;
+    padding: 0;
     font-size: 0.78rem;
 }
 "#;

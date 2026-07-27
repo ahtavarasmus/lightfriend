@@ -225,18 +225,6 @@ pub fn connect(props: &ConnectProps) -> Html {
                 html! { <YouTubeConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} /> }
             }
             "mcp" => html! { <McpConnect user_id={props.user_id} /> },
-            "perplexity" => {
-                html! { <div class="builtin-detail"><p>{"AI-powered web search for real-time information, research, and fact-checking."}</p></div> }
-            }
-            "weather" => {
-                html! { <div class="builtin-detail"><p>{"Weather updates and forecasts. Uses your location from Settings > Account."}</p></div> }
-            }
-            "photo" => {
-                html! { <div class="builtin-detail"><p>{"Send a photo to scan QR codes, translate text, or describe what you see."}</p></div> }
-            }
-            "sms_calls" => {
-                html! { <div class="builtin-detail"><p>{"Send follow-up info via SMS while on a voice call."}</p></div> }
-            }
             _ => html! {},
         }
     } else {
@@ -247,105 +235,79 @@ pub fn connect(props: &ConnectProps) -> Html {
                         // Apps
                         <div class="apps-icons-row">
                             <button
-                                class={classes!("app-icon", if *email_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "email") { "selected" } else { "" })}
+                                class={classes!("app-icon", "connectable-app", if *email_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "email") { "selected" } else { "" })}
                                 onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
                                     selected_app.set(if *selected_app == Some("email".to_string()) { None } else { Some("email".to_string()) });
                                 })}
                             >
                                 <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath fill='%234285f4' d='M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4L236.8 313.6c11.4 8.5 27 8.5 38.4 0L492.8 150.4c12.1-9.1 19.2-23.3 19.2-38.4c0-26.5-21.5-48-48-48H48zM0 176V384c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V176L294.4 339.2c-22.8 17.1-54 17.1-76.8 0L0 176z'/%3E%3C/svg%3E" alt="IMAP" width="24" height="24"/>
+                                <span class="app-icon-label">{"Email"}</span>
                             </button>
                             <button
-                                class={classes!("app-icon", if *whatsapp_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "whatsapp") { "selected" } else { "" })}
+                                class={classes!("app-icon", "connectable-app", if *whatsapp_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "whatsapp") { "selected" } else { "" })}
                                 onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
                                     selected_app.set(if *selected_app == Some("whatsapp".to_string()) { None } else { Some("whatsapp".to_string()) });
                                 })}
                             >
                                 <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp" width="24" height="24"/>
+                                <span class="app-icon-label">{"WhatsApp"}</span>
                             </button>
                             <button
-                                class={classes!("app-icon", if *telegram_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "telegram") { "selected" } else { "" })}
+                                class={classes!("app-icon", "connectable-app", if *telegram_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "telegram") { "selected" } else { "" })}
                                 onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
                                     selected_app.set(if *selected_app == Some("telegram".to_string()) { None } else { Some("telegram".to_string()) });
                                 })}
                             >
                                 <img src="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg" alt="Telegram" width="24" height="24"/>
+                                <span class="app-icon-label">{"Telegram"}</span>
                             </button>
                             <button
-                                class={classes!("app-icon", if *signal_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "signal") { "selected" } else { "" })}
+                                class={classes!("app-icon", "connectable-app", if *signal_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "signal") { "selected" } else { "" })}
                                 onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
                                     selected_app.set(if *selected_app == Some("signal".to_string()) { None } else { Some("signal".to_string()) });
                                 })}
                             >
                                 <img src="https://upload.wikimedia.org/wikipedia/commons/6/60/Signal-Logo-Ultramarine_%282024%29.svg" alt="Signal Logo" width="24" height="24"/>
-                            </button>
-                            <button
-                                class={classes!("app-icon", if *tesla_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "tesla") { "selected" } else { "" })}
-                                onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                    selected_app.set(if *selected_app == Some("tesla".to_string()) { None } else { Some("tesla".to_string()) });
-                                })}
-                            >
-                                <img src="https://upload.wikimedia.org/wikipedia/commons/b/bb/Tesla_T_symbol.svg" alt="Tesla" width="24" height="24"/>
-                            </button>
-                            <button
-                                class={classes!("app-icon", if *youtube_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "youtube") { "selected" } else { "" })}
-                                onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                    selected_app.set(if *selected_app == Some("youtube".to_string()) { None } else { Some("youtube".to_string()) });
-                                })}
-                            >
-                                <img src="https://upload.wikimedia.org/wikipedia/commons/0/09/YouTube_full-color_icon_%282017%29.svg" alt="YouTube" width="24" height="24"/>
-                            </button>
-                            <button
-                                class={classes!("app-icon", "mcp-icon", if *mcp_server_count > 0 { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "mcp") { "selected" } else { "" })}
-                                onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                    selected_app.set(if *selected_app == Some("mcp".to_string()) { None } else { Some("mcp".to_string()) });
-                                })}
-                                title="MCP Servers - Add custom tools (beta)"
-                            >
-                                <i class="fa-solid fa-plug"></i>
+                                <span class="app-icon-label">{"Signal"}</span>
                             </button>
                         </div>
+                        <details class="more-connections">
+                            <summary>{"More connections"}</summary>
+                            <div class="more-connections-body">
+                                <div class="apps-icons-row">
+                                    <button
+                                        class={classes!("app-icon", "connectable-app", if *tesla_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "tesla") { "selected" } else { "" })}
+                                        onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                            selected_app.set(if *selected_app == Some("tesla".to_string()) { None } else { Some("tesla".to_string()) });
+                                        })}
+                                    >
+                                        <img src="https://upload.wikimedia.org/wikipedia/commons/b/bb/Tesla_T_symbol.svg" alt="Tesla" width="24" height="24"/>
+                                        <span class="app-icon-label">{"Tesla"}</span>
+                                    </button>
+                                    <button
+                                        class={classes!("app-icon", "connectable-app", if *youtube_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "youtube") { "selected" } else { "" })}
+                                        onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                            selected_app.set(if *selected_app == Some("youtube".to_string()) { None } else { Some("youtube".to_string()) });
+                                        })}
+                                    >
+                                        <img src="https://upload.wikimedia.org/wikipedia/commons/0/09/YouTube_full-color_icon_%282017%29.svg" alt="YouTube" width="24" height="24"/>
+                                        <span class="app-icon-label">{"YouTube"}</span>
+                                    </button>
+                                    <button
+                                        class={classes!("app-icon", "connectable-app", "mcp-icon", if *mcp_server_count > 0 { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "mcp") { "selected" } else { "" })}
+                                        onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                            selected_app.set(if *selected_app == Some("mcp".to_string()) { None } else { Some("mcp".to_string()) });
+                                        })}
+                                        title="MCP Servers - Add custom tools (beta)"
+                                    >
+                                        <i class="fa-solid fa-plug"></i>
+                                        <span class="app-icon-label">{"MCP"}</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </details>
                         <div class="app-details">
                             { details }
-                        </div>
-                        // Built-in tools row - same style as capabilities above
-                        <div class="builtin-tools-label">{"Built-in"}</div>
-                        <div class="apps-icons-row builtin-row">
-                            <button
-                                class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "perplexity") { "selected" } else { "" })}
-                                title="Perplexity AI - AI-powered search and answers"
-                                onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                    selected_app.set(if *selected_app == Some("perplexity".to_string()) { None } else { Some("perplexity".to_string()) });
-                                })}
-                            >
-                                <img src="https://upload.wikimedia.org/wikipedia/commons/1/1d/Perplexity_AI_logo.svg" alt="Perplexity" width="24" height="24"/>
-                            </button>
-                            <button
-                                class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "weather") { "selected" } else { "" })}
-                                title="Weather - Weather updates and forecasts"
-                                onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                    selected_app.set(if *selected_app == Some("weather".to_string()) { None } else { Some("weather".to_string()) });
-                                })}
-                            >
-                                <i class="fa-solid fa-sun"></i>
-                            </button>
-                            <button
-                                class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "photo") { "selected" } else { "" })}
-                                title="Photo - QR codes and text translation"
-                                onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                    selected_app.set(if *selected_app == Some("photo".to_string()) { None } else { Some("photo".to_string()) });
-                                })}
-                            >
-                                <i class="fa-solid fa-camera"></i>
-                            </button>
-                            <button
-                                class={classes!("app-icon", "connected", "builtin-tool", if selected_app.as_ref().map_or(false, |s| s == "sms_calls") { "selected" } else { "" })}
-                                title="SMS During Calls - Send info via SMS while on voice calls"
-                                onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
-                                    selected_app.set(if *selected_app == Some("sms_calls".to_string()) { None } else { Some("sms_calls".to_string()) });
-                                })}
-                            >
-                                <i class="fa-solid fa-sms"></i>
-                            </button>
                         </div>
                         if let Some(err) = (*error).as_ref() {
                             <div class="error-message">
@@ -354,40 +316,6 @@ pub fn connect(props: &ConnectProps) -> Html {
                         }
     <style>
             {r#"
-/* Built-in tools - same row style as capabilities */
-.builtin-tools-label {
-    color: #666;
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    padding: 0 1.5rem;
-    margin: 0;
-}
-.apps-icons-row.builtin-row {
-    padding-top: 0.5rem;
-    margin-top: 0;
-}
-.app-icon.builtin-tool {
-    color: #34D399;
-    font-size: 1.5rem;
-    cursor: pointer;
-}
-.app-icon.builtin-tool.selected {
-    background: rgba(52, 211, 153, 0.25);
-    box-shadow: 0 0 12px rgba(52, 211, 153, 0.5);
-}
-.app-icon.builtin-tool img {
-    filter: brightness(0) saturate(100%) invert(68%) sepia(52%) saturate(434%) hue-rotate(106deg) brightness(96%) contrast(92%);
-}
-.builtin-detail {
-    padding: 0.75rem 1rem;
-    color: #aaa;
-    font-size: 0.85rem;
-    line-height: 1.5;
-}
-.builtin-detail p {
-    margin: 0;
-}
 .group-summary {
     margin-left: auto;
     display: flex;
@@ -568,44 +496,101 @@ pub fn connect(props: &ConnectProps) -> Html {
     display: flex;
     justify-content: flex-start;
     align-items: center;
-    gap: 1.5rem;
-    padding: 1.5rem;
-    margin: 1.5rem;
+    gap: 0.75rem;
+    padding: 0;
+    margin: 0;
     flex-wrap: wrap;
 }
 .app-icon {
     background: none;
-    border: none;
+    border: 1px solid transparent;
     cursor: pointer;
     padding: 0.5rem;
-    border-radius: 50%;
-    transition: all 0.3s ease;
+    transition: background 180ms ease, border-color 180ms ease, transform 180ms ease;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 1.5rem;
     color: #fff;
+    position: relative;
+}
+.app-icon.connectable-app {
+    flex-direction: column;
+    gap: 0.45rem;
+    min-width: 68px;
+    min-height: 64px;
+    border-radius: 10px;
+}
+.app-icon-label {
+    color: #aaa;
+    font-size: 0.68rem;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+}
+.app-icon:hover .app-icon-label,
+.app-icon.selected .app-icon-label {
+    color: #ddd;
 }
 .app-icon:hover {
-    background: rgba(30, 144, 255, 0.1);
+    background: rgba(255, 255, 255, 0.045);
 }
 .app-icon.selected {
-    background: rgba(30, 144, 255, 0.2);
-    box-shadow: 0 0 10px rgba(30, 144, 255, 0.3);
+    background: rgba(30, 144, 255, 0.08);
+    border-color: rgba(30, 144, 255, 0.75);
 }
 .app-icon.connected {
-    background: rgba(52, 211, 153, 0.2);
-    box-shadow: 0 0 10px rgba(52, 211, 153, 0.5);
+    background: transparent;
+    box-shadow: none;
+}
+.app-icon.connected::after {
+    content: "✓";
+    position: absolute;
+    top: 0.2rem;
+    right: 0.25rem;
+    color: #34D399;
+    font-size: 0.65rem;
+    font-weight: 700;
 }
 .app-icon.mcp-icon {
     color: #A78BFA;
 }
 .app-icon.mcp-icon.connected {
-    background: rgba(139, 92, 246, 0.2);
-    box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
+    background: transparent;
+    box-shadow: none;
 }
 .app-icon.mcp-icon:hover {
-    background: rgba(139, 92, 246, 0.1);
+    background: rgba(255, 255, 255, 0.045);
+}
+.more-connections {
+    margin-top: 0.75rem;
+}
+.more-connections summary {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    color: #7eb2ff;
+    cursor: pointer;
+    font-size: 0.78rem;
+    font-weight: 500;
+    list-style: none;
+}
+.more-connections summary::-webkit-details-marker {
+    display: none;
+}
+.more-connections summary::after {
+    content: "+";
+    margin-left: 0.4rem;
+}
+.more-connections[open] summary::after {
+    content: "−";
+}
+.more-connections summary:focus-visible {
+    outline: 2px solid rgba(126, 178, 255, 0.7);
+    outline-offset: 3px;
+}
+.more-connections-body {
+    padding-top: 0.65rem;
 }
 .app-details {
     width: 100%;

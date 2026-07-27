@@ -12,53 +12,59 @@ const PHONE_DEVICE_STYLES: &str = r#"
 .phone-device-panel {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    padding: 0 0.9rem 0.25rem;
 }
 .connection-card {
-    padding: 0.9rem;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.025);
+    padding: 0;
+    border: 0;
+    background: transparent;
+}
+.connection-card + .connection-card {
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 .connection-field {
-    display: flex;
-    flex-direction: column;
-    gap: 0.45rem;
+    display: grid;
+    grid-template-columns: minmax(120px, 0.6fr) minmax(180px, 1fr);
+    align-items: center;
+    gap: 0.75rem 1.25rem;
+    min-height: 64px;
+    padding: 0.8rem 0;
 }
 .connection-field + .connection-field {
-    margin-top: 0.9rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 .connection-label-row {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
+    gap: 0.5rem;
 }
 .connection-label {
     color: #ddd;
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     font-weight: 600;
-}
-.connection-description {
-    margin: 0;
-    color: #777;
-    font-size: 0.76rem;
-    line-height: 1.45;
 }
 .connection-value {
     color: #b9d3ff;
-    font-size: 0.9rem;
+    font-size: 0.82rem;
     font-variant-numeric: tabular-nums;
+    justify-self: end;
 }
 .connection-control {
     width: 100%;
+    max-width: 300px;
     min-height: 40px;
     padding: 0.55rem 0.65rem;
     border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 6px;
-    background: rgba(255, 255, 255, 0.045);
+    background: transparent;
     color: #ddd;
+    color-scheme: dark;
     font-size: 0.84rem;
+    justify-self: end;
+}
+.connection-control option {
+    background: #222;
+    color: #ddd;
 }
 .connection-control:focus {
     border-color: rgba(126, 178, 255, 0.7);
@@ -80,6 +86,7 @@ const PHONE_DEVICE_STYLES: &str = r#"
     color: #f88;
     font-size: 0.76rem;
     line-height: 1.4;
+    grid-column: 2;
 }
 .connection-spinner {
     display: inline-block;
@@ -97,9 +104,9 @@ const PHONE_DEVICE_STYLES: &str = r#"
     display: flex;
     flex-direction: column;
     gap: 0.55rem;
-    margin-top: 0.65rem;
-    padding-top: 0.75rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    grid-column: 1 / -1;
+    width: min(100%, 300px);
+    margin-left: auto;
 }
 .connection-action {
     min-height: 40px;
@@ -122,6 +129,30 @@ const PHONE_DEVICE_STYLES: &str = r#"
 .connection-action:disabled {
     cursor: wait;
     opacity: 0.55;
+}
+.light-phone-control {
+    min-width: 0;
+}
+@media (max-width: 560px) {
+    .phone-device-panel {
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+    }
+    .connection-field {
+        grid-template-columns: 1fr;
+        gap: 0.55rem;
+        padding: 0.9rem 0;
+    }
+    .connection-control,
+    .connection-value,
+    .byot-settings {
+        justify-self: stretch;
+        max-width: none;
+        margin-left: 0;
+    }
+    .connection-error {
+        grid-column: 1;
+    }
 }
 "#;
 
@@ -526,22 +557,9 @@ pub fn phone_device_panel(props: &PhoneDevicePanelProps) -> Html {
                 <div class="connection-card">
                     <div class="connection-field">
                         <div class="connection-label-row">
-                            <span class="connection-label">{"Your phone"}</span>
-                        </div>
-                        <span class="connection-value">{props.user_profile.phone_number.clone()}</span>
-                        <p class="connection-description">
-                            {"Lightfriend sends alerts and places calls to this number. Change it under Account."}
-                        </p>
-                    </div>
-
-                    <div class="connection-field">
-                        <div class="connection-label-row">
                             <span class="connection-label">{"Lightfriend number"}</span>
                             {save_status(&number_save_state)}
                         </div>
-                        <p class="connection-description">
-                            {"Texts and calls from Lightfriend come from this number."}
-                        </p>
                         {
                             if *show_number_selector {
                                 let numbers = (*available_numbers).clone();
@@ -656,12 +674,9 @@ pub fn phone_device_panel(props: &PhoneDevicePanelProps) -> Html {
 
                     <div class="connection-field">
                         <div class="connection-label-row">
-                            <span class="connection-label">{"Alert method"}</span>
+                            <span class="connection-label">{"Alerts"}</span>
                             {save_status(&notification_save_state)}
                         </div>
-                        <p class="connection-description">
-                            {"Choose how Lightfriend gets your attention for proactive alerts."}
-                        </p>
                         <select
                             class="connection-control"
                             value={(*notification_type).clone()}
@@ -681,11 +696,10 @@ pub fn phone_device_panel(props: &PhoneDevicePanelProps) -> Html {
 
                 <div class="connection-card">
                     <div class="connection-field">
-                        <span class="connection-label">{"Light Phone tool"}</span>
-                        <p class="connection-description">
-                            {"Pair the Lightfriend tool on your Light Phone with this account."}
-                        </p>
-                        <LightPhonePanel />
+                        <span class="connection-label">{"Light Phone"}</span>
+                        <div class="light-phone-control">
+                            <LightPhonePanel />
+                        </div>
                     </div>
                 </div>
             </div>

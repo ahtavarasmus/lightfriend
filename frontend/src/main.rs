@@ -1,8 +1,9 @@
+use gloo_net::http::Request;
 use log::{info, Level};
 use std::panic;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
-use web_sys::MouseEvent;
+use web_sys::{MouseEvent, RequestCredentials};
 use yew::prelude::*;
 use yew_router::prelude::*;
 
@@ -56,6 +57,7 @@ mod dashboard {
     pub mod chat_box;
     pub mod dashboard_view;
     pub mod emoji_utils;
+    pub mod focused_dashboard;
     pub mod light_phone_panel;
     pub mod media_panel;
     pub mod phone_device_panel;
@@ -403,7 +405,13 @@ pub fn nav(props: &NavProps) -> Html {
         };
     }
     html! {
-        <nav class={classes!("top-nav", (*is_scrolled).then(|| "scrolled"), is_pricing.then(|| "nav-static"), (*auth_state == AuthState::LoggedOut).then(|| "nav-landing"))}>
+        <nav class={classes!(
+            "top-nav",
+            (*is_scrolled).then(|| "scrolled"),
+            is_pricing.then(|| "nav-static"),
+            (*auth_state == AuthState::LoggedOut).then(|| "nav-landing"),
+            (*auth_state == AuthState::LoggedIn).then(|| "nav-auth")
+        )}>
             <div class="nav-content">
                 <div class="nav-left">
                     <Link<Route> to={Route::Home} classes="nav-logo">
@@ -452,14 +460,9 @@ pub fn nav(props: &NavProps) -> Html {
                                     }
                                 });
                                 html! {
-                                    <>
-                                        <Link<Route> to={Route::TrustChain} classes="nav-trust-icon">
-                                            <i class="fa-solid fa-shield-halved"></i>
-                                        </Link<Route>>
-                                        <button {onclick} class="nav-link">
-                                            {"Settings"}
-                                        </button>
-                                    </>
+                                    <button {onclick} class="nav-link nav-auth-settings">
+                                        {"Settings"}
+                                    </button>
                                 }
                             },
                             AuthState::Checking => html! {},
@@ -487,15 +490,36 @@ fn App() -> Html {
 
                     let auth_state = auth_state.clone();
                     wasm_bindgen_futures::spawn_local(async move {
-                        if let Ok(response) = Api::get("/api/auth/status").send().await {
-                            if response.ok() {
-                                auth_state.set(AuthState::LoggedIn);
-                            } else {
-                                auth_state.set(AuthState::LoggedOut);
-                            }
-                        } else {
+                        let session_is_valid = matches!(Api::get("/api/auth/status").send().await, Ok(response) if response.ok());
+
+                        if !session_is_valid {
                             auth_state.set(AuthState::LoggedOut);
+                            return;
                         }
+
+                        // Home renders the dashboard only when the profile endpoint
+                        // succeeds and its response matches UserProfile. Keep the
+                        // global navigation on the same source of truth so a stale
+                        // session can never put authenticated controls on the
+                        // public landing page.
+                        let profile_url =
+                            format!("{}/api/profile", crate::config::get_backend_url());
+                        let profile_is_usable = match Request::get(&profile_url)
+                            .credentials(RequestCredentials::Include)
+                            .send()
+                            .await
+                        {
+                            Ok(response) if response.ok() => {
+                                response.json::<UserProfile>().await.is_ok()
+                            }
+                            _ => false,
+                        };
+
+                        auth_state.set(if profile_is_usable {
+                            AuthState::LoggedIn
+                        } else {
+                            AuthState::LoggedOut
+                        });
                     });
                 }
                 || ()

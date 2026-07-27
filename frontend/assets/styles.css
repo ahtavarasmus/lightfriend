@@ -501,6 +501,33 @@ body {
     color: #fff;
 }
 
+.nav-auth .nav-link {
+    min-width: 44px;
+    min-height: 40px;
+    padding: 0.45rem 0.25rem;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: #858585;
+    font-size: 0.8rem;
+    transition: color 160ms ease, transform 160ms ease;
+}
+
+.nav-auth .nav-link:hover {
+    background: transparent;
+    color: #c7c7c7;
+    transform: none;
+}
+
+.nav-auth .nav-link:active {
+    transform: scale(0.98);
+}
+
+.nav-auth .nav-link:focus-visible {
+    outline: 2px solid rgba(126, 178, 255, 0.7);
+    outline-offset: 3px;
+}
+
 @media (max-width: 1024px) {
     .nav-trust-badges {
         display: none;

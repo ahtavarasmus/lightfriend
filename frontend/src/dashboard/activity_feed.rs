@@ -195,6 +195,8 @@ struct ActivityFeedEntry {
 pub struct ActivityFeedProps {
     #[prop_or_default]
     pub refresh_seq: u32,
+    #[prop_or(true)]
+    pub show_header: bool,
 }
 
 #[function_component(ActivityFeed)]
@@ -366,10 +368,12 @@ pub fn activity_feed(props: &ActivityFeedProps) -> Html {
         <>
             <style>{FEED_STYLES}</style>
             <div class="activity-feed">
-                <div class="activity-feed-header">{"Activity"}</div>
+                if props.show_header {
+                    <div class="activity-feed-header">{"Recent activity"}</div>
+                }
                 <div class="activity-feed-list">
                     if !*loading && entries.is_empty() {
-                        <div class="feed-empty">{"No activity yet. Events will appear here as your assistant handles messages and runs rules."}</div>
+                        <div class="feed-empty">{"Nothing to show yet. Lightfriend's decisions will appear here as it handles your messages."}</div>
                     }
                     { render_grouped_entries(&entries, now_secs, &current_expanded, &expanded_id) }
                 </div>

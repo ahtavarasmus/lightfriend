@@ -3,10 +3,9 @@ use crate::utils::api::Api;
 use crate::utils::seo::{use_seo, SeoMeta};
 use crate::Route;
 use serde::Deserialize;
-use serde_json::json;
 use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::JsCast;
-use web_sys::{HtmlInputElement, MouseEvent};
+use web_sys::MouseEvent;
 use yew::prelude::*;
 use yew_router::components::Link;
 
@@ -17,17 +16,11 @@ struct SmartphoneFreeDaysResponse {
 #[function_component(Landing)]
 pub fn landing() -> Html {
     use_seo(SeoMeta {
-        title: "Lightfriend: Free.",
-        description: "The feed cannot follow you to a dumbphone. Lightfriend keeps important WhatsApp, Telegram, Signal, and email messages reachable by SMS or call.",
+        title: "Lightfriend — Leave your smartphone, keep your people.",
+        description: "The communication layer that lets you leave your smartphone. Important WhatsApp, Telegram, Signal, and email messages reach any phone by SMS or call.",
         canonical: "https://lightfriend.ai",
         og_type: "website",
     });
-
-    // Waitlist form state
-    let waitlist_email = use_state(String::new);
-    let waitlist_loading = use_state(|| false);
-    let waitlist_success = use_state(|| false);
-    let waitlist_error = use_state(|| None::<String>);
 
     // Respect deep links like /#plans; otherwise start the landing page at top.
     {
@@ -108,9 +101,6 @@ pub fn landing() -> Html {
     // State for expanded FAQ item (-1 = none, 0+ = which one)
     let expanded_faq = use_state(|| -1i32);
 
-    // State for expanded capability card (-1 = none, 0-3 = which one)
-    let expanded_cap = use_state(|| -1i32);
-
     // FAQ data: (question, answer_html)
     let faq_data: Vec<(&str, Html)> = vec![
         (
@@ -120,27 +110,24 @@ pub fn landing() -> Html {
             },
         ),
         (
-            "How does it protect my data?",
-            html! {
-                <>
-                    <p>{"Lightfriend is designed so no one else can see your chats or personal data, including while AI processes them. All of the code is open source, and cryptographic evidence lets anyone independently verify which code is running in production."}</p>
-                    <p>{"The production application runs inside an AWS Nitro Enclave, stored application data is encrypted, and the enclave's signed code measurement can be compared with the published build and public approval registry."}</p>
-                    <p><a href="/trustless" style="color: var(--landing-blue);">{"See exactly how it works"}</a></p>
-                </>
-            },
-        ),
-        (
             "Can I send and receive messages?",
             html! {
                 <p>{"Yes. You can reply to WhatsApp, Telegram, Signal, and email directly via SMS or voice call. Lightfriend forwards your reply to the right place."}</p>
             },
         ),
         (
-            "What can Lightfriend actually do?",
+            "How does Lightfriend decide what reaches me?",
+            html! {
+                <p>{"Lightfriend learns from sender relationships, timing, messaging patterns, and your corrections. Time-sensitive messages reach you immediately. Everything else can wait for a digest."}</p>
+            },
+        ),
+        (
+            "How does it protect my data?",
             html! {
                 <>
-                    <p>{"Lightfriend includes the smart assistant and all connected tools as context: WhatsApp, Telegram, Signal, email, web search, image understanding, Tesla, MCP integrations, and more."}</p>
-                    <p>{"Autopilot adds the proactive layer: automatic critical notifications, smart digests, and custom rules that watch for what matters without you asking first."}</p>
+                    <p>{"Lightfriend is designed so no one else can see your chats or personal data, including while AI processes them. All of the code is open source, and cryptographic evidence lets anyone independently verify which code is running in production."}</p>
+                    <p>{"The production application runs inside an AWS Nitro Enclave, stored application data is encrypted, and the enclave's signed code measurement can be compared with the published build and public approval registry."}</p>
+                    <p><a href="/trustless" style="color: var(--landing-blue);">{"See exactly how it works"}</a></p>
                 </>
             },
         ),
@@ -155,15 +142,6 @@ pub fn landing() -> Html {
             },
         ),
         (
-            "How do I manage or cancel my subscription?",
-            html! {
-                <>
-                    <p>{"Open Settings, choose Billing, then select Manage or cancel subscription. Stripe's secure customer portal lets you cancel your subscription, update your payment method, and view invoices."}</p>
-                    <p>{"Subscription cancellation is self-service; you do not need to email us."}</p>
-                </>
-            },
-        ),
-        (
             "Which countries are supported?",
             html! {
                 <>
@@ -171,12 +149,6 @@ pub fn landing() -> Html {
                     <p><strong>{"Notification-only:"}</strong>{" 30+ countries across Europe and Asia-Pacific."}</p>
                     <p><strong>{"Elsewhere:"}</strong>{" Bring your own Twilio number."}</p>
                 </>
-            },
-        ),
-        (
-            "How do critical notifications work?",
-            html! {
-                <p>{"When a message arrives on WhatsApp, Telegram, Signal, or email, AI evaluates whether it needs your immediate attention. Urgent messages get forwarded instantly via SMS or phone call. Everything else goes into your digest."}</p>
             },
         ),
     ];
@@ -213,136 +185,47 @@ pub fn landing() -> Html {
         })
         .collect();
 
-    // Capability cards data: (icon_class, title, one_liner, detail_html)
-    let cap_data: Vec<(&str, &str, &str, Html)> = vec![
-        (
-            "fas fa-comments",
-            "Messages",
-            "WhatsApp, Telegram, Signal, email - from any phone.",
-            html! {
-                <p>{"Reply to messages, send new ones, and get summaries of long threads - all via SMS or voice call. This is what makes switching to a dumbphone possible in the first place."}</p>
-            },
-        ),
-        (
-            "fas fa-bell",
-            "Alerts",
-            "Urgent things reach you. Everything else waits.",
-            html! {
-                <p>{"AI evaluates every incoming message across all your apps. Time-critical ones - lunch invites, emergencies, deadlines - get forwarded immediately as SMS or a phone call. No setup needed, works out of the box."}</p>
-            },
-        ),
-        (
-            "fas fa-list-check",
-            "Digests",
-            "Catch up once. Not all day.",
-            html! {
-                <p>{"Non-urgent messages are batched into a digest delivered on your schedule. Keeps you in the loop without constant interruptions throughout the day."}</p>
-            },
-        ),
-        (
-            "fas fa-sliders",
-            "Rules",
-            "Optional automation when defaults aren't enough.",
-            html! {
-                <>
-                    <p>{"Create WHEN/IF/THEN rules: trigger on message arrival, a schedule, or a keyword. Conditions can use AI evaluation, keyword matching, or sender filters - like always forwarding messages from a specific person. Actions include forwarding, summarizing, replying, or running a check."}</p>
-                    <p>{"Set simple reminders. Schedule recurring checks. Everything is optional and customizable."}</p>
-                </>
-            },
-        ),
-    ];
-
-    let cap_cards_html: Vec<Html> = cap_data.into_iter().enumerate().map(|(idx, (icon, title, one_liner, detail))| {
-        let expanded = expanded_cap.clone();
-        let i = idx as i32;
-        let is_open = *expanded == i;
-        let onclick = {
-            let expanded = expanded.clone();
-            Callback::from(move |e: MouseEvent| {
-                e.prevent_default();
-                if *expanded == i {
-                    expanded.set(-1);
-                } else {
-                    expanded.set(i);
-                }
-            })
-        };
-        html! {
-            <div class={classes!("cap-card", if is_open { "open" } else { "" })} onclick={onclick}>
-                <div class="cap-card-header">
-                    <i class={icon}></i>
-                    <div class="cap-card-text">
-                        <span class="cap-card-title">{title}</span>
-                        <span class="cap-card-liner">{one_liner}</span>
-                    </div>
-                    <span class="cap-card-toggle">{if is_open { "\u{2212}" } else { "+" }}</span>
-                </div>
-                <div class="cap-card-detail">
-                    {detail}
-                </div>
-            </div>
-        }
-    }).collect();
-
-    // Generate particle elements for hero background
-    let particles_html: Vec<Html> = (0..25).map(|i| {
-        let left = ((i * 17 + 5) % 100) as f64;
-        let delay = (i as f64) * 0.8;
-        let duration = 6.0 + ((i % 5) as f64) * 2.0;
-        let size = 1.0 + ((i % 3) as f64);
-        let style = format!(
-            "left: {}%; animation-delay: {:.1}s; animation-duration: {:.1}s; width: {:.0}px; height: {:.0}px;",
-            left, delay, duration, size, size
-        );
-        html! { <span class="particle" style={style}></span> }
-    }).collect();
-
     html! {
         <div class="landing-page">
             <head>
                 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
             </head>
-            <header class="hero">
-                <div class="hero-particles">
-                    { for particles_html }
-                </div>
-                <div class="hero-content">
-                    <div class="hero-right-panel hero-word-panel">
-                        <h1 class="hero-title hero-word-title hero-anim hero-anim-1">{"FREE LIKE A CHILD"}</h1>
-                    </div>
+            <header class="quiet-hero">
+                <div class="quiet-hero-inner">
+                    <p class="quiet-kicker">{"Lightfriend"}</p>
+                    <h1>{"The communication layer that lets you leave your smartphone."}</h1>
+                    <p class="quiet-hero-subtitle">
+                        {"Important people and messages from WhatsApp, Signal, Telegram, and email reach any phone by text or call."}
+                    </p>
+                    <a href="#plans" class="quiet-cta">{"Start 7-day free trial"}</a>
+                    <p class="quiet-hero-note">{"No apps. No feed. Any phone."}</p>
                 </div>
             </header>
 
-            // TODO: Image carousel goes here when "Removed" style photos are ready
-
-            <section class="fight-section scroll-animate">
-                <div class="fight-copy">
-                    <h2>{"THIS FIGHT IS RIGGED"}</h2>
-                    <p>{"Stop fighting the phone. Leave the ring."}</p>
-                    <a href="#plans" class="story-cta-link">{"Start 7-day free trial"}</a>
+            <section class="quiet-section quiet-how" aria-labelledby="how-heading">
+                <div class="quiet-copy">
+                    <p class="quiet-eyebrow">{"How it works"}</p>
+                    <h2 id="how-heading">{"Leave the smartphone. Keep the people."}</h2>
+                    <p>
+                        {"Lightfriend watches the places people already reach you, learns what matters, and interrupts you only when something cannot wait."}
+                    </p>
                 </div>
-            </section>
-
-            <section id="apps" class="app-bridge-section scroll-animate">
-                <div class="app-bridge-copy">
-                    <p>{"Lightfriend watches WhatsApp, Signal, Telegram, and email. Important things reach any phone by SMS or call."}</p>
-                </div>
-                <div class="hero-diagram app-bridge-visual">
+                <div class="hero-diagram app-bridge-visual" aria-label="Messaging services connect to any phone through Lightfriend">
                     <div class="diagram-left">
-                        <img src="/assets/empty-phone.png" alt="Your phone" class="diagram-nokia" />
-                        <span class="diagram-node-label">{"Your phone"}</span>
+                        <img src="/assets/empty-phone.png" alt="Any phone" class="diagram-nokia" />
+                        <span class="diagram-node-label">{"Any phone"}</span>
                     </div>
                     <div class="diagram-center-group">
-                        <svg class="diagram-left-line" viewBox="0 0 100 24" preserveAspectRatio="none">
+                        <svg class="diagram-left-line" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true">
                             <defs>
-                                <marker id="arrow-right" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+                                <marker id="quiet-arrow-right" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
                                     <path d="M0,0 L6,2 L0,4" fill="rgba(126,178,255,0.6)" />
                                 </marker>
-                                <marker id="arrow-left" markerWidth="6" markerHeight="4" refX="1" refY="2" orient="auto">
+                                <marker id="quiet-arrow-left" markerWidth="6" markerHeight="4" refX="1" refY="2" orient="auto">
                                     <path d="M6,0 L0,2 L6,4" fill="rgba(126,178,255,0.6)" />
                                 </marker>
                             </defs>
-                            <line x1="4" y1="12" x2="96" y2="12" stroke="rgba(126,178,255,0.4)" stroke-width="1" marker-start="url(#arrow-left)" marker-end="url(#arrow-right)" />
+                            <line x1="4" y1="12" x2="96" y2="12" stroke="rgba(126,178,255,0.4)" stroke-width="1" marker-start="url(#quiet-arrow-left)" marker-end="url(#quiet-arrow-right)" />
                         </svg>
                         <span class="diagram-edge-label">{"SMS / Call"}</span>
                         <div class="diagram-lf-wrapper">
@@ -350,240 +233,106 @@ pub fn landing() -> Html {
                         </div>
                     </div>
                     <div class="diagram-right-group">
-                        <svg class="diagram-fan-svg" viewBox="0 0 70 130" preserveAspectRatio="none">
+                        <svg class="diagram-fan-svg" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">
                             <defs>
-                                <marker id="fan-arrow-r" markerWidth="5" markerHeight="4" refX="4" refY="2" orient="auto">
+                                <marker id="quiet-fan-arrow-r" markerWidth="5" markerHeight="4" refX="4" refY="2" orient="auto">
                                     <path d="M0,0 L5,2 L0,4" fill="rgba(126,178,255,0.5)" />
                                 </marker>
-                                <marker id="fan-arrow-l" markerWidth="5" markerHeight="4" refX="1" refY="2" orient="auto">
+                                <marker id="quiet-fan-arrow-l" markerWidth="5" markerHeight="4" refX="1" refY="2" orient="auto">
                                     <path d="M5,0 L0,2 L5,4" fill="rgba(126,178,255,0.5)" />
                                 </marker>
                             </defs>
-                            <line x1="0" y1="65" x2="65" y2="5" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
-                            <line x1="0" y1="65" x2="65" y2="35" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
-                            <line x1="0" y1="65" x2="65" y2="65" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
-                            <line x1="0" y1="65" x2="65" y2="95" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
-                            <line x1="0" y1="65" x2="65" y2="125" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#fan-arrow-l)" marker-end="url(#fan-arrow-r)" />
+                            <line x1="0" y1="50" x2="65" y2="5" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#quiet-fan-arrow-l)" marker-end="url(#quiet-fan-arrow-r)" />
+                            <line x1="0" y1="50" x2="65" y2="35" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#quiet-fan-arrow-l)" marker-end="url(#quiet-fan-arrow-r)" />
+                            <line x1="0" y1="50" x2="65" y2="65" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#quiet-fan-arrow-l)" marker-end="url(#quiet-fan-arrow-r)" />
+                            <line x1="0" y1="50" x2="65" y2="95" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#quiet-fan-arrow-l)" marker-end="url(#quiet-fan-arrow-r)" />
                         </svg>
-                        <div class="diagram-apps-list">
+                        <div class="diagram-apps-list quiet-apps-list">
                             <div class="diagram-app-row"><i class="fab fa-whatsapp"></i><span>{"WhatsApp"}</span></div>
-                            <div class="diagram-app-row"><i class="fab fa-telegram"></i><span>{"Telegram"}</span></div>
                             <div class="diagram-app-row"><i class="fab fa-signal-messenger"></i><span>{"Signal"}</span></div>
+                            <div class="diagram-app-row"><i class="fab fa-telegram"></i><span>{"Telegram"}</span></div>
                             <div class="diagram-app-row"><i class="fas fa-envelope"></i><span>{"Email"}</span></div>
-                            <div class="diagram-app-row"><i class="fas fa-plug"></i><span>{"MCP"}</span></div>
                         </div>
                     </div>
                 </div>
             </section>
 
-            <section id="tradeoff" class="choice-section scroll-animate">
-                <h2>{"No tradeoff."}</h2>
-                <div class="choice-grid">
-                    <div class="choice-card">
-                        <span class="choice-label">{"Smartphone"}</span>
-                        <strong>{"Connected."}</strong>
-                        <strong class="choice-bad">{"Distracted."}</strong>
-                    </div>
-                    <div class="choice-card">
-                        <span class="choice-label">{"Dumbphone"}</span>
-                        <strong>{"Calm."}</strong>
-                        <strong class="choice-bad">{"Cut off."}</strong>
-                    </div>
-                    <div class="choice-card choice-card-primary">
-                        <span class="choice-label">{"Lightfriend"}</span>
-                        <strong>{"Calm."}</strong>
-                        <strong>{"Connected."}</strong>
-                    </div>
-                </div>
-                <a href="#plans" class="story-cta-link">{"Start 7-day free trial"}</a>
+            <section class="quiet-section quiet-testimonial" aria-label="Customer story">
+                <blockquote>
+                    {"“Lightfriend has saved me so many times. I’ll forget a deadline or miss an important email. But then Lightfriend pings me before it’s too late. It watches my inbox so I don’t have to.”"}
+                </blockquote>
+                <p>{"— Kasperi"}</p>
             </section>
 
-            // Capabilities section - what you can do with Lightfriend
-            <section class="capabilities-section scroll-animate">
-                <h2 class="capabilities-title">{"What you get"}</h2>
-                <div class="capabilities-grid">
-                    { for cap_cards_html }
+            <section class="quiet-section quiet-trust" aria-labelledby="trust-heading">
+                <div class="quiet-trust-copy">
+                    <h2 id="trust-heading">{"Private by architecture."}</h2>
+                    <p>
+                        {"Designed so no one else can see your chats or data. That design includes AI processing. All of Lightfriend’s code is open source, and cryptographic evidence lets anyone independently verify which code is running in production."}
+                    </p>
+                    <div class="quiet-links">
+                        <Link<Route> to={Route::Trustless}>{"How privacy works"}</Link<Route>>
+                        <Link<Route> to={Route::TrustChain}>{"View the trust chain"}</Link<Route>>
+                    </div>
                 </div>
-                <p class="capabilities-footnote">{"Gets better over time - Lightfriend learns what matters to you."}</p>
+                if smartphone_free_days.is_some() {
+                    <div class="quiet-proof" aria-label={format!("{} smartphone-free days powered", days_smartphone_free)}>
+                        <strong>{days_smartphone_free.clone()}</strong>
+                        <span>{"smartphone-free days powered"}</span>
+                    </div>
+                }
             </section>
 
-            // Privacy section
-            <section class="privacy-hook scroll-animate">
-                <h2 class="privacy-hook-title">{"Designed so no one else can see your chats or data."}</h2>
-                <p class="privacy-hook-subtitle">{"That design includes AI processing. All of Lightfriend's code is open source, and cryptographic evidence lets anyone independently verify which code is running in production."}</p>
-                <div class="privacy-hook-links">
-                    <Link<Route> to={Route::Trustless} classes="privacy-hook-link">
-                        {"How Privacy Works →"}
-                    </Link<Route>>
-                    <Link<Route> to={Route::TrustChain} classes="privacy-hook-link">
-                        {"Trust Chain →"}
-                    </Link<Route>>
+            <section class="quiet-section quiet-founder" aria-labelledby="founder-heading">
+                <img src="/assets/rasmus-pfp.png" alt="Rasmus, founder of Lightfriend" loading="lazy" />
+                <div class="quiet-founder-copy">
+                    <p class="quiet-eyebrow">{"Founder story"}</p>
+                    <h2 id="founder-heading">{"Why I built it."}</h2>
+                    <p>
+                        {"I’m "}
+                        <a class="story-link" href="https://rasmus.ahtava.com" target="_blank" rel="noopener noreferrer">{"Rasmus"}</a>
+                        {". At one point I was studying, training, and working at the same time. I couldn’t afford to get sucked into scrolling during the day. Hours would just disappear, and I wouldn’t get to do the things I actually wanted to do. So I felt like I had no option but to switch to a dumbphone. But I didn’t want to become unreachable either, so I built Lightfriend for myself."}
+                    </p>
+                    <p>
+                        {"I still rely on it every day. It helped me keep doing sports professionally, finish my bachelor’s degree in computer science, and work at the same time. I made it available to others because I think we should get to decide what we spend our time on. Smartphones made me feel like I had less of that choice."}
+                    </p>
                 </div>
-                <a href="#plans" class="story-cta-link">{"Start 7-day free trial"}</a>
             </section>
 
-            <section class="testimonials-section scroll-animate">
-                <div class="testimonials-content">
-                    <div class="testimonial-metric">
-                        <span class="testimonial-metric-number">{days_smartphone_free}</span>
-                        <span class="testimonial-metric-label">{"smartphone-free days powered"}</span>
-                    </div>
-                    <h2>{"Life After Smartphones"}</h2>
-                    <div class="testimonial">
-                        <blockquote>
-                            {"I have ADHD so smartphones were basically impossible for me. I'd check one notification and suddenly an hour was gone. Now I just get a text with the important stuff. No apps, nothing to get lost in. Honestly it's changed everything for how I get through my day."}
-                        </blockquote>
-                    </div>
-                    <div class="testimonial">
-                        <blockquote>
-                            {"As a dumbphone user, I couldn't live without lightfriend. It's useful, smart and most importantly, reliable. A true must have for living a distraction free life."}
-                        </blockquote>
-                    </div>
-                    <div class="testimonial">
-                        <blockquote>
-                            {"Lightfriend has saved me so many times. I\u{2019}ll forget a deadline or miss an important email \u{2014} but then Lightfriend pings me about it before it\u{2019}s too late. It watches my inbox so I don\u{2019}t have to. Honestly, I\u{2019}d be lost without it."}
-                        </blockquote>
-                        <p class="testimonial-author">{"- Kasperi"}</p>
-                    </div>
-                    <div class="testimonial">
-                        <blockquote>
-                            {"Lightfriend proactively alerted me of a security alert in my email when my notifications were disabled making me aware of a threat which I then took care of before anything permanent damage could be done. Thanks to lightfriend monitoring, the issue was resolved and I could go back to work swiftly."}
-                        </blockquote>
-                    </div>
-                    <div class="testimonial">
-                        <blockquote>
-                            {"lightfriend fills in the gaps that the LP3(light phone 3) is missing, without making me want to use my iphone. Also I love that I can talk to Perplexity while I'm out"}
-                        </blockquote>
-                        <p class="testimonial-author">{"- Max"}</p>
-                    </div>
-                </div>
-            </section>
-            <div class="filter-concept">
-                <div class="filter-content">
-                    <div id="faq" class="faq-in-filter scroll-animate">
-                        <h2>{"Frequently Asked Questions"}</h2>
-                        { for faq_items_html }
-                        <div class="faq-more-link">
-                            <a href="mailto:rasmus@lightfriend.ai" class="privacy-link">{"More questions? Email rasmus@lightfriend.ai"}</a>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <section class="trust-proof scroll-animate">
+            <section id="plans" class="landing-pricing-section quiet-pricing">
                 <div class="section-intro">
-                    <h2>{"The Story"}</h2>
-                    <img src="/assets/rasmus-pfp.png" alt="Rasmus, founder of Lightfriend" loading="lazy" style="max-width: 200px; border-radius: 50%; margin: 0 auto 1.5rem; display: block;"/>
-                    <p>{"I\u{2019}m "}<a class="story-link" href="https://rasmus.ahtava.com" target="_blank" rel="noopener noreferrer">{"Rasmus"}</a>{". I built Lightfriend because I switched to a dumbphone and needed a way to keep WhatsApp and email without a smartphone."}</p>
-                </div>
-            </section>
-            <section id="plans" class="landing-pricing-section scroll-animate">
-                <div class="section-intro">
-                    <h2>{"Choose your billing timeline"}</h2>
+                    <p class="quiet-eyebrow">{"Start"}</p>
+                    <h2>{"Leave the smartphone behind."}</h2>
+                    <p>{"Every plan starts with a 7-day free trial."}</p>
                 </div>
                 <StripePricingTable />
             </section>
-            <footer class="footer-cta scroll-animate">
-                <div class="footer-content">
-                    <h2>{"Ready for Digital Peace?"}</h2>
-                    <a href="#plans" class="forward-link">
-                        <button class="hero-cta">{"Start 7-day free trial"}</button>
-                    </a>
-                    <p class="disclaimer">{"Works with any phone - smartphones, flip phones, and feature phones. No extra hardware required."}</p>
-                    <div class="waitlist-section">
-                        <p class="waitlist-intro">{"Not ready yet? Get updates when new features launch:"}</p>
-                        {
-                            if *waitlist_success {
-                                html! {
-                                    <p class="waitlist-success">{"Thanks! We'll keep you posted."}</p>
-                                }
-                            } else {
-                                let waitlist_email_clone = waitlist_email.clone();
-                                let waitlist_loading_clone = waitlist_loading.clone();
-                                let waitlist_success_clone = waitlist_success.clone();
-                                let waitlist_error_clone = waitlist_error.clone();
-                                let on_submit = Callback::from(move |e: SubmitEvent| {
-                                    e.prevent_default();
-                                    let email = (*waitlist_email_clone).clone();
-                                    let loading = waitlist_loading_clone.clone();
-                                    let success = waitlist_success_clone.clone();
-                                    let error = waitlist_error_clone.clone();
 
-                                    if email.is_empty() || !email.contains('@') {
-                                        error.set(Some("Please enter a valid email".to_string()));
-                                        return;
-                                    }
-
-                                    loading.set(true);
-                                    error.set(None);
-
-                                    wasm_bindgen_futures::spawn_local(async move {
-                                        match Api::post("/api/waitlist")
-                                            .json(&json!({ "email": email }))
-                                            .unwrap()
-                                            .send()
-                                            .await
-                                        {
-                                            Ok(response) => {
-                                                loading.set(false);
-                                                if response.ok() {
-                                                    success.set(true);
-                                                } else {
-                                                    error.set(Some("Could not join waitlist. Try again.".to_string()));
-                                                }
-                                            }
-                                            Err(_) => {
-                                                loading.set(false);
-                                                error.set(Some("Network error. Please try again.".to_string()));
-                                            }
-                                        }
-                                    });
-                                });
-
-                                let on_email_change = {
-                                    let waitlist_email = waitlist_email.clone();
-                                    Callback::from(move |e: Event| {
-                                        let input: HtmlInputElement = e.target_unchecked_into();
-                                        waitlist_email.set(input.value());
-                                    })
-                                };
-
-                                html! {
-                                    <form class="waitlist-form" onsubmit={on_submit}>
-                                        <input
-                                            type="email"
-                                            placeholder="your@email.com"
-                                            class="waitlist-input"
-                                            onchange={on_email_change}
-                                            disabled={*waitlist_loading}
-                                        />
-                                        <button type="submit" class="waitlist-button" disabled={*waitlist_loading}>
-                                            {if *waitlist_loading { "Joining..." } else { "Get Updates" }}
-                                        </button>
-                                        {
-                                            if let Some(err) = (*waitlist_error).as_ref() {
-                                                html! { <p class="waitlist-error">{err}</p> }
-                                            } else {
-                                                html! {}
-                                            }
-                                        }
-                                    </form>
-                                }
-                            }
-                        }
+            <section id="faq" class="quiet-section quiet-faq" aria-labelledby="faq-heading">
+                <div class="faq-in-filter">
+                    <p class="quiet-eyebrow">{"Questions"}</p>
+                    <h2 id="faq-heading">{"Only the essentials."}</h2>
+                    { for faq_items_html }
+                    <div class="faq-more-link">
+                        <a href="mailto:rasmus@lightfriend.ai" class="privacy-link">{"Still wondering? Email Rasmus"}</a>
                     </div>
-                    <div class="development-links">
-                        <p>{"Fully open source on "}
-                            <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer">{"GitHub"}</a>
-                        </p>
-                        <div class="legal-links">
-                            <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
-                            {" | "}
-                            <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
-                            {" | "}
-                            <Link<Route> to={Route::Trustless}>{"Privacy Architecture"}</Link<Route>>
-                            {" | "}
-                            <Link<Route> to={Route::TrustChain}>{"Trust Chain"}</Link<Route>>
-                        </div>
+                </div>
+            </section>
+
+            <footer class="quiet-footer">
+                <p class="quiet-footer-line">{"FREE LIKE A CHILD"}</p>
+                <div class="development-links">
+                    <p>{"Open source on "}
+                        <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer">{"GitHub"}</a>
+                    </p>
+                    <div class="legal-links">
+                        <Link<Route> to={Route::Terms}>{"Terms"}</Link<Route>>
+                        {" · "}
+                        <Link<Route> to={Route::Privacy}>{"Privacy"}</Link<Route>>
+                        {" · "}
+                        <Link<Route> to={Route::Trustless}>{"Architecture"}</Link<Route>>
+                        {" · "}
+                        <Link<Route> to={Route::TrustChain}>{"Trust chain"}</Link<Route>>
                     </div>
                 </div>
             </footer>
@@ -2874,12 +2623,14 @@ pub fn landing() -> Html {
         margin: 1rem auto;
         display: block;
     }
-    .section-intro .story-link {
+    .section-intro .story-link,
+    .quiet-founder-copy .story-link {
         color: var(--landing-blue);
         text-decoration: none;
         transition: color 0.3s ease;
     }
-    .section-intro .story-link:hover {
+    .section-intro .story-link:hover,
+    .quiet-founder-copy .story-link:hover {
         color: #a8ccff;
     }
     .before-after {
@@ -3498,6 +3249,299 @@ pub fn landing() -> Html {
         .adhd-section { padding: 2rem 1rem; }
         .adhd-section h2 { font-size: 2rem; }
         .adhd-grid { grid-template-columns: 1fr; gap: 1rem; }
+    }
+
+    /* ========== Quiet landing page ========== */
+    .quiet-hero {
+        min-height: 100svh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 6rem 1.5rem 4rem;
+        box-sizing: border-box;
+        text-align: center;
+    }
+    .quiet-hero-inner {
+        width: min(100%, 900px);
+        margin: 0 auto;
+    }
+    .quiet-kicker,
+    .quiet-eyebrow {
+        margin: 0 0 1.25rem;
+        color: rgba(255, 255, 255, 0.72);
+        font-size: 0.76rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+    }
+    .quiet-hero h1 {
+        max-width: 900px;
+        margin: 0 auto;
+        color: #fff;
+        font-size: clamp(2.8rem, 7vw, 6.4rem);
+        font-weight: 650;
+        letter-spacing: -0.055em;
+        line-height: 0.98;
+        text-wrap: balance;
+    }
+    .quiet-hero-subtitle {
+        max-width: 680px;
+        margin: 1.6rem auto 0;
+        color: rgba(255, 255, 255, 0.84);
+        font-size: clamp(1rem, 2vw, 1.28rem);
+        line-height: 1.65;
+        text-wrap: pretty;
+    }
+    .quiet-cta {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 48px;
+        margin-top: 2rem;
+        padding: 0.7rem 1.15rem;
+        border: 1px solid rgba(255, 255, 255, 0.42);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.92);
+        color: #111;
+        font-size: 0.92rem;
+        font-weight: 700;
+        text-decoration: none;
+        text-shadow: none;
+        transition: background 160ms ease, transform 160ms ease;
+    }
+    .quiet-cta:hover {
+        background: #fff;
+    }
+    .quiet-cta:active {
+        transform: scale(0.98);
+    }
+    .quiet-hero-note {
+        margin: 1rem 0 0;
+        color: rgba(255, 255, 255, 0.58);
+        font-size: 0.78rem;
+    }
+    .landing-page > .quiet-section {
+        width: min(100%, 1040px);
+        min-height: 66svh;
+        margin: 0 auto;
+        padding: clamp(5rem, 11vw, 9rem) 1.5rem;
+        box-sizing: border-box;
+    }
+    .quiet-copy {
+        width: min(100%, 680px);
+        margin: 0 auto;
+        text-align: center;
+    }
+    .quiet-copy h2,
+    .quiet-trust h2,
+    .quiet-founder h2,
+    .quiet-pricing h2,
+    .quiet-faq h2 {
+        margin: 0;
+        color: #fff;
+        font-size: clamp(2.2rem, 5vw, 4.4rem);
+        font-weight: 600;
+        letter-spacing: -0.045em;
+        line-height: 1.03;
+        text-wrap: balance;
+    }
+    .quiet-copy > p:last-child,
+    .quiet-trust-copy > p,
+    .quiet-founder-copy > p,
+    .quiet-pricing .section-intro > p:last-child {
+        color: rgba(255, 255, 255, 0.76);
+        font-size: 1.05rem;
+        line-height: 1.75;
+        text-wrap: pretty;
+    }
+    .quiet-how .hero-diagram {
+        margin-top: clamp(3rem, 7vw, 5rem);
+    }
+    .quiet-apps-list {
+        justify-content: space-between;
+    }
+    .quiet-how .diagram-fan-svg {
+        height: 100px;
+    }
+    .quiet-testimonial {
+        text-align: center;
+    }
+    .quiet-testimonial blockquote {
+        max-width: 800px;
+        margin: 0;
+        color: rgba(255, 255, 255, 0.94);
+        font-size: clamp(1.55rem, 3.5vw, 2.65rem);
+        font-weight: 450;
+        letter-spacing: -0.025em;
+        line-height: 1.35;
+        text-wrap: balance;
+    }
+    .quiet-testimonial > p {
+        margin: 1.5rem 0 0;
+        color: rgba(255, 255, 255, 0.62);
+        font-size: 0.9rem;
+    }
+    .landing-page > .quiet-trust {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(220px, 0.55fr);
+        gap: clamp(3rem, 8vw, 7rem);
+        align-items: center;
+    }
+    .quiet-trust-copy {
+        max-width: 640px;
+    }
+    .quiet-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem 1.3rem;
+        margin-top: 1.6rem;
+    }
+    .quiet-links a {
+        min-height: 32px;
+        color: var(--landing-blue);
+        font-size: 0.9rem;
+        text-decoration: none;
+        text-underline-offset: 0.25rem;
+    }
+    .quiet-links a:hover {
+        text-decoration: underline;
+    }
+    .quiet-proof {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        padding-left: clamp(1.5rem, 4vw, 3rem);
+        border-left: 1px solid rgba(255, 255, 255, 0.18);
+    }
+    .quiet-proof strong {
+        color: #fff;
+        font-size: clamp(3.2rem, 7vw, 6rem);
+        font-weight: 560;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.055em;
+        line-height: 1;
+    }
+    .quiet-proof span {
+        max-width: 180px;
+        margin-top: 0.75rem;
+        color: rgba(255, 255, 255, 0.64);
+        font-size: 0.82rem;
+        line-height: 1.45;
+    }
+    .landing-page > .quiet-founder {
+        display: grid;
+        grid-template-columns: 180px minmax(0, 1fr);
+        gap: clamp(2rem, 6vw, 5rem);
+        align-items: center;
+        width: min(100%, 900px);
+    }
+    .quiet-founder > img {
+        width: 180px;
+        height: 180px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+    }
+    .quiet-founder-copy {
+        max-width: 640px;
+    }
+    .quiet-founder-copy p {
+        margin-bottom: 0;
+    }
+    .quiet-founder-copy p + p {
+        margin-top: 1rem;
+    }
+    .landing-page > .quiet-pricing {
+        width: min(100%, 1100px);
+        min-height: 72svh;
+        margin: 0 auto;
+        padding: clamp(5rem, 11vw, 9rem) 1.5rem;
+    }
+    .quiet-pricing .section-intro {
+        max-width: 720px;
+        margin-bottom: 3rem;
+        text-align: center;
+    }
+    .quiet-pricing .section-intro > p:last-child {
+        margin-top: 1rem;
+    }
+    .landing-page > .quiet-faq {
+        width: min(100%, 760px);
+        min-height: auto;
+        padding-bottom: clamp(6rem, 12vw, 10rem);
+    }
+    .quiet-faq .faq-in-filter {
+        width: 100%;
+        padding: 0;
+    }
+    .quiet-faq .faq-in-filter h2 {
+        margin-bottom: 2.5rem;
+        text-align: left;
+    }
+    .quiet-footer {
+        min-height: 72svh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 6rem 1.5rem 3rem;
+        box-sizing: border-box;
+        text-align: center;
+    }
+    .quiet-footer-line {
+        margin: 0;
+        color: #fff;
+        font-size: clamp(3.2rem, 9vw, 8rem);
+        font-weight: 750;
+        letter-spacing: -0.055em;
+        line-height: 0.9;
+        text-wrap: balance;
+    }
+    .quiet-footer .development-links {
+        margin-top: auto;
+        padding-top: 5rem;
+        color: rgba(255, 255, 255, 0.54);
+        font-size: 0.78rem;
+    }
+    .quiet-footer .development-links a {
+        color: rgba(255, 255, 255, 0.72);
+    }
+    @media (max-width: 768px) {
+        .quiet-hero {
+            min-height: 88svh;
+            padding-top: 5rem;
+        }
+        .landing-page > .quiet-section {
+            min-height: auto;
+            padding-top: 5rem;
+            padding-bottom: 5rem;
+        }
+        .landing-page > .quiet-trust,
+        .landing-page > .quiet-founder {
+            grid-template-columns: 1fr;
+            gap: 2rem;
+            align-items: start;
+        }
+        .quiet-proof {
+            padding: 2rem 0 0;
+            border-top: 1px solid rgba(255, 255, 255, 0.18);
+            border-left: 0;
+        }
+        .quiet-founder > img {
+            width: 128px;
+            height: 128px;
+        }
+        .quiet-how .hero-diagram {
+            margin-top: 2.5rem;
+        }
+        .quiet-footer {
+            min-height: 60svh;
+        }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .quiet-cta {
+            transition: none;
+        }
     }
                 "#}
             </style>
