@@ -14,7 +14,8 @@ const COMMAND: &str = "!admin debug database-files";
 const DEFAULT_ADMIN_USER_ID: i32 = 1;
 const DEFAULT_INITIAL_DELAY_SECS: u64 = 20;
 const DEFAULT_REFRESH_SECS: u64 = 300;
-const DEFAULT_RESPONSE_TIMEOUT_SECS: u64 = 20;
+const DEFAULT_RESPONSE_TIMEOUT_SECS: u64 = 60;
+const DEFAULT_MAX_HISTORY_PAGES: usize = 50;
 const DEFAULT_SNAPSHOT_FILE: &str = "/tmp/tuwunel-rocksdb-database-files.md";
 const MESSAGE_PAGE_SIZE: u64 = 100;
 const RESPONSE_SETTLE_TIME: Duration = Duration::from_secs(2);
@@ -28,6 +29,7 @@ struct Config {
     initial_delay: Duration,
     refresh_interval: Duration,
     response_timeout: Duration,
+    max_history_pages: usize,
     snapshot_file: PathBuf,
 }
 
@@ -37,6 +39,15 @@ struct ReplyEvent {
     origin_server_ts: u64,
     body: String,
     relation_target: String,
+}
+
+#[derive(Debug, Default)]
+struct ResponseScan {
+    events: Vec<Value>,
+    pages_scanned: usize,
+    events_scanned: usize,
+    server_replies_seen: usize,
+    command_seen: bool,
 }
 
 pub async fn start_tuwunel_storage_diagnostics_worker(state: Arc<AppState>) {
@@ -51,6 +62,7 @@ pub async fn start_tuwunel_storage_diagnostics_worker(state: Arc<AppState>) {
         initial_delay_secs = config.initial_delay.as_secs(),
         refresh_secs = config.refresh_interval.as_secs(),
         response_timeout_secs = config.response_timeout.as_secs(),
+        max_history_pages = config.max_history_pages,
         snapshot_file = %config.snapshot_file.display(),
         "Tuwunel RocksDB diagnostics worker enabled"
     );
@@ -94,6 +106,7 @@ async fn refresh_snapshot(state: &Arc<AppState>, config: &Config) -> Result<()> 
         sent.event_id.as_str(),
         &server_user,
         config.response_timeout,
+        config.max_history_pages,
     )
     .await?;
     write_snapshot_atomically(&config.snapshot_file, &report).await?;
@@ -113,26 +126,25 @@ async fn await_database_files_report(
     command_event_id: &str,
     server_user: &str,
     response_timeout: Duration,
+    max_history_pages: usize,
 ) -> Result<String> {
     let deadline = Instant::now() + response_timeout;
     let mut candidate: Option<String> = None;
     let mut candidate_seen_at = None;
+    let mut last_scan = ResponseScan::default();
 
     while Instant::now() < deadline {
-        let mut options = matrix_sdk::room::MessagesOptions::backward();
-        options.limit = UInt::new(MESSAGE_PAGE_SIZE).expect("valid Matrix message page size");
-        let messages = tokio::time::timeout(REQUEST_TIMEOUT, room.messages(options))
-            .await
-            .map_err(|_| anyhow!("Tuwunel admin room history request timed out"))?
-            .context("could not read Tuwunel admin room history")?;
-        let events = messages
-            .chunk
-            .iter()
-            .filter_map(|event| event.raw().deserialize_as::<Value>().ok())
-            .collect::<Vec<_>>();
+        let scan = scan_response_history(
+            room,
+            command_event_id,
+            server_user,
+            max_history_pages,
+            deadline,
+        )
+        .await?;
 
         if let Some(report) =
-            extract_correlated_database_files_report(&events, command_event_id, server_user)
+            extract_correlated_database_files_report(&scan.events, command_event_id, server_user)
         {
             if candidate.as_ref() != Some(&report) {
                 candidate = Some(report);
@@ -141,11 +153,79 @@ async fn await_database_files_report(
                 return Ok(candidate.expect("candidate exists after stability check"));
             }
         }
+        last_scan = scan;
 
-        tokio::time::sleep(POLL_INTERVAL).await;
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if !remaining.is_zero() {
+            tokio::time::sleep(POLL_INTERVAL.min(remaining)).await;
+        }
     }
 
-    candidate.ok_or_else(|| anyhow!("no valid correlated database-files response before timeout"))
+    candidate.ok_or_else(|| {
+        anyhow!(
+            "no valid correlated database-files response before timeout \
+             pages_scanned={} events_scanned={} server_replies_seen={} command_seen={}",
+            last_scan.pages_scanned,
+            last_scan.events_scanned,
+            last_scan.server_replies_seen,
+            last_scan.command_seen
+        )
+    })
+}
+
+async fn scan_response_history(
+    room: &Room,
+    command_event_id: &str,
+    server_user: &str,
+    max_history_pages: usize,
+    deadline: Instant,
+) -> Result<ResponseScan> {
+    let mut scan = ResponseScan::default();
+    let mut from = None;
+    let mut seen_tokens = HashSet::new();
+
+    for _ in 0..max_history_pages {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+
+        let mut options = matrix_sdk::room::MessagesOptions::backward();
+        options.from = from.clone();
+        options.limit = UInt::new(MESSAGE_PAGE_SIZE).expect("valid Matrix message page size");
+        let messages = tokio::time::timeout(REQUEST_TIMEOUT.min(remaining), room.messages(options))
+            .await
+            .map_err(|_| anyhow!("Tuwunel admin room history request timed out"))?
+            .context("could not read Tuwunel admin room history")?;
+        scan.pages_scanned += 1;
+
+        for event in &messages.chunk {
+            let Ok(event) = event.raw().deserialize_as::<Value>() else {
+                continue;
+            };
+            scan.events_scanned += 1;
+            scan.command_seen |=
+                event.get("event_id").and_then(Value::as_str) == Some(command_event_id);
+            scan.server_replies_seen +=
+                usize::from(parse_reply_event(&event, server_user).is_some());
+            scan.events.push(event);
+        }
+
+        if scan.command_seen || messages.chunk.is_empty() {
+            break;
+        }
+        let Some(next_token) = messages.end else {
+            break;
+        };
+        if !seen_tokens.insert(next_token.clone()) {
+            return Err(anyhow!(
+                "Tuwunel admin room history pagination token repeated"
+            ));
+        }
+        from = Some(next_token);
+    }
+
+    Ok(scan)
 }
 
 pub fn extract_correlated_database_files_report(
@@ -328,6 +408,11 @@ impl Config {
                 DEFAULT_RESPONSE_TIMEOUT_SECS,
                 5,
             )),
+            max_history_pages: env_usize(
+                "TUWUNEL_ROCKSDB_DIAGNOSTICS_MAX_HISTORY_PAGES",
+                DEFAULT_MAX_HISTORY_PAGES,
+                1,
+            ),
             snapshot_file: std::env::var("TUWUNEL_ROCKSDB_DIAGNOSTICS_SNAPSHOT_FILE")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| PathBuf::from(DEFAULT_SNAPSHOT_FILE)),
@@ -350,6 +435,14 @@ fn env_i32(name: &str, default: i32, minimum: i32) -> i32 {
     std::env::var(name)
         .ok()
         .and_then(|value| value.parse::<i32>().ok())
+        .filter(|value| *value >= minimum)
+        .unwrap_or(default)
+}
+
+fn env_usize(name: &str, default: usize, minimum: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value >= minimum)
         .unwrap_or(default)
 }
