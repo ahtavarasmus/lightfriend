@@ -5,11 +5,13 @@ use backend::utils::disconnected_bridge_cleanup::{
     ORPHAN_LOGIN_ABSENT_VERIFIED,
 };
 use backend::utils::tuwunel_event_cleanup::{
-    build_purge_history_url, build_purge_status_url, historical_backfill_execution_kind,
-    historical_backfill_requires_proof_scan, historical_event_requires_proof, is_matrix_event_id,
-    is_tuwunel_admin_redaction_reason, next_backfill_scan_timestamp, purge_history_request,
-    purge_history_timestamp_request, select_portal_census_room_batch,
+    available_purge_submission_slots, build_purge_history_url, build_purge_status_url,
+    historical_backfill_execution_kind, historical_backfill_requires_proof_scan,
+    historical_event_requires_proof, is_matrix_event_id, is_tuwunel_admin_redaction_reason,
+    next_backfill_scan_timestamp, purge_history_request, purge_history_timestamp_request,
+    purge_task_status_is_missing, select_portal_census_room_batch,
 };
+use reqwest::StatusCode;
 use serde_json::json;
 
 #[test]
@@ -179,6 +181,24 @@ fn historical_backfill_timestamp_saturates() {
         next_backfill_scan_timestamp(i32::MAX - 5, 25, 25, 30, 3_600),
         i32::MAX
     );
+}
+
+#[test]
+fn purge_submission_slots_enforce_a_global_concurrency_limit() {
+    assert_eq!(available_purge_submission_slots(4, 0), 4);
+    assert_eq!(available_purge_submission_slots(4, 3), 1);
+    assert_eq!(available_purge_submission_slots(4, 4), 0);
+    assert_eq!(available_purge_submission_slots(4, 346), 0);
+    assert_eq!(available_purge_submission_slots(4, -1), 4);
+}
+
+#[test]
+fn missing_tuwunel_task_status_is_restart_recoverable() {
+    assert!(purge_task_status_is_missing(Some(StatusCode::NOT_FOUND)));
+    assert!(!purge_task_status_is_missing(Some(
+        StatusCode::INTERNAL_SERVER_ERROR
+    )));
+    assert!(!purge_task_status_is_missing(None));
 }
 
 #[test]

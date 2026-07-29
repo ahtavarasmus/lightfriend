@@ -1588,6 +1588,20 @@ fi
 sed -i 's/\[program:postgresql\]/[program:postgresql]/' /etc/supervisor/conf.d/lightfriend.conf
 
 echo ""
+echo "[STEP history-prune] Purging unprotected historical Tuwunel state payloads..."
+if [ -f /var/lib/tuwunel/CURRENT ]; then
+    if tuwunel_prune_history \
+        /var/lib/tuwunel \
+        /data/seed/tuwunel-history-prune-status.json; then
+        echo "  Historical state payload prune completed."
+    else
+        echo "  WARNING: Historical state payload prune failed closed; Tuwunel data was left intact or atomically unchanged."
+    fi
+else
+    echo "  No existing Tuwunel RocksDB found; skipping historical state payload prune."
+fi
+
+echo ""
 echo "[STEP reserve] Ensuring manual rootfs reserve..."
 ensure_rootfs_reserve
 

@@ -17,6 +17,7 @@ TUWUNEL_BUCKET_SNAPSHOT_FILE="${STORAGE_HEALTH_TUWUNEL_BUCKET_SNAPSHOT_FILE:-/tm
 TUWUNEL_COLUMN_SNAPSHOT_FILE="${STORAGE_HEALTH_TUWUNEL_COLUMN_SNAPSHOT_FILE:-/tmp/tuwunel-rocksdb-column-snapshot.tsv}"
 TUWUNEL_DATABASE_FILES_SNAPSHOT_FILE="${TUWUNEL_ROCKSDB_DIAGNOSTICS_SNAPSHOT_FILE:-/tmp/tuwunel-rocksdb-database-files.md}"
 TUWUNEL_DATABASE_FILES_STATUS_FILE="${TUWUNEL_ROCKSDB_DIAGNOSTICS_STATUS_FILE:-/tmp/tuwunel-rocksdb-diagnostics-status.txt}"
+TUWUNEL_HISTORY_PRUNE_STATUS_FILE="${TUWUNEL_HISTORY_PRUNE_STATUS_FILE:-/data/seed/tuwunel-history-prune-status.json}"
 TUWUNEL_COLUMN_GROWTH_REPORT_MIN_KB="${STORAGE_HEALTH_TUWUNEL_COLUMN_GROWTH_REPORT_MIN_KB:-256}"
 TUWUNEL_LOG_DIR="${TUWUNEL_LOG_DIR:-/var/log/supervisor}"
 TUWUNEL_DATA_DIR="${TUWUNEL_DATA_DIR:-/var/lib/tuwunel}"
@@ -339,8 +340,14 @@ print_deleted_open_file_accounting() {
 print_tuwunel_purge_audit() {
     echo "--- Tuwunel purge compact audit ---"
     echo "historical_audit_policy backfill_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_ENABLED:-true} audit_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_ENABLED:-true} execute_verified_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_EXECUTE_VERIFIED_ENABLED:-true} execute_blocked_enabled=${TUWUNEL_EVENT_PURGE_BACKFILL_EXECUTE_BLOCKED_ENABLED:-true} proof_scan_bypassed=${TUWUNEL_EVENT_PURGE_BACKFILL_EXECUTE_BLOCKED_ENABLED:-true} batch_size=${TUWUNEL_EVENT_PURGE_BACKFILL_BATCH_SIZE:-50} scan_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_SCAN_SECS:-60} min_age_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_MIN_AGE_SECS:-60} recheck_secs=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_RECHECK_SECS:-300} max_pages=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_MAX_PAGES:-100} page_size=${TUWUNEL_EVENT_PURGE_BACKFILL_AUDIT_PAGE_SIZE:-100}"
-    echo "portal_census_policy enabled=${TUWUNEL_PORTAL_CENSUS_PURGE_ENABLED:-true} scan_secs=${TUWUNEL_PORTAL_CENSUS_SCAN_SECS:-300} target_batch=${TUWUNEL_PORTAL_CENSUS_TARGET_BATCH_SIZE:-5} room_batch=${TUWUNEL_PORTAL_CENSUS_ROOM_BATCH_SIZE:-100} purge_batch=${TUWUNEL_PORTAL_CENSUS_PURGE_BATCH_SIZE:-20}"
+    echo "portal_census_policy enabled=${TUWUNEL_PORTAL_CENSUS_PURGE_ENABLED:-true} scan_secs=${TUWUNEL_PORTAL_CENSUS_SCAN_SECS:-300} target_batch=${TUWUNEL_PORTAL_CENSUS_TARGET_BATCH_SIZE:-5} room_batch=${TUWUNEL_PORTAL_CENSUS_ROOM_BATCH_SIZE:-100} purge_batch=${TUWUNEL_PORTAL_CENSUS_PURGE_BATCH_SIZE:-20} status_poll_batch=${TUWUNEL_PURGE_STATUS_POLL_BATCH_SIZE:-100} max_in_flight=${TUWUNEL_PURGE_MAX_IN_FLIGHT:-4}"
     echo "compaction_policy enabled=${TUWUNEL_COMPACTION_AFTER_BACKUP_ENABLED:-true} cooldown_secs=${TUWUNEL_COMPACTION_COOLDOWN_SECS:-86400} safety_bytes=${TUWUNEL_COMPACTION_SAFETY_BYTES:-134217728} max_backup_age_secs=${TUWUNEL_COMPACTION_MAX_BACKUP_AGE_SECS:-600}"
+    echo "historical_state_prune_policy enabled=${TUWUNEL_HISTORICAL_STATE_PRUNE_ENABLED:-true} retention_secs=${TUWUNEL_HISTORICAL_STATE_PRUNE_RETENTION_SECS:-60} compaction_enabled=${TUWUNEL_HISTORICAL_STATE_COMPACTION_ENABLED:-true} compaction_safety_bytes=${TUWUNEL_HISTORICAL_STATE_COMPACTION_SAFETY_BYTES:-134217728}"
+    if [ -f "$TUWUNEL_HISTORY_PRUNE_STATUS_FILE" ]; then
+        echo "historical_state_prune_status=$(tr '\n' ' ' < "$TUWUNEL_HISTORY_PRUNE_STATUS_FILE" 2>/dev/null | cut -c1-4000)"
+    else
+        echo "historical_state_prune_status=never_run"
+    fi
     if [ -f /data/seed/tuwunel-compaction-status.json ]; then
         echo "compaction_status=$(tr '\n' ' ' < /data/seed/tuwunel-compaction-status.json 2>/dev/null | cut -c1-2000)"
     else
@@ -361,6 +368,18 @@ print_tuwunel_purge_audit() {
           FROM tuwunel_cleanup_events
          GROUP BY status
          ORDER BY status;
+
+        SELECT
+               (SELECT count(*) FROM tuwunel_cleanup_events
+                 WHERE status = '\''purge_submitted'\'') AS event_boundary_tasks,
+               (SELECT count(*) FROM tuwunel_room_history_purges
+                 WHERE status = '\''submitted'\'') AS room_history_tasks,
+               (
+                   (SELECT count(*) FROM tuwunel_cleanup_events
+                     WHERE status = '\''purge_submitted'\'') +
+                   (SELECT count(*) FROM tuwunel_room_history_purges
+                     WHERE status = '\''submitted'\'')
+               ) AS total_in_flight;
 
         SELECT service,
                status,

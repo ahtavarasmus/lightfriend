@@ -102,6 +102,12 @@ pub struct RoomHistoryPurge {
 }
 
 #[derive(Debug, QueryableByName)]
+struct PurgeTaskCount {
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    count: i64,
+}
+
+#[derive(Debug, QueryableByName)]
 pub struct BridgeCleanupJob {
     #[diesel(sql_type = diesel::sql_types::Integer)]
     pub id: i32,
@@ -317,6 +323,18 @@ impl TuwunelCleanupRepository {
         )
         .bind::<diesel::sql_types::BigInt, _>(limit)
         .load::<RoomHistoryPurge>(&mut conn)?)
+    }
+
+    pub fn count_submitted_purge_tasks(&self) -> Result<i64> {
+        let mut conn = self.connection()?;
+        let row = diesel::sql_query(
+            "SELECT ( \
+                 (SELECT count(*) FROM tuwunel_cleanup_events WHERE status = 'purge_submitted') + \
+                 (SELECT count(*) FROM tuwunel_room_history_purges WHERE status = 'submitted') \
+             )::BIGINT AS count",
+        )
+        .get_result::<PurgeTaskCount>(&mut conn)?;
+        Ok(row.count)
     }
 
     pub fn active_room_history_purge_rooms(&self) -> Result<HashSet<String>> {

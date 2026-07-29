@@ -77,8 +77,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     sccache --show-stats && \
     cp target/release/backend /backend && \
     cp target/release/tuwunel_restore /tuwunel_restore && \
+    cp target/release/tuwunel_prune_history /tuwunel_prune_history && \
     strip /backend && \
-    strip /tuwunel_restore
+    strip /tuwunel_restore && \
+    strip /tuwunel_prune_history
 
 # ── Stage 2: Build Frontend (Yew/WASM) ──────────────────────────────────────
 
@@ -212,6 +214,7 @@ COPY --from=tesla-proxy-builder /tesla-http-proxy /usr/local/bin/tesla-http-prox
 WORKDIR /app
 COPY --from=builder /backend ./backend
 COPY --from=builder /tuwunel_restore /usr/local/bin/tuwunel_restore
+COPY --from=builder /tuwunel_prune_history /usr/local/bin/tuwunel_prune_history
 # ── Copy Marlin Oyster binaries (production only, skipped for local builds) ──
 RUN --mount=from=marlin-builder,target=/marlin-img \
     if [ "$BUILD_MODE" = "production" ]; then \

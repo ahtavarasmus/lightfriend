@@ -29,6 +29,8 @@ const DEFAULT_PORTAL_CENSUS_SCAN_SECS: u64 = 300;
 const DEFAULT_PORTAL_CENSUS_TARGET_BATCH_SIZE: usize = 5;
 const DEFAULT_PORTAL_CENSUS_ROOM_BATCH_SIZE: usize = 100;
 const DEFAULT_PORTAL_CENSUS_PURGE_BATCH_SIZE: usize = 20;
+const DEFAULT_PURGE_STATUS_POLL_BATCH_SIZE: usize = 100;
+const DEFAULT_PURGE_MAX_IN_FLIGHT: usize = 4;
 const DEFAULT_STALE_INGEST_SECS: u64 = 300;
 const DEFAULT_EXHAUSTED_RETRY_SECS: u64 = 900;
 const BLOCKER_LOG_INTERVAL_SECS: i64 = 600;
@@ -64,6 +66,8 @@ struct EventPurgeConfig {
     portal_census_target_batch_size: usize,
     portal_census_room_batch_size: usize,
     portal_census_purge_batch_size: usize,
+    purge_status_poll_batch_size: usize,
+    purge_max_in_flight: usize,
     stale_ingest_secs: u64,
     exhausted_retry_secs: u64,
 }
@@ -345,6 +349,8 @@ pub async fn start_tuwunel_event_purge_worker(state: Arc<AppState>) {
                 portal_census_target_batch_size = config.portal_census_target_batch_size,
                 portal_census_room_batch_size = config.portal_census_room_batch_size,
                 portal_census_purge_batch_size = config.portal_census_purge_batch_size,
+                purge_status_poll_batch_size = config.purge_status_poll_batch_size,
+                purge_max_in_flight = config.purge_max_in_flight,
                 stale_ingest_secs = config.stale_ingest_secs,
                 exhausted_retry_secs = config.exhausted_retry_secs,
                 "Tuwunel event purge policy loaded"
@@ -412,6 +418,10 @@ pub fn next_backfill_scan_timestamp(
         scan_secs
     };
     now.saturating_add(delay.min(i32::MAX as u64) as i32)
+}
+
+pub fn available_purge_submission_slots(max_in_flight: usize, active_tasks: i64) -> usize {
+    max_in_flight.saturating_sub(usize::try_from(active_tasks.max(0)).unwrap_or(usize::MAX))
 }
 
 async fn run_purge_cycle(
@@ -483,20 +493,23 @@ async fn run_purge_cycle(
     log_stale_blockers(state, stale_ingest_cutoff, now)?;
 
     let cutoff = now.saturating_sub(config.retention_secs.min(i32::MAX as u64) as i32);
-    let due = state
-        .tuwunel_cleanup_repository
-        .list_due_room_boundaries(cutoff, config.batch_size)?;
     let submitted = state
         .tuwunel_cleanup_repository
-        .list_submitted(config.batch_size as i64)?;
+        .list_submitted(config.purge_status_poll_batch_size as i64)?;
     let submitted_room_history = state
         .tuwunel_cleanup_repository
-        .list_submitted_room_history_purges(config.portal_census_purge_batch_size as i64)?;
-    let due_room_history = state
-        .tuwunel_cleanup_repository
-        .list_due_room_history_purges(config.portal_census_purge_batch_size as i64)?;
+        .list_submitted_room_history_purges(config.purge_status_poll_batch_size as i64)?;
 
     if config.dry_run {
+        let due = state
+            .tuwunel_cleanup_repository
+            .list_due_room_boundaries(cutoff, config.batch_size)?;
+        let due_room_history = state
+            .tuwunel_cleanup_repository
+            .list_due_room_history_purges(config.portal_census_purge_batch_size as i64)?;
+        let active_purge_tasks = state
+            .tuwunel_cleanup_repository
+            .count_submitted_purge_tasks()?;
         if DRY_RUN_LOGGED.set(()).is_ok()
             || !due.is_empty()
             || !submitted.is_empty()
@@ -508,6 +521,8 @@ async fn run_purge_cycle(
                 submitted_tasks = submitted.len(),
                 census_due_rooms = due_room_history.len(),
                 census_submitted_tasks = submitted_room_history.len(),
+                active_purge_tasks,
+                purge_max_in_flight = config.purge_max_in_flight,
                 retention_secs = config.retention_secs,
                 "Tuwunel event purge dry-run: no purge API calls made"
             );
@@ -521,11 +536,59 @@ async fn run_purge_cycle(
         });
     }
 
-    if due.is_empty()
-        && submitted.is_empty()
-        && due_room_history.is_empty()
-        && submitted_room_history.is_empty()
-    {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
+        .build()?;
+    let mut access_token = None;
+
+    if !submitted.is_empty() || !submitted_room_history.is_empty() {
+        access_token = Some(admin_access_token(state, config.admin_user_id).await?);
+    }
+
+    for candidate in submitted {
+        poll_submitted_purge(
+            state,
+            config,
+            &client,
+            access_token.as_deref().expect("access token loaded"),
+            &candidate,
+        )
+        .await;
+    }
+    for candidate in submitted_room_history {
+        poll_submitted_room_history_purge(
+            state,
+            config,
+            &client,
+            access_token.as_deref().expect("access token loaded"),
+            &candidate,
+        )
+        .await;
+    }
+
+    let active_purge_tasks = state
+        .tuwunel_cleanup_repository
+        .count_submitted_purge_tasks()?;
+    let mut submission_slots =
+        available_purge_submission_slots(config.purge_max_in_flight, active_purge_tasks);
+    let due = state
+        .tuwunel_cleanup_repository
+        .list_due_room_boundaries(cutoff, submission_slots.min(config.batch_size))?;
+    submission_slots = submission_slots.saturating_sub(due.len());
+    let due_room_history = state
+        .tuwunel_cleanup_repository
+        .list_due_room_history_purges(
+            submission_slots.min(config.portal_census_purge_batch_size) as i64,
+        )?;
+
+    if due.is_empty() && due_room_history.is_empty() {
+        if active_purge_tasks > 0 {
+            tracing::info!(
+                active_purge_tasks,
+                purge_max_in_flight = config.purge_max_in_flight,
+                "Tuwunel history purge queue is waiting for active tasks to finish"
+            );
+        }
         return Ok(PurgeCycleOutcome {
             backfilled,
             forced_backfilled,
@@ -535,23 +598,16 @@ async fn run_purge_cycle(
         });
     }
 
-    let access_token = admin_access_token(state, config.admin_user_id).await?;
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
-        .build()?;
-
-    for candidate in submitted {
-        poll_submitted_purge(state, config, &client, &access_token, &candidate).await;
+    if access_token.is_none() {
+        access_token = Some(admin_access_token(state, config.admin_user_id).await?);
     }
-    for candidate in submitted_room_history {
-        poll_submitted_room_history_purge(state, config, &client, &access_token, &candidate).await;
-    }
+    let access_token = access_token.as_deref().expect("access token loaded");
 
     for candidate in due {
-        submit_purge(state, config, &client, &access_token, &candidate).await;
+        submit_purge(state, config, &client, access_token, &candidate).await;
     }
     for candidate in due_room_history {
-        submit_room_history_purge(state, config, &client, &access_token, &candidate).await;
+        submit_room_history_purge(state, config, &client, access_token, &candidate).await;
     }
 
     Ok(PurgeCycleOutcome {
@@ -854,6 +910,15 @@ async fn poll_submitted_room_history_purge(
             candidate.attempt_count,
             &format!("unknown Tuwunel purge status: {}", status.status),
         ),
+        Err(error) if purge_task_status_is_missing(error.status) => {
+            record_room_history_purge_failure(
+                state,
+                config,
+                candidate,
+                candidate.attempt_count,
+                "purge task status disappeared, likely after Tuwunel restart; resubmitting room boundary",
+            )
+        }
         Err(error) => tracing::warn!(
             purge_row_id = candidate.id,
             room_id = candidate.room_id,
@@ -1364,7 +1429,7 @@ async fn poll_submitted_purge(
             candidate.attempt_count,
             &format!("unknown Tuwunel purge status {}", status.status),
         ),
-        Err(error) if error.status == Some(StatusCode::NOT_FOUND) => record_purge_failure(
+        Err(error) if purge_task_status_is_missing(error.status) => record_purge_failure(
             state,
             config,
             candidate,
@@ -1492,6 +1557,10 @@ async fn parse_json_response<T: for<'de> Deserialize<'de>>(
 fn event_was_already_purged(error: &PurgeApiError) -> bool {
     error.status == Some(StatusCode::NOT_FOUND)
         && error.body.to_ascii_lowercase().contains("event not found")
+}
+
+pub fn purge_task_status_is_missing(status: Option<StatusCode>) -> bool {
+    status == Some(StatusCode::NOT_FOUND)
 }
 
 pub fn build_purge_history_url(homeserver_url: &str, room_id: &str) -> String {
@@ -1638,6 +1707,18 @@ impl EventPurgeConfig {
                 1,
             )
             .min(100) as usize,
+            purge_status_poll_batch_size: env_u64(
+                "TUWUNEL_PURGE_STATUS_POLL_BATCH_SIZE",
+                DEFAULT_PURGE_STATUS_POLL_BATCH_SIZE as u64,
+                1,
+            )
+            .min(1000) as usize,
+            purge_max_in_flight: env_u64(
+                "TUWUNEL_PURGE_MAX_IN_FLIGHT",
+                DEFAULT_PURGE_MAX_IN_FLIGHT as u64,
+                1,
+            )
+            .min(32) as usize,
             stale_ingest_secs: env_u64(
                 "TUWUNEL_EVENT_PURGE_STALE_INGEST_SECS",
                 DEFAULT_STALE_INGEST_SECS,

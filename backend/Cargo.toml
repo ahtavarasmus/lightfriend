@@ -85,6 +85,11 @@ name = "tuwunel_restore"
 path = "src/bin/tuwunel_restore.rs"
 required-features = ["tuwunel-restore"]
 
+[[bin]]
+name = "tuwunel_prune_history"
+path = "src/bin/tuwunel_prune_history.rs"
+required-features = ["tuwunel-restore"]
+
 [dev-dependencies]
 serial_test = "3.0"  # For tests that modify environment variables
 wiremock = "0.6"  # For mock HTTP server tests
