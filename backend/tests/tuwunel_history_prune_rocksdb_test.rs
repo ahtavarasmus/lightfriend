@@ -4,7 +4,7 @@ use std::fs;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use backend::utils::tuwunel_history_prune::timeline_index_key;
+use backend::utils::tuwunel_history_prune::{parse_state_diff, short_event_id, timeline_index_key};
 use rocksdb::{ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, Options};
 
 type RocksDb = DBWithThreadMode<MultiThreaded>;
@@ -240,6 +240,117 @@ fn offline_prune_removes_only_unprotected_historical_state_payloads() {
     drop(timeline_index);
     drop(outliers);
     drop(originals);
+    drop(credentials);
+    drop(db);
+    fs::remove_dir_all(database_path).unwrap();
+    fs::remove_file(status_path).unwrap();
+}
+
+#[test]
+fn offline_prune_repairs_state_diffs_that_reference_missing_payloads() {
+    let test_id = uuid::Uuid::new_v4();
+    let database_path = std::env::temp_dir().join(format!("tuwunel-repair-{test_id}"));
+    let status_path = std::env::temp_dir().join(format!("tuwunel-repair-{test_id}.json"));
+    let db = open_database(&database_path, true);
+
+    let room_state = db.cf_handle("roomid_shortstatehash").unwrap();
+    let state_diffs = db.cf_handle("shortstatehash_statediff").unwrap();
+    let short_events = db.cf_handle("shorteventid_eventid").unwrap();
+    let credentials = db.cf_handle("userdeviceid_token").unwrap();
+
+    db.put_cf(&room_state, b"!room:example.com", 2_u64.to_be_bytes())
+        .unwrap();
+    let mut historical_state = 0_u64.to_be_bytes().to_vec();
+    historical_state.extend_from_slice(&compressed(1, 102));
+    historical_state.extend_from_slice(&compressed(2, 999));
+    db.put_cf(&state_diffs, 1_u64.to_be_bytes(), historical_state)
+        .unwrap();
+
+    let mut current_state = 1_u64.to_be_bytes().to_vec();
+    current_state.extend_from_slice(&compressed(2, 101));
+    current_state.extend_from_slice(&0_u64.to_be_bytes());
+    current_state.extend_from_slice(&compressed(2, 999));
+    db.put_cf(&state_diffs, 2_u64.to_be_bytes(), current_state)
+        .unwrap();
+
+    db.put_cf(&short_events, 101_u64.to_be_bytes(), b"$current")
+        .unwrap();
+    db.put_cf(&short_events, 102_u64.to_be_bytes(), b"$create")
+        .unwrap();
+    db.put_cf(&short_events, 999_u64.to_be_bytes(), b"$missing")
+        .unwrap();
+    db.put_cf(
+        &credentials,
+        b"@user:example.com\xFFDEVICE",
+        b"secret-token",
+    )
+    .unwrap();
+
+    put_timeline_pdu(
+        &db,
+        "$create",
+        1,
+        br#"{"event_id":"$create","room_id":"!room:example.com","state_key":"","origin_server_ts":1,"auth_events":[]}"#,
+    );
+    put_timeline_pdu(
+        &db,
+        "$current",
+        2,
+        br#"{"event_id":"$current","room_id":"!room:example.com","state_key":"@current:example.com","origin_server_ts":2,"auth_events":["$create","$missing-auth"]}"#,
+    );
+
+    drop(room_state);
+    drop(state_diffs);
+    drop(short_events);
+    drop(credentials);
+    drop(db);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_tuwunel_prune_history"))
+        .arg(&database_path)
+        .arg(&status_path)
+        .env("TUWUNEL_HISTORICAL_STATE_PRUNE_RETENTION_SECS", "60")
+        .env("TUWUNEL_HISTORICAL_STATE_COMPACTION_ENABLED", "false")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let db = open_database(&database_path, false);
+    let state_diffs = db.cf_handle("shortstatehash_statediff").unwrap();
+    let credentials = db.cf_handle("userdeviceid_token").unwrap();
+    for hash in [1_u64, 2_u64] {
+        let value = db
+            .get_cf(&state_diffs, hash.to_be_bytes())
+            .unwrap()
+            .unwrap();
+        let diff = parse_state_diff(&value).unwrap();
+        assert!(diff
+            .added
+            .iter()
+            .chain(&diff.removed)
+            .all(|compressed| short_event_id(compressed) != 999));
+    }
+    assert_eq!(
+        db.get_cf(&credentials, b"@user:example.com\xFFDEVICE")
+            .unwrap()
+            .unwrap(),
+        b"secret-token"
+    );
+
+    let status: serde_json::Value =
+        serde_json::from_slice(&fs::read(&status_path).unwrap()).unwrap();
+    assert_eq!(status["status"], "success");
+    assert_eq!(status["dangling_state_events_repaired"], 1);
+    assert_eq!(status["state_diff_references_removed"], 2);
+    assert_eq!(status["state_hashes_rewritten"], 2);
+    assert_eq!(status["missing_auth_event_payloads"], 1);
+    assert_eq!(status["historical_state_events_deleted"], 0);
+
+    drop(state_diffs);
     drop(credentials);
     drop(db);
     fs::remove_dir_all(database_path).unwrap();

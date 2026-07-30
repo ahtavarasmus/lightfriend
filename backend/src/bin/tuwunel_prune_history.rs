@@ -8,8 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{bail, Context, Result};
 use backend::utils::tuwunel_history_prune::{
     apply_state_diff_chain, is_historical_state_candidate, parse_state_diff,
-    parse_state_event_metadata, pdu_count_bytes, protected_auth_closure, short_event_id,
-    timeline_index_key, StateDiff, StateEventMetadata,
+    parse_state_event_metadata, pdu_count_bytes, protected_auth_closure_allowing_missing,
+    short_event_id, timeline_index_key, StateDiff, StateEventMetadata,
 };
 use rocksdb::{
     ColumnFamilyDescriptor, DBWithThreadMode, IteratorMode, MultiThreaded, Options, WriteBatch,
@@ -68,6 +68,10 @@ struct PruneStatus {
     current_state_events_preserved: u64,
     retained_state_events_preserved: u64,
     auth_closure_events_preserved: u64,
+    missing_auth_event_payloads: u64,
+    dangling_state_events_repaired: u64,
+    state_diff_references_removed: u64,
+    state_hashes_rewritten: u64,
     historical_state_events_deleted: u64,
     timeline_payloads_deleted: u64,
     outlier_payloads_deleted: u64,
@@ -148,23 +152,39 @@ fn prune(database_path: &Path, started_at_epoch: u64) -> Result<PruneStatus> {
     let db = open_database(database_path)?;
 
     let current_state_hashes = load_current_state_hashes(&db)?;
+    let (mut state_events, timeline_pdus_scanned) = scan_timeline_state_events(&db)?;
+    let outlier_pdus_scanned = scan_outlier_state_events(&db, &mut state_events)?;
+    let repair = repair_dangling_state_references(&db, &state_events, &current_state_hashes)?;
+
     let current_short_event_ids = load_current_short_event_ids(&db, &current_state_hashes)?;
     let current_state_event_ids = load_state_event_ids(&db, &current_short_event_ids)?;
     let (retained_short_event_ids, state_hashes_loaded) = load_retained_short_event_ids(&db)?;
     let retained_state_event_ids = load_state_event_ids(&db, &retained_short_event_ids)?;
+    let (protected_events, missing_auth_events) = protected_auth_closure_allowing_missing(
+        &retained_state_event_ids,
+        &metadata_map(&state_events),
+    );
 
-    let (mut state_events, timeline_pdus_scanned) = scan_timeline_state_events(&db)?;
-    let outlier_pdus_scanned = scan_outlier_state_events(&db, &mut state_events)?;
-    let protected_events =
-        protected_auth_closure(&retained_state_event_ids, &metadata_map(&state_events))?;
-
-    let candidates = state_events
-        .iter()
-        .filter(|(_, record)| {
-            is_historical_state_candidate(&record.metadata, &protected_events, cutoff_epoch_millis)
-        })
-        .map(|(event_id, _)| event_id.clone())
-        .collect::<Vec<_>>();
+    let candidates = if missing_auth_events.is_empty() {
+        state_events
+            .iter()
+            .filter(|(_, record)| {
+                is_historical_state_candidate(
+                    &record.metadata,
+                    &protected_events,
+                    cutoff_epoch_millis,
+                )
+            })
+            .map(|(event_id, _)| event_id.clone())
+            .collect::<Vec<_>>()
+    } else {
+        eprintln!(
+            "WARNING: {} retained auth-event payloads are already missing; \
+             repaired dangling state references but skipped further payload deletion",
+            missing_auth_events.len()
+        );
+        Vec::new()
+    };
 
     let plan = verify_deletion_plan(&db, &state_events, &candidates)?;
     let mut batch = WriteBatch::default();
@@ -217,6 +237,10 @@ fn prune(database_path: &Path, started_at_epoch: u64) -> Result<PruneStatus> {
             .len()
             .saturating_sub(retained_state_event_ids.len())
             as u64,
+        missing_auth_event_payloads: missing_auth_events.len() as u64,
+        dangling_state_events_repaired: repair.dangling_state_events_repaired,
+        state_diff_references_removed: repair.state_diff_references_removed,
+        state_hashes_rewritten: repair.state_hashes_rewritten,
         historical_state_events_deleted: candidates.len() as u64,
         timeline_payloads_deleted: plan.timeline_payloads_deleted,
         outlier_payloads_deleted: plan.outlier_payloads_deleted,
@@ -229,6 +253,156 @@ fn prune(database_path: &Path, started_at_epoch: u64) -> Result<PruneStatus> {
         compaction_required_free_bytes,
         compaction_status,
     })
+}
+
+#[derive(Default)]
+struct StateReferenceRepair {
+    dangling_state_events_repaired: u64,
+    state_diff_references_removed: u64,
+    state_hashes_rewritten: u64,
+}
+
+fn repair_dangling_state_references(
+    db: &RocksDb,
+    state_events: &HashMap<String, StateEventRecord>,
+    current_state_hashes: &[u64],
+) -> Result<StateReferenceRepair> {
+    let state_diffs_cf = required_cf(db, "shortstatehash_statediff")?;
+    let short_events_cf = required_cf(db, "shorteventid_eventid")?;
+    let mut diffs = HashMap::<u64, StateDiff>::new();
+    let mut short_event_ids = HashSet::new();
+
+    for item in db.iterator_cf(&state_diffs_cf, IteratorMode::Start) {
+        let (key, value) = item.context("failed while auditing retained state diffs")?;
+        let hash = u64::from_be_bytes(key.as_ref().try_into().with_context(|| {
+            format!("state-diff key is not eight bytes: {}", hex::encode(&key))
+        })?);
+        let diff = parse_state_diff(&value)
+            .with_context(|| format!("invalid retained state diff {hash}"))?;
+        short_event_ids.extend(diff.added.iter().chain(&diff.removed).map(short_event_id));
+        diffs.insert(hash, diff);
+    }
+
+    let mut dangling_short_ids = HashSet::new();
+    for short_id in short_event_ids {
+        let event_id = db
+            .get_cf(&short_events_cf, short_id.to_be_bytes())
+            .with_context(|| format!("failed to resolve short event id {short_id}"))?
+            .with_context(|| format!("short event id {short_id} has no event id"))?;
+        let event_id = std::str::from_utf8(&event_id)
+            .with_context(|| format!("event id for short id {short_id} is not UTF-8"))?;
+        if !state_events.contains_key(event_id) {
+            dangling_short_ids.insert(short_id);
+        }
+    }
+
+    if dangling_short_ids.is_empty() {
+        return Ok(StateReferenceRepair::default());
+    }
+
+    let mut repair = StateReferenceRepair {
+        dangling_state_events_repaired: dangling_short_ids.len() as u64,
+        ..StateReferenceRepair::default()
+    };
+    let mut repaired_diffs = HashMap::with_capacity(diffs.len());
+    let mut batch = WriteBatch::default();
+
+    for (hash, mut diff) in diffs {
+        let original_count = diff.added.len().saturating_add(diff.removed.len());
+        diff.added
+            .retain(|compressed| !dangling_short_ids.contains(&short_event_id(compressed)));
+        diff.removed
+            .retain(|compressed| !dangling_short_ids.contains(&short_event_id(compressed)));
+        let repaired_count = diff.added.len().saturating_add(diff.removed.len());
+        let removed = original_count.saturating_sub(repaired_count);
+        if removed > 0 {
+            batch.put_cf(
+                &state_diffs_cf,
+                hash.to_be_bytes(),
+                serialize_state_diff(&diff),
+            );
+            repair.state_diff_references_removed = repair
+                .state_diff_references_removed
+                .saturating_add(removed as u64);
+            repair.state_hashes_rewritten = repair.state_hashes_rewritten.saturating_add(1);
+        }
+        repaired_diffs.insert(hash, diff);
+    }
+
+    verify_current_state_after_repair(
+        current_state_hashes,
+        &repaired_diffs,
+        &short_events_cf,
+        db,
+        state_events,
+    )?;
+    db.write(batch)
+        .context("failed to atomically repair dangling state references")?;
+    db.flush_wal(true)
+        .context("failed to flush dangling state-reference repair")?;
+
+    eprintln!(
+        "Repaired {} dangling state events across {} state hashes ({} references removed)",
+        repair.dangling_state_events_repaired,
+        repair.state_hashes_rewritten,
+        repair.state_diff_references_removed
+    );
+    Ok(repair)
+}
+
+fn verify_current_state_after_repair(
+    current_state_hashes: &[u64],
+    diffs: &HashMap<u64, StateDiff>,
+    short_events_cf: &std::sync::Arc<rocksdb::BoundColumnFamily<'_>>,
+    db: &RocksDb,
+    state_events: &HashMap<String, StateEventRecord>,
+) -> Result<()> {
+    for current_hash in current_state_hashes {
+        let mut chain = Vec::new();
+        let mut visited = HashSet::new();
+        let mut cursor = Some(*current_hash);
+        while let Some(hash) = cursor {
+            if !visited.insert(hash) {
+                bail!("cycle detected while verifying repaired state at hash {hash}");
+            }
+            let diff = diffs
+                .get(&hash)
+                .with_context(|| format!("repaired state diff {hash} is missing"))?;
+            cursor = diff.parent;
+            chain.push(diff.clone());
+        }
+        chain.reverse();
+        for compressed in apply_state_diff_chain(&chain) {
+            let short_id = short_event_id(&compressed);
+            let event_id = db
+                .get_cf(short_events_cf, short_id.to_be_bytes())
+                .with_context(|| format!("failed to verify short event id {short_id}"))?
+                .with_context(|| format!("short event id {short_id} has no event id"))?;
+            let event_id = std::str::from_utf8(&event_id)
+                .with_context(|| format!("event id for short id {short_id} is not UTF-8"))?;
+            if !state_events.contains_key(event_id) {
+                bail!("current state still references a missing payload: {event_id}");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn serialize_state_diff(diff: &StateDiff) -> Vec<u8> {
+    let separator_bytes = usize::from(!diff.removed.is_empty()) * 8;
+    let mut value =
+        Vec::with_capacity(8 + (diff.added.len() + diff.removed.len()) * 16 + separator_bytes);
+    value.extend_from_slice(&diff.parent.unwrap_or(0).to_be_bytes());
+    for compressed in &diff.added {
+        value.extend_from_slice(compressed);
+    }
+    if !diff.removed.is_empty() {
+        value.extend_from_slice(&0_u64.to_be_bytes());
+        for compressed in &diff.removed {
+            value.extend_from_slice(compressed);
+        }
+    }
+    value
 }
 
 fn open_database(path: &Path) -> Result<RocksDb> {

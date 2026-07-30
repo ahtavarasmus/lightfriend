@@ -143,13 +143,27 @@ pub fn protected_auth_closure(
     current_state: &HashSet<String>,
     state_events: &HashMap<String, StateEventMetadata>,
 ) -> Result<HashSet<String>> {
+    let (protected, missing) = protected_auth_closure_allowing_missing(current_state, state_events);
+    if let Some(event_id) = missing.iter().next() {
+        bail!("protected state event payload is missing: {event_id}");
+    }
+
+    Ok(protected)
+}
+
+pub fn protected_auth_closure_allowing_missing(
+    current_state: &HashSet<String>,
+    state_events: &HashMap<String, StateEventMetadata>,
+) -> (HashSet<String>, HashSet<String>) {
     let mut protected = current_state.clone();
     let mut pending = current_state.iter().cloned().collect::<Vec<_>>();
+    let mut missing = HashSet::new();
 
     while let Some(event_id) = pending.pop() {
-        let event = state_events
-            .get(&event_id)
-            .with_context(|| format!("protected state event payload is missing: {event_id}"))?;
+        let Some(event) = state_events.get(&event_id) else {
+            missing.insert(event_id);
+            continue;
+        };
         for auth_event_id in &event.auth_events {
             if protected.insert(auth_event_id.clone()) {
                 pending.push(auth_event_id.clone());
@@ -157,7 +171,7 @@ pub fn protected_auth_closure(
         }
     }
 
-    Ok(protected)
+    (protected, missing)
 }
 
 pub fn is_historical_state_candidate(

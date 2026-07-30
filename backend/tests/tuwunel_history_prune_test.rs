@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use backend::utils::tuwunel_history_prune::{
     apply_state_diff_chain, is_historical_state_candidate, parse_state_diff,
-    parse_state_event_metadata, protected_auth_closure, short_event_id, timeline_index_key,
+    parse_state_event_metadata, protected_auth_closure, protected_auth_closure_allowing_missing,
+    short_event_id, timeline_index_key,
 };
 
 fn compressed(short_state_key: u64, short_event_id: u64) -> [u8; 16] {
@@ -99,6 +100,12 @@ fn missing_auth_payload_fails_closed() {
     .unwrap();
     let events = HashMap::from([(current.event_id.clone(), current)]);
     assert!(protected_auth_closure(&HashSet::from(["$current".to_owned()]), &events).is_err());
+
+    let (protected, missing) =
+        protected_auth_closure_allowing_missing(&HashSet::from(["$current".to_owned()]), &events);
+    assert!(protected.contains("$current"));
+    assert!(protected.contains("$missing"));
+    assert_eq!(missing, HashSet::from(["$missing".to_owned()]));
 }
 
 #[test]
