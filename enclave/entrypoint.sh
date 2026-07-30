@@ -1588,7 +1588,7 @@ fi
 sed -i 's/\[program:postgresql\]/[program:postgresql]/' /etc/supervisor/conf.d/lightfriend.conf
 
 echo ""
-echo "[STEP history-prune] Purging unprotected historical Tuwunel state payloads..."
+echo "[STEP history-prune] Checking opt-in historical Tuwunel state pruning..."
 if [ -f /var/lib/tuwunel/CURRENT ]; then
     if tuwunel_prune_history \
         /var/lib/tuwunel \

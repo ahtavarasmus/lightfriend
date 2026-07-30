@@ -338,6 +338,32 @@ details = '''${CHECK_DETAILS}'''
 result = {'status': 'FAILED', 'restore_type': '${RESTORE_TYPE}', 'timestamp': '${TIMESTAMP}', 'failed_checks': [${FAILED_LIST}], 'details': details.strip(), 'user_count': ${DB_USER_COUNT:-0}}
 print(json.dumps(result))
 " > "${RESULT_FILE}"
+    # Persist the service failure itself with the verify result. Candidate
+    # enclaves are terminated on rollback, so this is the durable evidence
+    # needed to diagnose a Tuwunel startup failure after the fact.
+    python3 - "${RESULT_FILE}" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+result_path = Path(sys.argv[1])
+result = json.loads(result_path.read_text())
+ansi = re.compile(r"\x1b\[[0-9;]*m")
+
+for field, path in (
+    ("tuwunel_stdout_tail", Path("/var/log/supervisor/tuwunel.log")),
+    ("tuwunel_stderr_tail", Path("/var/log/supervisor/tuwunel-err.log")),
+    ("supervisord_tail", Path("/var/log/supervisor/supervisord.log")),
+):
+    try:
+        lines = path.read_text(errors="replace").splitlines()[-60:]
+        result[field] = ansi.sub("", "\n".join(lines))[-6000:]
+    except OSError as error:
+        result[field] = f"unavailable: {error}"
+
+result_path.write_text(json.dumps(result))
+PY
     echo ""
     echo "=== Verification: FAILED ==="
     echo "Failed checks: ${FAILED_CHECKS[*]}"

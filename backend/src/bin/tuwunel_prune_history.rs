@@ -94,7 +94,10 @@ fn main() -> Result<()> {
         .unwrap_or_else(|| "/data/seed/tuwunel-history-prune-status.json".to_owned());
     let started_at_epoch = now_epoch_secs()?;
 
-    if !env_bool("TUWUNEL_HISTORICAL_STATE_PRUNE_ENABLED", true) {
+    // Direct RocksDB state-history mutation is recovery tooling, not a safe
+    // default startup migration. It must be explicitly enabled after being
+    // validated against the exact production Tuwunel release.
+    if !env_bool("TUWUNEL_HISTORICAL_STATE_PRUNE_ENABLED", false) {
         write_json_status(
             Path::new(&status_path),
             &serde_json::json!({
