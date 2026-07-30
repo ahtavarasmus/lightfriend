@@ -78,16 +78,24 @@ fn offline_prune_removes_only_unprotected_historical_state_payloads() {
     let originals = db.cf_handle("eventid_originalpdu").unwrap();
     let credentials = db.cf_handle("userdeviceid_token").unwrap();
 
-    db.put_cf(&room_state, b"!room:example.com", 1_u64.to_be_bytes())
+    db.put_cf(&room_state, b"!room:example.com", 2_u64.to_be_bytes())
         .unwrap();
-    let mut state_diff = 0_u64.to_be_bytes().to_vec();
-    state_diff.extend_from_slice(&compressed(1, 101));
-    state_diff.extend_from_slice(&compressed(2, 102));
-    db.put_cf(&state_diffs, 1_u64.to_be_bytes(), state_diff)
+    let mut retained_state_diff = 0_u64.to_be_bytes().to_vec();
+    retained_state_diff.extend_from_slice(&compressed(1, 103));
+    retained_state_diff.extend_from_slice(&compressed(2, 102));
+    db.put_cf(&state_diffs, 1_u64.to_be_bytes(), retained_state_diff)
+        .unwrap();
+    let mut current_state_diff = 1_u64.to_be_bytes().to_vec();
+    current_state_diff.extend_from_slice(&compressed(1, 101));
+    current_state_diff.extend_from_slice(&[0; 8]);
+    current_state_diff.extend_from_slice(&compressed(1, 103));
+    db.put_cf(&state_diffs, 2_u64.to_be_bytes(), current_state_diff)
         .unwrap();
     db.put_cf(&short_events, 101_u64.to_be_bytes(), b"$current")
         .unwrap();
     db.put_cf(&short_events, 102_u64.to_be_bytes(), b"$create")
+        .unwrap();
+    db.put_cf(&short_events, 103_u64.to_be_bytes(), b"$old-state")
         .unwrap();
     db.put_cf(
         &credentials,
@@ -116,6 +124,12 @@ fn offline_prune_removes_only_unprotected_historical_state_payloads() {
     );
     put_timeline_pdu(
         &db,
+        "$orphan-state",
+        6,
+        br#"{"event_id":"$orphan-state","room_id":"!room:example.com","state_key":"@orphan:example.com","origin_server_ts":3,"auth_events":["$create"]}"#,
+    );
+    put_timeline_pdu(
+        &db,
         "$message",
         4,
         br#"{"event_id":"$message","room_id":"!room:example.com","origin_server_ts":4,"auth_events":["$create"]}"#,
@@ -137,6 +151,12 @@ fn offline_prune_removes_only_unprotected_historical_state_payloads() {
         &outliers,
         b"$old-outlier",
         br#"{"event_id":"$old-outlier","room_id":"!room:example.com","state_key":"@outlier:example.com","origin_server_ts":3,"auth_events":["$create"]}"#,
+    )
+    .unwrap();
+    db.put_cf(
+        &originals,
+        b"$orphan-state",
+        br#"{"event_id":"$orphan-state","state_key":"@orphan:example.com"}"#,
     )
     .unwrap();
     db.put_cf(
@@ -175,20 +195,26 @@ fn offline_prune_removes_only_unprotected_historical_state_payloads() {
     let originals = db.cf_handle("eventid_originalpdu").unwrap();
     let credentials = db.cf_handle("userdeviceid_token").unwrap();
 
-    assert!(db.get_cf(&pduid_pdu, pdu_key(3)).unwrap().is_none());
-    assert!(db.get_cf(&eventid_pduid, b"$old-state").unwrap().is_none());
+    assert!(db.get_cf(&pduid_pdu, pdu_key(6)).unwrap().is_none());
+    assert!(db
+        .get_cf(&eventid_pduid, b"$orphan-state")
+        .unwrap()
+        .is_none());
     assert!(db
         .get_cf(
             &timeline_index,
-            timeline_index_key("!room:example.com", 3, 3_i64.to_be_bytes())
+            timeline_index_key("!room:example.com", 3, 6_i64.to_be_bytes())
         )
         .unwrap()
         .is_none());
     assert!(db.get_cf(&outliers, b"$old-outlier").unwrap().is_none());
-    assert!(db.get_cf(&originals, b"$old-state").unwrap().is_none());
+    assert!(db.get_cf(&originals, b"$orphan-state").unwrap().is_none());
 
     assert!(db.get_cf(&pduid_pdu, pdu_key(1)).unwrap().is_some());
     assert!(db.get_cf(&pduid_pdu, pdu_key(2)).unwrap().is_some());
+    assert!(db.get_cf(&pduid_pdu, pdu_key(3)).unwrap().is_some());
+    assert!(db.get_cf(&eventid_pduid, b"$old-state").unwrap().is_some());
+    assert!(db.get_cf(&originals, b"$old-state").unwrap().is_some());
     assert!(db.get_cf(&pduid_pdu, pdu_key(4)).unwrap().is_some());
     assert!(db.get_cf(&pduid_pdu, pdu_key(5)).unwrap().is_some());
     assert_eq!(
@@ -205,6 +231,8 @@ fn offline_prune_removes_only_unprotected_historical_state_payloads() {
     assert_eq!(status["timeline_payloads_deleted"], 1);
     assert_eq!(status["outlier_payloads_deleted"], 1);
     assert_eq!(status["current_state_events_preserved"], 2);
+    assert_eq!(status["retained_state_events_preserved"], 3);
+    assert_eq!(status["state_hashes_loaded"], 2);
     assert_eq!(status["compaction_status"], "disabled");
 
     drop(pduid_pdu);

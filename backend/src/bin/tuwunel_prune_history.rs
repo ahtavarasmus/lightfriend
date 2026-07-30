@@ -66,6 +66,7 @@ struct PruneStatus {
     outlier_pdus_scanned: u64,
     state_events_scanned: u64,
     current_state_events_preserved: u64,
+    retained_state_events_preserved: u64,
     auth_closure_events_preserved: u64,
     historical_state_events_deleted: u64,
     timeline_payloads_deleted: u64,
@@ -147,14 +148,15 @@ fn prune(database_path: &Path, started_at_epoch: u64) -> Result<PruneStatus> {
     let db = open_database(database_path)?;
 
     let current_state_hashes = load_current_state_hashes(&db)?;
-    let (current_short_event_ids, state_hashes_loaded) =
-        load_current_short_event_ids(&db, &current_state_hashes)?;
-    let current_state_event_ids = load_current_state_event_ids(&db, &current_short_event_ids)?;
+    let current_short_event_ids = load_current_short_event_ids(&db, &current_state_hashes)?;
+    let current_state_event_ids = load_state_event_ids(&db, &current_short_event_ids)?;
+    let (retained_short_event_ids, state_hashes_loaded) = load_retained_short_event_ids(&db)?;
+    let retained_state_event_ids = load_state_event_ids(&db, &retained_short_event_ids)?;
 
     let (mut state_events, timeline_pdus_scanned) = scan_timeline_state_events(&db)?;
     let outlier_pdus_scanned = scan_outlier_state_events(&db, &mut state_events)?;
     let protected_events =
-        protected_auth_closure(&current_state_event_ids, &metadata_map(&state_events))?;
+        protected_auth_closure(&retained_state_event_ids, &metadata_map(&state_events))?;
 
     let candidates = state_events
         .iter()
@@ -210,9 +212,10 @@ fn prune(database_path: &Path, started_at_epoch: u64) -> Result<PruneStatus> {
         outlier_pdus_scanned,
         state_events_scanned: state_events.len() as u64,
         current_state_events_preserved: current_state_event_ids.len() as u64,
+        retained_state_events_preserved: retained_state_event_ids.len() as u64,
         auth_closure_events_preserved: protected_events
             .len()
-            .saturating_sub(current_state_event_ids.len())
+            .saturating_sub(retained_state_event_ids.len())
             as u64,
         historical_state_events_deleted: candidates.len() as u64,
         timeline_payloads_deleted: plan.timeline_payloads_deleted,
@@ -263,10 +266,9 @@ fn load_current_state_hashes(db: &RocksDb) -> Result<Vec<u64>> {
 fn load_current_short_event_ids(
     db: &RocksDb,
     current_state_hashes: &[u64],
-) -> Result<(HashSet<u64>, u64)> {
+) -> Result<HashSet<u64>> {
     let cf = required_cf(db, "shortstatehash_statediff")?;
     let mut event_ids = HashSet::new();
-    let mut unique_hashes = HashSet::new();
 
     for current_hash in current_state_hashes {
         let mut chain = Vec::<StateDiff>::new();
@@ -276,7 +278,6 @@ fn load_current_short_event_ids(
             if !chain_hashes.insert(hash) {
                 bail!("cycle detected in state-diff ancestry at hash {hash}");
             }
-            unique_hashes.insert(hash);
             let value = db
                 .get_cf(&cf, hash.to_be_bytes())
                 .with_context(|| format!("failed to read state diff {hash}"))?
@@ -290,15 +291,38 @@ fn load_current_short_event_ids(
         event_ids.extend(apply_state_diff_chain(&chain).iter().map(short_event_id));
     }
 
-    Ok((event_ids, unique_hashes.len() as u64))
+    Ok(event_ids)
 }
 
-fn load_current_state_event_ids(
-    db: &RocksDb,
-    current_short_event_ids: &HashSet<u64>,
-) -> Result<HashSet<String>> {
+fn load_retained_short_event_ids(db: &RocksDb) -> Result<(HashSet<u64>, u64)> {
+    let cf = required_cf(db, "shortstatehash_statediff")?;
+    let mut event_ids = HashSet::new();
+    let mut state_hashes = 0_u64;
+
+    for item in db.iterator_cf(&cf, IteratorMode::Start) {
+        let (key, value) = item.context("failed while scanning retained state diffs")?;
+        let hash = key
+            .as_ref()
+            .try_into()
+            .map(u64::from_be_bytes)
+            .with_context(|| {
+                format!(
+                    "retained state-diff key is not eight bytes: {}",
+                    hex::encode(&key)
+                )
+            })?;
+        let diff = parse_state_diff(&value)
+            .with_context(|| format!("invalid retained state diff {hash}"))?;
+        event_ids.extend(diff.added.iter().chain(&diff.removed).map(short_event_id));
+        state_hashes = state_hashes.saturating_add(1);
+    }
+
+    Ok((event_ids, state_hashes))
+}
+
+fn load_state_event_ids(db: &RocksDb, short_event_ids: &HashSet<u64>) -> Result<HashSet<String>> {
     let cf = required_cf(db, "shorteventid_eventid")?;
-    current_short_event_ids
+    short_event_ids
         .iter()
         .map(|short_id| {
             let value = db
