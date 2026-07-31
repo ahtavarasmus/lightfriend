@@ -6,10 +6,11 @@ use backend::utils::disconnected_bridge_cleanup::{
 };
 use backend::utils::tuwunel_event_cleanup::{
     available_purge_submission_slots, build_purge_history_url, build_purge_status_url,
-    historical_backfill_execution_kind, historical_backfill_requires_proof_scan,
-    historical_event_requires_proof, is_matrix_event_id, is_tuwunel_admin_redaction_reason,
-    next_backfill_scan_timestamp, purge_history_request, purge_history_timestamp_request,
-    purge_task_status_is_missing, select_portal_census_room_batch,
+    build_server_rooms_url, historical_backfill_execution_kind,
+    historical_backfill_requires_proof_scan, historical_event_requires_proof, is_matrix_event_id,
+    is_tuwunel_admin_redaction_reason, next_backfill_scan_timestamp, parse_server_room_list_page,
+    purge_history_request, purge_history_timestamp_request, purge_task_status_is_missing,
+    room_history_error_is_already_clean, select_portal_census_room_batch,
 };
 use reqwest::StatusCode;
 use serde_json::json;
@@ -20,6 +21,48 @@ fn builds_encoded_room_history_purge_url() {
         build_purge_history_url("http://localhost:8008/", "!room:localhost"),
         "http://localhost:8008/_synapse/admin/v1/purge_history/%21room%3Alocalhost"
     );
+}
+
+#[test]
+fn builds_paginated_server_room_census_url() {
+    assert_eq!(
+        build_server_rooms_url("http://localhost:8008/", 5000, 5000),
+        "http://localhost:8008/_synapse/admin/v1/rooms?from=5000&limit=5000"
+    );
+}
+
+#[test]
+fn parses_server_room_census_page() {
+    let body = json!({
+        "rooms": [
+            {"room_id": "!a:localhost", "name": "A"},
+            {"room_id": "!b:localhost", "joined_members": 2}
+        ],
+        "offset": 0,
+        "total_rooms": 3,
+        "next_batch": 2,
+        "prev_batch": null
+    })
+    .to_string();
+
+    let (rooms, offset, total, next) = parse_server_room_list_page(&body).unwrap();
+    assert_eq!(rooms, vec!["!a:localhost", "!b:localhost"]);
+    assert_eq!(offset, 0);
+    assert_eq!(total, 3);
+    assert_eq!(next, Some(2));
+}
+
+#[test]
+fn rejects_invalid_room_ids_from_server_census() {
+    let body = json!({
+        "rooms": [{"room_id": "not-a-room"}],
+        "offset": 0,
+        "total_rooms": 1,
+        "next_batch": null
+    })
+    .to_string();
+
+    assert!(parse_server_room_list_page(&body).is_err());
 }
 
 #[test]
@@ -199,6 +242,22 @@ fn missing_tuwunel_task_status_is_restart_recoverable() {
         StatusCode::INTERNAL_SERVER_ERROR
     )));
     assert!(!purge_task_status_is_missing(None));
+}
+
+#[test]
+fn no_event_before_timestamp_is_an_already_clean_room() {
+    assert!(room_history_error_is_already_clean(
+        Some(StatusCode::NOT_FOUND),
+        r#"{"errcode":"M_NOT_FOUND","error":"No event found before the given timestamp"}"#,
+    ));
+    assert!(!room_history_error_is_already_clean(
+        Some(StatusCode::NOT_FOUND),
+        r#"{"errcode":"M_NOT_FOUND","error":"Unknown room"}"#,
+    ));
+    assert!(!room_history_error_is_already_clean(
+        Some(StatusCode::INTERNAL_SERVER_ERROR),
+        "No event found before the given timestamp",
+    ));
 }
 
 #[test]

@@ -413,6 +413,33 @@ impl TuwunelCleanupRepository {
         Ok(())
     }
 
+    pub fn record_room_history_noop_succeeded(
+        &self,
+        id: i32,
+        attempt: i32,
+        cutoff_ts: i32,
+    ) -> Result<()> {
+        let mut conn = self.connection()?;
+        let now = now_timestamp();
+        diesel::sql_query(
+            "WITH completed AS ( \
+                 SELECT room_id FROM tuwunel_room_history_purges WHERE id = $1 \
+             ) \
+             UPDATE tuwunel_room_history_purges p \
+             SET status = 'succeeded', attempt_count = GREATEST(p.attempt_count, $2), \
+                 submitted_cutoff_ts = GREATEST(COALESCE(p.submitted_cutoff_ts, 0), $3), \
+                 purge_id = NULL, last_error = NULL, completed_at = $4, updated_at = $4 \
+             FROM completed \
+             WHERE p.room_id = completed.room_id AND p.cutoff_ts <= $3",
+        )
+        .bind::<diesel::sql_types::Integer, _>(id)
+        .bind::<diesel::sql_types::Integer, _>(attempt)
+        .bind::<diesel::sql_types::Integer, _>(cutoff_ts)
+        .bind::<diesel::sql_types::Integer, _>(now)
+        .execute(&mut conn)?;
+        Ok(())
+    }
+
     pub fn record_room_history_failure(
         &self,
         id: i32,

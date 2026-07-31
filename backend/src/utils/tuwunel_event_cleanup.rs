@@ -3,7 +3,8 @@ use crate::repositories::tuwunel_cleanup_repository::{
     now_timestamp, HistoricalBackfillCandidate, RoomHistoryPurge,
 };
 use crate::AppState;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
+use matrix_sdk::ruma::OwnedRoomAliasId;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -29,12 +30,17 @@ const DEFAULT_PORTAL_CENSUS_SCAN_SECS: u64 = 300;
 const DEFAULT_PORTAL_CENSUS_TARGET_BATCH_SIZE: usize = 5;
 const DEFAULT_PORTAL_CENSUS_ROOM_BATCH_SIZE: usize = 100;
 const DEFAULT_PORTAL_CENSUS_PURGE_BATCH_SIZE: usize = 20;
+const DEFAULT_SERVER_CENSUS_SCAN_SECS: u64 = 21_600;
+const DEFAULT_SERVER_CENSUS_PAGE_SIZE: usize = 5_000;
+const DEFAULT_SERVER_CENSUS_MAX_PAGES: usize = 10;
+const DEFAULT_SERVER_CENSUS_HTTP_TIMEOUT_SECS: u64 = 120;
 const DEFAULT_PURGE_STATUS_POLL_BATCH_SIZE: usize = 100;
 const DEFAULT_PURGE_MAX_IN_FLIGHT: usize = 4;
 const DEFAULT_STALE_INGEST_SECS: u64 = 300;
 const DEFAULT_EXHAUSTED_RETRY_SECS: u64 = 900;
 const BLOCKER_LOG_INTERVAL_SECS: i64 = 600;
 const HTTP_TIMEOUT_SECS: u64 = 15;
+const SERVER_CENSUS_SERVICE: &str = "server_all_rooms";
 
 static DISABLED_LOGGED: OnceLock<()> = OnceLock::new();
 static DRY_RUN_LOGGED: OnceLock<()> = OnceLock::new();
@@ -66,6 +72,11 @@ struct EventPurgeConfig {
     portal_census_target_batch_size: usize,
     portal_census_room_batch_size: usize,
     portal_census_purge_batch_size: usize,
+    server_census_enabled: bool,
+    server_census_scan_secs: u64,
+    server_census_page_size: usize,
+    server_census_max_pages: usize,
+    server_census_http_timeout_secs: u64,
     purge_status_poll_batch_size: usize,
     purge_max_in_flight: usize,
     stale_ingest_secs: u64,
@@ -79,6 +90,29 @@ struct PurgeCycleOutcome {
     audited: usize,
     census_targets: usize,
     census_rooms: usize,
+    server_census_discovered_rooms: usize,
+    server_census_recorded_rooms: usize,
+    server_census_succeeded: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct ServerRoomListResponse {
+    rooms: Vec<ServerRoomSummary>,
+    offset: usize,
+    total_rooms: usize,
+    next_batch: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ServerRoomSummary {
+    room_id: String,
+}
+
+#[derive(Debug)]
+struct ServerRoomInventory {
+    room_ids: Vec<String>,
+    total_rooms: usize,
+    pages: usize,
 }
 
 #[derive(Debug)]
@@ -324,6 +358,7 @@ pub async fn start_tuwunel_event_purge_worker(state: Arc<AppState>) {
     tracing::info!("Tuwunel event purge worker started");
     let mut next_backfill_scan_at = 0_i32;
     let mut next_portal_census_at = 0_i32;
+    let mut next_server_census_at = 0_i32;
     loop {
         let config = EventPurgeConfig::from_env();
         if CONFIG_LOGGED.set(()).is_ok() {
@@ -349,6 +384,11 @@ pub async fn start_tuwunel_event_purge_worker(state: Arc<AppState>) {
                 portal_census_target_batch_size = config.portal_census_target_batch_size,
                 portal_census_room_batch_size = config.portal_census_room_batch_size,
                 portal_census_purge_batch_size = config.portal_census_purge_batch_size,
+                server_census_enabled = config.server_census_enabled,
+                server_census_scan_secs = config.server_census_scan_secs,
+                server_census_page_size = config.server_census_page_size,
+                server_census_max_pages = config.server_census_max_pages,
+                server_census_http_timeout_secs = config.server_census_http_timeout_secs,
                 purge_status_poll_batch_size = config.purge_status_poll_batch_size,
                 purge_max_in_flight = config.purge_max_in_flight,
                 stale_ingest_secs = config.stale_ingest_secs,
@@ -363,7 +403,16 @@ pub async fn start_tuwunel_event_purge_worker(state: Arc<AppState>) {
         let run_backfill = (config.backfill_audit_enabled || destructive_backfill_enabled)
             && now >= next_backfill_scan_at;
         let run_portal_census = config.portal_census_enabled && now >= next_portal_census_at;
-        match run_purge_cycle(&state, &config, run_backfill, run_portal_census).await {
+        let run_server_census = config.server_census_enabled && now >= next_server_census_at;
+        match run_purge_cycle(
+            &state,
+            &config,
+            run_backfill,
+            run_portal_census,
+            run_server_census,
+        )
+        .await
+        {
             Ok(outcome) => {
                 if run_backfill {
                     next_backfill_scan_at = next_backfill_scan_timestamp(
@@ -394,6 +443,21 @@ pub async fn start_tuwunel_event_purge_worker(state: Arc<AppState>) {
                         rooms = outcome.census_rooms,
                         next_portal_census_at,
                         "Tuwunel portal-room census cycle scheduled"
+                    );
+                }
+                if run_server_census {
+                    let delay = if outcome.server_census_succeeded {
+                        config.server_census_scan_secs
+                    } else {
+                        config.server_census_scan_secs.min(300)
+                    };
+                    next_server_census_at = now.saturating_add(delay.min(i32::MAX as u64) as i32);
+                    tracing::info!(
+                        succeeded = outcome.server_census_succeeded,
+                        discovered_rooms = outcome.server_census_discovered_rooms,
+                        recorded_rooms = outcome.server_census_recorded_rooms,
+                        next_server_census_at,
+                        "Tuwunel server-wide room census cycle scheduled"
                     );
                 }
             }
@@ -429,6 +493,7 @@ async fn run_purge_cycle(
     config: &EventPurgeConfig,
     run_backfill: bool,
     run_portal_census: bool,
+    run_server_census: bool,
 ) -> Result<PurgeCycleOutcome> {
     if !config.enabled {
         if DISABLED_LOGGED.set(()).is_ok() {
@@ -489,6 +554,40 @@ async fn run_purge_cycle(
     } else {
         (0, 0)
     };
+    let (server_census_discovered_rooms, server_census_recorded_rooms, server_census_succeeded) =
+        if run_server_census {
+            match run_server_room_census(state, config, now).await {
+                Ok((discovered, recorded)) => (discovered, recorded, true),
+                Err(error) => {
+                    let detail = error.to_string();
+                    if let Err(record_error) =
+                        state.tuwunel_cleanup_repository.record_portal_census_scan(
+                            crate::repositories::tuwunel_cleanup_repository::PortalCensusScan {
+                                user_id: config.admin_user_id,
+                                service: SERVER_CENSUS_SERVICE,
+                                status: "room_enumeration_failed",
+                                room_count: 0,
+                                room_cursor: None,
+                                error: Some(&detail),
+                                scanned_at: now,
+                            },
+                        )
+                    {
+                        tracing::error!(
+                            error = %record_error,
+                            "Failed to persist Tuwunel server-wide census failure"
+                        );
+                    }
+                    tracing::error!(
+                        error = %detail,
+                        "Tuwunel server-wide room census failed; no partial inventory was queued"
+                    );
+                    (0, 0, false)
+                }
+            }
+        } else {
+            (0, 0, false)
+        };
 
     log_stale_blockers(state, stale_ingest_cutoff, now)?;
 
@@ -533,6 +632,9 @@ async fn run_purge_cycle(
             audited,
             census_targets,
             census_rooms,
+            server_census_discovered_rooms,
+            server_census_recorded_rooms,
+            server_census_succeeded,
         });
     }
 
@@ -595,6 +697,9 @@ async fn run_purge_cycle(
             audited,
             census_targets,
             census_rooms,
+            server_census_discovered_rooms,
+            server_census_recorded_rooms,
+            server_census_succeeded,
         });
     }
 
@@ -616,6 +721,9 @@ async fn run_purge_cycle(
         audited,
         census_targets,
         census_rooms,
+        server_census_discovered_rooms,
+        server_census_recorded_rooms,
+        server_census_succeeded,
     })
 }
 
@@ -749,6 +857,205 @@ async fn run_portal_room_census(
     Ok((scanned_targets, recorded_rooms))
 }
 
+async fn run_server_room_census(
+    state: &Arc<AppState>,
+    config: &EventPurgeConfig,
+    now: i32,
+) -> Result<(usize, usize)> {
+    let matrix_client = crate::utils::matrix_auth::get_cached_client(config.admin_user_id, state)
+        .await
+        .with_context(|| {
+            format!(
+                "could not load Matrix admin user {} for server-wide room census",
+                config.admin_user_id
+            )
+        })?;
+    let admin_user = matrix_client
+        .user_id()
+        .ok_or_else(|| anyhow!("configured Matrix admin client has no authenticated user"))?;
+    let session = matrix_client.matrix_auth().session().ok_or_else(|| {
+        anyhow!(
+            "Matrix admin user {} has no active session for server-wide room census",
+            config.admin_user_id
+        )
+    })?;
+    let admin_alias = OwnedRoomAliasId::try_from(format!("#admins:{}", admin_user.server_name()))
+        .context("invalid Tuwunel admin room alias")?;
+    let admin_room = matrix_client
+        .resolve_room_alias(&admin_alias)
+        .await
+        .context("could not resolve Tuwunel admin room before server-wide purge census")?;
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(config.server_census_http_timeout_secs))
+        .build()?;
+    let inventory = fetch_server_room_inventory(
+        &client,
+        &config.homeserver_url,
+        &session.tokens.access_token,
+        config.server_census_page_size,
+        config.server_census_max_pages,
+    )
+    .await?;
+
+    let discovered = inventory.room_ids.len();
+    let mut purge_rooms = inventory.room_ids;
+    purge_rooms.retain(|room_id| room_id != admin_room.room_id.as_str());
+    let excluded_admin_rooms = discovered.saturating_sub(purge_rooms.len());
+    if excluded_admin_rooms != 1 {
+        return Err(anyhow!(
+            "Tuwunel room inventory did not contain the resolved admin room {}",
+            admin_room.room_id
+        ));
+    }
+
+    let cutoff_ts = now.saturating_sub(config.retention_secs.min(i32::MAX as u64) as i32);
+    let recorded = state
+        .tuwunel_cleanup_repository
+        .record_portal_census_rooms(
+            config.admin_user_id,
+            SERVER_CENSUS_SERVICE,
+            &purge_rooms,
+            cutoff_ts,
+            now,
+        )?;
+    state.tuwunel_cleanup_repository.record_portal_census_scan(
+        crate::repositories::tuwunel_cleanup_repository::PortalCensusScan {
+            user_id: config.admin_user_id,
+            service: SERVER_CENSUS_SERVICE,
+            status: "succeeded",
+            room_count: discovered,
+            room_cursor: None,
+            error: None,
+            scanned_at: now,
+        },
+    )?;
+
+    tracing::info!(
+        discovered_rooms = discovered,
+        reported_total_rooms = inventory.total_rooms,
+        pages = inventory.pages,
+        recorded_rooms = recorded,
+        excluded_admin_rooms,
+        admin_room_id = %admin_room.room_id,
+        cutoff_ts,
+        "Tuwunel server-wide room census queued exhaustive history purges"
+    );
+
+    Ok((discovered, recorded))
+}
+
+async fn fetch_server_room_inventory(
+    client: &reqwest::Client,
+    homeserver_url: &str,
+    access_token: &str,
+    page_size: usize,
+    max_pages: usize,
+) -> Result<ServerRoomInventory> {
+    let mut offset = 0;
+    let mut seen_offsets = HashSet::from([offset]);
+    let mut room_ids = HashSet::new();
+    let mut total_rooms = 0;
+
+    for page_index in 0..max_pages {
+        let url = build_server_rooms_url(homeserver_url, offset, page_size);
+        let response = client
+            .get(&url)
+            .bearer_auth(access_token)
+            .send()
+            .await
+            .with_context(|| format!("Tuwunel server room census request failed for {url}"))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .context("could not read Tuwunel server room census response")?;
+        if !status.is_success() {
+            return Err(anyhow!(
+                "Tuwunel server room census returned {}: {}",
+                status,
+                body.chars().take(2000).collect::<String>()
+            ));
+        }
+
+        let (page_rooms, response_offset, response_total, next_batch) =
+            parse_server_room_list_page(&body)?;
+        if response_offset != offset {
+            return Err(anyhow!(
+                "Tuwunel server room census offset mismatch: requested {} got {}",
+                offset,
+                response_offset
+            ));
+        }
+        total_rooms = total_rooms.max(response_total);
+        room_ids.extend(page_rooms);
+
+        let pages = page_index + 1;
+        let Some(next_offset) = next_batch else {
+            let mut room_ids = room_ids.into_iter().collect::<Vec<_>>();
+            room_ids.sort();
+            if room_ids.len() != total_rooms {
+                return Err(anyhow!(
+                    "Tuwunel server room census was incomplete: collected {} unique rooms but server reported {}",
+                    room_ids.len(),
+                    total_rooms
+                ));
+            }
+            return Ok(ServerRoomInventory {
+                room_ids,
+                total_rooms,
+                pages,
+            });
+        };
+        if next_offset <= offset || !seen_offsets.insert(next_offset) {
+            return Err(anyhow!(
+                "Tuwunel server room census returned invalid repeated offset {}",
+                next_offset
+            ));
+        }
+        offset = next_offset;
+    }
+
+    Err(anyhow!(
+        "Tuwunel server room census exceeded {} pages before completion",
+        max_pages
+    ))
+}
+
+pub fn parse_server_room_list_page(
+    body: &str,
+) -> Result<(Vec<String>, usize, usize, Option<usize>)> {
+    let response: ServerRoomListResponse = serde_json::from_str(body).with_context(|| {
+        format!(
+            "invalid Tuwunel server room census JSON: {}",
+            body.chars().take(500).collect::<String>()
+        )
+    })?;
+    let mut room_ids = Vec::with_capacity(response.rooms.len());
+    for room in response.rooms {
+        if !room.room_id.starts_with('!') || room.room_id.chars().any(char::is_control) {
+            return Err(anyhow!(
+                "Tuwunel server room census returned invalid room id {:?}",
+                room.room_id
+            ));
+        }
+        room_ids.push(room.room_id);
+    }
+    Ok((
+        room_ids,
+        response.offset,
+        response.total_rooms,
+        response.next_batch,
+    ))
+}
+
+pub fn build_server_rooms_url(homeserver_url: &str, offset: usize, limit: usize) -> String {
+    format!(
+        "{}/_synapse/admin/v1/rooms?from={offset}&limit={limit}",
+        homeserver_url.trim_end_matches('/')
+    )
+}
+
 pub fn select_portal_census_room_batch(
     sorted_room_ids: &[String],
     cursor: Option<&str>,
@@ -835,6 +1142,28 @@ async fn submit_room_history_purge(
                 attempt,
                 "Submitted durable portal-census room-history purge"
             );
+        }
+        Err(error) if room_history_was_already_clean(&error) => {
+            match state
+                .tuwunel_cleanup_repository
+                .record_room_history_noop_succeeded(candidate.id, attempt, candidate.cutoff_ts)
+            {
+                Ok(()) => tracing::info!(
+                    purge_row_id = candidate.id,
+                    user_id = candidate.user_id,
+                    service = candidate.service,
+                    room_id = candidate.room_id,
+                    cutoff_ts = candidate.cutoff_ts,
+                    attempt,
+                    "Tuwunel room history was already empty before the requested cutoff"
+                ),
+                Err(record_error) => tracing::error!(
+                    purge_row_id = candidate.id,
+                    room_id = candidate.room_id,
+                    error = %record_error,
+                    "Failed to persist already-clean Tuwunel room history"
+                ),
+            }
         }
         Err(error) => {
             record_room_history_purge_failure(state, config, candidate, attempt, &error.to_string())
@@ -1559,6 +1888,17 @@ fn event_was_already_purged(error: &PurgeApiError) -> bool {
         && error.body.to_ascii_lowercase().contains("event not found")
 }
 
+pub fn room_history_error_is_already_clean(status: Option<StatusCode>, body: &str) -> bool {
+    status == Some(StatusCode::NOT_FOUND)
+        && body
+            .to_ascii_lowercase()
+            .contains("no event found before the given timestamp")
+}
+
+fn room_history_was_already_clean(error: &PurgeApiError) -> bool {
+    room_history_error_is_already_clean(error.status, &error.body)
+}
+
 pub fn purge_task_status_is_missing(status: Option<StatusCode>) -> bool {
     status == Some(StatusCode::NOT_FOUND)
 }
@@ -1707,6 +2047,30 @@ impl EventPurgeConfig {
                 1,
             )
             .min(100) as usize,
+            server_census_enabled: env_flag("TUWUNEL_SERVER_CENSUS_PURGE_ENABLED", true),
+            server_census_scan_secs: env_u64(
+                "TUWUNEL_SERVER_CENSUS_SCAN_SECS",
+                DEFAULT_SERVER_CENSUS_SCAN_SECS,
+                300,
+            ),
+            server_census_page_size: env_u64(
+                "TUWUNEL_SERVER_CENSUS_PAGE_SIZE",
+                DEFAULT_SERVER_CENSUS_PAGE_SIZE as u64,
+                100,
+            )
+            .min(10_000) as usize,
+            server_census_max_pages: env_u64(
+                "TUWUNEL_SERVER_CENSUS_MAX_PAGES",
+                DEFAULT_SERVER_CENSUS_MAX_PAGES as u64,
+                1,
+            )
+            .min(100) as usize,
+            server_census_http_timeout_secs: env_u64(
+                "TUWUNEL_SERVER_CENSUS_HTTP_TIMEOUT_SECS",
+                DEFAULT_SERVER_CENSUS_HTTP_TIMEOUT_SECS,
+                15,
+            )
+            .min(600),
             purge_status_poll_batch_size: env_u64(
                 "TUWUNEL_PURGE_STATUS_POLL_BATCH_SIZE",
                 DEFAULT_PURGE_STATUS_POLL_BATCH_SIZE as u64,
