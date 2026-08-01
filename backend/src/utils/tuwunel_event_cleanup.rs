@@ -91,7 +91,7 @@ struct PurgeCycleOutcome {
     census_targets: usize,
     census_rooms: usize,
     server_census_discovered_rooms: usize,
-    server_census_recorded_rooms: usize,
+    server_census_new_rooms: usize,
     server_census_succeeded: bool,
 }
 
@@ -385,6 +385,7 @@ pub async fn start_tuwunel_event_purge_worker(state: Arc<AppState>) {
                 portal_census_room_batch_size = config.portal_census_room_batch_size,
                 portal_census_purge_batch_size = config.portal_census_purge_batch_size,
                 server_census_enabled = config.server_census_enabled,
+                server_census_queue_mode = "insert_once",
                 server_census_scan_secs = config.server_census_scan_secs,
                 server_census_page_size = config.server_census_page_size,
                 server_census_max_pages = config.server_census_max_pages,
@@ -454,8 +455,9 @@ pub async fn start_tuwunel_event_purge_worker(state: Arc<AppState>) {
                     next_server_census_at = now.saturating_add(delay.min(i32::MAX as u64) as i32);
                     tracing::info!(
                         succeeded = outcome.server_census_succeeded,
+                        queue_mode = "insert_once",
                         discovered_rooms = outcome.server_census_discovered_rooms,
-                        recorded_rooms = outcome.server_census_recorded_rooms,
+                        newly_queued_rooms = outcome.server_census_new_rooms,
                         next_server_census_at,
                         "Tuwunel server-wide room census cycle scheduled"
                     );
@@ -554,7 +556,7 @@ async fn run_purge_cycle(
     } else {
         (0, 0)
     };
-    let (server_census_discovered_rooms, server_census_recorded_rooms, server_census_succeeded) =
+    let (server_census_discovered_rooms, server_census_new_rooms, server_census_succeeded) =
         if run_server_census {
             match run_server_room_census(state, config, now).await {
                 Ok((discovered, recorded)) => (discovered, recorded, true),
@@ -633,7 +635,7 @@ async fn run_purge_cycle(
             census_targets,
             census_rooms,
             server_census_discovered_rooms,
-            server_census_recorded_rooms,
+            server_census_new_rooms,
             server_census_succeeded,
         });
     }
@@ -698,7 +700,7 @@ async fn run_purge_cycle(
             census_targets,
             census_rooms,
             server_census_discovered_rooms,
-            server_census_recorded_rooms,
+            server_census_new_rooms,
             server_census_succeeded,
         });
     }
@@ -722,7 +724,7 @@ async fn run_purge_cycle(
         census_targets,
         census_rooms,
         server_census_discovered_rooms,
-        server_census_recorded_rooms,
+        server_census_new_rooms,
         server_census_succeeded,
     })
 }
@@ -910,9 +912,9 @@ async fn run_server_room_census(
     }
 
     let cutoff_ts = now.saturating_sub(config.retention_secs.min(i32::MAX as u64) as i32);
-    let recorded = state
+    let newly_queued = state
         .tuwunel_cleanup_repository
-        .record_portal_census_rooms(
+        .record_server_census_rooms_once(
             config.admin_user_id,
             SERVER_CENSUS_SERVICE,
             &purge_rooms,
@@ -935,14 +937,15 @@ async fn run_server_room_census(
         discovered_rooms = discovered,
         reported_total_rooms = inventory.total_rooms,
         pages = inventory.pages,
-        recorded_rooms = recorded,
+        newly_queued_rooms = newly_queued,
+        queue_mode = "insert_once",
         excluded_admin_rooms,
         admin_room_id = %admin_room.room_id,
         cutoff_ts,
-        "Tuwunel server-wide room census queued exhaustive history purges"
+        "Tuwunel server-wide room census discovered insert-once history purges"
     );
 
-    Ok((discovered, recorded))
+    Ok((discovered, newly_queued))
 }
 
 async fn fetch_server_room_inventory(

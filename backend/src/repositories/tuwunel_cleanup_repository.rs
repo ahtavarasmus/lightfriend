@@ -282,6 +282,33 @@ impl TuwunelCleanupRepository {
         .map_err(Into::into)
     }
 
+    /// Queue each server-wide backlog room exactly once. Recurring inventory scans must never
+    /// advance cutoffs or reopen completed rows; ongoing events use the ingestion cleanup path.
+    pub fn record_server_census_rooms_once(
+        &self,
+        user_id: i32,
+        service: &str,
+        room_ids: &[String],
+        cutoff_ts: i32,
+        discovered_at: i32,
+    ) -> Result<usize> {
+        let mut conn = self.connection()?;
+        Ok(diesel::sql_query(
+            "INSERT INTO tuwunel_room_history_purges \
+                 (user_id, service, room_id, cutoff_ts, status, attempt_count, \
+                  last_discovered_at, updated_at) \
+             SELECT $1, $2, rooms.room_id, $3, 'pending', 0, $4, $4 \
+             FROM unnest($5::TEXT[]) AS rooms(room_id) \
+             ON CONFLICT (user_id, service, room_id) DO NOTHING",
+        )
+        .bind::<diesel::sql_types::Integer, _>(user_id)
+        .bind::<diesel::sql_types::Text, _>(service)
+        .bind::<diesel::sql_types::Integer, _>(cutoff_ts)
+        .bind::<diesel::sql_types::Integer, _>(discovered_at)
+        .bind::<diesel::sql_types::Array<diesel::sql_types::Text>, _>(room_ids)
+        .execute(&mut conn)?)
+    }
+
     pub fn list_due_room_history_purges(&self, limit: i64) -> Result<Vec<RoomHistoryPurge>> {
         let mut conn = self.connection()?;
         Ok(diesel::sql_query(
