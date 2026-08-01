@@ -501,7 +501,7 @@ pub fn diagnostics_enabled_from_value(value: Option<&str>) -> bool {
             "0" | "false" | "no" | "off" => Some(false),
             _ => None,
         })
-        .unwrap_or(true)
+        .unwrap_or(false)
 }
 
 fn env_i32(name: &str, default: i32, minimum: i32) -> i32 {

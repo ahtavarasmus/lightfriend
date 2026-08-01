@@ -1625,6 +1625,10 @@ async fn main() {
             post(handlers::maintenance_handlers::compact_tuwunel),
         )
         .route(
+            "/api/internal/tuwunel/purge-admin-history",
+            post(handlers::maintenance_handlers::purge_tuwunel_admin_history),
+        )
+        .route(
             "/api/internal/health/storage",
             get(handlers::health_handlers::storage_health),
         )
@@ -1767,13 +1771,8 @@ async fn main() {
         .await;
     });
 
-    let state_for_tuwunel_storage_diagnostics = state.clone();
-    tokio::spawn(async move {
-        backend::utils::tuwunel_storage_diagnostics::start_tuwunel_storage_diagnostics_worker(
-            state_for_tuwunel_storage_diagnostics,
-        )
-        .await;
-    });
+    // RocksDB diagnostics come from Tuwunel's hourly backup signal and are
+    // monitored externally. Do not create recurring admin-room history here.
 
     let state_for_disconnected_bridge_cleanup = state.clone();
     tokio::spawn(async move {

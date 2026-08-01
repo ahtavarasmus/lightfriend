@@ -11,6 +11,9 @@ use std::sync::{atomic::Ordering, Arc};
 
 use crate::AppState;
 
+const ADMIN_HISTORY_PURGE_SERVICE: &str = "admin_room_manual";
+const DEFAULT_ADMIN_HISTORY_RETENTION_SECS: u64 = 60;
+
 /// Validates the X-Maintenance-Secret header against the MAINTENANCE_SECRET env var.
 pub fn check_secret(headers: &HeaderMap) -> bool {
     let expected = match std::env::var("MAINTENANCE_SECRET") {
@@ -158,6 +161,108 @@ pub async fn compact_tuwunel(
             "room_id": resolved.room_id,
             "event_id": sent.event_id,
             "command": command
+        })),
+    )
+        .into_response()
+}
+
+pub async fn purge_tuwunel_admin_history(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if !check_secret(&headers) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "forbidden"}))).into_response();
+    }
+
+    let admin_user_id = std::env::var("TUWUNEL_ADMIN_USER_ID")
+        .ok()
+        .and_then(|value| value.parse::<i32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(1);
+    let retention_secs = std::env::var("TUWUNEL_ADMIN_HISTORY_RETENTION_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_ADMIN_HISTORY_RETENTION_SECS);
+    let client = match crate::utils::matrix_auth::get_cached_client(admin_user_id, &state).await {
+        Ok(client) => client,
+        Err(error) => {
+            tracing::error!(admin_user_id, error = %error, "Tuwunel admin history purge client unavailable");
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"error": format!("admin client unavailable: {error}")})),
+            )
+                .into_response();
+        }
+    };
+    let Some(admin_user) = client.user_id() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": "admin client has no authenticated user"})),
+        )
+            .into_response();
+    };
+    let alias = match matrix_sdk::ruma::OwnedRoomAliasId::try_from(format!(
+        "#admins:{}",
+        admin_user.server_name()
+    )) {
+        Ok(alias) => alias,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("invalid admin room alias: {error}")})),
+            )
+                .into_response();
+        }
+    };
+    let resolved = match client.resolve_room_alias(&alias).await {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            tracing::error!(alias = %alias, error = %error, "Could not resolve Tuwunel admin room for history purge");
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"error": format!("admin room unavailable: {error}")})),
+            )
+                .into_response();
+        }
+    };
+
+    let now = crate::repositories::tuwunel_cleanup_repository::now_timestamp();
+    let cutoff_ts = now.saturating_sub(retention_secs.min(i32::MAX as u64) as i32);
+    let room_id = resolved.room_id.to_string();
+    let queued = match state.tuwunel_cleanup_repository.record_portal_census_rooms(
+        admin_user_id,
+        ADMIN_HISTORY_PURGE_SERVICE,
+        std::slice::from_ref(&room_id),
+        cutoff_ts,
+        now,
+    ) {
+        Ok(queued) => queued,
+        Err(error) => {
+            tracing::error!(room_id, error = %error, "Could not queue Tuwunel admin room history purge");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "admin history purge queue failed"})),
+            )
+                .into_response();
+        }
+    };
+
+    tracing::warn!(
+        room_id,
+        cutoff_ts,
+        retention_secs,
+        queued,
+        "Queued state-preserving Tuwunel admin room history purge"
+    );
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({
+            "status": "queued",
+            "room_id": room_id,
+            "cutoff_ts": cutoff_ts,
+            "retention_secs": retention_secs,
+            "queued_rows": queued,
+            "preserves_state": true
         })),
     )
         .into_response()

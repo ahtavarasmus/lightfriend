@@ -133,11 +133,11 @@ fn rejects_incomplete_or_malformed_report() {
 }
 
 #[test]
-fn diagnostics_default_enabled_but_allow_explicit_disable() {
-    assert!(diagnostics_enabled_from_value(None));
+fn diagnostics_default_disabled_and_require_explicit_enable() {
+    assert!(!diagnostics_enabled_from_value(None));
     assert!(diagnostics_enabled_from_value(Some("true")));
     assert!(diagnostics_enabled_from_value(Some("1")));
     assert!(!diagnostics_enabled_from_value(Some("false")));
     assert!(!diagnostics_enabled_from_value(Some("0")));
-    assert!(diagnostics_enabled_from_value(Some("invalid")));
+    assert!(!diagnostics_enabled_from_value(Some("invalid")));
 }
