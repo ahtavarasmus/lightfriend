@@ -1752,16 +1752,29 @@ async fn handle_openai_reader(
                         .await;
                 }
                 OpenAiRealtimeAudioMode::WebPcm24 => {
+                    let speech_started = serde_json::json!({"type": "vad", "speaking": true});
+                    let _ = send_tx
+                        .send(Message::Text(speech_started.to_string().into()))
+                        .await;
                     let clear_msg = serde_json::json!({"type": "audio_clear"});
                     let _ = send_tx
                         .send(Message::Text(clear_msg.to_string().into()))
                         .await;
                     web_audio_open = false;
-                    let _ = openai_tx
-                        .send(serde_json::json!({"type": "response.cancel"}))
-                        .await;
                 }
             },
+            "input_audio_buffer.speech_stopped" => {
+                if session.mode == OpenAiRealtimeAudioMode::WebPcm24 {
+                    let processing = serde_json::json!({
+                        "type": "vad",
+                        "speaking": false,
+                        "processing": true
+                    });
+                    let _ = send_tx
+                        .send(Message::Text(processing.to_string().into()))
+                        .await;
+                }
+            }
             "response.output_item.done" => {
                 if let Some(item) = event.get("item") {
                     handle_realtime_function_call(item, &init, &state, &openai_tx).await;
