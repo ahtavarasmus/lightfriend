@@ -1,11 +1,15 @@
 use crate::profile::billing_models::UserProfile;
 use crate::utils::api::Api;
+use serde::Deserialize;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
 use super::activity_feed::ActivityFeed;
+use super::media_panel::{MediaItem, MediaPanel};
 use super::settings_panel::{SettingsPanel, SettingsTab};
+use super::tesla_quick_panel::TeslaQuickPanel;
+use super::youtube_quick_panel::YouTubeQuickPanel;
 
 const FOCUSED_DASHBOARD_STYLES: &str = r#"
 .focused-dashboard {
@@ -77,6 +81,90 @@ const FOCUSED_DASHBOARD_STYLES: &str = r#"
     color: #aaa;
     text-decoration-color: rgba(255, 255, 255, 0.2);
     text-underline-offset: 0.22rem;
+}
+.focused-value {
+    margin: 1.5rem 0 0;
+    color: #a0a0a0;
+    font-size: clamp(0.95rem, 2vw, 1.08rem);
+    font-weight: 520;
+    line-height: 1.5;
+    font-variant-numeric: tabular-nums;
+    text-wrap: pretty;
+}
+.focused-controls {
+    padding: 1.35rem 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.focused-controls-label {
+    margin: 0 0 0.75rem;
+    color: #707070;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+}
+.focused-controls-row {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    flex-wrap: wrap;
+}
+.focused-control-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 40px;
+    padding: 0.55rem 0.8rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.035);
+    color: #aaa;
+    font: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+.focused-control-button:hover:not(:disabled) {
+    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.07);
+    color: #ddd;
+}
+.focused-control-button:active:not(:disabled) {
+    transform: scale(0.98);
+}
+.focused-control-button:focus-visible {
+    outline: 2px solid rgba(126, 178, 255, 0.7);
+    outline-offset: 3px;
+}
+.focused-control-button:disabled {
+    cursor: wait;
+    opacity: 0.6;
+}
+.focused-control-state {
+    color: #777;
+    font-size: 0.7rem;
+}
+.focused-control-state.on {
+    color: #69d895;
+}
+.focused-control-button.integration.active {
+    border-color: rgba(126, 178, 255, 0.35);
+    background: rgba(126, 178, 255, 0.1);
+    color: #9ec5ff;
+}
+.focused-control-error {
+    margin: 0.7rem 0 0;
+    color: #ff8a8a;
+    font-size: 0.76rem;
+}
+.focused-quick-panel {
+    margin-top: 0.8rem;
+}
+.focused-quick-panel .tesla-quick-panel,
+.focused-quick-panel .youtube-quick-panel,
+.focused-quick-panel .media-panel {
+    margin-top: 0;
 }
 .focused-primary-action {
     display: inline-flex;
@@ -208,6 +296,19 @@ const FOCUSED_DASHBOARD_STYLES: &str = r#"
     .focused-history {
         border-top-color: rgba(0, 0, 0, 0.08);
     }
+    .focused-controls {
+        border-top-color: rgba(0, 0, 0, 0.08);
+    }
+    .focused-control-button {
+        border-color: rgba(0, 0, 0, 0.1);
+        background: rgba(0, 0, 0, 0.025);
+        color: #666;
+    }
+    .focused-control-button:hover:not(:disabled) {
+        border-color: rgba(0, 0, 0, 0.2);
+        background: rgba(0, 0, 0, 0.05);
+        color: #333;
+    }
     .focused-footer button:hover,
     .focused-footer a:hover {
         color: #444;
@@ -215,6 +316,7 @@ const FOCUSED_DASHBOARD_STYLES: &str = r#"
 }
 @media (prefers-reduced-motion: reduce) {
     .focused-primary-action,
+    .focused-control-button,
     .focused-history-back,
     .focused-footer button,
     .focused-footer a {
@@ -231,6 +333,8 @@ struct ConnectionState {
     signal: bool,
     telegram: bool,
     email: bool,
+    tesla: bool,
+    youtube: bool,
 }
 
 impl ConnectionState {
@@ -252,6 +356,25 @@ impl ConnectionState {
     }
 }
 
+#[derive(Clone, PartialEq, Deserialize)]
+struct DashboardValueStats {
+    period_label: String,
+    quieted_messages: i64,
+    interruptions_sent: i64,
+    quiet_percent: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct DashboardSummary {
+    value_stats: DashboardValueStats,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum QuickPanel {
+    Tesla,
+    YouTube,
+}
+
 #[derive(Properties, PartialEq, Clone)]
 pub struct FocusedDashboardViewProps {
     pub user_profile: UserProfile,
@@ -264,6 +387,15 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
     let settings_open = use_state(|| false);
     let settings_initial_tab = use_state(|| SettingsTab::Connections);
     let show_history = use_state(|| false);
+    let value_stats = use_state(|| None::<DashboardValueStats>);
+    let critical_notifications =
+        use_state(|| props.user_profile.system_important_notify.unwrap_or(false));
+    let digests = use_state(|| props.user_profile.digest_enabled.unwrap_or(false));
+    let critical_saving = use_state(|| false);
+    let digest_saving = use_state(|| false);
+    let preference_error = use_state(|| None::<String>);
+    let quick_panel = use_state(|| None::<QuickPanel>);
+    let selected_video = use_state(|| None::<MediaItem>);
 
     {
         let connections = connections.clone();
@@ -308,7 +440,48 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
                         }
                     }
 
+                    if let Ok(response) = Api::get("/api/auth/tesla/status").send().await {
+                        if response.ok() {
+                            if let Ok(data) = response.json::<serde_json::Value>().await {
+                                next.tesla = data
+                                    .get("has_tesla")
+                                    .and_then(|value| value.as_bool())
+                                    .unwrap_or(false);
+                            }
+                        }
+                    }
+
+                    if let Ok(response) = Api::get("/api/auth/youtube/status").send().await {
+                        if response.ok() {
+                            if let Ok(data) = response.json::<serde_json::Value>().await {
+                                next.youtube = data
+                                    .get("connected")
+                                    .and_then(|value| value.as_bool())
+                                    .unwrap_or(false);
+                            }
+                        }
+                    }
+
                     connections.set(next);
+                });
+                || ()
+            },
+            (),
+        );
+    }
+
+    {
+        let value_stats = value_stats.clone();
+        use_effect_with_deps(
+            move |_| {
+                spawn_local(async move {
+                    if let Ok(response) = Api::get("/api/dashboard/summary").send().await {
+                        if response.ok() {
+                            if let Ok(summary) = response.json::<DashboardSummary>().await {
+                                value_stats.set(Some(summary.value_stats));
+                            }
+                        }
+                    }
                 });
                 || ()
             },
@@ -373,6 +546,120 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
     let toggle_history = {
         let show_history = show_history.clone();
         Callback::from(move |_: MouseEvent| show_history.set(!*show_history))
+    };
+
+    let toggle_critical_notifications = {
+        let enabled = critical_notifications.clone();
+        let saving = critical_saving.clone();
+        let preference_error = preference_error.clone();
+        let profile = props.user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |_: MouseEvent| {
+            if *saving {
+                return;
+            }
+            let previous = *enabled;
+            let next = !previous;
+            enabled.set(next);
+            saving.set(true);
+            preference_error.set(None);
+
+            let enabled = enabled.clone();
+            let saving = saving.clone();
+            let preference_error = preference_error.clone();
+            let mut profile = profile.clone();
+            let on_profile_update = on_profile_update.clone();
+            spawn_local(async move {
+                let request = serde_json::json!({
+                    "field": "system_important_notify",
+                    "value": next,
+                });
+                let saved = match Api::patch("/api/profile/field").json(&request) {
+                    Ok(builder) => matches!(builder.send().await, Ok(response) if response.ok()),
+                    Err(_) => false,
+                };
+
+                if saved {
+                    profile.system_important_notify = Some(next);
+                    on_profile_update.emit(profile);
+                } else {
+                    enabled.set(previous);
+                    preference_error.set(Some(
+                        "Critical notification setting could not be saved. Try again.".to_string(),
+                    ));
+                }
+                saving.set(false);
+            });
+        })
+    };
+
+    let toggle_digests = {
+        let enabled = digests.clone();
+        let saving = digest_saving.clone();
+        let preference_error = preference_error.clone();
+        let profile = props.user_profile.clone();
+        let on_profile_update = props.on_profile_update.clone();
+        Callback::from(move |_: MouseEvent| {
+            if *saving {
+                return;
+            }
+            let previous = *enabled;
+            let next = !previous;
+            enabled.set(next);
+            saving.set(true);
+            preference_error.set(None);
+
+            let enabled = enabled.clone();
+            let saving = saving.clone();
+            let preference_error = preference_error.clone();
+            let mut profile = profile.clone();
+            let on_profile_update = on_profile_update.clone();
+            spawn_local(async move {
+                let request = serde_json::json!({
+                    "field": "digest_enabled",
+                    "value": next,
+                });
+                let saved = match Api::patch("/api/profile/field").json(&request) {
+                    Ok(builder) => matches!(builder.send().await, Ok(response) if response.ok()),
+                    Err(_) => false,
+                };
+
+                if saved {
+                    profile.digest_enabled = Some(next);
+                    on_profile_update.emit(profile);
+                } else {
+                    enabled.set(previous);
+                    preference_error.set(Some(
+                        "Digest setting could not be saved. Try again.".to_string(),
+                    ));
+                }
+                saving.set(false);
+            });
+        })
+    };
+
+    let toggle_tesla_panel = {
+        let quick_panel = quick_panel.clone();
+        Callback::from(move |_: MouseEvent| {
+            quick_panel.set(if *quick_panel == Some(QuickPanel::Tesla) {
+                None
+            } else {
+                Some(QuickPanel::Tesla)
+            });
+        })
+    };
+
+    let toggle_youtube_panel = {
+        let quick_panel = quick_panel.clone();
+        let selected_video = selected_video.clone();
+        Callback::from(move |_: MouseEvent| {
+            selected_video.set(None);
+            quick_panel.set(if *quick_panel == Some(QuickPanel::YouTube) {
+                None
+            } else {
+                Some(QuickPanel::YouTube)
+            });
+        })
     };
 
     let names = connections.names();
@@ -454,6 +741,127 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
                                 <button class="focused-primary-action" onclick={open_connections}>
                                     {"Connect your first app"}
                                 </button>
+                            }
+
+                            if let Some(stats) = (*value_stats).as_ref() {
+                                <p class="focused-value">
+                                    {format!(
+                                        "{}: {} messages left quiet{} and {} {}.",
+                                        stats.period_label,
+                                        stats.quieted_messages,
+                                        stats
+                                            .quiet_percent
+                                            .map(|percent| format!(" ({}%)", percent))
+                                            .unwrap_or_default(),
+                                        stats.interruptions_sent,
+                                        if stats.interruptions_sent == 1 {
+                                            "interruption"
+                                        } else {
+                                            "interruptions"
+                                        },
+                                    )}
+                                </p>
+                            }
+                        </section>
+
+                        <section class="focused-controls" aria-labelledby="focused-controls-title">
+                            <h2 id="focused-controls-title" class="focused-controls-label">{"Controls"}</h2>
+                            <div class="focused-controls-row">
+                                <button
+                                    type="button"
+                                    class="focused-control-button"
+                                    aria-pressed={(*critical_notifications).to_string()}
+                                    disabled={*critical_saving}
+                                    onclick={toggle_critical_notifications}
+                                >
+                                    <span>{"Critical notifications"}</span>
+                                    <span class={classes!("focused-control-state", (*critical_notifications).then_some("on"))}>
+                                        {if *critical_saving { "Saving…" } else if *critical_notifications { "On" } else { "Off" }}
+                                    </span>
+                                </button>
+                                <button
+                                    type="button"
+                                    class="focused-control-button"
+                                    aria-pressed={(*digests).to_string()}
+                                    disabled={*digest_saving}
+                                    onclick={toggle_digests}
+                                >
+                                    <span>{"Digests"}</span>
+                                    <span class={classes!("focused-control-state", (*digests).then_some("on"))}>
+                                        {if *digest_saving { "Saving…" } else if *digests { "On" } else { "Off" }}
+                                    </span>
+                                </button>
+                                if connections.tesla {
+                                    <button
+                                        type="button"
+                                        class={classes!("focused-control-button", "integration", (*quick_panel == Some(QuickPanel::Tesla)).then_some("active"))}
+                                        aria-expanded={(*quick_panel == Some(QuickPanel::Tesla)).to_string()}
+                                        onclick={toggle_tesla_panel}
+                                    >
+                                        <i class="fa-solid fa-car" aria-hidden="true"></i>
+                                        <span>{"Tesla"}</span>
+                                    </button>
+                                }
+                                if connections.youtube {
+                                    <button
+                                        type="button"
+                                        class={classes!("focused-control-button", "integration", ((*quick_panel == Some(QuickPanel::YouTube)) || selected_video.is_some()).then_some("active"))}
+                                        aria-expanded={((*quick_panel == Some(QuickPanel::YouTube)) || selected_video.is_some()).to_string()}
+                                        onclick={toggle_youtube_panel}
+                                    >
+                                        <i class="fa-brands fa-youtube" aria-hidden="true"></i>
+                                        <span>{"YouTube"}</span>
+                                    </button>
+                                }
+                            </div>
+                            if let Some(message) = (*preference_error).as_ref() {
+                                <p class="focused-control-error" role="alert">{message}</p>
+                            }
+                            if *quick_panel == Some(QuickPanel::Tesla) {
+                                <div class="focused-quick-panel">
+                                    <TeslaQuickPanel on_close={{
+                                        let quick_panel = quick_panel.clone();
+                                        Callback::from(move |_: ()| quick_panel.set(None))
+                                    }} />
+                                </div>
+                            } else if *quick_panel == Some(QuickPanel::YouTube) {
+                                <div class="focused-quick-panel">
+                                    <YouTubeQuickPanel
+                                        on_close={{
+                                            let quick_panel = quick_panel.clone();
+                                            Callback::from(move |_: ()| quick_panel.set(None))
+                                        }}
+                                        on_video_select={{
+                                            let quick_panel = quick_panel.clone();
+                                            let selected_video = selected_video.clone();
+                                            Callback::from(move |video: MediaItem| {
+                                                selected_video.set(Some(video));
+                                                quick_panel.set(None);
+                                            })
+                                        }}
+                                    />
+                                </div>
+                            } else if let Some(video) = (*selected_video).as_ref() {
+                                <div class="focused-quick-panel">
+                                    <MediaPanel
+                                        media_items={vec![video.clone()]}
+                                        playing={true}
+                                        on_close={{
+                                            let selected_video = selected_video.clone();
+                                            Callback::from(move |_: ()| selected_video.set(None))
+                                        }}
+                                        on_select={Callback::from(|_: usize| {})}
+                                        on_back={Some({
+                                            let quick_panel = quick_panel.clone();
+                                            let selected_video = selected_video.clone();
+                                            Callback::from(move |_: ()| {
+                                                selected_video.set(None);
+                                                quick_panel.set(Some(QuickPanel::YouTube));
+                                            })
+                                        })}
+                                        youtube_connected={true}
+                                    />
+                                </div>
                             }
                         </section>
                     }
