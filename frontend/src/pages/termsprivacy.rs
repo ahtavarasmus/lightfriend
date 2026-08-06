@@ -184,9 +184,20 @@ pub fn privacy_policy() -> Html {
                 <p>{"In the event of a personal data breach, we will notify the relevant supervisory authority within 72 hours of becoming aware of the breach, where feasible, in accordance with GDPR Article 33. If the breach is likely to result in a high risk to your rights and freedoms, we will also notify you without undue delay."}</p>
             </section>
 
-            <section>
+            <section id="cookies">
                 <h2>{"18. Cookies"}</h2>
-                <p>{"We use strictly necessary cookies for authentication and session management. These cookies are required for the Service to function and cannot be disabled. We do not use tracking cookies, advertising cookies, or third-party analytics cookies."}</p>
+                <p>{"We use strictly necessary cookies for authentication and session management. These cookies are required for the Service to function and cannot be disabled."}</p>
+                <p>
+                    {"We use Simple Analytics for anonymous, aggregate page metrics. Simple Analytics does not set cookies or use browser storage, retain IP addresses, or identify visitors, so it runs without your analytics consent. See the "}
+                    <a href="https://www.simpleanalytics.com/gdpr-compliance" target="_blank" rel="noopener noreferrer">{"Simple Analytics privacy information"}</a>
+                    {" for details."}
+                </p>
+                <p>{"With your consent, we use DataFast analytics to understand website visits, traffic sources, and how our pages are used. DataFast may process information including your IP address, browser and device details, pages visited, and analytics events, and it uses an analytics cookie to recognise returning visitors. We do not load DataFast until you allow analytics, and we do not use advertising cookies."}</p>
+                <p>
+                    {"You can accept, reject, or change this choice at any time using the “Privacy choices” control on the website. Withdrawing consent stops future analytics collection and removes the DataFast visitor cookie from your browser. See the "}
+                    <a href="https://datafa.st/privacy-policy" target="_blank" rel="noopener noreferrer">{"DataFast privacy policy"}</a>
+                    {" for more information about its processing."}
+                </p>
             </section>
 
             <section>

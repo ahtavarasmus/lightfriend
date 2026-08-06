@@ -1,0 +1,160 @@
+.lf-consent-host {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2147483000;
+  display: flex;
+  justify-content: center;
+  padding: 1rem;
+  pointer-events: none;
+}
+
+.lf-consent-banner {
+  display: flex;
+  width: min(100%, 680px);
+  align-items: center;
+  gap: 1rem;
+  padding: 0.875rem;
+  color: #f4f7fb;
+  background: rgba(13, 19, 30, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  box-shadow:
+    0 2px 6px rgba(5, 10, 20, 0.24),
+    0 14px 40px rgba(5, 10, 20, 0.28);
+  pointer-events: auto;
+  -webkit-font-smoothing: antialiased;
+}
+
+.lf-consent-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.lf-consent-copy h2 {
+  margin: 0 0 0.25rem;
+  color: inherit;
+  font: 650 0.95rem/1.25 Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: -0.01em;
+}
+
+.lf-consent-copy p {
+  margin: 0;
+  color: #c5cedb;
+  font: 400 0.82rem/1.45 Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  text-wrap: pretty;
+}
+
+.lf-consent-copy a {
+  color: #dceaff;
+  text-decoration: underline;
+  text-decoration-color: rgba(220, 234, 255, 0.55);
+  text-underline-offset: 0.16em;
+}
+
+.lf-consent-copy a:hover {
+  text-decoration-color: currentColor;
+}
+
+.lf-consent-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.5rem;
+}
+
+.lf-consent-button,
+.lf-analytics-settings {
+  min-height: 40px;
+  padding: 0.625rem 0.875rem;
+  font: 600 0.8rem/1 Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  border-radius: 9px;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.lf-consent-button:active,
+.lf-analytics-settings:active {
+  transform: scale(0.98);
+}
+
+.lf-consent-button:focus-visible,
+.lf-analytics-settings:focus-visible,
+.lf-consent-copy a:focus-visible {
+  outline: 2px solid #8ab8ff;
+  outline-offset: 3px;
+}
+
+.lf-consent-reject {
+  color: #e8edf5;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+.lf-consent-reject:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.42);
+}
+
+.lf-consent-accept {
+  color: #07111f;
+  background: #9bc2ff;
+  border: 1px solid #9bc2ff;
+}
+
+.lf-consent-accept:hover {
+  background: #b4d2ff;
+  border-color: #b4d2ff;
+}
+
+.lf-analytics-settings {
+  position: fixed;
+  bottom: 0.75rem;
+  left: 0.75rem;
+  z-index: 2147482999;
+  min-height: 34px;
+  padding: 0.45rem 0.65rem;
+  color: #d7deea;
+  background: rgba(13, 19, 30, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 4px 18px rgba(5, 10, 20, 0.2);
+  opacity: 0.76;
+}
+
+.lf-analytics-settings:hover,
+.lf-analytics-settings:focus-visible {
+  opacity: 1;
+  background: rgba(20, 29, 44, 0.98);
+}
+
+@media (max-width: 620px) {
+  .lf-consent-host {
+    padding: 0.625rem;
+  }
+
+  .lf-consent-banner {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .lf-consent-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .lf-consent-button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lf-consent-button,
+  .lf-analytics-settings {
+    transition: none;
+  }
+}

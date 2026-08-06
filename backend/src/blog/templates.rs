@@ -165,9 +165,8 @@ a:hover { text-decoration: underline; }
 "#;
 
 const ANALYTICS: &str = r#"
-    <script defer data-website-id="68c9baf36c40f6f0060e0d5a" data-domain="lightfriend.ai" src="https://datafa.st/js/script.js"></script>
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-G812WMEHC6"></script>
-    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-G812WMEHC6');</script>
+    <link rel="stylesheet" href="/assets/analytics-consent.css">
+    <script defer data-website-id="dfid_ICHRky5CwoxQQSthciEQz" data-domain="lightfriend.ai" src="/assets/analytics-consent.js"></script>
 "#;
 
 fn html_escape(s: &str) -> String {

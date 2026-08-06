@@ -558,5 +558,11 @@ fn main() {
     }));
     console_log::init_with_level(Level::Info).expect("error initializing log");
     info!("Starting application");
-    yew::Renderer::<App>::new().render();
+    let document = web_sys::window()
+        .and_then(|window| window.document())
+        .expect("browser document is unavailable");
+    let root = document
+        .get_element_by_id("app")
+        .expect("missing #app mount element");
+    yew::Renderer::<App>::with_root(root).render();
 }
