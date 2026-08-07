@@ -1290,6 +1290,33 @@ impl OntologyRepository {
         query.load::<OntMessage>(&mut conn)
     }
 
+    /// Query one explicitly selected email inbox. Email room IDs are scoped
+    /// as `email_<imap_connection_id>_<uid>`, so filtering here avoids a
+    /// busy second inbox consuming the result limit before post-filtering.
+    pub fn get_recent_email_messages_for_account(
+        &self,
+        user_id: i32,
+        imap_connection_id: i32,
+        since_ts: i32,
+        limit: i64,
+        incoming_only: bool,
+    ) -> Result<Vec<OntMessage>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let room_prefix = format!("email_{}_%", imap_connection_id);
+        let mut query = ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::platform.eq("email"))
+            .filter(ont_messages::room_id.like(room_prefix))
+            .filter(ont_messages::created_at.gt(since_ts))
+            .order(ont_messages::created_at.desc())
+            .limit(limit)
+            .into_boxed();
+        if incoming_only {
+            query = query.filter(ont_messages::sender_name.ne("You"));
+        }
+        query.load::<OntMessage>(&mut conn)
+    }
+
     /// "What's in my messages lately?" digest query.
     ///
     /// Returns the latest INCOMING message from each distinct conversation
@@ -1842,6 +1869,21 @@ impl OntologyRepository {
         ont_messages::table
             .filter(ont_messages::id.eq_any(ids))
             .load::<OntMessage>(&mut conn)
+    }
+
+    /// Tenant-scoped lookup for resolving a stable message result ID back to
+    /// its provider-specific identity (for example an IMAP account + UID).
+    pub fn get_message_by_id_for_user(
+        &self,
+        user_id: i32,
+        message_id: i64,
+    ) -> Result<Option<OntMessage>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_messages::table
+            .filter(ont_messages::user_id.eq(user_id))
+            .filter(ont_messages::id.eq(message_id))
+            .first::<OntMessage>(&mut conn)
+            .optional()
     }
 
     /// Safety net for messages where urgency classification failed or was

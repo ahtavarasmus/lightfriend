@@ -510,7 +510,7 @@ fn linked_account_run_snapshots_principal_without_spending_trial_quota() {
             device.id,
             user.id,
             "linked-client-message",
-            "Changed retry text",
+            "Check my email",
             NOW + TRIAL_DURATION_SECONDS + 1,
         )
         .unwrap();
@@ -519,6 +519,19 @@ fn linked_account_run_snapshots_principal_without_spending_trial_quota() {
     };
     assert_eq!(replay.id, run.id);
     assert_eq!(replay.user_message, "Check my email");
+
+    assert_eq!(
+        repository
+            .create_account_run(
+                device.id,
+                user.id,
+                "linked-client-message",
+                "Changed retry text",
+                NOW + TRIAL_DURATION_SECONDS + 2,
+            )
+            .unwrap(),
+        AccountRunCreation::IdempotencyConflict
+    );
 
     let stored_device = LightToolDevicesRepository::new(state.pg_pool.clone())
         .find_by_installation_hash(&installation_hash)
@@ -549,7 +562,7 @@ fn linked_account_run_snapshots_principal_without_spending_trial_quota() {
 
 #[test]
 #[serial_test::serial]
-fn replay_returns_original_run_without_spending_quota_again() {
+fn exact_replay_returns_original_run_without_spending_quota_again() {
     set_test_encryption_key();
     let (pool, device_id) = create_device();
     let repository = LightToolRunsRepository::new(pool.clone());
@@ -567,7 +580,7 @@ fn replay_returns_original_run_without_spending_quota_again() {
         .create_anonymous_trial_run(
             device_id,
             "same-client-message",
-            "Changed retry text",
+            "Original text",
             NOW + 2,
             TRIAL_MESSAGE_LIMIT,
         )
@@ -586,6 +599,19 @@ fn replay_returns_original_run_without_spending_quota_again() {
     assert_eq!(replay.id, first.id);
     assert_eq!(replay.user_message, "Original text");
     assert_eq!(messages_remaining, TRIAL_MESSAGE_LIMIT - 1);
+
+    assert_eq!(
+        repository
+            .create_anonymous_trial_run(
+                device_id,
+                "same-client-message",
+                "Changed retry text",
+                NOW + 3,
+                TRIAL_MESSAGE_LIMIT,
+            )
+            .unwrap(),
+        AnonymousTrialRunCreation::IdempotencyConflict
+    );
 
     let stored_device = LightToolDevicesRepository::new(pool)
         .find_by_installation_hash(&hash_installation_id(INSTALLATION_ID).unwrap())

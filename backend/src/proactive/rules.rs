@@ -1124,10 +1124,16 @@ async fn execute_flow_action(
                     // Auto-injected params override LLM values (higher priority)
                     if tool_name == "respond_to_email" {
                         if let Some(snapshot) = trigger_snapshot {
-                            let email_uid = snapshot
-                                .get("email_uid")
-                                .and_then(|v| v.as_str())
-                                .map(str::to_string)
+                            let email_reference = snapshot
+                                .get("message_id")
+                                .and_then(|v| v.as_i64())
+                                .map(|value| value.to_string())
+                                .or_else(|| {
+                                    snapshot
+                                        .get("email_uid")
+                                        .and_then(|v| v.as_str())
+                                        .map(str::to_string)
+                                })
                                 .or_else(|| {
                                     snapshot
                                         .get("room_id")
@@ -1137,8 +1143,8 @@ async fn execute_flow_action(
                                         )
                                         .map(|identity| identity.uid)
                                 });
-                            if let Some(email_uid) = email_uid {
-                                p["email_id"] = serde_json::json!(email_uid);
+                            if let Some(email_reference) = email_reference {
+                                p["email_id"] = serde_json::json!(email_reference);
                             }
                             if let Some(account) =
                                 snapshot.get("email_account").and_then(|v| v.as_str())

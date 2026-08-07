@@ -74,13 +74,20 @@ static MESSAGE_PROPS: &[PropertyDef] = &[
         prop_type: "String",
         filter: Some(FilterSource::Dynamic("person_names")),
     },
+    PropertyDef {
+        name: "inbox",
+        description: "For email only, filter by a connected inbox nickname or email address. Omit to include every inbox.",
+        prop_type: "String",
+        filter: Some(FilterSource::Dynamic("inbox_selectors")),
+    },
 ];
 
 static MESSAGE_DEF: ObjectTypeDef = ObjectTypeDef {
     name: "Message",
     description: "Query recent messages across ALL platforms — WhatsApp, Telegram, Signal, AND EMAIL. \
         Use this tool for ANY question about the user's messages, chats, inbox, emails, digests, or \
-        'what came in'. Pass platform='email' to see only emails, or omit platform to see everything. \
+        'what came in'. Pass platform='email' to see only emails, and use `inbox` when the user names \
+        a connected inbox (for example 'work'). Omit both to see everything. \
         NEVER answer from conversation history alone — always call this tool fresh, even if a prior \
         assistant turn in history already contained a digest (that history is stale and may be hours old). \
         \

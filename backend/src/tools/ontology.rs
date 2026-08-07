@@ -119,6 +119,7 @@ fn query_message(
     let platform_filter = param_str(params, "platform");
     let sender_filter = param_str(params, "sender_name");
     let query_filter = param_str(params, "query");
+    let inbox_filter = param_str(params, "inbox").filter(|value| value != "all");
 
     // Single agent-controlled dial: how many of the most-recent messages
     // to return. Matches Palantir's Object query tool pattern — no
@@ -156,7 +157,40 @@ fn query_message(
         .is_some();
     let dedup_mode = !specific_sender && query_filter.is_none();
 
-    let messages: Vec<OntMessage> = if dedup_mode {
+    let selected_inbox = if let Some(selector) = inbox_filter.as_deref() {
+        Some(
+            state
+                .user_repository
+                .get_imap_credentials_by_selector(user_id, selector)
+                .map_err(|_| "Could not look up connected inboxes. Please try again.".to_string())?
+                .ok_or_else(|| {
+                    format!(
+                        "No connected inbox matches '{}'. Ask the user which inbox they mean.",
+                        selector
+                    )
+                })?,
+        )
+    } else {
+        None
+    };
+
+    let selected_inbox_fetch_limit = if specific_sender || query_filter.is_some() {
+        100
+    } else {
+        limit
+    };
+    let messages: Vec<OntMessage> = if let Some(account) = selected_inbox.as_ref() {
+        state
+            .ontology_repository
+            .get_recent_email_messages_for_account(
+                user_id,
+                account.id,
+                0,
+                selected_inbox_fetch_limit,
+                dedup_mode,
+            )
+            .map_err(|e| format!("Failed to query messages: {}", e))?
+    } else if dedup_mode {
         state
             .ontology_repository
             .get_latest_incoming_per_room(user_id, plat, limit)
@@ -224,10 +258,24 @@ fn query_message(
         }
     };
 
-    let mut output = format!(
-        "Found {} message(s), most recent first:\n\n",
-        messages.len()
-    );
+    let inbox_context = selected_inbox.as_ref().map(|account| {
+        account
+            .nickname
+            .as_deref()
+            .unwrap_or(&account.email)
+            .to_string()
+    });
+    let mut output = match inbox_context.as_deref() {
+        Some(inbox) => format!(
+            "Found {} message(s) in inbox '{}', most recent first:\n\n",
+            messages.len(),
+            inbox
+        ),
+        None => format!(
+            "Found {} message(s), most recent first:\n\n",
+            messages.len()
+        ),
+    };
 
     // No per-message content cap. This chat-box is a fetch-info tool, not
     // a long-running conversation — the user asks specific questions and
@@ -254,12 +302,33 @@ fn query_message(
         // re-quoting the message, producing leaked output like
         // `"id=9099 toivon vaan..."` where the brackets are dropped and
         // the verifier's regex no longer matches.
+        let mailbox_label = if m.platform == "email" {
+            crate::handlers::imap_handlers::parse_email_room_id(&m.room_id)
+                .and_then(|identity| identity.imap_connection_id)
+                .and_then(|connection_id| {
+                    state
+                        .user_repository
+                        .get_imap_connection_by_id(connection_id)
+                        .ok()
+                        .flatten()
+                        .filter(|(owner_id, _, status)| *owner_id == user_id && status == "active")
+                        .map(|(_, account, _)| {
+                            format!(
+                                " via email ({})",
+                                account.nickname.as_deref().unwrap_or(&account.email)
+                            )
+                        })
+                })
+                .unwrap_or_else(|| " via email".to_string())
+        } else {
+            format!(" via {}", m.platform)
+        };
         output.push_str(&format!(
-            "{}. ({}) {} via {} - \"{}\" [id={}]",
+            "{}. ({}) {}{} - \"{}\" [id={}]",
             i + 1,
             age_str(m.created_at),
             sender_label,
-            m.platform,
+            mailbox_label,
             m.content,
             m.id,
         ));

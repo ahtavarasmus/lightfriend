@@ -5,6 +5,14 @@
 //! the HTTP handler is a thin wrapper that maps these outcomes to
 //! status codes, so covering the repository covers the dangerous logic.
 
+use axum::body::to_bytes;
+use axum::extract::State;
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::Json;
+use backend::handlers::auth_middleware::AuthUser;
+use backend::handlers::webhook_sms_handlers::{
+    create_token, webhook_sms, CreateTokenRequest, WebhookSmsRequest,
+};
 use backend::models::user_models::NewWebhookToken;
 use backend::repositories::webhook_tokens_repository::{ClaimResult, IdempotencyResult};
 use backend::test_utils::{create_test_state, create_test_user, TestUserParams};
@@ -28,6 +36,13 @@ fn hash(raw: &str) -> String {
     let mut h = Sha256::new();
     h.update(raw.as_bytes());
     hex::encode(h.finalize())
+}
+
+fn owner_auth(user_id: i32) -> AuthUser {
+    AuthUser {
+        user_id,
+        is_admin: false,
+    }
 }
 
 /// Helper: insert a token with the given cap and return (raw, row).
@@ -310,6 +325,168 @@ async fn idempotency_keys_are_scoped_per_token() {
         .unwrap();
     assert!(matches!(res_a, IdempotencyResult::Fresh { .. }));
     assert!(matches!(res_b, IdempotencyResult::Fresh { .. }));
+}
+
+#[tokio::test]
+#[serial]
+async fn concurrent_idempotency_reservations_have_one_winner_without_db_error() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let (_raw, token) = mint(&state, user.id, "concurrent retry", 50);
+    let token_id = token.id;
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+
+    let (left, right) = tokio::task::spawn_blocking({
+        let state = state.clone();
+        move || {
+            std::thread::scope(|scope| {
+                let left_state = state.clone();
+                let left_barrier = barrier.clone();
+                let left = scope.spawn(move || {
+                    left_barrier.wait();
+                    left_state
+                        .webhook_tokens_repository
+                        .reserve_idempotency_key(token_id, "same-concurrent-key")
+                });
+                let right_state = state.clone();
+                let right_barrier = barrier.clone();
+                let right = scope.spawn(move || {
+                    right_barrier.wait();
+                    right_state
+                        .webhook_tokens_repository
+                        .reserve_idempotency_key(token_id, "same-concurrent-key")
+                });
+                (left.join().unwrap(), right.join().unwrap())
+            })
+        }
+    })
+    .await
+    .unwrap();
+
+    let outcomes = [left.unwrap(), right.unwrap()];
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| matches!(outcome, IdempotencyResult::Fresh { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| matches!(outcome, IdempotencyResult::InFlight))
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn public_handler_replays_idempotent_send_without_consuming_another_slot() {
+    let previous_environment = std::env::var("ENVIRONMENT").ok();
+    std::env::set_var("ENVIRONMENT", "development");
+
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let created = create_token(
+        State(state.clone()),
+        owner_auth(user.id),
+        Json(CreateTokenRequest {
+            label: "build alerts".into(),
+            daily_cap: Some(5),
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        created.headers().get(header::CACHE_CONTROL).unwrap(),
+        "no-store"
+    );
+    let created_body = to_bytes(created.into_body(), 16 * 1024).await.unwrap();
+    let created_json: serde_json::Value = serde_json::from_slice(&created_body).unwrap();
+    let raw_token = created_json["token"].as_str().unwrap().to_string();
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {raw_token}")).unwrap(),
+    );
+    headers.insert("Idempotency-Key", HeaderValue::from_static("build-123"));
+
+    for _ in 0..2 {
+        let response = webhook_sms(
+            State(state.clone()),
+            headers.clone(),
+            Json(WebhookSmsRequest {
+                message: "Deploy finished".into(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-store"
+        );
+        let body = to_bytes(response.into_body(), 16 * 1024).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["status"], "accepted");
+        assert_eq!(body["sid"], "dev_not_sending");
+    }
+
+    let token = state
+        .webhook_tokens_repository
+        .find_by_hash(&hash(&raw_token))
+        .unwrap()
+        .unwrap();
+    assert_eq!(token.daily_sent, 1, "replay must not consume quota twice");
+
+    match previous_environment {
+        Some(value) => std::env::set_var("ENVIRONMENT", value),
+        None => std::env::remove_var("ENVIRONMENT"),
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn message_limit_counts_unicode_characters_not_utf8_bytes() {
+    let previous_environment = std::env::var("ENVIRONMENT").ok();
+    std::env::set_var("ENVIRONMENT", "development");
+
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let (raw, _) = mint(&state, user.id, "unicode", 5);
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {raw}")).unwrap(),
+    );
+
+    let accepted = webhook_sms(
+        State(state.clone()),
+        headers.clone(),
+        Json(WebhookSmsRequest {
+            message: "å".repeat(1500),
+        }),
+    )
+    .await;
+    assert!(accepted.is_ok());
+
+    let rejected = webhook_sms(
+        State(state),
+        headers,
+        Json(WebhookSmsRequest {
+            message: "å".repeat(1501),
+        }),
+    )
+    .await
+    .expect_err("1501 characters must be rejected");
+    assert_eq!(rejected.0, StatusCode::BAD_REQUEST);
+
+    match previous_environment {
+        Some(value) => std::env::set_var("ENVIRONMENT", value),
+        None => std::env::remove_var("ENVIRONMENT"),
+    }
 }
 
 #[tokio::test]

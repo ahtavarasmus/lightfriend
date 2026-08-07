@@ -5,8 +5,8 @@
 --   NULL = the original request is still in-flight; concurrent
 --          replays should be rejected with 409 so the client can wait
 --          and retry rather than racing the original.
---   non-NULL = the original request completed; replays return this
---              SID without re-billing or re-consuming the daily cap.
+--   non-NULL = the provider accepted the original request; replays return
+--              this SID without re-billing or re-consuming the daily cap.
 --
 -- Lookup is TTL-gated in code (24h) so reusing a key after a day
 -- starts fresh; rows older than that are inert but kept until a

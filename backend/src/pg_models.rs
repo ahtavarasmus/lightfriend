@@ -151,6 +151,7 @@ pub struct PgImapConnection {
     pub description: String,
     pub imap_server: Option<String>,
     pub imap_port: Option<i32>,
+    pub nickname: Option<String>,
 }
 
 #[derive(Insertable)]
@@ -165,6 +166,7 @@ pub struct NewPgImapConnection {
     pub description: String,
     pub imap_server: Option<String>,
     pub imap_port: Option<i32>,
+    pub nickname: Option<String>,
 }
 
 // -- message_history --
@@ -387,6 +389,8 @@ pub struct PgBridge {
     pub data: Option<String>,
     pub created_at: Option<i32>,
     pub last_seen_online: Option<i32>,
+    pub last_native_activity_at: Option<i32>,
+    pub native_activity_reminded_at: Option<i32>,
 }
 
 #[derive(Insertable)]
@@ -398,6 +402,8 @@ pub struct NewPgBridge {
     pub room_id: Option<String>,
     pub data: Option<String>,
     pub created_at: Option<i32>,
+    pub last_native_activity_at: Option<i32>,
+    pub native_activity_reminded_at: Option<i32>,
 }
 
 // -- bridge_disconnection_events --

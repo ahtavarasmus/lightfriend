@@ -14,6 +14,7 @@ use backend::models::ontology_models::{NewOntMessage, OntMessage};
 use backend::test_utils::{
     create_test_state, create_test_user, setup_test_encryption, TestUserParams,
 };
+use backend::tool_call_utils::email::resolve_email_reply_target;
 use chrono::Utc;
 use serial_test::serial;
 
@@ -212,6 +213,32 @@ async fn test_same_uid_in_two_accounts_creates_two_isolated_messages() {
         .get_message_by_email_room_id(user.id, &email_room_id("42", Some(account_b)))
         .unwrap()
         .is_some());
+
+    let account_a_messages = state
+        .ontology_repository
+        .get_recent_email_messages_for_account(user.id, account_a, 0, 20, true)
+        .unwrap();
+    assert_eq!(account_a_messages.len(), 1);
+    assert_eq!(account_a_messages[0].id, id_a);
+    assert_eq!(
+        account_a_messages[0].room_id,
+        email_room_id("42", Some(account_a))
+    );
+
+    let (reply_account, reply_uid) =
+        resolve_email_reply_target(&state, user.id, &id_a.to_string(), &None).unwrap();
+    assert_eq!(reply_account.id, account_a);
+    assert_eq!(reply_uid, "42");
+
+    let wrong_inbox = resolve_email_reply_target(
+        &state,
+        user.id,
+        &id_a.to_string(),
+        &Some("account-b@example.com".to_string()),
+    );
+    assert!(wrong_inbox
+        .unwrap_err()
+        .contains("different connected inbox"));
 }
 
 #[tokio::test]
@@ -671,6 +698,77 @@ fn test_set_imap_credentials_upsert_returns_existing_id() {
         .unwrap()
         .unwrap();
     assert_eq!(info.password, "pw2");
+}
+
+#[test]
+#[serial]
+fn test_inbox_nickname_selector_is_user_scoped_unique_and_removable() {
+    setup_test_encryption();
+    let state = create_test_state();
+    let user_a = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let user_b = create_test_user(&state, &TestUserParams::finland_user(10.0, 5.0));
+
+    state
+        .user_repository
+        .set_imap_credentials(user_a.id, "first@example.com", "pw", None, None)
+        .unwrap();
+    state
+        .user_repository
+        .set_imap_credentials(user_a.id, "second@example.com", "pw", None, None)
+        .unwrap();
+    state
+        .user_repository
+        .set_imap_credentials(user_b.id, "other@example.com", "pw", None, None)
+        .unwrap();
+
+    assert!(state
+        .user_repository
+        .set_imap_connection_nickname(user_a.id, "first@example.com", Some("work"))
+        .unwrap());
+    assert!(state
+        .user_repository
+        .set_imap_connection_nickname(user_b.id, "other@example.com", Some("work"))
+        .unwrap());
+
+    let selected = state
+        .user_repository
+        .get_imap_credentials_by_selector(user_a.id, "WORK")
+        .unwrap()
+        .unwrap();
+    assert_eq!(selected.email, "first@example.com");
+    assert_eq!(selected.nickname.as_deref(), Some("work"));
+
+    let duplicate = state.user_repository.set_imap_connection_nickname(
+        user_a.id,
+        "second@example.com",
+        Some("work"),
+    );
+    assert!(matches!(
+        duplicate,
+        Err(diesel::result::Error::DatabaseError(
+            diesel::result::DatabaseErrorKind::UniqueViolation,
+            _
+        ))
+    ));
+
+    assert!(state
+        .user_repository
+        .set_imap_connection_nickname(user_a.id, "first@example.com", None)
+        .unwrap());
+    assert!(state
+        .user_repository
+        .get_imap_credentials_by_selector(user_a.id, "work")
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        state
+            .user_repository
+            .get_imap_credentials_by_selector(user_a.id, " FIRST@EXAMPLE.COM ")
+            .unwrap()
+            .unwrap()
+            .email,
+        "first@example.com"
+    );
 }
 
 #[test]

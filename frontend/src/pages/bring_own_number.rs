@@ -43,7 +43,8 @@ fn intro_and_country_component(props: &IntroAndCountryProps) -> Html {
             <div class="instruction-block overview-block">
                 <div class="instruction-content">
                     <h2>{"SMS and Voice Communication Setup"}</h2>
-                    <p>{"Lightfriend uses Twilio to send voice calls and text messages. Users outside the US need to use their own Twilio number, because many countries require local address to be able to buy a phone number or even send messages."}</p>
+                    <p>{"Lightfriend uses Twilio for voice calls and text messages. You can use a Lightfriend-provided number when an eligible number is available from the platform pool, or connect an eligible Twilio number you already own. Availability and capabilities vary by country, destination permissions, provider rules, and local regulations."}</p>
+                    <p>{"When you bring your own number, Twilio bills usage directly to your Twilio account. Those charges are separate from your Lightfriend subscription, and notification, SMS, or call volume can increase them."}</p>
                     <a href="https://youtu.be/WARw4REp584?si=ghmMYGzTKTLcgss_" class="learn-more-link" target="_blank">{"Don't bother to read? Watch me explain this page on youtube ->"}</a>
                 </div>
             </div>

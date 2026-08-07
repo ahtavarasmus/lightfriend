@@ -4,6 +4,39 @@ use backend::handlers::imap_auth::{
     detect_imap_config, detect_imap_server, extract_email_domain, is_known_email_provider,
     is_valid_email,
 };
+use backend::handlers::imap_handlers::smtp_server_for_imap;
+use backend::repositories::user_repository::normalize_inbox_nickname;
+
+#[test]
+fn inbox_nicknames_are_normalized_deterministically() {
+    assert_eq!(
+        normalize_inbox_nickname("  Work   Mail ").unwrap(),
+        Some("work mail".to_string())
+    );
+    assert_eq!(normalize_inbox_nickname("   ").unwrap(), None);
+    assert!(normalize_inbox_nickname("work@example.com").is_err());
+    assert!(normalize_inbox_nickname("🚀").is_err());
+}
+
+#[test]
+fn smtp_submission_hosts_cover_nonstandard_provider_names() {
+    assert_eq!(
+        smtp_server_for_imap(Some("outlook.office365.com")),
+        "smtp.office365.com"
+    );
+    assert_eq!(
+        smtp_server_for_imap(Some("imap.secureserver.net")),
+        "smtpout.secureserver.net"
+    );
+    assert_eq!(
+        smtp_server_for_imap(Some("imap.fastmail.com")),
+        "smtp.fastmail.com"
+    );
+    assert_eq!(
+        smtp_server_for_imap(Some("mail.privateemail.com")),
+        "mail.privateemail.com"
+    );
+}
 
 // ============================================================
 // IMAP Server Detection Tests

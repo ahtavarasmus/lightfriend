@@ -146,6 +146,22 @@ fn pairing_status_tracks_the_current_session() {
             .unwrap(),
         LightToolPairingStatus::Connected
     );
+
+    service
+        .create_offer(user.id, NOW + PAIRING_TTL_SECONDS + 3)
+        .unwrap();
+    assert_eq!(
+        service
+            .status_for_user(user.id, NOW + PAIRING_TTL_SECONDS + 3)
+            .unwrap(),
+        LightToolPairingStatus::Pending
+    );
+    assert_eq!(
+        service
+            .status_for_user(user.id, NOW + (2 * PAIRING_TTL_SECONDS) + 3)
+            .unwrap(),
+        LightToolPairingStatus::Connected
+    );
 }
 
 #[test]

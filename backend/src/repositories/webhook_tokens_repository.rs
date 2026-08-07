@@ -12,7 +12,7 @@ use crate::{
     PgDbPool,
 };
 use diesel::prelude::*;
-use diesel::result::{DatabaseErrorKind, Error as DieselError};
+use diesel::result::Error as DieselError;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Idempotency keys older than this are treated as if they don't exist.
@@ -43,7 +43,7 @@ pub enum IdempotencyResult {
     /// proceed with the send and then call `complete_idempotency` with
     /// the resulting SID so future replays can be answered.
     Fresh { id: i32 },
-    /// We've seen this key before and the prior request completed.
+    /// We've seen this key before and the provider accepted the prior request.
     /// Caller should return the cached SID without re-billing or
     /// re-consuming the daily cap.
     Replayed { sid: String },
@@ -263,28 +263,31 @@ impl WebhookTokensRepository {
             }
 
             // Insert a fresh row with response_sid = NULL (in-flight).
-            // The UNIQUE (token_id, idempotency_key) constraint defends
-            // against a concurrent insert that beat us between the SELECT
-            // and the INSERT — translated to InFlight below.
+            // `ON CONFLICT DO NOTHING` is important here: catching a unique
+            // violation inside a PostgreSQL transaction does not recover the
+            // transaction, so the later COMMIT would still fail. A no-op
+            // conflict keeps the transaction usable and deterministically
+            // maps the losing concurrent request to `InFlight`.
             let new_row = NewWebhookIdempotencyKey {
                 token_id,
                 idempotency_key: key.clone(),
                 response_sid: None,
                 created_at: now,
             };
-            match diesel::insert_into(webhook_idempotency_keys::table)
+            let inserted = diesel::insert_into(webhook_idempotency_keys::table)
                 .values(&new_row)
+                .on_conflict((
+                    webhook_idempotency_keys::token_id,
+                    webhook_idempotency_keys::idempotency_key,
+                ))
+                .do_nothing()
                 .returning(webhook_idempotency_keys::id)
                 .get_result::<i32>(conn)
-            {
-                Ok(id) => Ok(IdempotencyResult::Fresh { id }),
-                Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => {
-                    // Lost the race; another request just reserved.
-                    // Whatever they're doing, we treat as in-flight.
-                    Ok(IdempotencyResult::InFlight)
-                }
-                Err(e) => Err(e),
-            }
+                .optional()?;
+            Ok(match inserted {
+                Some(id) => IdempotencyResult::Fresh { id },
+                None => IdempotencyResult::InFlight,
+            })
         })
     }
 

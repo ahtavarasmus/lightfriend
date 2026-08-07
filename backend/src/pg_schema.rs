@@ -40,6 +40,7 @@ diesel::table! {
         description -> Text,
         imap_server -> Nullable<Text>,
         imap_port -> Nullable<Int4>,
+        nickname -> Nullable<Text>,
     }
 }
 
@@ -171,6 +172,8 @@ diesel::table! {
         data -> Nullable<Text>,
         created_at -> Nullable<Int4>,
         last_seen_online -> Nullable<Int4>,
+        last_native_activity_at -> Nullable<Int4>,
+        native_activity_reminded_at -> Nullable<Int4>,
     }
 }
 
@@ -736,6 +739,19 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    mcp_access_tokens (id) {
+        id -> Int4,
+        user_id -> Int4,
+        token_hash -> Text,
+        token_prefix -> Text,
+        label -> Text,
+        created_at -> Int4,
+        last_used_at -> Nullable<Int4>,
+        revoked_at -> Nullable<Int4>,
+    }
+}
+
 diesel::joinable!(ont_person_edits -> ont_persons (person_id));
 diesel::joinable!(ont_channels -> ont_persons (person_id));
 
@@ -798,6 +814,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     light_tool_pairing_sessions,
     webhook_tokens,
     webhook_idempotency_keys,
+    mcp_access_tokens,
     billing_accounts,
     billing_usage_events,
     billing_webhook_events,

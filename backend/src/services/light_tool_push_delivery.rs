@@ -70,7 +70,6 @@ impl LightToolPushDeliveryService {
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(10))
             .redirect(Policy::none())
-            .no_proxy()
             .build()
             .map_err(LightToolPushDeliveryError::ClientBuild)?;
         let allowed_hosts = allowed_hosts

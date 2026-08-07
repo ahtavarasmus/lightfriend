@@ -427,6 +427,7 @@ pub struct ImapStatus {
 #[derive(Serialize)]
 pub struct ImapAccountStatus {
     pub email: String,
+    pub nickname: Option<String>,
     pub connected: bool,
 }
 
@@ -439,6 +440,13 @@ pub struct ImapStatusMulti {
 #[derive(Deserialize)]
 pub struct DeleteImapRequest {
     pub email: String,
+}
+
+#[derive(Deserialize)]
+pub struct ImapNicknameRequest {
+    pub email: String,
+    /// Null or blank removes the nickname.
+    pub nickname: Option<String>,
 }
 
 // Function to establish an IMAP connection for credential verification.
@@ -528,7 +536,9 @@ pub async fn imap_login(
             );
             Err((
                 StatusCode::BAD_REQUEST,
-                AxumJson(json!({"error": format!("IMAP connection failed: {:?}", e)})),
+                AxumJson(
+                    json!({"error": "Could not connect to that inbox. Check the address, server settings, and app password."}),
+                ),
             ))
         }
     }
@@ -557,6 +567,7 @@ pub async fn imap_status(
         .into_iter()
         .map(|c| ImapAccountStatus {
             email: c.email,
+            nickname: c.nickname,
             connected: true, // active in DB = connected
         })
         .collect();
@@ -566,6 +577,59 @@ pub async fn imap_status(
         connected,
         connections: accounts,
     }))
+}
+
+/// Create, update, or remove a nickname for one connected inbox.
+pub async fn update_imap_nickname(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(payload): Json<ImapNicknameRequest>,
+) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
+    let nickname = match payload.nickname.as_deref() {
+        Some(value) => {
+            match crate::repositories::user_repository::normalize_inbox_nickname(value) {
+                Ok(value) => value,
+                Err(message) => {
+                    return Err((StatusCode::BAD_REQUEST, AxumJson(json!({"error": message}))))
+                }
+            }
+        }
+        None => None,
+    };
+
+    match state.user_repository.set_imap_connection_nickname(
+        auth_user.user_id,
+        &payload.email,
+        nickname.as_deref(),
+    ) {
+        Ok(true) => Ok(AxumJson(json!({
+            "message": "Inbox nickname updated",
+            "email": payload.email.trim().to_lowercase(),
+            "nickname": nickname,
+        }))),
+        Ok(false) => Err((
+            StatusCode::NOT_FOUND,
+            AxumJson(json!({"error": "Connected inbox not found"})),
+        )),
+        Err(diesel::result::Error::DatabaseError(
+            diesel::result::DatabaseErrorKind::UniqueViolation,
+            _,
+        )) => Err((
+            StatusCode::CONFLICT,
+            AxumJson(json!({"error": "That inbox nickname is already in use"})),
+        )),
+        Err(error) => {
+            tracing::error!(
+                "Failed to update inbox nickname for user {}: {}",
+                auth_user.user_id,
+                error
+            );
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": "Failed to update inbox nickname"})),
+            ))
+        }
+    }
 }
 
 // Handler to delete a specific IMAP connection by email address
@@ -589,15 +653,24 @@ pub async fn delete_imap_connection(
         crate::utils::imap_idle::abort_idle_task(&state, info.id);
     }
 
-    if let Err(e) = state
+    match state
         .user_repository
         .delete_imap_connection_by_email(auth_user.user_id, &payload.email)
     {
-        tracing::error!("Failed to delete IMAP credentials: {}", e);
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "Failed to delete IMAP credentials"})),
-        ));
+        Ok(true) => {}
+        Ok(false) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                AxumJson(json!({"error": "Connected inbox not found"})),
+            ))
+        }
+        Err(e) => {
+            tracing::error!("Failed to delete IMAP credentials: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": "Failed to delete IMAP credentials"})),
+            ));
+        }
     }
 
     tracing::info!(

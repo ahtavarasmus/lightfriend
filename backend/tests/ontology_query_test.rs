@@ -3,7 +3,9 @@
 //! Tests handle_query() directly with JSON args. Verifies formatted output
 //! for person and channel queries.
 
-use backend::test_utils::{create_test_state, create_test_user, TestUserParams};
+use backend::test_utils::{
+    create_test_state, create_test_user, setup_test_encryption, TestUserParams,
+};
 use backend::tools::ontology::handle_query;
 use serial_test::serial;
 
@@ -158,6 +160,69 @@ async fn test_query_event_status_all_includes_non_active_events() {
 // =============================================================================
 // Message queries
 // =============================================================================
+
+#[tokio::test]
+#[serial]
+async fn test_query_message_filters_by_inbox_nickname() {
+    setup_test_encryption();
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let work_id = state
+        .user_repository
+        .set_imap_credentials(user.id, "work@example.com", "pw", None, None)
+        .unwrap();
+    let personal_id = state
+        .user_repository
+        .set_imap_credentials(user.id, "personal@example.com", "pw", None, None)
+        .unwrap();
+    state
+        .user_repository
+        .set_imap_connection_nickname(user.id, "work@example.com", Some("work"))
+        .unwrap();
+
+    let now = chrono::Utc::now().timestamp() as i32;
+    for (room_id, content) in [
+        (format!("email_{}_10", work_id), "work-only message"),
+        (format!("email_{}_10", personal_id), "personal-only message"),
+    ] {
+        state
+            .ontology_repository
+            .insert_message(&backend::models::ontology_models::NewOntMessage {
+                user_id: user.id,
+                room_id,
+                platform: "email".to_string(),
+                sender_name: "Sender".to_string(),
+                sender_key: None,
+                content: content.to_string(),
+                person_id: None,
+                created_at: now,
+                matrix_event_id: None,
+            })
+            .unwrap();
+    }
+
+    let output = handle_query(
+        "query_message",
+        r#"{"platform":"email","inbox":"work"}"#,
+        &state,
+        user.id,
+    )
+    .await
+    .unwrap();
+    assert!(output.contains("work-only message"));
+    assert!(!output.contains("personal-only message"));
+    assert!(output.contains("inbox 'work'"));
+
+    let missing = handle_query(
+        "query_message",
+        r#"{"platform":"email","inbox":"missing"}"#,
+        &state,
+        user.id,
+    )
+    .await
+    .unwrap_err();
+    assert!(missing.contains("Ask the user which inbox"));
+}
 
 #[tokio::test]
 #[serial]

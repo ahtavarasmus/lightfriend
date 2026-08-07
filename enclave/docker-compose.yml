@@ -152,6 +152,7 @@ services:
       SERVER_URL: ${SERVER_URL:-}
       ASSISTANT_ID: ${ASSISTANT_ID:-}
       MAINTENANCE_SECRET: ${MAINTENANCE_SECRET:-}
+      LIGHT_TOOL_PUSH_ALLOWED_HOSTS: ${LIGHT_TOOL_PUSH_ALLOWED_HOSTS:-}
       # Enclave mode
       SKIP_BACKEND: ${SKIP_BACKEND:-false}
       # Local-only fallback. Production should derive the backup key inside the enclave.

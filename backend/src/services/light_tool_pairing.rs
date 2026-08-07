@@ -87,16 +87,24 @@ impl LightToolPairingService {
         user_id: i32,
         now: i32,
     ) -> Result<LightToolPairingStatus, LightToolPairingError> {
-        let Some(session) = self.repository.find_for_user(user_id)? else {
-            return Ok(LightToolPairingStatus::None);
-        };
-        if session.consumed_at.is_some() {
-            return Ok(LightToolPairingStatus::Connected);
-        }
-        if session.expires_at <= now {
+        if let Some(session) = self.repository.find_for_user(user_id)? {
+            if session.consumed_at.is_some() {
+                return Ok(LightToolPairingStatus::Connected);
+            }
+            if session.expires_at > now {
+                return Ok(LightToolPairingStatus::Pending);
+            }
+            if self.repository.has_active_device_for_user(user_id)? {
+                return Ok(LightToolPairingStatus::Connected);
+            }
             return Ok(LightToolPairingStatus::Expired);
         }
-        Ok(LightToolPairingStatus::Pending)
+
+        if self.repository.has_active_device_for_user(user_id)? {
+            Ok(LightToolPairingStatus::Connected)
+        } else {
+            Ok(LightToolPairingStatus::None)
+        }
     }
 }
 

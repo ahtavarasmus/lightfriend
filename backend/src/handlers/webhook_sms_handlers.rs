@@ -24,7 +24,8 @@ use crate::repositories::webhook_tokens_repository::{ClaimResult, IdempotencyRes
 use crate::{AppState, UserCoreOps};
 use axum::{
     extract::{Path, State},
-    http::{HeaderMap, StatusCode},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
+    response::{IntoResponse, Response},
     Json,
 };
 use rand::RngCore;
@@ -32,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Twilio SMS bodies max out at 1600 chars (10 concatenated segments).
 /// We reserve room for two prefixes the body picks up downstream:
@@ -53,6 +54,7 @@ const TOKEN_BYTES: usize = 16; // 128 bits, rendered as 32 hex chars
 /// and we replay the cached response for any second hit within 24h.
 const IDEMPOTENCY_HEADER: &str = "Idempotency-Key";
 const MAX_IDEMPOTENCY_KEY_LEN: usize = 64;
+const SEND_TIMEOUT: Duration = Duration::from_secs(30);
 
 // ============================================================================
 // Management endpoints (JWT-authed, mounted under protected_routes)
@@ -93,7 +95,7 @@ pub async fn create_token(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Json(req): Json<CreateTokenRequest>,
-) -> Result<Json<CreateTokenResponse>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     let user_id = auth_user.user_id;
 
     // Gate on tier 2 — same bar as every other outbound path. We check
@@ -109,7 +111,7 @@ pub async fn create_token(
     }
 
     let label = req.label.trim();
-    if label.is_empty() || label.len() > 64 {
+    if label.is_empty() || label.chars().count() > 64 {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "label must be 1..=64 chars"})),
@@ -140,14 +142,17 @@ pub async fn create_token(
         .create(&row)
         .map_err(db_err)?;
 
-    Ok(Json(CreateTokenResponse {
-        id: inserted.id,
-        label: inserted.label,
-        token_prefix: inserted.token_prefix,
-        daily_cap: inserted.daily_cap,
-        token: raw_token,
-        created_at: inserted.created_at,
-    }))
+    Ok(no_store(
+        Json(CreateTokenResponse {
+            id: inserted.id,
+            label: inserted.label,
+            token_prefix: inserted.token_prefix,
+            daily_cap: inserted.daily_cap,
+            token: raw_token,
+            created_at: inserted.created_at,
+        })
+        .into_response(),
+    ))
 }
 
 pub async fn list_tokens(
@@ -225,7 +230,7 @@ pub async fn webhook_sms(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Json(req): Json<WebhookSmsRequest>,
-) -> Result<Json<WebhookSmsResponse>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     // 1. Extract bearer.
     let raw = extract_bearer(&headers).ok_or_else(unauthorized)?;
     if !raw.starts_with(TOKEN_PREFIX) {
@@ -252,7 +257,7 @@ pub async fn webhook_sms(
             Json(json!({"error": "message must not be empty"})),
         ));
     }
-    if body.len() > MAX_BODY_LEN {
+    if body.chars().count() > MAX_BODY_LEN {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({
@@ -274,10 +279,13 @@ pub async fn webhook_sms(
             .map_err(db_err)?;
         match res {
             IdempotencyResult::Replayed { sid } => {
-                return Ok(Json(WebhookSmsResponse {
-                    status: "sent",
-                    sid,
-                }));
+                return Ok(no_store(
+                    Json(WebhookSmsResponse {
+                        status: "accepted",
+                        sid,
+                    })
+                    .into_response(),
+                ));
             }
             IdempotencyResult::InFlight => {
                 return Err((
@@ -311,7 +319,14 @@ pub async fn webhook_sms(
     if let Err(msg) = crate::utils::usage::check_user_credits(&state, &user, "noti_msg", None).await
     {
         release_idempotency(&state, idempotency_row_id);
-        return Err((StatusCode::PAYMENT_REQUIRED, Json(json!({"error": msg}))));
+        let (status, public_message) = public_credit_error(&msg);
+        if status == StatusCode::SERVICE_UNAVAILABLE {
+            tracing::error!(
+                user_id = user.id,
+                "webhook_sms billing/eligibility check failed"
+            );
+        }
+        return Err((status, Json(json!({"error": public_message}))));
     }
 
     // 7. Atomic daily-cap claim.
@@ -356,12 +371,13 @@ pub async fn webhook_sms(
     //    quota. That keeps the cap from being a free retry loop on
     //    provider outages. Idempotency rows ARE released on failure so
     //    the client can retry with the same key.
-    match state
-        .channel_router
-        .send_to_user(&user, &outbound, None)
-        .await
+    match tokio::time::timeout(
+        SEND_TIMEOUT,
+        state.channel_router.send_to_user(&user, &outbound, None),
+    )
+    .await
     {
-        Ok(sid) => {
+        Ok(Ok(sid)) => {
             let sid = sid.into_inner();
             if let Some(id) = idempotency_row_id {
                 if let Err(e) = state
@@ -380,19 +396,24 @@ pub async fn webhook_sms(
                     time_consumed: None,
                     success: Some(true),
                     reason: Some(format!("token_id={}", token.id)),
-                    status: Some("sent".to_string()),
+                    status: Some("accepted".to_string()),
                     recharge_threshold_timestamp: None,
                     zero_credits_timestamp: None,
                 },
             ) {
                 tracing::error!("Failed to log webhook_sms usage: {}", e);
             }
-            Ok(Json(WebhookSmsResponse {
-                status: "sent",
-                sid,
-            }))
+            Ok(no_store(
+                Json(WebhookSmsResponse {
+                    // A provider message id confirms acceptance, not handset
+                    // delivery. Delivery is resolved later by status callbacks.
+                    status: "accepted",
+                    sid,
+                })
+                .into_response(),
+            ))
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             tracing::error!(
                 "webhook_sms send failed for user {} token {}: {}",
                 user.id,
@@ -403,6 +424,23 @@ pub async fn webhook_sms(
             Err((
                 StatusCode::BAD_GATEWAY,
                 Json(json!({"error": "send failed"})),
+            ))
+        }
+        Err(_) => {
+            tracing::error!(
+                user_id = user.id,
+                token_id = token.id,
+                "webhook_sms send timed out"
+            );
+            // The provider future was cancelled without a definitive result.
+            // Keep the idempotency row in-flight so an automatic retry cannot
+            // immediately create a duplicate notification with an unknown
+            // first-send outcome.
+            Err((
+                StatusCode::GATEWAY_TIMEOUT,
+                Json(
+                    json!({"error": "send outcome unknown; retry later with the same idempotency key"}),
+                ),
             ))
         }
     }
@@ -527,6 +565,44 @@ fn not_found(msg: &str) -> (StatusCode, Json<serde_json::Value>) {
     (StatusCode::NOT_FOUND, Json(json!({"error": msg})))
 }
 
+fn no_store(mut response: Response) -> Response {
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
+fn public_credit_error(message: &str) -> (StatusCode, &'static str) {
+    if message.starts_with("Failed to ") || message == "Invalid event type" {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "notification eligibility check unavailable",
+        );
+    }
+    if message.contains("Phone service") {
+        return (StatusCode::PAYMENT_REQUIRED, "phone service is inactive");
+    }
+    if message.contains("subscription") {
+        return (StatusCode::PAYMENT_REQUIRED, "active subscription required");
+    }
+    if message.contains("Monthly usage") {
+        return (
+            StatusCode::PAYMENT_REQUIRED,
+            "monthly usage allowance exhausted",
+        );
+    }
+    if message.contains("credits") || message.contains("quota") {
+        return (
+            StatusCode::PAYMENT_REQUIRED,
+            "notification usage balance exhausted",
+        );
+    }
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        "notification eligibility check unavailable",
+    )
+}
+
 /// Strip control characters from the label so it can't break out of the
 /// `[label]` prefix on display. Already length-bounded at creation; we
 /// only need to defuse newlines and other formatting tricks.
@@ -540,5 +616,25 @@ fn sanitize_label(label: &str) -> String {
         "webhook".to_string()
     } else {
         cleaned.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn billing_failures_are_redacted_and_distinguished_from_user_actions() {
+        assert_eq!(
+            public_credit_error("Failed to check billing entitlement: postgres password=secret"),
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "notification eligibility check unavailable"
+            )
+        );
+        assert_eq!(
+            public_credit_error("Active subscription required."),
+            (StatusCode::PAYMENT_REQUIRED, "active subscription required")
+        );
     }
 }

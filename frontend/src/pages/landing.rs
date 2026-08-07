@@ -110,45 +110,79 @@ pub fn landing() -> Html {
             },
         ),
         (
-            "Can I send and receive messages?",
+            "What kinds of messages can Lightfriend surface?",
             html! {
-                <p>{"Yes. You can reply to WhatsApp, Telegram, Signal, and email directly via SMS or voice call. Lightfriend forwards your reply to the right place."}</p>
+                <p>{"Lightfriend can surface messages from connected WhatsApp, Signal, Telegram, and email accounts. Time-sensitive items can reach you by SMS, while routine updates can wait for a scheduled digest. Provider availability and AI classification can affect what arrives and when."}</p>
             },
         ),
         (
-            "How does Lightfriend decide what reaches me?",
+            "How does Lightfriend reduce notification noise?",
             html! {
-                <p>{"Lightfriend learns from sender relationships, timing, messaging patterns, and your corrections. Time-sensitive messages reach you immediately. Everything else can wait for a digest."}</p>
+                <p>{"It evaluates message content together with sender relationships, timing, recent patterns, and cross-service outreach. Messages judged able to wait are collected for a digest instead of interrupting you. This is an AI judgment, so it is not guaranteed to classify every message perfectly."}</p>
             },
         ),
         (
-            "How does it protect my data?",
+            "Can I ask Lightfriend to send or reply to a message?",
             html! {
                 <>
-                    <p>{"Lightfriend is designed so no one else can see your chats or personal data, including while AI processes them. All of the code is open source, and cryptographic evidence lets anyone independently verify which code is running in production."}</p>
-                    <p>{"The production application runs inside an AWS Nitro Enclave, stored application data is encrypted, and the enclave's signed code measurement can be compared with the published build and public approval registry."}</p>
-                    <p><a href="/trustless" style="color: var(--landing-blue);">{"See exactly how it works"}</a></p>
+                    <p>{"Yes, for supported actions on connected WhatsApp, Signal, Telegram, and email accounts. In the SMS and voice conversation flow, Lightfriend queues the attempt for about 60 seconds and tells you how to cancel during that window."}</p>
+                    <p>{"A queue confirmation is not proof of provider delivery. The connected service can still reject or fail the attempt."}</p>
                 </>
+            },
+        ),
+        (
+            "What happens when a connected service is unavailable?",
+            html! {
+                <p>{"A fetch or send can fail until the account reconnects or the provider recovers. Lightfriend reports failures where the provider returns them, but queued does not mean delivered. Persistent disconnects may require reauthorizing the service; WhatsApp linked devices also require periodic activity in the native phone app."}</p>
+            },
+        ),
+        (
+            "Is Lightfriend available in my country?",
+            html! {
+                <>
+                    <p>{"There are two number routes: a Lightfriend-provided number from the currently available pool, or an eligible Twilio number you already own. Neither route works automatically in every country."}</p>
+                    <p>{"Availability depends on the selected number's current voice and SMS capabilities, destination permissions, provider rules, and local regulations. Start a trial or email support to check the current options for your use case."}</p>
+                </>
+            },
+        ),
+        (
+            "Can I bring my own Twilio number?",
+            html! {
+                <>
+                    <p>{"You can connect Twilio credentials and select an eligible number already owned by that Twilio account. Lightfriend attempts to configure the required voice and SMS callbacks and provides a setup verification check."}</p>
+                    <p>{"The number still needs the right Twilio capabilities, destination permissions, and regulatory support. Setup is not guaranteed for every number or country."}</p>
+                </>
+            },
+        ),
+        (
+            "Who pays Twilio charges when I bring my own number?",
+            html! {
+                <p>{"Twilio bills usage for your number directly to your own Twilio account. Those provider charges are separate from the Lightfriend subscription, and higher notification, SMS, or call volume can increase them."}</p>
             },
         ),
         (
             "How much usage is included?",
             html! {
                 <>
-                    <p>{"Every subscription includes a $25 monthly allowance for metered usage, including annual subscriptions. This allowance is separate from the subscription price: your subscription pays for access to Lightfriend and its integrations, while the allowance covers AI processing and hosted SMS and voice usage."}</p>
-                    <p>{"The allowance renews each month and does not roll over. For normal personal use - asking questions when needed and receiving updates through the day on Autopilot - it should be more than enough."}</p>
-                    <p>{"Your exact usage depends on AI processing, message destination, carrier fees, and call duration. You can see each charge and your remaining allowance under Billing. If you use up the allowance, Lightfriend pauses metered usage unless you choose to enable pay-as-you-go overage."}</p>
+                    <p>{"Every subscription includes a $25 monthly allowance for metered Lightfriend usage, including annual subscriptions. The allowance renews monthly and does not roll over."}</p>
+                    <p>{"Actual usage depends on AI processing, destinations, carrier fees, and call duration. Billing shows the recorded charges and remaining allowance. Bring-your-own-Twilio charges are separate and billed by Twilio."}</p>
                 </>
             },
         ),
         (
-            "Which countries are supported?",
+            "How is Lightfriend designed with privacy in mind?",
             html! {
                 <>
-                    <p><strong>{"Full service:"}</strong>{" US, Canada, UK, Finland, Netherlands, Australia."}</p>
-                    <p><strong>{"Notification-only:"}</strong>{" 30+ countries across Europe and Asia-Pacific."}</p>
-                    <p><strong>{"Elsewhere:"}</strong>{" Bring your own Twilio number."}</p>
+                    <p>{"Lightfriend is open source and documents a production architecture that uses an AWS Nitro Enclave and encrypted storage. Published build and enclave information is intended to make parts of that architecture independently inspectable."}</p>
+                    <p>{"No system is risk-free, and connected providers and phone carriers still process their parts of a communication."}</p>
+                    <p><a href="/trustless" style="color: var(--landing-blue);">{"Read the architecture details"}</a></p>
                 </>
+            },
+        ),
+        (
+            "Need something Lightfriend does not do yet?",
+            html! {
+                <p>{"Email Rasmus at rasmus@lightfriend.ai with the use case. Ideas are welcome, but sharing one is not a promise that the feature will be built."}</p>
             },
         ),
     ];
@@ -306,6 +340,10 @@ pub fn landing() -> Html {
                     <p>{"Every plan starts with a 7-day free trial."}</p>
                 </div>
                 <StripePricingTable />
+                <p class="pricing-provider-note">
+                    {"Bringing your own Twilio number? Twilio usage is billed separately to your Twilio account, and higher SMS, notification, or call volume can increase those provider charges. "}
+                    <a href="/bring-own-number">{"See setup details"}</a>
+                </p>
             </section>
 
             <section id="faq" class="quiet-section quiet-faq" aria-labelledby="faq-heading">
@@ -326,6 +364,8 @@ pub fn landing() -> Html {
                         <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer">{"GitHub"}</a>
                     </p>
                     <div class="legal-links">
+                        <a href="/blog">{"Blog"}</a>
+                        {" · "}
                         <Link<Route> to={Route::Terms}>{"Terms"}</Link<Route>>
                         {" · "}
                         <Link<Route> to={Route::Privacy}>{"Privacy"}</Link<Route>>
@@ -960,6 +1000,17 @@ pub fn landing() -> Html {
     .landing-pricing-section .stripe-pricing-table-wrap stripe-pricing-table {
         display: block;
         width: 100%;
+    }
+    .pricing-provider-note {
+        max-width: 760px;
+        margin: 1.25rem auto 0;
+        color: var(--landing-muted);
+        font-size: 0.85rem;
+        line-height: 1.6;
+        text-align: center;
+    }
+    .pricing-provider-note a {
+        color: var(--landing-blue);
     }
     .stripe-pricing-loading,
     .stripe-pricing-error {

@@ -20,13 +20,52 @@ use crate::{
 pub type ImapCredentials = (String, String, Option<String>, Option<i32>);
 
 /// Structured IMAP connection info (replaces raw tuples for multi-email support)
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ImapConnectionInfo {
     pub id: i32,
     pub email: String,
+    pub nickname: Option<String>,
     pub password: String,
     pub imap_server: Option<String>,
     pub imap_port: Option<i32>,
+}
+
+impl std::fmt::Debug for ImapConnectionInfo {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ImapConnectionInfo")
+            .field("id", &self.id)
+            .field("email", &self.email)
+            .field("nickname", &self.nickname)
+            .field("password", &"[REDACTED]")
+            .field("imap_server", &self.imap_server)
+            .field("imap_port", &self.imap_port)
+            .finish()
+    }
+}
+
+/// Normalize a user-facing inbox nickname for storage and tool selection.
+/// Empty input removes a nickname. Keeping nicknames ASCII and short makes
+/// case-insensitive matching deterministic across Rust and PostgreSQL.
+pub fn normalize_inbox_nickname(value: &str) -> Result<Option<String>, &'static str> {
+    let normalized = value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    if normalized.is_empty() {
+        return Ok(None);
+    }
+    if normalized.len() > 32 {
+        return Err("Inbox nickname must be 32 characters or fewer");
+    }
+    if !normalized
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_'))
+    {
+        return Err("Inbox nickname may only contain letters, numbers, spaces, '-' or '_'");
+    }
+    Ok(Some(normalized))
 }
 
 /// Parameters for logging usage
@@ -264,6 +303,7 @@ impl UserRepository {
                 description: normalized_email,
                 imap_server: imap_server.map(|s| s.to_string()),
                 imap_port: imap_port.map(|p| p as i32),
+                nickname: None,
             };
 
             let inserted: crate::pg_models::PgImapConnection =
@@ -327,6 +367,7 @@ impl UserRepository {
                 Ok(password) => result.push(ImapConnectionInfo {
                     id: c.id,
                     email: c.description,
+                    nickname: c.nickname,
                     password,
                     imap_server: c.imap_server,
                     imap_port: c.imap_port,
@@ -362,6 +403,7 @@ impl UserRepository {
                     ImapConnectionInfo {
                         id: c.id,
                         email: c.description,
+                        nickname: c.nickname,
                         password,
                         imap_server: c.imap_server,
                         imap_port: c.imap_port,
@@ -465,6 +507,7 @@ impl UserRepository {
                 Ok(password) => Ok(Some(ImapConnectionInfo {
                     id: c.id,
                     email: c.description,
+                    nickname: c.nickname,
                     password,
                     imap_server: c.imap_server,
                     imap_port: c.imap_port,
@@ -474,6 +517,78 @@ impl UserRepository {
         } else {
             Ok(None)
         }
+    }
+
+    /// Resolve an active mailbox by nickname first, then by email address.
+    /// Nickname-first selection is intentional: conversational aliases are
+    /// user-controlled and cannot contain `@`, while direct addresses remain
+    /// backwards compatible.
+    pub fn get_imap_credentials_by_selector(
+        &self,
+        user_id: i32,
+        selector: &str,
+    ) -> Result<Option<ImapConnectionInfo>, diesel::result::Error> {
+        use crate::pg_schema::imap_connection;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let nickname = normalize_inbox_nickname(selector).ok().flatten();
+        let normalized_email = selector.trim().to_lowercase();
+
+        let mut row = None;
+        if let Some(nickname) = nickname {
+            row = imap_connection::table
+                .filter(imap_connection::user_id.eq(user_id))
+                .filter(imap_connection::nickname.eq(nickname))
+                .filter(imap_connection::status.eq("active"))
+                .first::<crate::pg_models::PgImapConnection>(&mut conn)
+                .optional()?;
+        }
+        if row.is_none() {
+            row = imap_connection::table
+                .filter(imap_connection::user_id.eq(user_id))
+                .filter(imap_connection::description.eq(normalized_email))
+                .filter(imap_connection::status.eq("active"))
+                .first::<crate::pg_models::PgImapConnection>(&mut conn)
+                .optional()?;
+        }
+
+        match row {
+            Some(c) => decrypt(&c.encrypted_password)
+                .map(|password| {
+                    Some(ImapConnectionInfo {
+                        id: c.id,
+                        email: c.description,
+                        nickname: c.nickname,
+                        password,
+                        imap_server: c.imap_server,
+                        imap_port: c.imap_port,
+                    })
+                })
+                .map_err(|_| diesel::result::Error::RollbackTransaction),
+            None => Ok(None),
+        }
+    }
+
+    /// Set or clear the normalized nickname for one of the user's mailboxes.
+    /// Returns false when the mailbox does not exist or is inactive.
+    pub fn set_imap_connection_nickname(
+        &self,
+        user_id: i32,
+        email: &str,
+        nickname: Option<&str>,
+    ) -> Result<bool, diesel::result::Error> {
+        use crate::pg_schema::imap_connection;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let normalized_email = email.trim().to_lowercase();
+
+        let changed = diesel::update(
+            imap_connection::table
+                .filter(imap_connection::user_id.eq(user_id))
+                .filter(imap_connection::description.eq(normalized_email))
+                .filter(imap_connection::status.eq("active")),
+        )
+        .set(imap_connection::nickname.eq(nickname))
+        .execute(&mut conn)?;
+        Ok(changed == 1)
     }
 
     /// Delete all IMAP connections for a user
@@ -492,18 +607,18 @@ impl UserRepository {
         &self,
         user_id: i32,
         email: &str,
-    ) -> Result<(), diesel::result::Error> {
+    ) -> Result<bool, diesel::result::Error> {
         use crate::pg_schema::imap_connection;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
-        diesel::delete(
+        let deleted = diesel::delete(
             imap_connection::table
                 .filter(imap_connection::user_id.eq(user_id))
-                .filter(imap_connection::description.eq(email)),
+                .filter(imap_connection::description.eq(email.trim().to_lowercase())),
         )
         .execute(&mut conn)?;
 
-        Ok(())
+        Ok(deleted == 1)
     }
 
     // log the usage. activity_type either 'call' or 'sms', or the new 'notification'
@@ -1222,6 +1337,70 @@ impl UserRepository {
             .set(bridges::last_seen_online.eq(Some(last_seen_online)))
             .execute(&mut conn)?;
         Ok(rows)
+    }
+
+    /// Record activity proven to have happened in the native WhatsApp app.
+    /// Lightfriend message handling must not call this method. A new activity
+    /// starts a new inactivity period, so it also clears the previous reminder.
+    pub fn record_whatsapp_native_activity(
+        &self,
+        user_id: i32,
+        occurred_at: i32,
+    ) -> Result<usize, DieselError> {
+        use crate::pg_schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(bridges::table)
+            .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::bridge_type.eq("whatsapp"))
+            .set((
+                bridges::last_native_activity_at.eq(Some(occurred_at)),
+                bridges::native_activity_reminded_at.eq(None::<i32>),
+            ))
+            .execute(&mut conn)
+    }
+
+    /// Atomically claim a reminder for the inactivity period identified by
+    /// `last_activity_at`. This prevents overlapping checks from sending it
+    /// more than once and refuses the claim if newer native activity arrived.
+    pub fn claim_whatsapp_native_activity_reminder(
+        &self,
+        bridge_id: i32,
+        last_activity_at: i32,
+        claimed_at: i32,
+    ) -> Result<bool, DieselError> {
+        use crate::pg_schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let rows = diesel::update(bridges::table)
+            .filter(bridges::id.eq(bridge_id))
+            .filter(bridges::bridge_type.eq("whatsapp"))
+            .filter(bridges::status.eq("connected"))
+            .filter(bridges::last_native_activity_at.eq(Some(last_activity_at)))
+            .filter(
+                bridges::native_activity_reminded_at
+                    .is_null()
+                    .or(bridges::native_activity_reminded_at.lt(last_activity_at)),
+            )
+            .set(bridges::native_activity_reminded_at.eq(Some(claimed_at)))
+            .execute(&mut conn)?;
+        Ok(rows == 1)
+    }
+
+    /// Release a failed delivery claim without disturbing a newer inactivity
+    /// period or a claim made by another scheduler run.
+    pub fn release_whatsapp_native_activity_reminder_claim(
+        &self,
+        bridge_id: i32,
+        last_activity_at: i32,
+        claimed_at: i32,
+    ) -> Result<usize, DieselError> {
+        use crate::pg_schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(bridges::table)
+            .filter(bridges::id.eq(bridge_id))
+            .filter(bridges::last_native_activity_at.eq(Some(last_activity_at)))
+            .filter(bridges::native_activity_reminded_at.eq(Some(claimed_at)))
+            .set(bridges::native_activity_reminded_at.eq(None::<i32>))
+            .execute(&mut conn)
     }
 
     /// Update bridge data field (e.g., connected account/phone number)

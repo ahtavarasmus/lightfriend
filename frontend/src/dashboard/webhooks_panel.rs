@@ -295,15 +295,16 @@ pub fn webhooks_panel() -> Html {
                     <pre>{format!(
     "curl -X POST {url} \\
     -H \"Authorization: Bearer <your-token>\" \\
+    -H \"Idempotency-Key: <unique-id>\" \\
     -H \"Content-Type: application/json\" \\
     -d '{{\"message\":\"deploy finished\"}}'",
                         url = webhook_endpoint_url()
                     )}</pre>
                     <div class="webhooks-help-block">
-                        {"Optional: add "}
-                        <code>{"-H \"Idempotency-Key: <unique-id>\""}</code>
-                        {" to dedupe retried requests within 24h. Daily cap resets at UTC midnight. Successful responses return "}
-                        <code>{r#"{"status":"sent","sid":"..."}"#}</code>{"."}
+                        {"Reuse the same "}<code>{"Idempotency-Key"}</code>
+                        {" when retrying a request to prevent duplicate texts within 24h. Daily cap resets at UTC midnight. An accepted response returns "}
+                        <code>{r#"{"status":"accepted","sid":"..."}"#}</code>
+                        {"; this confirms provider acceptance, not delivery to the phone."}
                     </div>
                 </div>
 

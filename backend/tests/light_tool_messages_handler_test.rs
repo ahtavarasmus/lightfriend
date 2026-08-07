@@ -63,11 +63,24 @@ async fn message_endpoint_creates_and_idempotently_replays_a_queued_run() {
         &app,
         Some(&session.device_token),
         &client_message_id,
-        "Changed retry text",
+        "What is the weather?",
     )
     .await;
     assert_eq!(replay.status(), StatusCode::ACCEPTED);
     assert_eq!(response_json(replay).await["run_id"], run_id);
+
+    let conflicting_replay = send_request(
+        &app,
+        Some(&session.device_token),
+        &client_message_id,
+        "Changed retry text",
+    )
+    .await;
+    assert_eq!(conflicting_replay.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(conflicting_replay).await["error"],
+        "client_message_id was already used with different content"
+    );
 
     let device = LightToolDevicesRepository::new(state.pg_pool.clone())
         .find_active_by_token_hash(&hash_device_token(&session.device_token).unwrap())

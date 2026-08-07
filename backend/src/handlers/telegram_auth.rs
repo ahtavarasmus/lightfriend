@@ -1143,6 +1143,8 @@ pub async fn start_telegram_connection(
         room_id: Some(room_id.to_string()),
         data: None,
         created_at: Some(current_time),
+        last_native_activity_at: None,
+        native_activity_reminded_at: None,
     };
 
     // Store bridge information
@@ -1460,6 +1462,8 @@ async fn monitor_telegram_connection(
                                     room_id: Some(room_id.to_string()),
                                     data: connected_account,
                                     created_at: Some(current_time),
+                                    last_native_activity_at: None,
+                                    native_activity_reminded_at: None,
                                 };
                                 state.user_repository.delete_bridge(user_id, "telegram")?;
                                 state.user_repository.create_bridge(new_bridge)?;

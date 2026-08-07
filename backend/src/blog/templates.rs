@@ -443,6 +443,10 @@ pub fn render_blog_index(
         </header>
         <section class="blog-list-section">
             <div class="cluster-section">
+                <h2>Latest</h2>
+                {recent_cards}
+            </div>
+            <div class="cluster-section">
                 <h2>Featured</h2>
                 {existing_cards}
             </div>
@@ -468,6 +472,7 @@ pub fn render_blog_index(
 </body>
 </html>"#,
         existing_cards = existing_cards,
+        recent_cards = recent_cards,
         cluster_sections = cluster_sections,
         css = INLINE_CSS,
         analytics = ANALYTICS,

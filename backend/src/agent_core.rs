@@ -165,7 +165,7 @@ Example:
 ### Hidden email references:
 Conversation history may contain hidden markers like `[email_ref account_id=12 account=user@example.com mailbox=INBOX uid=33066 ont_message_id=98765]`.
 - Never show these markers to the user.
-- If the user asks to reply to "that email" or a recently notified email, use the marker: pass `uid` as `email_id` and `account` as `from` to `respond_to_email`.
+- If the user asks to reply to "that email" or a recently notified email, use the marker: prefer `ont_message_id` as `email_id`; fall back to `uid` with `account` as `from` for an older marker.
 - Prefer the most recent relevant email_ref when the user says "that email".
 
 Provide all information immediately; only ask follow-ups when confirming send/create actions. Call all needed tools upfront.
@@ -194,6 +194,18 @@ pub async fn build_tools(
         if let Ok(persons) = state.ontology_repository.get_persons(user_id) {
             let names: Vec<String> = persons.iter().map(|p| p.name.clone()).collect();
             dynamic_enums.insert("person_names".to_string(), names);
+        }
+        if let Ok(accounts) = state.user_repository.get_all_imap_credentials(user_id) {
+            let selectors = accounts
+                .into_iter()
+                .flat_map(|account| {
+                    account
+                        .nickname
+                        .into_iter()
+                        .chain(std::iter::once(account.email))
+                })
+                .collect();
+            dynamic_enums.insert("inbox_selectors".to_string(), selectors);
         }
         crate::ontology::registry::OntologyUserData { dynamic_enums }
     };

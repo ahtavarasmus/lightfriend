@@ -707,6 +707,12 @@ async fn main() {
             post(handlers::webhook_sms_handlers::webhook_sms),
         )
         .layer(DefaultBodyLimit::max(4096));
+    // Public, stateless MCP endpoint. A dedicated per-user bearer token is
+    // authenticated inside the handler; it is intentionally separate from
+    // browser JWTs and notification-webhook tokens.
+    let public_mcp_routes = Router::new()
+        .route("/api/mcp", post(handlers::public_mcp_handlers::public_mcp))
+        .layer(DefaultBodyLimit::max(64 * 1024));
     // Voice pipeline: TwiML endpoint validated by Twilio signature
     let voice_twiml_routes = Router::new()
         .route("/api/voice/incoming", post(voice_pipeline::voice_incoming))
@@ -1334,6 +1340,10 @@ async fn main() {
         )
         .route("/api/auth/imap/login", post(imap_auth::imap_login))
         .route("/api/auth/imap/status", get(imap_auth::imap_status))
+        .route(
+            "/api/auth/imap/nickname",
+            patch(imap_auth::update_imap_nickname),
+        )
         .route("/api/auth/imap/detect", post(imap_auth::detect_provider))
         .route(
             "/api/auth/imap/disconnect",
@@ -1601,6 +1611,15 @@ async fn main() {
             delete(handlers::webhook_sms_handlers::revoke_token),
         )
         .route(
+            "/api/me/mcp-tokens",
+            get(handlers::public_mcp_handlers::list_tokens)
+                .post(handlers::public_mcp_handlers::create_token),
+        )
+        .route(
+            "/api/me/mcp-tokens/{token_id}",
+            delete(handlers::public_mcp_handlers::revoke_token),
+        )
+        .route(
             "/api/me/light-tool/pairing-sessions",
             get(handlers::light_tool_handlers::get_pairing_status)
                 .post(handlers::light_tool_handlers::create_pairing_offer),
@@ -1665,6 +1684,7 @@ async fn main() {
         .merge(telnyx_routes)
         .merge(voice_routes)
         .merge(webhook_sms_routes)
+        .merge(public_mcp_routes)
         .nest_service("/uploads", ServeDir::new("uploads"))
         .route("/blog/md/{slug}", get(blog::handlers::blog_post_md_handler))
         .route("/blog/{slug}", get(blog::handlers::blog_post_handler))

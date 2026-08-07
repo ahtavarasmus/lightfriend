@@ -126,7 +126,9 @@ impl LightToolRunsRepository {
                     return Ok(AnonymousTrialRunCreation::IdempotencyConflict);
                 }
                 let existing = decrypt_run(existing)?;
-                if existing.image_data_url.as_deref() != image_data_url {
+                if existing.user_message != user_message
+                    || existing.image_data_url.as_deref() != image_data_url
+                {
                     return Ok(AnonymousTrialRunCreation::IdempotencyConflict);
                 }
                 return Ok(AnonymousTrialRunCreation::Existing {
@@ -236,7 +238,9 @@ impl LightToolRunsRepository {
                     return Ok(AccountRunCreation::IdempotencyConflict);
                 }
                 let existing = decrypt_run(existing)?;
-                if existing.image_data_url.as_deref() != image_data_url {
+                if existing.user_message != user_message
+                    || existing.image_data_url.as_deref() != image_data_url
+                {
                     return Ok(AccountRunCreation::IdempotencyConflict);
                 }
                 return Ok(AccountRunCreation::Existing(existing));

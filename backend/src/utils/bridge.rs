@@ -1820,6 +1820,23 @@ use matrix_sdk::ruma::events::room::message::{OriginalSyncRoomMessageEvent, Rela
 use matrix_sdk::RoomMemberships;
 use strsim;
 
+/// Contract for the only bridge signal that advances WhatsApp native-app
+/// activity: an `m.read` receipt for Lightfriend's own Matrix user in a
+/// WhatsApp portal. Message ingress/egress and receipts for other users,
+/// receipt types, or services are deliberately ineligible.
+pub fn is_whatsapp_native_activity_receipt(
+    content: &matrix_sdk::ruma::events::receipt::ReceiptEventContent,
+    own_user_id: &matrix_sdk::ruma::UserId,
+    portal_service: Option<&str>,
+) -> bool {
+    use matrix_sdk::ruma::events::receipt::ReceiptType;
+
+    portal_service == Some("whatsapp")
+        && content
+            .user_receipt(own_user_id, ReceiptType::Read)
+            .is_some()
+}
+
 /// Handle an incoming read receipt from a bridge.
 /// When the user reads a message on the native platform (WhatsApp/Signal/Telegram),
 /// the bridge forwards the read receipt as a Matrix m.receipt event.
@@ -1845,6 +1862,25 @@ pub async fn handle_read_receipt(
         Some(r) => r,
         None => return,
     };
+
+    // Lightfriend never emits Matrix read receipts, so an own-user receipt in
+    // a WhatsApp portal is the bridge's existing proof that the user read in
+    // the native phone app. Do this independently of ontology matching: the
+    // receipt is still genuine activity when the read event is not stored.
+    let portal_service = infer_service_from_room_members(&room).await;
+    if is_whatsapp_native_activity_receipt(&ev.content, &own_user_id, portal_service.as_deref()) {
+        let now = chrono::Utc::now().timestamp() as i32;
+        if let Err(e) = state
+            .user_repository
+            .record_whatsapp_native_activity(user_id, now)
+        {
+            tracing::warn!(
+                "Failed to record native WhatsApp activity for user {}: {}",
+                user_id,
+                e
+            );
+        }
+    }
 
     let room_id_str = room.room_id().to_string();
 

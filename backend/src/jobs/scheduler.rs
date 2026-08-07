@@ -29,6 +29,94 @@ const RECONCILE_CONCURRENCY: usize = 5;
 /// The reconciler's own tick interval should be <= this.
 const RECONCILE_TICK_INTERVAL_SECS: u64 = 60;
 
+/// WhatsApp currently expires linked devices after roughly fourteen days of
+/// native-phone inactivity. Warn at day twelve to leave about two days' margin.
+pub const WHATSAPP_NATIVE_ACTIVITY_REMINDER_AFTER_SECS: i32 = 12 * 24 * 60 * 60;
+
+pub fn whatsapp_native_activity_reminder_due(
+    last_activity_at: Option<i32>,
+    reminded_at: Option<i32>,
+    now: i32,
+) -> bool {
+    let Some(last_activity_at) = last_activity_at else {
+        return false;
+    };
+
+    now.saturating_sub(last_activity_at) >= WHATSAPP_NATIVE_ACTIVITY_REMINDER_AFTER_SECS
+        && reminded_at.is_none_or(|reminded_at| reminded_at < last_activity_at)
+}
+
+/// Send at most one warning per native-app inactivity period. The existing
+/// 15-minute bridge-health cadence calls this, but eligibility is based only
+/// on the persisted native activity signal, never on disconnect error text.
+pub async fn check_whatsapp_native_activity_reminders(state: &Arc<AppState>) {
+    let users_with_bridges = match state.user_repository.get_users_with_active_bridges() {
+        Ok(bridges) => bridges,
+        Err(e) => {
+            error!(
+                "Failed to load WhatsApp bridges for native activity reminders: {}",
+                e
+            );
+            return;
+        }
+    };
+    let now = chrono::Utc::now().timestamp() as i32;
+
+    for (user_id, bridges) in users_with_bridges {
+        for bridge in bridges.into_iter().filter(|bridge| {
+            bridge.bridge_type == "whatsapp"
+                && whatsapp_native_activity_reminder_due(
+                    bridge.last_native_activity_at,
+                    bridge.native_activity_reminded_at,
+                    now,
+                )
+        }) {
+            let Some(last_activity_at) = bridge.last_native_activity_at else {
+                continue;
+            };
+            match state
+                .user_repository
+                .claim_whatsapp_native_activity_reminder(bridge.id, last_activity_at, now)
+            {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(e) => {
+                    error!(
+                        "Failed to claim native WhatsApp activity reminder for user {}: {}",
+                        user_id, e
+                    );
+                    continue;
+                }
+            }
+
+            let delivered = crate::proactive::utils::send_notification(
+                state,
+                user_id,
+                "Open WhatsApp on your phone within the next 2 days to keep Lightfriend connected. WhatsApp may disconnect linked devices after about 14 days without using the phone app.",
+                "whatsapp_native_activity_reminder_sms".to_string(),
+                None,
+            )
+            .await;
+
+            if !delivered {
+                if let Err(e) = state
+                    .user_repository
+                    .release_whatsapp_native_activity_reminder_claim(
+                        bridge.id,
+                        last_activity_at,
+                        now,
+                    )
+                {
+                    error!(
+                        "Failed to release undelivered native WhatsApp activity reminder for user {}: {}",
+                        user_id, e
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// Idempotent reconciler for Matrix client lifecycle. Called once at boot
 /// (in a background task) and then on a 60s cron. Does three things under
 /// a single top-level mutex so ticks can't overlap and stampede Tuwunel:
@@ -739,6 +827,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
             if let Err(e) = check_all_bridges_health(&state).await {
                 error!("Bridge health check failed: {}", e);
             }
+            check_whatsapp_native_activity_reminders(&state).await;
         })
     })
     .expect("Failed to create bridge health check job");

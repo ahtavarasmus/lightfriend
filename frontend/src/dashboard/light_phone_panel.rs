@@ -173,21 +173,29 @@ pub fn light_phone_panel() -> Html {
     {
         let loading = loading.clone();
         let connected = connected.clone();
+        let error = error.clone();
         use_effect_with_deps(
             move |_| {
                 spawn_local(async move {
                     match Api::get("/api/me/light-tool/pairing-sessions").send().await {
                         Ok(response) if response.ok() => {
-                            if let Ok(response) = response.json::<PairingStatusResponse>().await {
-                                connected.set(matches!(response.status, PairingStatus::Connected));
+                            match response.json::<PairingStatusResponse>().await {
+                                Ok(response) => {
+                                    connected
+                                        .set(matches!(response.status, PairingStatus::Connected));
+                                }
+                                Err(_) => error.set(Some(
+                                    "Could not read the Light Phone connection status.".to_string(),
+                                )),
                             }
                         }
-                        Ok(_) => {
-                            // Pairing remains available even if status could not be loaded.
-                        }
-                        Err(_) => {
-                            // Pairing remains available even if status could not be loaded.
-                        }
+                        Ok(response) => error.set(Some(format!(
+                            "Could not check the Light Phone connection ({}).",
+                            response.status()
+                        ))),
+                        Err(_) => error.set(Some(
+                            "Network error checking the Light Phone connection.".to_string(),
+                        )),
                     }
                     loading.set(false);
                 });
@@ -276,7 +284,11 @@ pub fn light_phone_panel() -> Html {
         let server_expired = server_expired.clone();
         let poll_epoch = poll_epoch.clone();
         Callback::from(move |_: MouseEvent| {
-            *poll_epoch.borrow_mut() += 1;
+            let active_epoch = {
+                let mut epoch = poll_epoch.borrow_mut();
+                *epoch += 1;
+                *epoch
+            };
             offer.set(None);
             error.set(None);
             loading.set(true);
@@ -287,11 +299,15 @@ pub fn light_phone_panel() -> Html {
             let loading = loading.clone();
             let error = error.clone();
             let now = now.clone();
+            let poll_epoch = poll_epoch.clone();
             spawn_local(async move {
-                match Api::post("/api/me/light-tool/pairing-sessions")
+                let response = Api::post("/api/me/light-tool/pairing-sessions")
                     .send()
-                    .await
-                {
+                    .await;
+                if *poll_epoch.borrow() != active_epoch {
+                    return;
+                }
+                match response {
                     Ok(response) if response.ok() => {
                         match response.json::<PairingOfferResponse>().await {
                             Ok(response) => {

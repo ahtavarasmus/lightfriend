@@ -65,6 +65,20 @@ impl LightToolPairingRepository {
             .optional()?)
     }
 
+    pub fn has_active_device_for_user(
+        &self,
+        user_id: i32,
+    ) -> Result<bool, LightToolPairingRepositoryError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        Ok(light_tool_devices::table
+            .filter(light_tool_devices::user_id.eq(user_id))
+            .filter(light_tool_devices::revoked_at.is_null())
+            .select(light_tool_devices::id)
+            .first::<i32>(&mut conn)
+            .optional()?
+            .is_some())
+    }
+
     pub fn consume(
         &self,
         token_hash: &str,

@@ -4,6 +4,12 @@ use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{Event, HtmlInputElement, MouseEvent};
 use yew::prelude::*;
+
+#[derive(Clone, PartialEq)]
+struct ConnectedInbox {
+    email: String,
+    nickname: Option<String>,
+}
 #[derive(Properties, PartialEq)]
 pub struct EmailProps {
     pub user_id: i32,
@@ -13,7 +19,7 @@ pub struct EmailProps {
 pub fn email_connect(props: &EmailProps) -> Html {
     let error = use_state(|| None::<String>);
     let success_message = use_state(|| None::<String>);
-    let connected_accounts = use_state(|| Vec::<String>::new());
+    let connected_accounts = use_state(Vec::<ConnectedInbox>::new);
     let imap_email = use_state(|| String::new());
     let imap_password = use_state(|| String::new());
     let imap_server = use_state(|| String::new());
@@ -64,15 +70,21 @@ pub fn email_connect(props: &EmailProps) -> Html {
                                 if let Some(connections) =
                                     data.get("connections").and_then(|v| v.as_array())
                                 {
-                                    let emails: Vec<String> = connections
+                                    let accounts: Vec<ConnectedInbox> = connections
                                         .iter()
                                         .filter_map(|c| {
-                                            c.get("email")
-                                                .and_then(|e| e.as_str())
-                                                .map(String::from)
+                                            c.get("email").and_then(|e| e.as_str()).map(|email| {
+                                                ConnectedInbox {
+                                                    email: email.to_string(),
+                                                    nickname: c
+                                                        .get("nickname")
+                                                        .and_then(|value| value.as_str())
+                                                        .map(String::from),
+                                                }
+                                            })
                                         })
                                         .collect();
-                                    connected_accounts.set(emails);
+                                    connected_accounts.set(accounts);
                                 }
                             }
                         }
@@ -239,8 +251,11 @@ pub fn email_connect(props: &EmailProps) -> Html {
                         if response.ok() {
                             // Add to connected accounts list
                             let mut accounts = (*connected_accounts).clone();
-                            if !accounts.contains(&email) {
-                                accounts.push(email);
+                            if !accounts.iter().any(|account| account.email == email) {
+                                accounts.push(ConnectedInbox {
+                                    email,
+                                    nickname: None,
+                                });
                             }
                             connected_accounts.set(accounts);
                             imap_email_setter.set(String::new());
@@ -355,20 +370,78 @@ pub fn email_connect(props: &EmailProps) -> Html {
                 // List connected accounts with per-account disconnect
                 if !connected_accounts.is_empty() {
                     <div class="connected-accounts-list">
-                        { for connected_accounts.iter().map(|account_email| {
-                            let email_for_display = account_email.clone();
-                            let email_for_disconnect = account_email.clone();
+                        { for connected_accounts.iter().map(|account| {
+                            let email_for_display = account.email.clone();
+                            let nickname_for_display = account.nickname.clone();
+                            let email_for_nickname = account.email.clone();
+                            let nickname_for_edit = account.nickname.clone().unwrap_or_default();
+                            let email_for_disconnect = account.email.clone();
+                            let connected_accounts_for_nickname = connected_accounts.clone();
                             let connected_accounts_clone = connected_accounts.clone();
-                            let error_clone = error.clone();
+                            let error_for_nickname = error.clone();
+                            let error_for_disconnect = error.clone();
                             html! {
                                 <div class="connected-account-row">
-                                    <span class="connected-account-email">{&email_for_display}</span>
+                                    <span class="connected-account-email">
+                                        if let Some(nickname) = nickname_for_display {
+                                            <strong>{nickname}</strong>
+                                            {" · "}
+                                        }
+                                        {&email_for_display}
+                                    </span>
+                                    <button
+                                        class="disconnect-button-small"
+                                        onclick={Callback::from(move |_: MouseEvent| {
+                                            let Some(window) = web_sys::window() else { return; };
+                                            let prompt = window.prompt_with_message_and_default(
+                                                "Inbox nickname (for example work or personal). Leave blank to remove:",
+                                                &nickname_for_edit,
+                                            );
+                                            let Ok(Some(nickname)) = prompt else { return; };
+                                            let email = email_for_nickname.clone();
+                                            let connected_accounts = connected_accounts_for_nickname.clone();
+                                            let error = error_for_nickname.clone();
+                                            spawn_local(async move {
+                                                let payload = json!({"email": email, "nickname": nickname});
+                                                let request = Api::patch("/api/auth/imap/nickname")
+                                                    .header("Content-Type", "application/json")
+                                                    .json(&payload)
+                                                    .unwrap()
+                                                    .send()
+                                                    .await;
+                                                match request {
+                                                    Ok(response) if response.ok() => {
+                                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                                            let saved = data.get("nickname")
+                                                                .and_then(|value| value.as_str())
+                                                                .map(String::from);
+                                                            let mut accounts = (*connected_accounts).clone();
+                                                            if let Some(account) = accounts.iter_mut().find(|account| account.email == email) {
+                                                                account.nickname = saved;
+                                                            }
+                                                            connected_accounts.set(accounts);
+                                                            error.set(None);
+                                                        }
+                                                    }
+                                                    Ok(response) => {
+                                                        let message = response.json::<serde_json::Value>().await.ok()
+                                                            .and_then(|data| data.get("error").and_then(|value| value.as_str()).map(String::from))
+                                                            .unwrap_or_else(|| "Failed to update inbox nickname".to_string());
+                                                        error.set(Some(message));
+                                                    }
+                                                    Err(network_error) => error.set(Some(format!("Network error: {}", network_error))),
+                                                }
+                                            });
+                                        })}
+                                    >
+                                        {"Nickname"}
+                                    </button>
                                     <button
                                         class="disconnect-button-small"
                                         onclick={Callback::from(move |_: MouseEvent| {
                                             let email = email_for_disconnect.clone();
                                             let connected_accounts = connected_accounts_clone.clone();
-                                            let error = error_clone.clone();
+                                            let error = error_for_disconnect.clone();
                                             spawn_local(async move {
                                                 let payload = json!({"email": email});
                                                 let request = Api::delete("/api/auth/imap/disconnect")
@@ -381,7 +454,7 @@ pub fn email_connect(props: &EmailProps) -> Html {
                                                     Ok(response) => {
                                                         if response.ok() {
                                                             let mut accounts = (*connected_accounts).clone();
-                                                            accounts.retain(|e| e != &email);
+                                                            accounts.retain(|account| account.email != email);
                                                             connected_accounts.set(accounts);
                                                             error.set(None);
                                                         } else {

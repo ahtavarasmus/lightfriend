@@ -22,14 +22,14 @@ impl ToolHandler for SendEmailHandler {
     }
 
     fn definition_for_user(&self, state: &AppState, user_id: i32) -> chat_completion::Tool {
-        let emails: Vec<String> = state
+        let selectors: Vec<String> = state
             .user_repository
             .get_all_imap_credentials(user_id)
             .unwrap_or_default()
             .into_iter()
-            .map(|c| c.email)
+            .flat_map(|c| c.nickname.into_iter().chain(std::iter::once(c.email)))
             .collect();
-        crate::tool_call_utils::email::get_send_email_tool_for_user(&emails)
+        crate::tool_call_utils::email::get_send_email_tool_for_user(&selectors)
     }
 
     fn is_outgoing(&self) -> bool {
@@ -102,14 +102,14 @@ impl ToolHandler for RespondEmailHandler {
     }
 
     fn definition_for_user(&self, state: &AppState, user_id: i32) -> chat_completion::Tool {
-        let emails: Vec<String> = state
+        let selectors: Vec<String> = state
             .user_repository
             .get_all_imap_credentials(user_id)
             .unwrap_or_default()
             .into_iter()
-            .map(|c| c.email)
+            .flat_map(|c| c.nickname.into_iter().chain(std::iter::once(c.email)))
             .collect();
-        crate::tool_call_utils::email::get_respond_to_email_tool_for_user(&emails)
+        crate::tool_call_utils::email::get_respond_to_email_tool_for_user(&selectors)
     }
 
     fn auto_injected_params(&self) -> Vec<&'static str> {

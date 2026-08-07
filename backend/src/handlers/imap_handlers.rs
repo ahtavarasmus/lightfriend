@@ -18,6 +18,35 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::net::TcpStream;
 
+/// Resolve the submission host for providers supported by the connection UI.
+/// Not every provider follows the `imap.` -> `smtp.` naming convention
+/// (notably Microsoft 365 and GoDaddy), so keep the known exceptions explicit.
+pub fn smtp_server_for_imap(imap_server: Option<&str>) -> String {
+    let server = imap_server.unwrap_or("imap.gmail.com").to_ascii_lowercase();
+    match server.as_str() {
+        "outlook.office365.com" => "smtp.office365.com".to_string(),
+        "imap.secureserver.net" => "smtpout.secureserver.net".to_string(),
+        "imap.gmx.com" => "mail.gmx.com".to_string(),
+        "mail.privateemail.com" => "mail.privateemail.com".to_string(),
+        _ if server.starts_with("imap.") => server.replacen("imap.", "smtp.", 1),
+        _ => server,
+    }
+}
+
+async fn send_smtp_message(mailer: lettre::SmtpTransport, message: Message) -> Result<(), String> {
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        tokio::task::spawn_blocking(move || mailer.send(&message)),
+    )
+    .await
+    {
+        Ok(Ok(Ok(_))) => Ok(()),
+        Ok(Ok(Err(error))) => Err(error.to_string()),
+        Ok(Err(error)) => Err(format!("SMTP worker failed: {}", error)),
+        Err(_) => Err("SMTP send timed out after 60 seconds".to_string()),
+    }
+}
+
 /// Decode RFC 2047 MIME encoded words (e.g. =?UTF-8?Q?...?=) in header values.
 /// Uses mail_parser for correct handling of all charset/encoding variants.
 fn decode_rfc2047(raw: &str) -> String {
@@ -217,14 +246,37 @@ pub enum ImapError {
     FetchError(String),
     ParseError(String),
 }
+
+fn public_imap_error(error: &ImapError) -> (StatusCode, &'static str) {
+    match error {
+        ImapError::NoConnection => (StatusCode::BAD_REQUEST, "No connected inbox found"),
+        ImapError::CredentialsError(_) => (
+            StatusCode::UNAUTHORIZED,
+            "Inbox authentication failed. Reconnect the inbox and try again.",
+        ),
+        ImapError::ConnectionError(_) => (
+            StatusCode::BAD_GATEWAY,
+            "Could not connect to the inbox provider. Please try again.",
+        ),
+        ImapError::FetchError(_) | ImapError::ParseError(_) => (
+            StatusCode::BAD_GATEWAY,
+            "Could not read email from the inbox provider. Please try again.",
+        ),
+    }
+}
 #[derive(Debug, Deserialize)]
 pub struct FetchEmailsQuery {
     pub limit: Option<u32>,
+    /// Connected inbox nickname or email address.
+    pub account: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
 pub struct FetchSingleEmailQuery {
     pub imap_connection_id: Option<i32>,
+    /// Connected inbox nickname or email address. Prefer this for clients;
+    /// `imap_connection_id` remains for backwards compatibility.
+    pub account: Option<String>,
 }
 
 /// Pure parser: turn a `async_imap::types::Fetch` message into an
@@ -890,7 +942,20 @@ pub async fn fetch_imap_previews(
         auth_user.user_id,
         params.limit
     );
-    match fetch_emails_imap(&state, auth_user.user_id, params.limit, false, false).await {
+    let result = if let Some(selector) = params.account.as_deref() {
+        fetch_emails_imap_for_selector(
+            &state,
+            auth_user.user_id,
+            selector,
+            params.limit,
+            false,
+            false,
+        )
+        .await
+    } else {
+        fetch_emails_imap(&state, auth_user.user_id, params.limit, false, false).await
+    };
+    match result {
         Ok(previews) => {
             tracing::info!("Fetched {} IMAP previews", previews.len());
 
@@ -904,7 +969,8 @@ pub async fn fetch_imap_previews(
                         "date": p.date.map(|dt| dt.to_rfc3339()),
                         "date_formatted": p.date_formatted.unwrap_or_else(|| "Unknown date".to_string()),
                         "snippet": p.snippet.unwrap_or_else(|| "No preview".to_string()),
-                        "is_read": p.is_read
+                        "is_read": p.is_read,
+                        "imap_connection_id": p.imap_connection_id,
                     })
                 })
                 .collect();
@@ -913,17 +979,12 @@ pub async fn fetch_imap_previews(
             ))
         }
         Err(e) => {
-            let (status, message) = match e {
-                ImapError::NoConnection => (
-                    StatusCode::BAD_REQUEST,
-                    "No IMAP connection found".to_string(),
-                ),
-                ImapError::CredentialsError(msg) => (StatusCode::UNAUTHORIZED, msg),
-                ImapError::ConnectionError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
-                ImapError::FetchError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
-                ImapError::ParseError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
-            };
-            tracing::error!("IMAP preview fetch failed: {}", message);
+            tracing::error!(
+                "IMAP preview fetch failed for user {}: {:?}",
+                auth_user.user_id,
+                e
+            );
+            let (status, message) = public_imap_error(&e);
             Err((status, AxumJson(json!({ "error": message }))))
         }
     }
@@ -942,7 +1003,13 @@ pub async fn fetch_full_imap_emails(
     if limit.is_none() {
         limit = Some(5);
     }
-    match fetch_emails_imap(&state, auth_user.user_id, limit, false, false).await {
+    let result = if let Some(selector) = params.account.as_deref() {
+        fetch_emails_imap_for_selector(&state, auth_user.user_id, selector, limit, false, false)
+            .await
+    } else {
+        fetch_emails_imap(&state, auth_user.user_id, limit, false, false).await
+    };
+    match result {
         Ok(previews) => {
             tracing::info!("Fetched {} IMAP full emails", previews.len());
 
@@ -957,7 +1024,8 @@ pub async fn fetch_full_imap_emails(
                         "date_formatted": p.date_formatted.unwrap_or_else(|| "Unknown date".to_string()),
                         "snippet": p.snippet.unwrap_or_else(|| "No preview".to_string()),
                         "body": p.body.unwrap_or_else(|| "No content".to_string()),
-                        "is_read": p.is_read
+                        "is_read": p.is_read,
+                        "imap_connection_id": p.imap_connection_id,
                     })
                 })
                 .collect();
@@ -966,17 +1034,12 @@ pub async fn fetch_full_imap_emails(
             ))
         }
         Err(e) => {
-            let (status, message) = match e {
-                ImapError::NoConnection => (
-                    StatusCode::BAD_REQUEST,
-                    "No IMAP connection found".to_string(),
-                ),
-                ImapError::CredentialsError(msg) => (StatusCode::UNAUTHORIZED, msg),
-                ImapError::ConnectionError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
-                ImapError::FetchError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
-                ImapError::ParseError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
-            };
-            tracing::error!("IMAP full emails fetch failed: {}", message);
+            tracing::error!(
+                "IMAP full email fetch failed for user {}: {:?}",
+                auth_user.user_id,
+                e
+            );
+            let (status, message) = public_imap_error(&e);
             Err((status, AxumJson(json!({ "error": message }))))
         }
     }
@@ -1008,24 +1071,24 @@ pub async fn respond_to_email(
         ));
     }
     // Resolve which email account to use
-    let cred = if let Some(ref from_email) = request.from {
+    let cred = if let Some(ref from_selector) = request.from {
         match state
             .user_repository
-            .get_imap_credentials_by_email(auth_user.user_id, from_email)
+            .get_imap_credentials_by_selector(auth_user.user_id, from_selector)
         {
             Ok(Some(c)) => c,
             Ok(None) => {
                 return Err((
                     StatusCode::BAD_REQUEST,
                     AxumJson(
-                        json!({ "error": format!("No connected email account for '{}'", from_email) }),
+                        json!({ "error": format!("No connected inbox matches '{}'", from_selector) }),
                     ),
                 ))
             }
-            Err(e) => {
+            Err(_error) => {
                 return Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    AxumJson(json!({ "error": format!("Failed to get IMAP credentials: {}", e) })),
+                    AxumJson(json!({ "error": "Failed to look up connected inbox" })),
                 ))
             }
         }
@@ -1038,6 +1101,7 @@ pub async fn respond_to_email(
                 crate::repositories::user_repository::ImapConnectionInfo {
                     id: 0,
                     email,
+                    nickname: None,
                     password,
                     imap_server,
                     imap_port,
@@ -1095,8 +1159,9 @@ pub async fn respond_to_email(
         })?;
 
         let reply_to_address = envelope
-            .from
+            .reply_to
             .as_ref()
+            .or(envelope.from.as_ref())
             .and_then(|addrs| addrs.first())
             .and_then(|addr| {
                 let mailbox = addr.mailbox.as_ref()?.to_vec();
@@ -1129,49 +1194,32 @@ pub async fn respond_to_email(
 
     let (reply_to_address, original_subject) = match imap_result {
         Ok(Ok(pair)) => pair,
-        Ok(Err(ImapError::CredentialsError(msg))) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({ "error": msg })),
-            ))
-        }
-        Ok(Err(ImapError::FetchError(msg))) | Ok(Err(ImapError::ParseError(msg))) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({ "error": msg })),
-            ))
-        }
-        Ok(Err(ImapError::ConnectionError(msg))) => {
-            return Err((
-                StatusCode::GATEWAY_TIMEOUT,
-                AxumJson(json!({ "error": msg })),
-            ))
-        }
-        Ok(Err(ImapError::NoConnection)) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({ "error": "No IMAP connection" })),
-            ))
+        Ok(Err(error)) => {
+            tracing::error!(
+                "Failed to fetch original email for reply, user {}: {:?}",
+                auth_user.user_id,
+                error
+            );
+            let (status, message) = public_imap_error(&error);
+            return Err((status, AxumJson(json!({ "error": message }))));
         }
         Err(_) => {
             return Err((
                 StatusCode::GATEWAY_TIMEOUT,
-                AxumJson(json!({ "error": "IMAP fetch wall-clock timeout (60s)" })),
+                AxumJson(
+                    json!({ "error": "The inbox provider did not respond in time. Please try again." }),
+                ),
             ))
         }
     };
 
-    tracing::info!("reply addr: {}", reply_to_address);
     let subject = if !original_subject.to_lowercase().starts_with("re:") {
         format!("Re: {}", original_subject)
     } else {
         original_subject
     };
     // Create SMTP transport
-    let smtp_server = imap_server
-        .as_deref()
-        .unwrap_or("smtp.gmail.com")
-        .replace("imap", "smtp");
+    let smtp_server = smtp_server_for_imap(imap_server.as_deref());
 
     let smtp_port = 587; // Standard SMTP port
     let creds = Credentials::new(email.clone(), password.clone());
@@ -1187,9 +1235,25 @@ pub async fn respond_to_email(
         .credentials(creds)
         .build();
     // Create email message
+    let sender_mailbox = email.parse().map_err(|error| {
+        tracing::error!("Stored sender address is invalid: {}", error);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            AxumJson(json!({ "error": "The connected inbox has an invalid sender address" })),
+        )
+    })?;
+    let reply_mailbox = reply_to_address.parse().map_err(|error| {
+        tracing::warn!("Original email has an invalid reply address: {}", error);
+        (
+            StatusCode::BAD_GATEWAY,
+            AxumJson(
+                json!({ "error": "The original email does not contain a usable reply address" }),
+            ),
+        )
+    })?;
     let email_message = match Message::builder()
-        .from(email.parse().unwrap())
-        .to(reply_to_address.parse().unwrap())
+        .from(sender_mailbox)
+        .to(reply_mailbox)
         .subject(subject.clone())
         .body(request.response_text.clone())
     {
@@ -1209,7 +1273,7 @@ pub async fn respond_to_email(
     );
 
     // Attempt to send the email with detailed error logging
-    let send_result = mailer.send(&email_message);
+    let send_result = send_smtp_message(mailer, email_message).await;
 
     match send_result {
         Ok(_) => {
@@ -1233,10 +1297,7 @@ pub async fn respond_to_email(
 
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({
-                    "error": format!("Failed to send email via SMTP: {}", e),
-                    "details": e.to_string()
-                })),
+                AxumJson(json!({ "error": "The reply could not be sent. Please try again." })),
             ))
         }
     }
@@ -1268,7 +1329,30 @@ pub async fn fetch_single_imap_email(
             })),
         ));
     }
-    let result = match params.imap_connection_id {
+    let selected_connection_id = if let Some(selector) = params.account.as_deref() {
+        match state
+            .user_repository
+            .get_imap_credentials_by_selector(auth_user.user_id, selector)
+        {
+            Ok(Some(account)) => Some(account.id),
+            Ok(None) => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    AxumJson(json!({"error": "No connected inbox matches that selector"})),
+                ))
+            }
+            Err(error) => {
+                tracing::error!("Failed to resolve inbox selector: {}", error);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    AxumJson(json!({"error": "Failed to look up connected inbox"})),
+                ));
+            }
+        }
+    } else {
+        params.imap_connection_id
+    };
+    let result = match selected_connection_id {
         Some(connection_id) => {
             fetch_single_email_imap_for_connection(
                 &state,
@@ -1295,54 +1379,18 @@ pub async fn fetch_single_imap_email(
                     "snippet": email.snippet.unwrap_or_else(|| "No preview".to_string()),
                     "body": email.body.unwrap_or_else(|| "No content".to_string()),
                     "is_read": email.is_read,
-                    "attachments": email.attachments
+                    "attachments": email.attachments,
+                    "imap_connection_id": selected_connection_id,
                 }
             })))
         }
         Err(e) => {
-            let (status, message) = match e {
-                ImapError::NoConnection => {
-                    tracing::error!("No IMAP connection found for user {}", auth_user.user_id);
-                    (
-                        StatusCode::BAD_REQUEST,
-                        "No IMAP connection found".to_string(),
-                    )
-                }
-                ImapError::CredentialsError(msg) => {
-                    tracing::error!(
-                        "IMAP credentials error for user {}: {}",
-                        auth_user.user_id,
-                        msg
-                    );
-                    (StatusCode::UNAUTHORIZED, msg)
-                }
-                ImapError::ConnectionError(msg) => {
-                    tracing::error!(
-                        "IMAP connection error for user {}: {}",
-                        auth_user.user_id,
-                        msg
-                    );
-                    (StatusCode::INTERNAL_SERVER_ERROR, msg)
-                }
-                ImapError::FetchError(msg) => {
-                    tracing::error!(
-                        "IMAP fetch error for email {} user {}: {}",
-                        email_id,
-                        auth_user.user_id,
-                        msg
-                    );
-                    (StatusCode::INTERNAL_SERVER_ERROR, msg)
-                }
-                ImapError::ParseError(msg) => {
-                    tracing::error!(
-                        "IMAP parse error for email {} user {}: {}",
-                        email_id,
-                        auth_user.user_id,
-                        msg
-                    );
-                    (StatusCode::INTERNAL_SERVER_ERROR, msg)
-                }
-            };
+            tracing::error!(
+                "Single IMAP email fetch failed for user {}: {:?}",
+                auth_user.user_id,
+                e
+            );
+            let (status, message) = public_imap_error(&e);
             Err((
                 status,
                 AxumJson(json!({
@@ -1379,6 +1427,8 @@ pub async fn fetch_emails_imap(
     }
 
     let mut all_previews = Vec::new();
+    let mut successful_accounts = 0usize;
+    let mut last_error = None;
     for account in &accounts {
         match fetch_emails_imap_for_account(
             state,
@@ -1395,6 +1445,7 @@ pub async fn fetch_emails_imap(
         .await
         {
             Ok(mut previews) => {
+                successful_accounts += 1;
                 // Tag each preview's account source in the from field
                 for p in &mut previews {
                     if p.from.is_none() || p.from.as_deref() == Some("") {
@@ -1411,9 +1462,14 @@ pub async fn fetch_emails_imap(
                     user_id,
                     e
                 );
+                last_error = Some(e);
                 // Continue with other accounts
             }
         }
+    }
+
+    if successful_accounts == 0 {
+        return Err(last_error.unwrap_or(ImapError::NoConnection));
     }
 
     // Sort by date descending (newest first)
@@ -1425,6 +1481,43 @@ pub async fn fetch_emails_imap(
     }
 
     Ok(all_previews)
+}
+
+/// Fetch from one explicitly selected inbox. Unlike the all-account helper,
+/// failures are returned to the caller instead of being hidden as an empty
+/// successful result.
+pub async fn fetch_emails_imap_for_selector(
+    state: &AppState,
+    user_id: i32,
+    selector: &str,
+    limit: Option<u32>,
+    unprocessed: bool,
+    unread_only: bool,
+) -> Result<Vec<ImapEmailPreview>, ImapError> {
+    let account = state
+        .user_repository
+        .get_imap_credentials_by_selector(user_id, selector)
+        .map_err(|_| ImapError::CredentialsError("Failed to look up connected inbox".to_string()))?
+        .ok_or_else(|| {
+            ImapError::CredentialsError("No connected inbox matches that selector".to_string())
+        })?;
+    let mut previews = fetch_emails_imap_for_account(
+        state,
+        user_id,
+        &account.email,
+        &account.password,
+        account.imap_server.as_deref(),
+        account.imap_port,
+        limit,
+        unprocessed,
+        unread_only,
+        Some(account.id),
+    )
+    .await?;
+    for preview in &mut previews {
+        preview.imap_connection_id = Some(account.id);
+    }
+    Ok(previews)
 }
 
 /// Fetch emails from a single IMAP account
@@ -1837,31 +1930,27 @@ pub async fn send_email(
     auth_user: AuthUser,
     Json(request): Json<SendEmailRequest>,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
-    tracing::info!(
-        "Sending new email to {} for user {}",
-        request.to,
-        auth_user.user_id
-    );
+    tracing::info!("Sending new email for user {}", auth_user.user_id);
     // Resolve which email account to use
-    let cred = if let Some(ref from_email) = request.from {
+    let cred = if let Some(ref from_selector) = request.from {
         // Use specific account
         match state
             .user_repository
-            .get_imap_credentials_by_email(auth_user.user_id, from_email)
+            .get_imap_credentials_by_selector(auth_user.user_id, from_selector)
         {
             Ok(Some(c)) => c,
             Ok(None) => {
                 return Err((
                     StatusCode::BAD_REQUEST,
                     AxumJson(
-                        json!({ "error": format!("No connected email account for '{}'", from_email) }),
+                        json!({ "error": format!("No connected inbox matches '{}'", from_selector) }),
                     ),
                 ))
             }
-            Err(e) => {
+            Err(_error) => {
                 return Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    AxumJson(json!({ "error": format!("Failed to get email credentials: {}", e) })),
+                    AxumJson(json!({ "error": "Failed to look up connected inbox" })),
                 ))
             }
         }
@@ -1875,6 +1964,7 @@ pub async fn send_email(
                 crate::repositories::user_repository::ImapConnectionInfo {
                     id: 0,
                     email,
+                    nickname: None,
                     password,
                     imap_server,
                     imap_port,
@@ -1898,10 +1988,7 @@ pub async fn send_email(
     let password = cred.password;
     let imap_server = cred.imap_server;
     // Derive SMTP server from IMAP server (common pattern, e.g., imap.gmail.com -> smtp.gmail.com)
-    let smtp_server = imap_server
-        .as_deref()
-        .unwrap_or("smtp.gmail.com")
-        .replace("imap", "smtp");
+    let smtp_server = smtp_server_for_imap(imap_server.as_deref());
     let smtp_port = 587; // Standard STARTTLS port for SMTP
                          // Set up credentials and SMTP transport
     let creds = Credentials::new(email.clone(), password.clone());
@@ -1928,7 +2015,7 @@ pub async fn send_email(
     let content_type = if is_html {
         "text/html; charset=utf-8"
     } else {
-        "text/plain; charset=us-ascii"
+        "text/plain; charset=utf-8"
     };
 
     let part = SinglePart::builder()
@@ -1938,11 +2025,7 @@ pub async fn send_email(
                 AxumJson(json!({ "error": format!("Invalid content type: {}", e) })),
             )
         })?)
-        .header(if is_html {
-            ContentTransferEncoding::QuotedPrintable
-        } else {
-            ContentTransferEncoding::SevenBit
-        })
+        .header(ContentTransferEncoding::QuotedPrintable)
         .body(request.body.clone());
     // Format sender with display name "Lightfriend"
     let from_address = format!("Lightfriend <{}>", email);
@@ -1971,28 +2054,25 @@ pub async fn send_email(
         }
     };
     // Send the email
-    tracing::info!("Attempting to send email via SMTP to {}", request.to);
+    tracing::info!("Attempting to send email via SMTP");
     tracing::debug!(
         "SMTP Configuration - Server: {}, Port: {}",
         smtp_server,
         smtp_port
     );
-    match mailer.send(&email_message) {
+    match send_smtp_message(mailer, email_message).await {
         Ok(_) => {
-            tracing::info!("Email sent successfully to {}", request.to);
+            tracing::info!("Email sent successfully");
             Ok(AxumJson(json!({
                 "success": true,
                 "message": "Email sent successfully"
             })))
         }
         Err(e) => {
-            tracing::error!("Failed to send email to {}: {:?}", request.to, e);
+            tracing::error!("Failed to send email: {}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({
-                    "error": format!("Failed to send email: {}", e),
-                    "details": e.to_string()
-                })),
+                AxumJson(json!({ "error": "The email could not be sent. Please try again." })),
             ))
         }
     }

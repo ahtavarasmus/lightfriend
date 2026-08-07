@@ -567,6 +567,8 @@ pub async fn start_whatsapp_phone_connection(
         room_id: Some(room_id.to_string()),
         data: None,
         created_at: Some(current_time),
+        last_native_activity_at: Some(current_time),
+        native_activity_reminded_at: None,
     };
 
     state
@@ -811,6 +813,8 @@ pub async fn start_whatsapp_connection(
         room_id: Some(room_id.to_string()),
         data: None,
         created_at: Some(current_time),
+        last_native_activity_at: Some(current_time),
+        native_activity_reminded_at: None,
     };
 
     // Store bridge information
@@ -974,6 +978,8 @@ async fn monitor_whatsapp_connection(
             room_id: Some(room_id.to_string()),
             data: connected_account,
             created_at: Some(current_time),
+            last_native_activity_at: Some(current_time),
+            native_activity_reminded_at: None,
         };
         state.user_repository.delete_bridge(user_id, "whatsapp")?;
         state.user_repository.create_bridge(new_bridge)?;
