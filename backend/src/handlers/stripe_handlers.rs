@@ -13,7 +13,7 @@ use crate::AppState;
 use axum::{
     body::Bytes,
     extract::{Path, State},
-    http::{HeaderMap, StatusCode},
+    http::{header::COOKIE, HeaderMap, StatusCode},
     response::IntoResponse,
     Json,
 };
@@ -30,6 +30,48 @@ pub struct SubscriptionCheckoutBody {
     pub subscription_type: SubscriptionType,
     /// "autopilot"; "assistant" is accepted as a legacy alias.
     pub plan_type: Option<String>,
+}
+
+pub fn datafast_metadata_from_headers(
+    headers: &HeaderMap,
+) -> std::collections::HashMap<String, String> {
+    const DATAFAST_COOKIE_NAMES: [&str; 2] = ["datafast_visitor_id", "datafast_session_id"];
+    const STRIPE_METADATA_VALUE_LIMIT: usize = 500;
+
+    let mut metadata = std::collections::HashMap::new();
+
+    for cookie_header in headers.get_all(COOKIE).iter() {
+        let Ok(cookie_header) = cookie_header.to_str() else {
+            continue;
+        };
+
+        for cookie in cookie_header.split(';') {
+            let Some((name, value)) = cookie.trim().split_once('=') else {
+                continue;
+            };
+            let name = name.trim();
+            if !DATAFAST_COOKIE_NAMES.contains(&name) {
+                continue;
+            }
+
+            let value = value.trim();
+            let value = value
+                .strip_prefix('"')
+                .and_then(|value| value.strip_suffix('"'))
+                .unwrap_or(value);
+
+            if value.is_empty()
+                || value.len() > STRIPE_METADATA_VALUE_LIMIT
+                || value.chars().any(char::is_control)
+            {
+                continue;
+            }
+
+            metadata.insert(name.to_string(), value.to_string());
+        }
+    }
+
+    metadata
 }
 
 #[derive(Serialize)]
@@ -417,6 +459,7 @@ pub async fn create_unified_subscription_checkout(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Path(user_id): Path<i32>,
+    headers: HeaderMap,
     Json(body): Json<SubscriptionCheckoutBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     // Security: Verify user can only create checkout for themselves
@@ -546,6 +589,7 @@ pub async fn create_unified_subscription_checkout(
 
     let success_url = format!("{}/?subscription=success", domain_url);
     let cancel_url = format!("{}/?subscription=canceled", domain_url);
+    let datafast_metadata = datafast_metadata_from_headers(&headers);
     let mut create_params = CreateCheckoutSession {
         success_url: Some(&success_url),
         cancel_url: Some(&cancel_url),
@@ -579,6 +623,7 @@ pub async fn create_unified_subscription_checkout(
             optional: Some(false),
             ..Default::default()
         }]),
+        metadata: (!datafast_metadata.is_empty()).then_some(datafast_metadata.clone()),
         ..Default::default()
     };
     // Handle metadata for plan changes
@@ -587,7 +632,7 @@ pub async fn create_unified_subscription_checkout(
         tracing::debug!("Found existing subscription: {}", current_subscription.id);
 
         // Create metadata to track the subscription change
-        let mut metadata = std::collections::HashMap::new();
+        let mut metadata = datafast_metadata.clone();
         metadata.insert(
             "replacing_subscription".to_string(),
             current_subscription.id.to_string(),
@@ -642,6 +687,7 @@ pub struct GuestCheckoutBody {
 /// Create a checkout session for users without an account
 /// POST /api/stripe/guest-checkout
 pub async fn create_guest_checkout(
+    headers: HeaderMap,
     Json(body): Json<GuestCheckoutBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     tracing::debug!(
@@ -677,7 +723,7 @@ pub async fn create_guest_checkout(
     let cancel_url = format!("{}/?checkout=canceled#plans", domain_url);
 
     // Build metadata
-    let mut metadata = std::collections::HashMap::new();
+    let mut metadata = datafast_metadata_from_headers(&headers);
     metadata.insert(
         "selected_country".to_string(),
         body.selected_country.clone(),
@@ -1056,6 +1102,7 @@ pub async fn create_checkout_session(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Path(user_id): Path<i32>,
+    headers: HeaderMap,
     Json(payload): Json<BuyCreditsRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     if crate::services::metronome_billing::metronome_enabled() {
@@ -1178,6 +1225,7 @@ pub async fn create_checkout_session(
         amount_cents
     );
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
+    let datafast_metadata = datafast_metadata_from_headers(&headers);
 
     // Create a Checkout Session with payment method attachment
     tracing::debug!("Creating Stripe checkout session");
@@ -1220,6 +1268,7 @@ pub async fn create_checkout_session(
                 stripe::CheckoutSessionBillingAddressCollection::Required,
             ),
             allow_promotion_codes: Some(true), // Allow discount codes
+            metadata: (!datafast_metadata.is_empty()).then_some(datafast_metadata),
             ..Default::default()
         },
     )

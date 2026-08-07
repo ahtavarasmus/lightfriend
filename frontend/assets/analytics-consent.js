@@ -31,7 +31,15 @@
     }
   }
 
+  function ensureDataFastQueue() {
+    window.datafast = window.datafast || function () {
+      window.datafast.q = window.datafast.q || [];
+      window.datafast.q.push(arguments);
+    };
+  }
+
   function loadDataFast() {
+    ensureDataFastQueue();
     if (document.getElementById(trackerId)) return;
 
     const tracker = document.createElement("script");
@@ -43,11 +51,29 @@
     document.head.appendChild(tracker);
   }
 
+  function trackPayment(email) {
+    if (
+      readConsent() !== consentGranted ||
+      typeof email !== "string" ||
+      email.trim() === ""
+    ) {
+      return false;
+    }
+
+    loadDataFast();
+    window.datafast("payment", { email: email.trim() });
+    return true;
+  }
+
+  window.lightfriendTrackDataFastPayment = trackPayment;
+
   function clearDataFastCookie() {
     const expires = "expires=Thu, 01 Jan 1970 00:00:00 GMT";
-    document.cookie = `datafast_visitor_id=; ${expires}; path=/; SameSite=Lax`;
-    document.cookie = `datafast_visitor_id=; ${expires}; path=/; domain=${domain}; SameSite=Lax`;
-    document.cookie = `datafast_visitor_id=; ${expires}; path=/; domain=.${domain}; SameSite=Lax`;
+    ["datafast_visitor_id", "datafast_session_id"].forEach(function (name) {
+      document.cookie = `${name}=; ${expires}; path=/; SameSite=Lax`;
+      document.cookie = `${name}=; ${expires}; path=/; domain=${domain}; SameSite=Lax`;
+      document.cookie = `${name}=; ${expires}; path=/; domain=.${domain}; SameSite=Lax`;
+    });
   }
 
   function removeBanner() {

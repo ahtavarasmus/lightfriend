@@ -1,4 +1,5 @@
 use crate::utils::api::Api;
+use crate::utils::datafast::mark_payment_pending;
 use futures::future::{select, Either};
 use gloo_timers::future::TimeoutFuture;
 use yew::prelude::*;
@@ -10,6 +11,7 @@ use yew::prelude::*;
 pub fn subscription_success() -> Html {
     use_effect_with_deps(
         move |_| {
+            mark_payment_pending();
             wasm_bindgen_futures::spawn_local(async move {
                 let auth_check = Api::get("/api/auth/status").send();
                 let timeout = TimeoutFuture::new(2_000);

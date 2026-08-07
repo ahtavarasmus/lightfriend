@@ -16,6 +16,7 @@ pub enum AuthState {
 mod config;
 mod utils {
     pub mod api;
+    pub mod datafast;
     pub mod seo;
     pub mod voice_web;
     pub mod webauthn;

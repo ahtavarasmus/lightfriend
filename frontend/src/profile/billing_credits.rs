@@ -4,6 +4,7 @@ use crate::profile::billing_models::{
 };
 use crate::profile::stripe::StripePricingTable;
 use crate::utils::api::Api;
+use crate::utils::datafast::{attribute_pending_payment, mark_payment_pending};
 use gloo_timers::future::TimeoutFuture;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -423,6 +424,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
     let _handle_successful_payment = {
         let success = success.clone();
         let error = error.clone();
+        let customer_email = user_profile.email.clone();
         use_effect_with_deps(
             move |_| {
                 let window = web_sys::window().unwrap();
@@ -447,6 +449,8 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                     need_refresh = true;
                 }
                 if need_refresh {
+                    mark_payment_pending();
+                    attribute_pending_payment(&customer_email);
                     spawn_local(async move {
                         let mut refresh_success = true;
                         if let Some(session_id) = session_id_opt.clone() {

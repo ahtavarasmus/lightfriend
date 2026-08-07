@@ -5,6 +5,7 @@ use crate::pages::landing::Landing;
 use crate::profile::billing_models::UserProfile;
 use crate::profile::stripe::StripePricingTable;
 use crate::utils::api::Api;
+use crate::utils::datafast::{attribute_pending_payment, mark_payment_pending};
 use futures::future::{select, Either};
 use gloo_timers::callback::Timeout;
 use gloo_timers::future::TimeoutFuture;
@@ -96,6 +97,7 @@ pub fn Home() -> Html {
                 if let Ok(params) = web_sys::UrlSearchParams::new_with_str(query) {
                     // Check for subscription success
                     if params.get("subscription").as_deref() == Some("success") {
+                        mark_payment_pending();
                         post_checkout_success.set(true);
                         success.set(Some("Subscription activated successfully!".to_string()));
                         refresh_trigger.set(*refresh_trigger + 1);
@@ -189,6 +191,7 @@ pub fn Home() -> Html {
                                 Ok(profile) => {
                                     auth_status.set(Some(true));
                                     user_verified.set(profile.verified);
+                                    attribute_pending_payment(&profile.email);
                                     profile_data.set(Some(profile.clone()));
                                     error.set(None);
                                 }
