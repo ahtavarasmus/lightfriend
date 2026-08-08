@@ -102,6 +102,54 @@ const SETTINGS_STYLES: &str = r#"
     line-height: 1.5;
     margin: 0 0 1.5rem;
 }
+.settings-prompt-guide {
+    margin-top: 1.5rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.settings-prompt-guide summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    color: #888;
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 600;
+    list-style: none;
+}
+.settings-prompt-guide summary::-webkit-details-marker {
+    display: none;
+}
+.settings-prompt-guide summary::after {
+    content: "+";
+    color: #666;
+    font-size: 1rem;
+    font-weight: 400;
+}
+.settings-prompt-guide[open] summary::after {
+    content: "−";
+}
+.settings-prompt-guide summary:focus-visible {
+    outline: 2px solid rgba(126, 178, 255, 0.7);
+    outline-offset: 2px;
+}
+.settings-prompt-guide-copy {
+    margin: 0 0 0.75rem;
+    color: #777;
+    font-size: 0.76rem;
+    line-height: 1.5;
+}
+.settings-prompt-list {
+    margin: 0;
+    padding: 0 0 0 1.1rem;
+    color: #999;
+    font-size: 0.76rem;
+    line-height: 1.5;
+}
+.settings-prompt-list li + li {
+    margin-top: 0.4rem;
+}
 .settings-connection-prompt {
     color: #ddd;
     font-size: 1rem;
@@ -233,6 +281,8 @@ pub struct SettingsPanelProps {
     pub on_profile_update: Callback<UserProfile>,
     #[prop_or(SettingsTab::Connections)]
     pub initial_tab: SettingsTab,
+    #[prop_or_default]
+    pub example_prompts: Vec<String>,
 }
 
 #[function_component(SettingsPanel)]
@@ -384,6 +434,19 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                             user_profile={profile.clone()}
                             on_profile_update={on_profile_update}
                         />
+                        if !props.example_prompts.is_empty() {
+                            <details class="settings-prompt-guide">
+                                <summary>{"Things to ask"}</summary>
+                                <p class="settings-prompt-guide-copy">
+                                    {"Text or call Lightfriend from your phone. These examples are here for reference."}
+                                </p>
+                                <ul class="settings-prompt-list">
+                                    {for props.example_prompts.iter().map(|prompt| html! {
+                                        <li>{prompt}</li>
+                                    })}
+                                </ul>
+                            </details>
+                        }
                     </div>
                 }
             } else {

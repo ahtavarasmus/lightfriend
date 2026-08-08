@@ -95,45 +95,6 @@ const FOCUSED_DASHBOARD_STYLES: &str = r#"
     padding: 1.35rem 0;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
-.try-asking {
-    padding: 1.35rem 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-.try-asking-copy {
-    margin: -0.25rem 0 0.8rem;
-    color: #777;
-    font-size: 0.76rem;
-}
-.try-asking-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.5rem;
-}
-.try-asking-example {
-    min-height: 48px;
-    padding: 0.65rem 0.75rem;
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.025);
-    color: #aaa;
-    font: inherit;
-    font-size: 0.78rem;
-    line-height: 1.4;
-    text-align: left;
-    cursor: copy;
-}
-.try-asking-example:hover:not(:disabled) {
-    border-color: rgba(126, 178, 255, 0.32);
-    color: #d3e3ff;
-}
-.try-asking-example:focus-visible {
-    outline: 2px solid rgba(126, 178, 255, 0.7);
-    outline-offset: 2px;
-}
-.try-asking-example:disabled {
-    cursor: not-allowed;
-    opacity: 0.42;
-}
 .focused-controls-label {
     margin: 0 0 0.75rem;
     color: #707070;
@@ -338,8 +299,6 @@ const FOCUSED_DASHBOARD_STYLES: &str = r#"
     .focused-controls {
         border-top-color: rgba(0, 0, 0, 0.08);
     }
-    .try-asking { border-top-color: rgba(0, 0, 0, 0.08); }
-    .try-asking-example { border-color: rgba(0, 0, 0, 0.09); background: rgba(0, 0, 0, 0.02); color: #666; }
     .focused-control-button {
         border-color: rgba(0, 0, 0, 0.1);
         background: rgba(0, 0, 0, 0.025);
@@ -363,9 +322,6 @@ const FOCUSED_DASHBOARD_STYLES: &str = r#"
     .focused-footer a {
         transition: none;
     }
-}
-@media (max-width: 560px) {
-    .try-asking-grid { grid-template-columns: 1fr; }
 }
 "#;
 
@@ -432,13 +388,7 @@ fn dashboard_attention_state(connections: &ConnectionState) -> DashboardAttentio
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct TryAskingExample {
-    prompt: String,
-    available: bool,
-}
-
-fn try_asking_examples(connections: &ConnectionState) -> Vec<TryAskingExample> {
+fn try_asking_examples(connections: &ConnectionState) -> Vec<String> {
     let has_messages = !connections.names().is_empty();
     let bridge_platform = if connections.whatsapp {
         Some("WhatsApp")
@@ -452,54 +402,35 @@ fn try_asking_examples(connections: &ConnectionState) -> Vec<TryAskingExample> {
     let catch_up_source = connections.names().join(", ");
 
     vec![
-        TryAskingExample {
-            prompt: if has_messages {
-                format!("Catch me up on recent messages across {}.", catch_up_source)
-            } else {
-                "Connect a message service to ask for a catch-up.".to_string()
-            },
-            available: has_messages,
+        if has_messages {
+            format!("Catch me up on recent messages across {}.", catch_up_source)
+        } else {
+            "Connect a message service to ask for a catch-up.".to_string()
         },
-        TryAskingExample {
-            prompt: bridge_platform
-                .map(|platform| format!("Send ‘Running late’ to Alex on {}.", platform))
-                .unwrap_or_else(|| {
-                    "Connect WhatsApp, Telegram, or Signal to send a message.".to_string()
-                }),
-            available: bridge_platform.is_some(),
-        },
-        TryAskingExample {
-            prompt: "Remind me tomorrow at 9 AM to call the dentist. What exact time is that?"
-                .to_string(),
-            available: true,
-        },
-        TryAskingExample {
-            prompt: bridge_platform
-                .map(|platform| {
-                    format!(
-                        "Send ‘Can you confirm?’ to Alex on {} and tell me when they reply.",
-                        platform
-                    )
-                })
-                .unwrap_or_else(|| {
-                    "Connect a chat service to wait for someone’s reply.".to_string()
-                }),
-            available: bridge_platform.is_some(),
-        },
-        TryAskingExample {
+        bridge_platform
+            .map(|platform| format!("Send ‘Running late’ to Alex on {}.", platform))
+            .unwrap_or_else(|| {
+                "Connect WhatsApp, Telegram, or Signal to send a message.".to_string()
+            }),
+        "Remind me tomorrow at 9 AM to call the dentist. What exact time is that?".to_string(),
+        bridge_platform
+            .map(|platform| {
+                format!(
+                    "Send ‘Can you confirm?’ to Alex on {} and tell me when they reply.",
+                    platform
+                )
+            })
+            .unwrap_or_else(|| "Connect a chat service to wait for someone’s reply.".to_string()),
+        {
             // Lightfriend cannot currently create a global temporary quiet
             // mode conversationally. Phrase this as a capability question so
             // the example never promises an unsupported action.
-            prompt: "How can I quiet noncritical alerts for the next hour?".to_string(),
-            available: true,
+            "How can I quiet noncritical alerts for the next hour?".to_string()
         },
-        TryAskingExample {
-            prompt: if has_messages {
-                "How do I manage my connected services?".to_string()
-            } else {
-                "Which message services can I connect?".to_string()
-            },
-            available: true,
+        if has_messages {
+            "How do I manage my connected services?".to_string()
+        } else {
+            "Which message services can I connect?".to_string()
         },
     ]
 }
@@ -545,7 +476,6 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
     let quick_panel = use_state(|| None::<QuickPanel>);
     let selected_video = use_state(|| None::<MediaItem>);
     let whatsapp_confirm_saving = use_state(|| false);
-    let copied_example = use_state(|| None::<usize>);
 
     {
         let connections = connections.clone();
@@ -873,46 +803,52 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
             "Checking status",
             "waiting",
             "Checking what needs your attention.",
-            "This should only take a moment.",
+            Some("This should only take a moment."),
         ),
         DashboardAttentionState::StatusUnavailable => (
             "Needs attention",
             "unavailable",
             "Lightfriend's status could not be checked.",
-            "Your existing services may still be running. Check again in a moment.",
+            Some("Your existing services may still be running. Check again in a moment."),
         ),
         DashboardAttentionState::IntegrationIssue => (
             "Needs attention",
             "unavailable",
             "A connected service needs attention.",
-            connections
-                .core_issue
-                .as_deref()
-                .unwrap_or("Open Connections to reconnect it."),
+            Some(
+                connections
+                    .core_issue
+                    .as_deref()
+                    .unwrap_or("Open Connections to reconnect it."),
+            ),
         ),
         DashboardAttentionState::WhatsappActionNow => (
             "Action needed",
             "unavailable",
             "Open WhatsApp on your primary phone now.",
-            "Linked Devices may expire after about two weeks without the primary phone being active.",
+            Some(
+                "Linked Devices may expire after about two weeks without the primary phone being active.",
+            ),
         ),
         DashboardAttentionState::WhatsappRiskSoon => (
             "At risk soon",
             "waiting",
             "Open WhatsApp on your primary phone soon.",
-            "This keeps the Lightfriend Linked Device from timing out.",
+            Some("This keeps the Lightfriend Linked Device from timing out."),
         ),
         DashboardAttentionState::Healthy => (
             "Working quietly",
             "",
             "Nothing needs your attention.",
-            "Lightfriend is working in the background.",
+            None,
         ),
         DashboardAttentionState::SetupNeeded => (
             "Setup needed",
             "waiting",
             "Connect the places that matter.",
-            "Lightfriend needs at least one connection before it can watch for important messages.",
+            Some(
+                "Lightfriend needs at least one connection before it can watch for important messages.",
+            ),
         ),
     };
 
@@ -946,7 +882,9 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
                                 {status_label}
                             </div>
                             <h1>{title}</h1>
-                            <p class="focused-status-copy">{description}</p>
+                            if let Some(description) = description {
+                                <p class="focused-status-copy">{description}</p>
+                            }
 
                             if has_connections {
                                 <p class="focused-number">
@@ -997,39 +935,6 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
                                     )}
                                 </p>
                             }
-                        </section>
-
-                        <section class="try-asking" aria-labelledby="try-asking-title">
-                            <h2 id="try-asking-title" class="focused-controls-label">{"Try asking"}</h2>
-                            <p class="try-asking-copy">{"Tap an example to copy it."}</p>
-                            <div class="try-asking-grid">
-                                { for asking_examples.iter().enumerate().map(|(index, example)| {
-                                    let prompt = example.prompt.clone();
-                                    let copied_for_click = copied_example.clone();
-                                    html! {
-                                        <button
-                                            type="button"
-                                            class="try-asking-example"
-                                            disabled={!example.available}
-                                            aria-label={if example.available { format!("Copy: {}", prompt) } else { prompt.clone() }}
-                                            onclick={Callback::from(move |_| {
-                                                if let Some(window) = web_sys::window() {
-                                                    let clipboard = window.navigator().clipboard();
-                                                    let prompt = prompt.clone();
-                                                    let copied_example = copied_for_click.clone();
-                                                    spawn_local(async move {
-                                                        if wasm_bindgen_futures::JsFuture::from(clipboard.write_text(&prompt)).await.is_ok() {
-                                                            copied_example.set(Some(index));
-                                                        }
-                                                    });
-                                                }
-                                            })}
-                                        >
-                                            {if *copied_example == Some(index) { "Copied".to_string() } else { example.prompt.clone() }}
-                                        </button>
-                                    }
-                                }) }
-                            </div>
                         </section>
 
                         <section class="focused-controls" aria-labelledby="focused-controls-title">
@@ -1164,6 +1069,7 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
                 on_close={close_settings}
                 on_profile_update={props.on_profile_update.clone()}
                 initial_tab={*settings_initial_tab}
+                example_prompts={asking_examples}
             />
         </>
     }
@@ -1242,21 +1148,19 @@ mod tests {
         let examples = try_asking_examples(&connections);
 
         assert_eq!(examples.len(), 6);
-        assert!(examples[0].prompt.contains("Telegram"));
-        assert!(examples[1].prompt.contains("Telegram"));
-        assert!(examples[3].prompt.contains("tell me when they reply"));
-        assert!(examples.iter().all(|example| example.prompt.len() < 100));
+        assert!(examples[0].contains("Telegram"));
+        assert!(examples[1].contains("Telegram"));
+        assert!(examples[3].contains("tell me when they reply"));
+        assert!(examples.iter().all(|example| example.len() < 100));
     }
 
     #[test]
-    fn unavailable_message_jobs_are_disabled_in_the_empty_state() {
+    fn empty_state_examples_explain_which_connections_are_needed() {
         let examples = try_asking_examples(&loaded_connections());
 
-        assert!(!examples[0].available);
-        assert!(!examples[1].available);
-        assert!(!examples[3].available);
-        assert!(examples[2].available);
-        assert!(examples[4].available);
-        assert!(examples[5].available);
+        assert!(examples[0].starts_with("Connect a message service"));
+        assert!(examples[1].starts_with("Connect WhatsApp"));
+        assert!(examples[3].starts_with("Connect a chat service"));
+        assert_eq!(examples[5], "Which message services can I connect?");
     }
 }

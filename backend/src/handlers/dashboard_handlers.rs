@@ -1628,7 +1628,13 @@ pub async fn get_or_build_contact_index(state: &Arc<AppState>, user_id: i32) -> 
                         candidates.len()
                     );
                     for c in candidates {
-                        let key = ("telegram".to_string(), c.display_name.trim().to_lowercase());
+                        // Matrix room names already pass through this same
+                        // normalization above. Apply it to bridge-DB names as
+                        // well so "Krister" and "Krister (Telegram)" share a
+                        // dedup key and render with one consistent label.
+                        let display_name =
+                            crate::utils::bridge::remove_bridge_suffix(&c.display_name);
+                        let key = ("telegram".to_string(), display_name.trim().to_lowercase());
                         if !c.is_group && covered_chat_keys.contains(&key) {
                             continue;
                         }
@@ -1646,7 +1652,7 @@ pub async fn get_or_build_contact_index(state: &Arc<AppState>, user_id: i32) -> 
                             &mut seen,
                             Contact {
                                 id,
-                                display_name: c.display_name,
+                                display_name,
                                 subtitle,
                                 platform: Some("telegram".to_string()),
                                 room_id: c.mxid,
