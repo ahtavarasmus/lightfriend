@@ -1743,6 +1743,12 @@ async fn main() {
         .route("/blog/{slug}", get(blog::handlers::blog_post_handler))
         .route("/blog", get(blog::handlers::blog_index_handler))
         .route("/sitemap.xml", get(blog::handlers::sitemap_handler))
+        .route("/llms.txt", get(blog::handlers::llms_txt_handler))
+        .route("/llms-full.txt", get(blog::handlers::llms_full_txt_handler))
+        .route(
+            "/.well-known/llms.txt",
+            get(blog::handlers::llms_txt_handler),
+        )
         .fallback_service(ServeDir::new("public").fallback(ServeFile::new("public/index.html")))
         .layer(middleware::from_fn_with_state(
             state.clone(),

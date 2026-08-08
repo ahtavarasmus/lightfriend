@@ -1,3 +1,5 @@
+use axum::body::to_bytes;
+use axum::http::header;
 use backend::blog::content::BlogStore;
 
 fn load_blog() -> BlogStore {
@@ -120,4 +122,23 @@ fn robots_points_to_public_sitemap_and_blocks_private_sections() {
             "robots should disallow {route}"
         );
     }
+}
+
+#[tokio::test]
+async fn llms_handlers_serve_plain_text_instead_of_the_spa_fallback() {
+    let response = backend::blog::handlers::llms_txt_handler().await;
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE).unwrap(),
+        "text/plain; charset=utf-8"
+    );
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = std::str::from_utf8(&body).unwrap();
+    assert!(body.contains("Lightfriend"));
+    assert!(body.contains("best-dumbphone-whatsapp-setup-2026"));
+
+    let response = backend::blog::handlers::llms_full_txt_handler().await;
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = std::str::from_utf8(&body).unwrap();
+    assert!(body.contains("Lightfriend"));
+    assert!(body.contains("digital-detox-with-whatsapp"));
 }

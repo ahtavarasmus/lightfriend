@@ -67,3 +67,24 @@ pub async fn sitemap_handler(State(state): State<Arc<AppState>>) -> Response {
     );
     response
 }
+
+fn static_text_response(contents: &'static str) -> Response {
+    let mut response = contents.into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        "text/plain; charset=utf-8".parse().unwrap(),
+    );
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        "public, max-age=3600, s-maxage=86400".parse().unwrap(),
+    );
+    response
+}
+
+pub async fn llms_txt_handler() -> Response {
+    static_text_response(include_str!("../../static/llms.txt"))
+}
+
+pub async fn llms_full_txt_handler() -> Response {
+    static_text_response(include_str!("../../static/llms-full.txt"))
+}
