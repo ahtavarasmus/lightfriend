@@ -1,8 +1,14 @@
 use crate::utils::api::Api;
-use crate::utils::datafast::mark_payment_pending;
+use crate::utils::datafast::{attribute_payment, mark_payment_pending};
 use futures::future::{select, Either};
 use gloo_timers::future::TimeoutFuture;
+use serde::Deserialize;
 use yew::prelude::*;
+
+#[derive(Deserialize)]
+struct DataFastCheckoutAttribution {
+    email: String,
+}
 
 /// Simple page shown after guest checkout completes
 /// Shows "check email" immediately; if the user is already logged in, a
@@ -13,6 +19,28 @@ pub fn subscription_success() -> Html {
         move |_| {
             mark_payment_pending();
             wasm_bindgen_futures::spawn_local(async move {
+                if let Some(session_id) = web_sys::window()
+                    .and_then(|window| window.location().search().ok())
+                    .and_then(|search| web_sys::UrlSearchParams::new_with_str(&search).ok())
+                    .and_then(|params| params.get("session_id"))
+                {
+                    if let Ok(response) = Api::get(&format!(
+                        "/api/stripe/datafast-attribution/{}",
+                        session_id
+                    ))
+                    .send()
+                    .await
+                    {
+                        if response.ok() {
+                            if let Ok(attribution) =
+                                response.json::<DataFastCheckoutAttribution>().await
+                            {
+                                attribute_payment(&attribution.email);
+                            }
+                        }
+                    }
+                }
+
                 let auth_check = Api::get("/api/auth/status").send();
                 let timeout = TimeoutFuture::new(2_000);
                 if let Either::Left((Ok(response), _)) =

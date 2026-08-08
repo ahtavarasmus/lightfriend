@@ -36,18 +36,28 @@ pub fn attribute_pending_payment(email: &str) {
         return;
     }
 
-    let Ok(tracker) = Reflect::get(window.as_ref(), &JsValue::from_str(PAYMENT_TRACKER_NAME))
-    else {
-        return;
-    };
-    let Ok(tracker) = tracker.dyn_into::<Function>() else {
-        return;
-    };
-    let Ok(attributed) = tracker.call1(&JsValue::NULL, &JsValue::from_str(email.trim())) else {
-        return;
-    };
-
-    if attributed.as_bool() == Some(true) {
+    if attribute_payment(email) {
         let _ = storage.remove_item(PENDING_PAYMENT_KEY);
     }
+}
+
+pub fn attribute_payment(email: &str) -> bool {
+    if email.trim().is_empty() {
+        return false;
+    }
+
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let Ok(tracker) = Reflect::get(window.as_ref(), &JsValue::from_str(PAYMENT_TRACKER_NAME)) else {
+        return false;
+    };
+    let Ok(tracker) = tracker.dyn_into::<Function>() else {
+        return false;
+    };
+    let Ok(attributed) = tracker.call1(&JsValue::NULL, &JsValue::from_str(email.trim())) else {
+        return false;
+    };
+
+    attributed.as_bool() == Some(true)
 }

@@ -74,6 +74,103 @@ pub fn datafast_metadata_from_headers(
     metadata
 }
 
+pub fn is_valid_stripe_checkout_session_id(session_id: &str) -> bool {
+    (8..=255).contains(&session_id.len())
+        && session_id.starts_with("cs_")
+        && session_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+pub fn datafast_checkout_success_url(base_url: &str, path_and_query: &str) -> String {
+    format!(
+        "{}{}{}session_id={{CHECKOUT_SESSION_ID}}",
+        base_url.trim_end_matches('/'),
+        path_and_query,
+        if path_and_query.contains('?') {
+            "&"
+        } else {
+            "?"
+        }
+    )
+}
+
+#[derive(Serialize)]
+pub struct DataFastCheckoutAttributionResponse {
+    pub email: String,
+}
+
+/// Return the email from a completed Stripe Checkout Session so the browser
+/// that owns the DataFast visitor cookie can emit DataFast's payment event.
+/// Checkout Session IDs are unguessable bearer references; the response is
+/// deliberately minimal and non-cacheable.
+pub async fn get_datafast_checkout_attribution(
+    Path(session_id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    if !is_valid_stripe_checkout_session_id(&session_id) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid checkout session"})),
+        ));
+    }
+
+    let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY").map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Stripe configuration error"})),
+        )
+    })?;
+    let checkout_session_id = session_id.parse().map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid checkout session"})),
+        )
+    })?;
+    let session = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        CheckoutSession::retrieve(&Client::new(stripe_secret_key), &checkout_session_id, &[]),
+    )
+    .await
+    .map_err(|_| {
+        (
+            StatusCode::GATEWAY_TIMEOUT,
+            Json(json!({"error": "Stripe request timed out"})),
+        )
+    })?
+    .map_err(|_| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Completed checkout session not found"})),
+        )
+    })?;
+
+    if session.status != Some(stripe::CheckoutSessionStatus::Complete)
+        || session.payment_status == stripe::CheckoutSessionPaymentStatus::Unpaid
+    {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Completed checkout session not found"})),
+        ));
+    }
+
+    let email = session
+        .customer_details
+        .and_then(|details| details.email)
+        .or(session.customer_email)
+        .filter(|email| !email.trim().is_empty())
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Checkout email not found"})),
+            )
+        })?;
+
+    Ok((
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(DataFastCheckoutAttributionResponse { email }),
+    ))
+}
+
 #[derive(Serialize)]
 pub struct SubscriptionMigrationStatusResponse {
     pub show_current_plans: bool,
@@ -587,7 +684,7 @@ pub async fn create_unified_subscription_checkout(
         ..Default::default()
     }];
 
-    let success_url = format!("{}/?subscription=success", domain_url);
+    let success_url = datafast_checkout_success_url(&domain_url, "/?subscription=success");
     let cancel_url = format!("{}/?subscription=canceled", domain_url);
     let datafast_metadata = datafast_metadata_from_headers(&headers);
     let mut create_params = CreateCheckoutSession {
@@ -627,7 +724,7 @@ pub async fn create_unified_subscription_checkout(
         ..Default::default()
     };
     // Handle metadata for plan changes
-    let success_url1 = format!("{}/?subscription=changed", domain_url);
+    let success_url1 = datafast_checkout_success_url(&domain_url, "/?subscription=changed");
     if let Some(current_subscription) = current_subscription {
         tracing::debug!("Found existing subscription: {}", current_subscription.id);
 
@@ -719,7 +816,7 @@ pub async fn create_guest_checkout(
     }];
 
     // Success URL redirects to password setup page with session_id
-    let success_url = format!("{}/subscription-success", domain_url);
+    let success_url = datafast_checkout_success_url(&domain_url, "/subscription-success");
     let cancel_url = format!("{}/?checkout=canceled#plans", domain_url);
 
     // Build metadata
@@ -1232,7 +1329,10 @@ pub async fn create_checkout_session(
     let checkout_session = CheckoutSession::create(
         &client,
         CreateCheckoutSession {
-            success_url: Some(&format!("{}/?credits=success", domain_url)), // Redirect after success
+            success_url: Some(&datafast_checkout_success_url(
+                &domain_url,
+                "/?credits=success",
+            )), // Redirect after success
             cancel_url: Some(&format!("{}/?credits=canceled", domain_url)), // Redirect after cancellation
             payment_method_types: Some(vec![stripe::CreateCheckoutSessionPaymentMethodTypes::Card]), // Allow card payments
             mode: Some(stripe::CheckoutSessionMode::Payment), // One-time payment mode

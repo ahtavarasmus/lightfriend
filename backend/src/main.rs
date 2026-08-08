@@ -865,6 +865,10 @@ async fn main() {
             get(stripe_handlers::get_pricing_table_config),
         )
         .route(
+            "/api/stripe/datafast-attribution/{session_id}",
+            get(stripe_handlers::get_datafast_checkout_attribution),
+        )
+        .route(
             "/api/auth/magic/{token}",
             get(auth_handlers::validate_magic_link),
         )
@@ -1783,6 +1787,9 @@ async fn main() {
         .layer(SetResponseHeaderLayer::overriding(
             axum::http::header::X_XSS_PROTECTION,
             HeaderValue::from_static("1; mode=block"),
+        ))
+        .layer(middleware::from_fn(
+            backend::utils::datafast_bot_tracking::track_bot_traffic,
         ))
         .with_state(state.clone());
     let state_for_scheduler = state.clone();

@@ -55,6 +55,7 @@ pub mod utils {
     pub mod bridge_contacts;
     pub mod bridge_responses;
     pub mod country;
+    pub mod datafast_bot_tracking;
     pub mod disconnected_bridge_cleanup;
     pub mod email;
     pub mod embedding_service;

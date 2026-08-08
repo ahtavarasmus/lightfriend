@@ -1,5 +1,8 @@
 use axum::http::{header::COOKIE, HeaderMap, HeaderValue};
-use backend::handlers::stripe_handlers::datafast_metadata_from_headers;
+use backend::handlers::stripe_handlers::{
+    datafast_checkout_success_url, datafast_metadata_from_headers,
+    is_valid_stripe_checkout_session_id,
+};
 
 #[test]
 fn extracts_datafast_cookies_for_stripe_metadata() {
@@ -22,6 +25,26 @@ fn extracts_datafast_cookies_for_stripe_metadata() {
         metadata.get("datafast_session_id").map(String::as_str),
         Some("session=456")
     );
+}
+
+#[test]
+fn adds_checkout_session_id_to_success_urls() {
+    assert_eq!(
+        datafast_checkout_success_url("https://lightfriend.ai/", "/subscription-success"),
+        "https://lightfriend.ai/subscription-success?session_id={CHECKOUT_SESSION_ID}"
+    );
+    assert_eq!(
+        datafast_checkout_success_url("https://lightfriend.ai", "/?subscription=success"),
+        "https://lightfriend.ai/?subscription=success&session_id={CHECKOUT_SESSION_ID}"
+    );
+}
+
+#[test]
+fn validates_checkout_session_ids_before_calling_stripe() {
+    assert!(is_valid_stripe_checkout_session_id("cs_live_a1B2C3_d4E5F6"));
+    assert!(!is_valid_stripe_checkout_session_id("pi_not_a_session"));
+    assert!(!is_valid_stripe_checkout_session_id("cs_bad-value"));
+    assert!(!is_valid_stripe_checkout_session_id("cs_"));
 }
 
 #[test]

@@ -14,6 +14,7 @@
   const trackerId = "lightfriend-datafast-analytics";
   const bannerHostId = "lightfriend-analytics-consent";
   const settingsButtonId = "lightfriend-analytics-settings";
+  let pendingPaymentEmail = null;
 
   function readConsent() {
     try {
@@ -47,21 +48,24 @@
     tracker.defer = true;
     tracker.dataset.websiteId = websiteId;
     tracker.dataset.domain = domain;
+    tracker.dataset.disablePayments = "true";
     tracker.src = "https://datafa.st/js/script.js";
     document.head.appendChild(tracker);
   }
 
   function trackPayment(email) {
-    if (
-      readConsent() !== consentGranted ||
-      typeof email !== "string" ||
-      email.trim() === ""
-    ) {
+    if (typeof email !== "string" || email.trim() === "") {
+      return false;
+    }
+
+    if (readConsent() !== consentGranted) {
+      pendingPaymentEmail = readConsent() === consentDenied ? null : email.trim();
       return false;
     }
 
     loadDataFast();
     window.datafast("payment", { email: email.trim() });
+    pendingPaymentEmail = null;
     return true;
   }
 
@@ -101,12 +105,16 @@
     if (allowed) {
       storeConsent(consentGranted);
       loadDataFast();
+      if (pendingPaymentEmail) {
+        trackPayment(pendingPaymentEmail);
+      }
       closeBanner();
       return;
     }
 
     const trackerWasLoaded = Boolean(document.getElementById(trackerId));
     storeConsent(consentDenied);
+    pendingPaymentEmail = null;
     clearDataFastCookie();
 
     if (trackerWasLoaded) {
