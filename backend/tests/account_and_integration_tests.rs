@@ -1,3 +1,5 @@
+#[path = "agent_integration_test.rs"]
+mod agent_integration_test;
 #[path = "contact_send_resolution_test.rs"]
 mod contact_send_resolution_test;
 #[path = "country_service_test.rs"]

@@ -713,6 +713,30 @@ async fn main() {
     let public_mcp_routes = Router::new()
         .route("/api/mcp", post(handlers::public_mcp_handlers::public_mcp))
         .layer(DefaultBodyLimit::max(64 * 1024));
+    // Local agent clients authenticate with a dedicated write-only bearer.
+    // These routes expose no reads and reject credentials in query strings.
+    let agent_routes = Router::new()
+        .route(
+            "/api/agent/pairing/start",
+            post(handlers::agent_integration_handlers::start_pairing),
+        )
+        .route(
+            "/api/agent/pairing/poll",
+            post(handlers::agent_integration_handlers::poll_pairing),
+        )
+        .route(
+            "/api/agent/actions/reminders",
+            post(handlers::agent_integration_handlers::create_reminder),
+        )
+        .route(
+            "/api/agent/actions/reply-watches",
+            post(handlers::agent_integration_handlers::create_reply_watch),
+        )
+        .route(
+            "/api/agent/credential",
+            delete(handlers::agent_integration_handlers::revoke_current_credential),
+        )
+        .layer(DefaultBodyLimit::max(4096));
     // Voice pipeline: TwiML endpoint validated by Twilio signature
     let voice_twiml_routes = Router::new()
         .route("/api/voice/incoming", post(voice_pipeline::voice_incoming))
@@ -1636,6 +1660,18 @@ async fn main() {
             delete(handlers::public_mcp_handlers::revoke_token),
         )
         .route(
+            "/api/me/agent-credentials",
+            get(handlers::agent_integration_handlers::list_credentials),
+        )
+        .route(
+            "/api/me/agent-credentials/{credential_id}",
+            delete(handlers::agent_integration_handlers::revoke_credential),
+        )
+        .route(
+            "/api/me/agent-pairing/approve",
+            post(handlers::agent_integration_handlers::approve_pairing),
+        )
+        .route(
             "/api/me/light-tool/pairing-sessions",
             get(handlers::light_tool_handlers::get_pairing_status)
                 .post(handlers::light_tool_handlers::create_pairing_offer),
@@ -1701,6 +1737,7 @@ async fn main() {
         .merge(voice_routes)
         .merge(webhook_sms_routes)
         .merge(public_mcp_routes)
+        .merge(agent_routes)
         .nest_service("/uploads", ServeDir::new("uploads"))
         .route("/blog/md/{slug}", get(blog::handlers::blog_post_md_handler))
         .route("/blog/{slug}", get(blog::handlers::blog_post_handler))

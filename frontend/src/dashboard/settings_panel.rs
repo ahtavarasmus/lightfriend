@@ -1,3 +1,4 @@
+use super::agent_panel::AgentPanel;
 use super::always_show::AlwaysShowSettings;
 use super::phone_device_panel::PhoneDevicePanel;
 use super::webhooks_panel::WebhooksPanel;
@@ -365,6 +366,10 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                     <div class="settings-content">
                         <p class="settings-connection-prompt">{"Choose what Lightfriend can watch."}</p>
                         <div class="connections-stack">
+                            <section class="connections-group" aria-label="Local agents">
+                                <AgentPanel />
+                            </section>
+
                             <section class="connections-group" aria-label="Apps">
                                 <Connect
                                     user_id={profile.id}

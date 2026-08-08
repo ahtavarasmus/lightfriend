@@ -92,6 +92,10 @@ fn test_migrations_apply_cleanly_with_existing_data() {
         "mcp_servers",
         "totp_secrets",
         "totp_backup_codes",
+        "agent_credentials",
+        "agent_pairing_sessions",
+        "agent_action_idempotency",
+        "agent_action_audit",
     ] {
         let query = format!("SELECT count(*) as count FROM {table}");
         let result: CountResult = sql_query(&query)

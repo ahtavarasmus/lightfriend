@@ -55,6 +55,7 @@ mod components {
 }
 mod dashboard {
     pub mod activity_feed;
+    pub mod agent_panel;
     pub mod always_show;
     pub mod chat_box;
     pub mod dashboard_view;

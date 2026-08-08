@@ -95,6 +95,40 @@ const FOCUSED_DASHBOARD_STYLES: &str = r#"
     padding: 1.35rem 0;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
+.focused-reminders {
+    padding: 1.35rem 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.focused-reminder-list {
+    display: grid;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.focused-reminder-empty { margin: 0; color: #777; font-size: 0.78rem; }
+.focused-reminder-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.72rem 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.focused-reminder-row:last-child { border-bottom: 0; }
+.focused-reminder-text {
+    min-width: 0;
+    color: #d5d5d5;
+    font-size: 0.84rem;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+.focused-reminder-time {
+    flex: 0 0 auto;
+    color: #858585;
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+}
 .focused-controls-label {
     margin: 0 0 0.75rem;
     color: #707070;
@@ -446,6 +480,14 @@ struct DashboardValueStats {
 #[derive(Deserialize)]
 struct DashboardSummary {
     value_stats: DashboardValueStats,
+    #[serde(default)]
+    events: Vec<UpcomingReminder>,
+}
+
+#[derive(Clone, PartialEq, Deserialize)]
+struct UpcomingReminder {
+    description: String,
+    remind_at: Option<i32>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -467,6 +509,7 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
     let settings_initial_tab = use_state(|| SettingsTab::Connections);
     let show_history = use_state(|| false);
     let value_stats = use_state(|| None::<DashboardValueStats>);
+    let upcoming_reminders = use_state(Vec::<UpcomingReminder>::new);
     let critical_notifications =
         use_state(|| props.user_profile.system_important_notify.unwrap_or(false));
     let digests = use_state(|| props.user_profile.digest_enabled.unwrap_or(false));
@@ -568,6 +611,7 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
 
     {
         let value_stats = value_stats.clone();
+        let upcoming_reminders = upcoming_reminders.clone();
         use_effect_with_deps(
             move |_| {
                 spawn_local(async move {
@@ -575,6 +619,15 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
                         if response.ok() {
                             if let Ok(summary) = response.json::<DashboardSummary>().await {
                                 value_stats.set(Some(summary.value_stats));
+                                let now = chrono::Utc::now().timestamp() as i32;
+                                let mut reminders = summary
+                                    .events
+                                    .into_iter()
+                                    .filter(|event| event.remind_at.is_some_and(|at| at >= now))
+                                    .collect::<Vec<_>>();
+                                reminders.sort_by_key(|event| event.remind_at);
+                                reminders.truncate(5);
+                                upcoming_reminders.set(reminders);
                             }
                         }
                     }
@@ -937,6 +990,26 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
                             }
                         </section>
 
+                        <section class="focused-reminders" aria-labelledby="focused-reminders-title">
+                            <h2 id="focused-reminders-title" class="focused-controls-label">{"Upcoming reminders"}</h2>
+                            if upcoming_reminders.is_empty() {
+                                <p class="focused-reminder-empty">{"No reminders scheduled."}</p>
+                            } else {
+                                <ul class="focused-reminder-list">
+                                    {for upcoming_reminders.iter().filter_map(|reminder| {
+                                        reminder.remind_at.map(|at| html! {
+                                            <li class="focused-reminder-row">
+                                                <span class="focused-reminder-text">{&reminder.description}</span>
+                                                <time class="focused-reminder-time" datetime={chrono::DateTime::from_timestamp(i64::from(at), 0).map(|date| date.to_rfc3339()).unwrap_or_default()}>
+                                                    {format_reminder_time(at, props.user_profile.timezone.as_deref())}
+                                                </time>
+                                            </li>
+                                        })
+                                    })}
+                                </ul>
+                            }
+                        </section>
+
                         <section class="focused-controls" aria-labelledby="focused-controls-title">
                             <h2 id="focused-controls-title" class="focused-controls-label">{"Controls"}</h2>
                             <div class="focused-controls-row">
@@ -1072,6 +1145,19 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
                 example_prompts={asking_examples}
             />
         </>
+    }
+}
+
+fn format_reminder_time(timestamp: i32, timezone: Option<&str>) -> String {
+    let Some(utc) = chrono::DateTime::from_timestamp(i64::from(timestamp), 0) else {
+        return "Unknown time".to_string();
+    };
+    match timezone.and_then(|name| name.parse::<chrono_tz::Tz>().ok()) {
+        Some(zone) => utc
+            .with_timezone(&zone)
+            .format("%a, %b %-d · %H:%M")
+            .to_string(),
+        None => utc.format("%a, %b %-d · %H:%M UTC").to_string(),
     }
 }
 

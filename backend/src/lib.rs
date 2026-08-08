@@ -2,6 +2,7 @@
 pub mod handlers {
     pub mod admin_handlers;
     pub mod admin_stats_handlers;
+    pub mod agent_integration_handlers;
     pub mod attestation_handlers;
     pub mod auth_dtos;
     pub mod auth_handlers;
@@ -125,6 +126,7 @@ pub mod tools {
     pub mod youtube;
 }
 pub mod models {
+    pub mod agent_integration_models;
     pub mod commitment_models;
     pub mod light_tool_models;
     pub mod mcp_models;
@@ -133,6 +135,7 @@ pub mod models {
 }
 pub mod repositories {
     pub mod admin_alert_repository;
+    pub mod agent_integration_repository;
     pub mod bandwidth_repository;
     pub mod billing_repository;
     pub mod bridge_login_repository;

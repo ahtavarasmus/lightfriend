@@ -819,6 +819,60 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    agent_credentials (id) {
+        id -> Int4,
+        user_id -> Int4,
+        token_hash -> Text,
+        token_prefix -> Text,
+        label -> Text,
+        scopes -> Text,
+        daily_cap -> Int4,
+        daily_used -> Int4,
+        daily_reset_at -> Int4,
+        expires_at -> Int4,
+        created_at -> Int4,
+        last_used_at -> Nullable<Int4>,
+        revoked_at -> Nullable<Int4>,
+    }
+}
+
+diesel::table! {
+    agent_pairing_sessions (id) {
+        id -> Int4,
+        device_code_hash -> Text,
+        user_code_hash -> Text,
+        client_name -> Text,
+        created_at -> Int4,
+        expires_at -> Int4,
+        approved_by_user_id -> Nullable<Int4>,
+        approved_at -> Nullable<Int4>,
+        consumed_at -> Nullable<Int4>,
+    }
+}
+
+diesel::table! {
+    agent_action_idempotency (id) {
+        id -> Int4,
+        credential_id -> Int4,
+        action_kind -> Text,
+        key_hash -> Text,
+        outcome -> Nullable<Text>,
+        created_at -> Int4,
+    }
+}
+
+diesel::table! {
+    agent_action_audit (id) {
+        id -> Int8,
+        credential_id -> Nullable<Int4>,
+        user_id -> Int4,
+        action_kind -> Text,
+        outcome -> Text,
+        created_at -> Int4,
+    }
+}
+
 diesel::joinable!(ont_person_edits -> ont_persons (person_id));
 diesel::joinable!(ont_channels -> ont_persons (person_id));
 
@@ -834,6 +888,11 @@ diesel::joinable!(light_tool_runs -> light_tool_devices (device_id));
 diesel::joinable!(light_tool_pairing_sessions -> users (user_id));
 diesel::joinable!(webhook_tokens -> users (user_id));
 diesel::joinable!(webhook_idempotency_keys -> webhook_tokens (token_id));
+diesel::joinable!(agent_credentials -> users (user_id));
+diesel::joinable!(agent_pairing_sessions -> users (approved_by_user_id));
+diesel::joinable!(agent_action_idempotency -> agent_credentials (credential_id));
+diesel::joinable!(agent_action_audit -> agent_credentials (credential_id));
+diesel::joinable!(agent_action_audit -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     user_secrets,
@@ -891,4 +950,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     billing_usage_intents,
     billing_webhook_events,
     scheduler_health,
+    agent_credentials,
+    agent_pairing_sessions,
+    agent_action_idempotency,
+    agent_action_audit,
 );
