@@ -2,6 +2,7 @@
 name = "backend"
 version = "0.1.0"
 edition = "2021"
+autotests = false
 
 [dependencies]
 mime_guess = "2.0"
@@ -89,6 +90,49 @@ required-features = ["tuwunel-restore"]
 name = "tuwunel_prune_history"
 path = "src/bin/tuwunel_prune_history.rs"
 required-features = ["tuwunel-restore"]
+
+# Keep related integration tests in shared harnesses. Each source file remains
+# a separate module, preserving its test bodies while avoiding one link step
+# per file.
+[[test]]
+name = "billing_and_usage_tests"
+path = "tests/billing_and_usage_tests.rs"
+
+[[test]]
+name = "bridge_tests"
+path = "tests/bridge_tests.rs"
+
+[[test]]
+name = "channel_tests"
+path = "tests/channel_tests.rs"
+
+[[test]]
+name = "light_tool_tests"
+path = "tests/light_tool_tests.rs"
+
+[[test]]
+name = "ontology_and_ai_tests"
+path = "tests/ontology_and_ai_tests.rs"
+
+[[test]]
+name = "attention_and_digest_tests"
+path = "tests/attention_and_digest_tests.rs"
+
+[[test]]
+name = "account_and_integration_tests"
+path = "tests/account_and_integration_tests.rs"
+
+[[test]]
+name = "platform_tests"
+path = "tests/platform_tests.rs"
+
+[[test]]
+name = "migration_test"
+path = "tests/migration_test.rs"
+
+[[test]]
+name = "web_tests"
+path = "tests/web_tests.rs"
 
 [dev-dependencies]
 serial_test = "3.0"  # For tests that modify environment variables
