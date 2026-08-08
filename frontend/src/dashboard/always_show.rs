@@ -413,7 +413,6 @@ pub fn always_show_settings() -> Html {
                     <select
                         id="always-show-source"
                         class="always-show-select"
-                        value={(*source).clone()}
                         onchange={{
                             let source = source.clone();
                             let query = query.clone();
@@ -431,9 +430,14 @@ pub fn always_show_settings() -> Html {
                             })
                         }}
                     >
-                        <option value="email">{"Email"}</option>
+                        <option value="email" selected={source.as_str() == "email"}>{"Email"}</option>
                         { for platforms.iter().map(|platform| html! {
-                            <option value={platform.clone()}>{platform_label(platform)}</option>
+                            <option
+                                value={platform.clone()}
+                                selected={source.as_str() == platform.as_str()}
+                            >
+                                {platform_label(platform)}
+                            </option>
                         }) }
                     </select>
 
@@ -530,7 +534,6 @@ pub fn always_show_settings() -> Html {
                             <select
                                 id="always-show-group-mode"
                                 class="always-show-select"
-                                value={(*group_mode).clone()}
                                 onchange={{
                                     let group_mode = group_mode.clone();
                                     Callback::from(move |event: Event| {
@@ -540,9 +543,14 @@ pub fn always_show_settings() -> Html {
                                     })
                                 }}
                             >
-                                <option value="all">{"All messages"}</option>
+                                <option value="all" selected={group_mode.as_str() == "all"}>{"All messages"}</option>
                                 if mentions_supported {
-                                    <option value="mention_only">{"Mentions only"}</option>
+                                    <option
+                                        value="mention_only"
+                                        selected={group_mode.as_str() == "mention_only"}
+                                    >
+                                        {"Mentions only"}
+                                    </option>
                                 }
                             </select>
                             if !mentions_supported {
