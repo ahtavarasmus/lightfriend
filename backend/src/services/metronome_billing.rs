@@ -4,7 +4,7 @@ use crate::{AppState, BillingRepository, UserCoreOps};
 use anyhow::{anyhow, Context, Result};
 use reqwest::Client as HttpClient;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 use std::sync::Arc;
 
 pub const OVERAGE_CONSENT_VERSION: &str = "2026-07-21";
@@ -1086,10 +1086,10 @@ pub async fn reconcile_usage_outbox(state: Arc<AppState>) {
             ) else {
                 continue;
             };
-            if !invoices_by_user.contains_key(&event.user_id) {
+            if let Entry::Vacant(entry) = invoices_by_user.entry(event.user_id) {
                 match client.list_invoices(customer_id).await {
                     Ok(invoices) => {
-                        invoices_by_user.insert(event.user_id, invoices);
+                        entry.insert(invoices);
                     }
                     Err(error) => {
                         tracing::warn!(

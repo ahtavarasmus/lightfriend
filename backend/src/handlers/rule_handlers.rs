@@ -80,18 +80,32 @@ fn always_show_entry(rule: &OntRule) -> Option<AlwaysShowEntry> {
     })
 }
 
-fn build_always_show_rule(
+struct AlwaysShowRuleInput<'a> {
     user_id: i32,
-    platform: &str,
-    display_name: &str,
-    identity: &str,
-    room_id: Option<&str>,
+    platform: &'a str,
+    display_name: &'a str,
+    identity: &'a str,
+    room_id: Option<&'a str>,
     person_id: Option<i32>,
-    sender_key: Option<&str>,
+    sender_key: Option<&'a str>,
     is_group: Option<bool>,
-    group_mode: Option<&str>,
+    group_mode: Option<&'a str>,
     now: i32,
-) -> NewOntRule {
+}
+
+fn build_always_show_rule(input: AlwaysShowRuleInput<'_>) -> NewOntRule {
+    let AlwaysShowRuleInput {
+        user_id,
+        platform,
+        display_name,
+        identity,
+        room_id,
+        person_id,
+        sender_key,
+        is_group,
+        group_mode,
+        now,
+    } = input;
     let mut trigger = json!({
         "entity_type": "Message",
         "change": "created",
@@ -190,18 +204,18 @@ pub fn build_platform_always_show_rule_with_mode(
         }
         None
     };
-    Ok(build_always_show_rule(
+    Ok(build_always_show_rule(AlwaysShowRuleInput {
         user_id,
         platform,
-        contact.display_name.trim(),
-        &contact.id,
-        contact.room_id.as_deref(),
-        contact.person_id,
-        None,
-        Some(contact.is_group),
+        display_name: contact.display_name.trim(),
+        identity: &contact.id,
+        room_id: contact.room_id.as_deref(),
+        person_id: contact.person_id,
+        sender_key: None,
+        is_group: Some(contact.is_group),
         group_mode,
         now,
-    ))
+    }))
 }
 
 pub fn build_email_always_show_rule(
@@ -213,18 +227,18 @@ pub fn build_email_always_show_rule(
     if !crate::handlers::imap_auth::is_valid_email(&normalized) {
         return Err("Enter a valid email address");
     }
-    Ok(build_always_show_rule(
+    Ok(build_always_show_rule(AlwaysShowRuleInput {
         user_id,
-        "email",
-        &normalized,
-        &format!("email:{}", normalized),
-        None,
-        None,
-        Some(&normalized),
-        Some(false),
-        None,
+        platform: "email",
+        display_name: &normalized,
+        identity: &format!("email:{}", normalized),
+        room_id: None,
+        person_id: None,
+        sender_key: Some(&normalized),
+        is_group: Some(false),
+        group_mode: None,
         now,
-    ))
+    }))
 }
 
 pub async fn list_always_show(
