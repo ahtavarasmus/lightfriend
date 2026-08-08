@@ -14,6 +14,7 @@ pub struct BlogFrontmatter {
     pub slug: String,
     pub description: String,
     pub date: String,
+    pub updated: Option<String>,
     #[serde(default)]
     pub cluster: String,
     #[serde(default)]
@@ -29,6 +30,8 @@ pub struct BlogFrontmatter {
     #[serde(default)]
     pub related_slugs: Vec<String>,
     pub hub_slug: Option<String>,
+    pub hub_path: Option<String>,
+    pub hub_label: Option<String>,
     pub ai_summary: Option<String>,
 }
 
@@ -276,9 +279,14 @@ impl BlogStore {
             } else {
                 "0.6"
             };
+            let last_modified = post
+                .frontmatter
+                .updated
+                .as_deref()
+                .unwrap_or(&post.frontmatter.date);
             urls.push_str(&format!(
                 "  <url>\n    <loc>https://lightfriend.ai/blog/{}</loc>\n    <lastmod>{}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>{}</priority>\n  </url>\n",
-                post.frontmatter.slug, post.frontmatter.date, priority
+                post.frontmatter.slug, last_modified, priority
             ));
         }
 

@@ -25,6 +25,9 @@ fn sitemap_contains_indexable_public_routes_and_blog_posts() {
         "https://lightfriend.ai/blog/when-a-connected-service-is-unavailable",
         "https://lightfriend.ai/blog/privacy-minded-minimal-assistant",
         "https://lightfriend.ai/blog/what-lightfriend-does-not-try-to-do",
+        "https://lightfriend.ai/blog/best-dumbphone-whatsapp-setup-2026",
+        "https://lightfriend.ai/blog/digital-detox-with-whatsapp",
+        "https://lightfriend.ai/blog/smartphone-at-home-dumbphone",
     ] {
         assert!(
             sitemap.contains(&format!("<loc>{url}</loc>")),
@@ -65,6 +68,9 @@ fn blog_posts_have_index_links_and_page_metadata() {
         "when-a-connected-service-is-unavailable",
         "privacy-minded-minimal-assistant",
         "what-lightfriend-does-not-try-to-do",
+        "best-dumbphone-whatsapp-setup-2026",
+        "digital-detox-with-whatsapp",
+        "smartphone-at-home-dumbphone",
     ];
 
     for slug in maintained_slugs {
@@ -80,6 +86,21 @@ fn blog_posts_have_index_links_and_page_metadata() {
             "post {slug} should contain a meta description"
         );
         assert!(
+            post.full_page_html
+                .contains(r#"data-fast-goal="blog_pricing_click""#),
+            "post {slug} should track pricing CTA clicks"
+        );
+        if matches!(
+            slug,
+            "digital-detox-with-whatsapp" | "smartphone-at-home-dumbphone"
+        ) {
+            assert!(
+                post.full_page_html
+                    .contains(r#"href="/how-to-switch-to-dumbphone""#),
+                "post {slug} should link back to the switching hub"
+            );
+        }
+        assert!(
             store
                 .blog_index_html
                 .contains(&format!(r#"href="/blog/{slug}""#)),
@@ -92,6 +113,7 @@ fn blog_posts_have_index_links_and_page_metadata() {
 fn robots_points_to_public_sitemap_and_blocks_private_sections() {
     let robots = include_str!("../static/robots.txt");
     assert!(robots.contains("Sitemap: https://lightfriend.ai/sitemap.xml"));
+    assert!(robots.contains("User-agent: OAI-SearchBot\nAllow: /"));
     for route in ["/api/", "/admin", "/billing"] {
         assert!(
             robots.contains(&format!("Disallow: {route}")),

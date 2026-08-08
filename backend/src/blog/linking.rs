@@ -31,6 +31,21 @@ pub fn render_related_section(related: &[BlogPost]) -> String {
 }
 
 pub fn render_hub_link(post: &BlogPost) -> String {
+    if let Some(path) = &post.frontmatter.hub_path {
+        let label = post
+            .frontmatter
+            .hub_label
+            .as_deref()
+            .unwrap_or("Back to guide overview");
+        return format!(
+            r#"<nav class="hub-breadcrumb">
+  <a href="{}">{}</a>
+</nav>"#,
+            html_escape(path),
+            html_escape(label)
+        );
+    }
+
     match &post.frontmatter.hub_slug {
         Some(hub) => format!(
             r#"<nav class="hub-breadcrumb">

@@ -148,12 +148,24 @@ How to use Signal encrypted messaging on any dumbphone or flip phone. Lightfrien
 URL: https://lightfriend.ai/signal-on-dumbphone
 
 ### Light Phone 3 WhatsApp Guide
-How to add WhatsApp functionality to a Light Phone 3 using Lightfriend. Send and receive WhatsApp messages via SMS without installing any apps on the phone.
+Light Phone III does not currently list a native WhatsApp tool. This guide compares calls and SMS, WhatsApp Web/Desktop, and Lightfriend's selected text access over SMS. Lightfriend does not install WhatsApp on LightOS or reproduce every provider feature; native-app setup and linked-device maintenance still require a separate supported device.
 URL: https://lightfriend.ai/light-phone-3-whatsapp-guide
 
 ### How to Switch to a Dumbphone
-Complete guide covering 2FA authentication, messaging app alternatives, navigation solutions, and computer setup for the dumbphone lifestyle.
+Practical switching checklist covering WhatsApp, 2FA and passkeys, banking approval, maps, transport, payments, account recovery, and a reversible trial period.
 URL: https://lightfriend.ai/how-to-switch-to-dumbphone
+
+### Best Dumbphone Setup for WhatsApp in 2026
+Comparison of four realistic options: an Android-based minimalist phone, a home smartphone plus WhatsApp Web/Desktop, selected text access through Lightfriend over SMS, or leaving WhatsApp for calls and SMS.
+URL: https://lightfriend.ai/blog/best-dumbphone-whatsapp-setup-2026
+
+### Digital Detox Without Missing Urgent WhatsApp Messages
+How to give critical contacts a direct call or SMS fallback, move routine WhatsApp use into scheduled sessions, and optionally use focused alerts and digests on a dumbphone.
+URL: https://lightfriend.ai/blog/digital-detox-with-whatsapp
+
+### Keep Your Smartphone at Home and Carry a Dumbphone
+A reversible two-device transition plan. Keep the old smartphone secured on Wi-Fi while testing calls, SMS, authentication, banking, messaging, maps, payments, and recovery on the new setup.
+URL: https://lightfriend.ai/blog/smartphone-at-home-dumbphone
 
 ### How to Read More Accidentally
 How removing smartphone distractions naturally leads to reading more books. Tips for blocking digital escapism on computers while keeping productivity tools.

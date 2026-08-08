@@ -223,6 +223,20 @@ pub fn render_blog_post(post: &BlogPost, related: &[BlogPost]) -> String {
         ),
         None => String::new(),
     };
+    let updated_date = post
+        .frontmatter
+        .updated
+        .as_deref()
+        .unwrap_or(&post.frontmatter.date);
+    let updated_meta = if updated_date != post.frontmatter.date {
+        format!(
+            r#" · Updated <time datetime="{}" itemprop="dateModified">{}</time>"#,
+            updated_date,
+            format_date(updated_date)
+        )
+    } else {
+        String::new()
+    };
 
     format!(
         r#"<!DOCTYPE html>
@@ -267,7 +281,7 @@ pub fn render_blog_post(post: &BlogPost, related: &[BlogPost]) -> String {
             <header class="blog-hero">
                 <h1 itemprop="headline">{title}</h1>
                 <p class="blog-meta">
-                    <time datetime="{date}" itemprop="datePublished">{formatted_date}</time>
+                    Published <time datetime="{date}" itemprop="datePublished">{formatted_date}</time>{updated_meta}
                 </p>
             </header>
             <div itemprop="articleBody">
@@ -278,8 +292,8 @@ pub fn render_blog_post(post: &BlogPost, related: &[BlogPost]) -> String {
         {related_html}
         <div class="blog-cta">
             <h3>Works with any phone that can text</h3>
-            <a href="/#plans" class="hero-cta">Get Started</a>
-            <p>No smartphone needed. No app to install.</p>
+            <a href="/#plans" class="hero-cta" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="{slug}" data-fast-goal-content-cluster="{cluster}">See Plans</a>
+            <p>Use Lightfriend from the phone you already have. Some connected services require a separate device for initial setup or periodic maintenance.</p>
         </div>
     </div>
     <footer class="blog-footer">
@@ -300,6 +314,7 @@ pub fn render_blog_post(post: &BlogPost, related: &[BlogPost]) -> String {
         slug = post.frontmatter.slug,
         date = post.frontmatter.date,
         formatted_date = format_date(&post.frontmatter.date),
+        updated_meta = updated_meta,
         rendered_html = post.rendered_html,
         schema_json_ld = schema_json_ld,
         keywords_meta = keywords_meta,
@@ -309,6 +324,7 @@ pub fn render_blog_post(post: &BlogPost, related: &[BlogPost]) -> String {
         related_html = related_html,
         css = INLINE_CSS,
         analytics = ANALYTICS,
+        cluster = html_escape(&post.frontmatter.cluster),
     )
 }
 
@@ -454,8 +470,8 @@ pub fn render_blog_index(
         </section>
         <div class="blog-cta">
             <h3>Works with any phone that can text</h3>
-            <a href="/#plans" class="hero-cta">Get Started</a>
-            <p>No smartphone needed. No app to install.</p>
+            <a href="/#plans" class="hero-cta" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="blog-index" data-fast-goal-content-cluster="index">See Plans</a>
+            <p>Use Lightfriend from the phone you already have. Some connected services require a separate device for setup or periodic maintenance.</p>
         </div>
     </div>
     <footer class="blog-footer">

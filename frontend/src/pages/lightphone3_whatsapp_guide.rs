@@ -6,8 +6,8 @@ use yew_router::components::Link;
 #[function_component(LightPhone3WhatsappGuide)]
 pub fn light_phone_3_whatsapp_guide() -> Html {
     use_seo(SeoMeta {
-        title: "Light Phone 3 WhatsApp Guide \u{2013} How to Get WhatsApp on Light Phone",
-        description: "How to add WhatsApp to your Light Phone 3 without apps. AI monitors your WhatsApp and alerts you when something matters. Lightfriend is open source with cryptographically verifiable deployment measurements.",
+        title: "Can You Use WhatsApp on Light Phone III? Options Compared",
+        description: "Light Phone III does not currently include a native WhatsApp tool. Compare the practical alternatives, including desktop access and Lightfriend's text-first SMS bridge.",
         canonical: "https://lightfriend.ai/light-phone-3-whatsapp-guide",
         og_type: "article",
     });
@@ -28,98 +28,115 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
         <div class="blog-page">
             <div class="blog-background"></div>
             <section class="blog-hero">
-                <h1>{"Light Phone 3 WhatsApp Guide: Enhance Your Minimalist Phone with Lightfriend"}</h1>
-                <p>{"Discover how to add WhatsApp functionality to your Light Phone 3 without compromising its minimalist design. Stay connected via SMS and voice while maintaining digital detox benefits."}</p>
+                <h1>{"Can You Use WhatsApp on Light Phone III?"}</h1>
+                <p>{"There is no native WhatsApp tool on Light Phone III today. Here are the practical ways to stay reachable without pretending they reproduce the full app."}</p>
             </section>
             <section class="blog-content">
-                <h2>{"Introduction: Why Add WhatsApp to Light Phone 3?"}</h2>
-                <p>{"The Light Phone 3 is a premium minimalist phone designed for digital detox, but many users miss essential messaging apps like WhatsApp. With Lightfriend's AI assistant, you can access WhatsApp on your Light Phone 3 via simple SMS or voice calls - no apps required."}</p>
+                <p><strong>{"Short answer: Light Phone III does not currently run a native WhatsApp tool."}</strong>{" Lightfriend is a separate service that can give the phone selected, text-first access to a connected WhatsApp account through ordinary SMS and voice calls. It does not install WhatsApp on LightOS or reproduce every WhatsApp feature."}</p>
                 <img src="/assets/light-phone-3-whatsapp-integration.webp" alt="Light Phone 3 with WhatsApp via Lightfriend AI" loading="lazy" class="blog-image" />
 
-                <h2>{"How Lightfriend Works with Light Phone 3"}</h2>
-                <p>{"Lightfriend acts as your smart companion, bridging the gap between your minimalist phone and digital services:"}</p>
-                <ul>
-                    <li>{"Send and receive WhatsApp messages via SMS/voice through a single phone number"}</li>
-                    <li>{"Get notifications for critical messages and important chats"}</li>
-                    <li>{"Monitor contacts and respond hands-free"}</li>
-                    <li>{"Setup temporary notifications for certain one time events you are waiting for"}</li>
-                    <li>{"Setup scheduled daily digests that tell you about messages you might have missed"}</li>
-                </ul>
+                <h2>{"What Light Phone officially supports"}</h2>
+                <p>{"Light's current "}<a href="https://support.thelightphone.com/hc/en-us/articles/360031128671-Tool-Availability-Status" target="_blank" rel="noopener noreferrer">{"tool availability page"}</a>{" lists tools such as Directions, Calendar, Notes, Weather, and Authenticator for Light Phone III, but not WhatsApp. Light says third-party messaging tools would require deeper collaboration with those platforms and does not provide a timeline."}</p>
 
-                <h2>{"Benefits for Light Phone 3 Users"}</h2>
-                <p>{"Enhance your digital minimalism without sacrifices:"}</p>
-                <ul>
-                    <li>{"Maintain Light Phone's distraction-free experience"}</li>
-                    <li>{"Access WhatsApp without needing a phone with app store"}</li>
-                    <li>{"AI-powered monitoring for urgent messages only"}</li>
-                    <li>{"Seamless integration with Light Phone's voice and text capabilities"}</li>
-                </ul>
-
-                <h2>{"Step-by-Step Setup Guide"}</h2>
-                <ol>
-                    <li>{"Sign up for Lightfriend and connect your WhatsApp account via the web dashboard"}</li>
-                    <li>{"Set up notification preferences and custom rules"}</li>
-                    <li>{"Add Lightfriend's number to your Light Phone 3 contacts"}</li>
-                    <li>{"Test by sending 'Check WhatsApp' via SMS or voice call"}</li>
-                    <li>{"Customize AI monitoring for your needs"}</li>
-                </ol>
-
-                <h2>{"Comparison: Light Phone 3 With vs Without Lightfriend"}</h2>
+                <h2>{"Your three practical options"}</h2>
                 <table class="comparison-table">
                     <thead>
                         <tr>
-                            <th>{"Feature"}</th>
-                            <th>{"Light Phone 3 Alone"}</th>
-                            <th>{"With Lightfriend"}</th>
+                            <th>{"Option"}</th>
+                            <th>{"Works while carrying only Light Phone III"}</th>
+                            <th>{"Main tradeoff"}</th>
                         </tr>
                     </thead>
                     <tbody>
                         <tr>
-                            <td>{"WhatsApp Access"}</td>
+                            <td>{"Calls and SMS only"}</td>
+                            <td>{"Yes"}</td>
+                            <td>{"Your contacts must change how they reach you"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"WhatsApp Web/Desktop"}</td>
                             <td>{"No"}</td>
-                            <td>{"Full send/receive via SMS/Voice"}</td>
+                            <td>{"The complete interface is available only at a computer"}</td>
                         </tr>
                         <tr>
-                            <td>{"Message Notifications"}</td>
-                            <td>{"None"}</td>
-                            <td>{"AI-filtered important alerts"}</td>
-                        </tr>
-                        <tr>
-                            <td>{"Chat Monitoring"}</td>
-                            <td>{"No"}</td>
-                            <td>{"Yes, with summaries"}</td>
-                        </tr>
-                        <tr>
-                            <td>{"Battery Impact"}</td>
-                            <td>{"Minimal"}</td>
-                            <td>{"No additional drain"}</td>
-                        </tr>
-                        <tr>
-                            <td>{"Minimalist Integrity"}</td>
-                            <td>{"High"}</td>
-                            <td>{"Maintained - no apps added"}</td>
+                            <td>{"Lightfriend over SMS"}</td>
+                            <td>{"Yes, for selected text access"}</td>
+                            <td>{"Not a full clone of the WhatsApp app"}</td>
                         </tr>
                     </tbody>
                 </table>
 
-                <h2>{"Common Questions"}</h2>
-                <p>{"Q: Does this work with Light Phone 3's international versions? A: Yes, as long as SMS/voice is available."}</p>
-                <p>{"Q: How is my WhatsApp data handled? A: Lightfriend's production application runs in a hardware-isolated enclave. Stored application data is encrypted, the codebase is fully open source, and the running enclave reports a cryptographically signed code measurement that can be checked against the published build."}</p>
-
-                <h2>{"Also Works With"}</h2>
-                <p>{"Lightfriend bridges all major messaging platforms to SMS:"}</p>
+                <h2>{"How Lightfriend works with Light Phone III"}</h2>
+                <p>{"Lightfriend connects a supported WhatsApp account to a smaller conversational interface. From Light Phone III you can text or call Lightfriend to ask about recent messages, search for a sender or topic, reply through the connected account, and configure focused alerts or digests."}</p>
                 <ul>
+                    <li>{"Ask what a person or group recently said"}</li>
+                    <li>{"Send a text reply through the connected account"}</li>
+                    <li>{"Receive focused alerts from important contacts"}</li>
+                    <li>{"Create a temporary alert for an event you are waiting for"}</li>
+                    <li>{"Receive scheduled summaries instead of a live notification feed"}</li>
+                </ul>
+
+                <h2>{"Setup: what you still need"}</h2>
+                <ol>
+                    <li>{"Keep a supported device with the native WhatsApp app available for account setup and recovery"}</li>
+                    <li>{"Sign up for Lightfriend and pair the WhatsApp account from the web dashboard"}</li>
+                    <li>{"Add Lightfriend's number to your Light Phone 3 contacts"}</li>
+                    <li>{"Test one direct message, one group conversation, and one reply"}</li>
+                    <li>{"Configure which contacts may interrupt you and when routine messages should be summarized"}</li>
+                </ol>
+                <p>{"You do not need to carry the setup device every day. Keep it secured, updated, and available because linked-device sessions can require periodic native-app activity or re-pairing. Lightfriend can send a reminder before the expected inactivity window, but it cannot override WhatsApp's policies."}</p>
+
+                <h2>{"What works and what does not"}</h2>
+                <table class="comparison-table">
+                    <thead>
+                        <tr>
+                            <th>{"Feature"}</th>
+                            <th>{"Lightfriend on Light Phone III"}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>{"Retrieve and reply to text messages"}</td>
+                            <td>{"Yes"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"Focused alerts and summaries"}</td>
+                            <td>{"Yes"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"Group-chat context"}</td>
+                            <td>{"Text-first access; not the full group interface"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"WhatsApp voice or video calls"}</td>
+                            <td>{"No"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"Status, stickers, reactions, and live location"}</td>
+                            <td>{"No native app experience"}</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h2>{"Privacy and reliability tradeoffs"}</h2>
+                <p>{"Lightfriend's production application runs in a hardware-isolated enclave. Stored application data is encrypted, the codebase is open source, and the running enclave exposes a signed code measurement that can be checked against the published build."}</p>
+                <p>{"The final SMS leg still passes through your cellular carrier and is not end-to-end encrypted. Delivery also depends on WhatsApp, the bridge connection, Lightfriend, and your carrier. Use a direct call or SMS fallback for emergencies."}</p>
+
+                <h2>{"Continue planning your setup"}</h2>
+                <ul>
+                    <li><a href="/blog/best-dumbphone-whatsapp-setup-2026">{"Compare four dumbphone WhatsApp setups"}</a></li>
+                    <li><a href="/how-to-switch-to-dumbphone">{"Use the complete dumbphone switching checklist"}</a></li>
+                    <li><a href="/blog/digital-detox-with-whatsapp">{"Plan a digital detox with urgent-message fallbacks"}</a></li>
                     <li><Link<Route> to={Route::TelegramOnDumbphone}>{"Telegram on dumbphone"}</Link<Route>></li>
                     <li><Link<Route> to={Route::SignalOnDumbphone}>{"Signal on dumbphone"}</Link<Route>></li>
-                    <li>{"Email (any provider)"}</li>
                 </ul>
 
                 <div class="blog-cta">
-                    <h3>{"Ready to Add WhatsApp to Your Light Phone 3?"}</h3>
-                    <a href="/#plans" class="forward-link">
-                        <button class="hero-cta">{"Get Started with Lightfriend"}</button>
+                    <h3>{"Need selected WhatsApp access away from your computer?"}</h3>
+                    <a href="/#plans" class="forward-link" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="light-phone-3-whatsapp-guide" data-fast-goal-content-cluster="messaging">
+                        <button class="hero-cta">{"See Lightfriend Plans"}</button>
                     </a>
-                    <p>{"Join 100+ users enhancing their minimalist phones today!"}</p>
+                    <p>{"Text-first access for phones that can call and send SMS. Initial connected-service setup still uses the provider's supported device."}</p>
                 </div>
             </section>
             <style>

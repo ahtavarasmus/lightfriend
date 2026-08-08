@@ -13,5 +13,8 @@ Disallow: /subscription-success
 Sitemap: https://lightfriend.ai/sitemap.xml
 
 # AI Search Engines
+User-agent: OAI-SearchBot
+Allow: /
+
 # See https://lightfriend.ai/llms.txt for AI-readable content
 # See https://lightfriend.ai/llms-full.txt for comprehensive AI-readable content

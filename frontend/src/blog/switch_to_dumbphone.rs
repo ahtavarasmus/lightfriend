@@ -4,8 +4,8 @@ use yew::prelude::*;
 #[function_component(SwitchToDumbphoneGuide)]
 pub fn switch_to_dumbphone_guide() -> Html {
     use_seo(SeoMeta {
-        title: "How to Switch to a Dumbphone \u{2013} Complete Guide",
-        description: "Everything you need to know about switching to a dumbphone. Handle 2FA, messaging apps, navigation, and stay productive with a minimalist phone.",
+        title: "How to Switch to a Dumbphone Without Losing Essential Apps",
+        description: "A practical dumbphone switching checklist for WhatsApp, 2FA, banking, maps, payments, transport, and account recovery.",
         canonical: "https://lightfriend.ai/how-to-switch-to-dumbphone",
         og_type: "article",
     });
@@ -25,52 +25,74 @@ pub fn switch_to_dumbphone_guide() -> Html {
         <div class="blog-page">
             <div class="blog-background"></div>
             <section class="blog-hero">
-                <h1>{"How to Switch to a Dumbphone"}</h1>
-                <p>{"Learn how to transition to a dumbphone for a distraction-free life."}</p>
+                <h1>{"How to Switch to a Dumbphone Without Losing What Matters"}</h1>
+                <p>{"A practical plan for WhatsApp, 2FA, banking, maps, payments, transport, and account recovery."}</p>
                 <img src="/assets/lightphone2.png" alt="Light Phone 2" loading="lazy" class="blog-image" />
             </section>
             <section class="blog-content">
-                <h2>{"Introduction: Your Computer is Your Best Friend"}</h2>
-                <p>{"The point is not to go full jail mode. You still need two factor authentication and probably check that group chat also. We want to block the endless algorithms, not work or friends:)."}</p>
-                <p>{"Apps you may want on your computer: "}</p>
+                <p><strong>{"The safest switch is gradual: keep the old smartphone secured at home, move everyday calls and texts to the dumbphone, and replace one essential dependency at a time."}</strong>{" Do not erase, sell, or trade in the smartphone until the new setup has worked for several weeks."}</p>
+
+                <h2>{"1. Inventory what your smartphone actually does"}</h2>
+                <p>{"Review the last seven days and sort each important use into three groups: must work while you are away, can wait until you are home, or needs a tested replacement. Calls and SMS usually belong on the dumbphone. Routine WhatsApp and email can often wait. Banking approval, authentication, tickets, and navigation need a deliberate plan."}</p>
+                <table class="comparison-table">
+                    <thead><tr><th>{"Need"}</th><th>{"Possible dumbphone plan"}</th><th>{"Verify before switching"}</th></tr></thead>
+                    <tbody>
+                        <tr><td>{"WhatsApp and group chats"}</td><td>{"Computer checks, a home smartphone, or selected access through Lightfriend"}</td><td>{"Pairing, recovery, urgent-contact fallback"}</td></tr>
+                        <tr><td>{"2FA and passkeys"}</td><td>{"Recovery codes, security key, computer passkey, or a supported authenticator"}</td><td>{"Every critical account individually"}</td></tr>
+                        <tr><td>{"Banking and payments"}</td><td>{"Computer banking, physical token, SMS approval, and payment cards"}</td><td>{"Your bank's exact policy"}</td></tr>
+                        <tr><td>{"Maps and transport"}</td><td>{"Built-in directions, printed routes, travel card, or taxi number"}</td><td>{"One ordinary trip and one unfamiliar route"}</td></tr>
+                    </tbody>
+                </table>
+
+                <h2>{"2. Choose the smallest phone that fits"}</h2>
+                <p>{"Decide whether you want a true feature phone, a purpose-built minimalist phone, or an Android-based phone with fewer distractions. A phone that runs the official WhatsApp app is still an app-capable phone; that may be the right compromise, but it is not the same intervention as removing the app platform from your pocket."}</p>
+                <p>{"Check carrier compatibility, calling, SMS, hotspot support, maps, accessibility, and battery behavior for the exact model and region. Light Phone III owners should review Light's current "}<a href="https://support.thelightphone.com/hc/en-us/articles/360031128671-Tool-Availability-Status" target="_blank" rel="noopener noreferrer">{"official tool list"}</a>{" rather than relying on an old review."}</p>
+
+                <h2>{"3. Keep your computer useful, not addictive"}</h2>
+                <p>{"A computer is a good home for tasks that deserve a deliberate session: long email, account administration, rich group chats, travel planning, and document work. Remove automatic launches and notifications, then choose specific times to check communication."}</p>
+                <p>{"Optional tools include:"}</p>
                 <ul>
                     <li>
-                        <a href="https://beeper.com" target="_blank">{"Beeper.com"}</a>{" so you can keep chatting like you used to, but now across platforms in one app!"}
+                        <a href="https://beeper.com" target="_blank" rel="noopener noreferrer">{"Beeper"}</a>{" or the providers' official desktop apps for scheduled messaging sessions"}
                     </li>
                     <li>
-                        <a href="https://steptwo.app" target="_blank">{"Step Two App (MacOS)"}</a>{" for handling two factor authentication codes on a Macbook"}
-                    </li>
-                    <li>
-                        <a href="https://freetubeapp.io" target="_blank">{"FreeTube"}</a>{" is a YouTube video player with only subscription feed"}
-                    </li>
-                    <li>
-                        <a href="https://getcoldturkey.com" target="_blank">{"Cold Turkey App Blocker"}</a>{" can be set to block any website or app on your computer completely, for a specific time or however you like. The blocks can be locked with a password which you can give to a trusted person. You cannot unblock or uninstall anything without that password. You can set temporary allowances if you really need to check some blocked app for certain duration. If you bring lightfriend AI along your dumbphone journey, you get 20% discount on the Pro version."}
+                        <a href="https://getcoldturkey.com" target="_blank" rel="noopener noreferrer">{"Cold Turkey"}</a>{" or another website blocker to protect focused work periods"}
                     </li>
                 </ul>
-                <h2>{"Dumbphones and Where to Buy"}</h2>
-                <p>{"Dumbphones are basic feature phones without app stores, social media, or endless notifications. Popular options include "}<a href="https://thelightphone.com" target="_blank">{"The Light Phone, "}</a><a href="https://mudita.com/products/phones/mudita-kompakt" target="_blank">{"Mudita Kompakt, "}</a><a href="https://www.punkt.ch/en/products/mp02-4g-mobile-phone" target="_blank">{"Punkt MP02"}</a>{" or if you want you can go full retro and buy old Nokia from "}<a href="https://vintagemobile.fr/en/collections/nokia" target="_blank">{"vintagemobile.fr"}</a>{". "}<a href="https://dumbphones.org" target="_blank">{"Dumbphones.org"}</a>{" is a great resource for browsing different dumbphones. Don't sweat it too much, as long as it doesn't have an app store it should be fine. My personal recommendation would be to get one that has a hotspot so you can share wifi to your computer. At least The Light Phone and Mudita Kompakt have a hotspot, but if your phone doesn't, you may want to buy a portable wifi module to bring with or just rely on public wifis depending on the country you live in."}</p>
-                <h2>{"Lightfriend AI"}</h2>
-                <p>{"Lightfriend.ai is your assistant that you can call or text from your dumbphone to get access to your digital life. It monitors emails and messages, forwarding only what's urgent to your dumbphone."}</p>
-                <h2>{"YubiKey and Where to Buy"}</h2>
-                <p>{"YubiKey is a hardware security key for two-factor authentication (2FA) for services that require authentication apps like Microsoft Authenticator normally. It's essential for being able to login to certain services where software 2FA codes aren't allowed. Purchase from the official Yubico website (yubico.com) or authorized resellers like Amazon."}</p>
-                <h2>{"Bank authentication"}</h2>
-                <p>{"Many banks require authentication apps for logging in, but they usually offer physical code calculators or security token devices as alternatives. These small devices generate one-time codes for logging into your bank account. Contact your bank to request a physical authentication device - they typically provide these free of charge or for a small fee. Some banks may call these devices 'key fobs', 'code calculators', or 'security tokens'."}</p>
-                <h2>{"Transportation"}</h2>
-                <p>{"Transportation solutions vary by country, but there are several options available. Many cities offer physical keycards for public transit. Alternative platforms like tremp.me offer ride-sharing possibilities. For navigation, modern dumbphones like The Light Phone and Mudita Kompakt include built-in maps."}</p>
-                <h2>{"Step-by-Step Guide to Switching"}</h2>
+
+                <h2>{"4. Build account-recovery and 2FA fallbacks"}</h2>
+                <p>{"For every important account, identify whether it uses an authenticator code, push approval, SMS, passkey, or hardware security key. Store recovery codes securely and add a second supported sign-in method before changing devices. A hardware key is useful where supported, but it does not replace every authenticator or banking app."}</p>
+
+                <h2>{"5. Make a banking and payments plan"}</h2>
+                <p>{"Banks vary by institution and country. Sign in from the computer you plan to use, verify the lost-device recovery process, and ask the bank about web approval, SMS, or physical tokens. Carry a payment card and keep the bank's official support number. Never wipe the only device capable of approving a new login."}</p>
+
+                <h2>{"6. Decide how WhatsApp will work"}</h2>
+                <p>{"You can check WhatsApp at home, use the official app on an Android-based minimalist phone, leave the account entirely, or use a text-first bridge for selected access. The "}<a href="/blog/best-dumbphone-whatsapp-setup-2026">{"dumbphone WhatsApp comparison"}</a>{" explains the differences. Light Phone III does not currently list a native WhatsApp tool."}</p>
+                <p>{"Lightfriend can let you ask about connected messages, reply, receive focused alerts, and request summaries through SMS and voice. It does not reproduce every provider feature. Initial pairing and later linked-device maintenance can still require the native app on a separate supported device."}</p>
+
+                <h2>{"7. Test the transition before making it permanent"}</h2>
                 <ol>
-                    <li>{"Choose and buy your dumbphone"}</li>
-                    <li>{"Set up 2FA to your computer and YubiKey on yubico.com"}</li>
-                    <li>{"Sign up for Beeper and connect messaging services"}</li>
-                    <li>{"Sign up for Lightfriend and connect your digital life"}</li>
-                    <li>{"Install Cold Turkey on your computer and configure blocks"}</li>
-                    <li>{"Transfer contacts and start living!"}</li>
+                    <li>{"Leave the smartphone at home for one ordinary weekend"}</li>
+                    <li>{"Test calls, SMS, voicemail, and your emergency-contact instructions"}</li>
+                    <li>{"Take one normal journey and make one real payment"}</li>
+                    <li>{"Sign in to one protected account using the planned 2FA fallback"}</li>
+                    <li>{"Record every unplanned return to the smartphone"}</li>
+                    <li>{"Fix the real gaps, then repeat for a full week"}</li>
                 </ol>
+
+                <h2>{"Detailed setup guides"}</h2>
+                <ul>
+                    <li><a href="/blog/smartphone-at-home-dumbphone">{"Keep your smartphone at home and carry a dumbphone"}</a></li>
+                    <li><a href="/light-phone-3-whatsapp-guide">{"Compare WhatsApp options for Light Phone III"}</a></li>
+                    <li><a href="/blog/digital-detox-with-whatsapp">{"Keep urgent WhatsApp messages during a digital detox"}</a></li>
+                    <li><a href="/blog/ai-email-on-dumbphone">{"Manage selected email from a dumbphone"}</a></li>
+                </ul>
                 <div class="blog-cta">
                     <h3>{"Ready to Switch to a Dumbphone?"}</h3>
-                    <a href="/#plans" class="forward-link">
-                        <button class="hero-cta">{"Get Started with Lightfriend"}</button>
+                    <a href="/#plans" class="forward-link" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="how-to-switch-to-dumbphone" data-fast-goal-content-cluster="minimalism">
+                        <button class="hero-cta">{"See Lightfriend Plans"}</button>
                     </a>
+                    <p>{"Use calls and SMS as the small interface to selected messages, email, reminders, and AI assistance."}</p>
                 </div>
             </section>
             <style>

@@ -10,6 +10,9 @@ Disallow: /set-password
 Disallow: /subscription-success
 
 # AI Search Engines - explicitly allowed
+User-agent: OAI-SearchBot
+Allow: /
+
 User-agent: GPTBot
 Allow: /
 

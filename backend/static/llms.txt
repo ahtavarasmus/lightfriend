@@ -60,8 +60,11 @@ For the full explanation: [How Lightfriend Limits Prompt-Injection Impact](https
 - [How Lightfriend Limits Prompt-Injection Impact](https://lightfriend.ai/prompt-injection-safe): Read-only-by-default architecture with application-code approval gates
 - [Telegram on Dumbphone](https://lightfriend.ai/telegram-on-dumbphone): How to use Telegram on any dumbphone or flip phone via SMS
 - [Signal on Dumbphone](https://lightfriend.ai/signal-on-dumbphone): How to use Signal encrypted messaging on any basic phone via SMS
-- [Light Phone 3 WhatsApp Guide](https://lightfriend.ai/light-phone-3-whatsapp-guide): Add WhatsApp to Light Phone 3 via Lightfriend
-- [How to Switch to a Dumbphone](https://lightfriend.ai/how-to-switch-to-dumbphone): Complete guide for the dumbphone lifestyle
+- [Light Phone 3 WhatsApp Guide](https://lightfriend.ai/light-phone-3-whatsapp-guide): Current WhatsApp options for Light Phone III, including the limitations of text-first SMS access
+- [How to Switch to a Dumbphone](https://lightfriend.ai/how-to-switch-to-dumbphone): Practical checklist for WhatsApp, 2FA, banking, maps, transport, and recovery
+- [Best Dumbphone WhatsApp Setup in 2026](https://lightfriend.ai/blog/best-dumbphone-whatsapp-setup-2026): Compare native apps, linked devices, SMS bridges, and leaving WhatsApp
+- [Digital Detox With WhatsApp](https://lightfriend.ai/blog/digital-detox-with-whatsapp): Keep an urgent-contact path while routine chats wait for a scheduled check or digest
+- [Keep a Smartphone at Home](https://lightfriend.ai/blog/smartphone-at-home-dumbphone): A low-risk two-device transition plan
 - [How to Read More Accidentally](https://lightfriend.ai/how-to-read-more-accidentally): How removing smartphone distractions leads to reading more
 
 ## Optional

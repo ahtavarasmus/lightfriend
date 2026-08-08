@@ -3,6 +3,7 @@ title: "Keeping a WhatsApp Linked Device Connected"
 slug: "keep-whatsapp-linked-device-connected"
 description: "Why WhatsApp users still need to open the native phone app periodically, and how Lightfriend reminds them before inactivity becomes a problem."
 date: "2026-08-02"
+updated: "2026-08-08"
 cluster: "messaging"
 keywords:
   - "WhatsApp linked device disconnect"
@@ -12,11 +13,13 @@ tags:
   - "connections"
 schema_type: "Article"
 related_slugs:
+  - "whatsapp-without-smartphone"
+  - "best-dumbphone-whatsapp-setup-2026"
   - "messages-without-a-smartphone"
   - "when-a-connected-service-is-unavailable"
 ---
 
-WhatsApp linked devices do not remove the native phone app from the relationship. If the owner does not use WhatsApp on the primary phone for roughly two weeks, WhatsApp may disconnect linked devices.
+WhatsApp linked devices do not remove the native phone app from the relationship. Extended inactivity on the primary phone can cause WhatsApp to disconnect linked devices; the exact behavior remains controlled by WhatsApp and can change.
 
 That can feel silent when Lightfriend is the device you use day to day. The connection may work normally until the inactivity window closes.
 

@@ -17,6 +17,11 @@ fn escape_json(s: &str) -> String {
 }
 
 fn generate_article_schema(post: &BlogPost) -> String {
+    let date_modified = post
+        .frontmatter
+        .updated
+        .as_deref()
+        .unwrap_or(&post.frontmatter.date);
     let mut schema = format!(
         r#"<script type="application/ld+json">
 {{
@@ -25,6 +30,7 @@ fn generate_article_schema(post: &BlogPost) -> String {
   "headline": "{}",
   "description": "{}",
   "datePublished": "{}",
+  "dateModified": "{}",
   "author": {{
     "@type": "Organization",
     "name": "Lightfriend",
@@ -40,6 +46,7 @@ fn generate_article_schema(post: &BlogPost) -> String {
         escape_json(&post.frontmatter.title),
         escape_json(&post.frontmatter.description),
         post.frontmatter.date,
+        date_modified,
         post.frontmatter.slug
     );
 
@@ -99,6 +106,11 @@ fn generate_howto_schema(post: &BlogPost) -> String {
         .as_deref()
         .unwrap_or("PT10M");
 
+    let date_modified = post
+        .frontmatter
+        .updated
+        .as_deref()
+        .unwrap_or(&post.frontmatter.date);
     let mut schema = format!(
         r#"<script type="application/ld+json">
 {{
@@ -106,11 +118,15 @@ fn generate_howto_schema(post: &BlogPost) -> String {
   "@type": "HowTo",
   "name": "{}",
   "description": "{}",
+  "datePublished": "{}",
+  "dateModified": "{}",
   "totalTime": "{}"
 }}
 </script>"#,
         escape_json(&post.frontmatter.title),
         escape_json(&post.frontmatter.description),
+        post.frontmatter.date,
+        date_modified,
         time
     );
 
