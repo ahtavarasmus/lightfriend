@@ -104,7 +104,16 @@ test-backend ARGS="":
 
 # Development: Run one integration test crate, e.g. `just test-backend-file sms_sanitizer_test`
 test-backend-file FILE:
-    cd backend && cargo test --test {{FILE}}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd backend
+    suite_file=$(rg -l "^mod {{FILE}};$" tests/*_tests.rs | head -1 || true)
+    if [ -n "$suite_file" ]; then
+      suite=$(basename "$suite_file" .rs)
+      cargo test --test "$suite" "{{FILE}}::"
+    else
+      cargo test --test "{{FILE}}"
+    fi
 
 # Development: Run tests for frontend
 test-frontend:
