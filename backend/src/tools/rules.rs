@@ -1,8 +1,28 @@
 use openai_api_rs::v1::{chat_completion, types};
 use std::collections::HashMap;
 
+use crate::api::twilio_sms::TwilioResponse;
 use crate::models::ontology_models::NewOntEvent;
-use crate::tools::registry::{ToolContext, ToolHandler, ToolResult};
+use crate::tools::registry::{write_outgoing_history, ToolContext, ToolHandler, ToolResult};
+use axum::http::StatusCode;
+
+fn direct_reminder_response(ctx: &ToolContext<'_>, message: String) -> ToolResult {
+    write_outgoing_history(
+        ctx.state,
+        ctx.user_id,
+        "set_reminder",
+        &ctx.tool_call_id,
+        &message,
+        ctx.current_time,
+    );
+    ToolResult::EarlyReturn {
+        response: TwilioResponse {
+            message,
+            created_item_id: None,
+        },
+        status: StatusCode::OK,
+    }
+}
 
 // ---------------------------------------------------------------------------
 // SetReminderHandler - simple facade for reminders/notifications
@@ -36,7 +56,7 @@ impl ToolHandler for SetReminderHandler {
             Box::new(types::JSONSchemaDefine {
                 schema_type: Some(types::JSONSchemaType::String),
                 description: Some(
-                    "When to fire. ISO datetime (e.g. '2026-03-19T14:30').".to_string(),
+                    "Exact local wall-clock time in the user's stored timezone, as ISO datetime without an offset (e.g. '2026-03-19T14:30'). Ask for clarification instead of guessing a date or time.".to_string(),
                 ),
                 ..Default::default()
             }),
@@ -90,14 +110,16 @@ impl ToolHandler for SetReminderHandler {
             .unwrap_or_default()
             .as_secs() as i32;
 
-        let tz_offset = crate::proactive::utils::user_tz_offset_secs(ctx.state, ctx.user_id);
-        let remind_at = crate::proactive::utils::parse_iso_to_timestamp(&when, tz_offset)
-            .ok_or_else(|| {
-                format!(
-                    "Invalid reminder timestamp '{}'. Use an ISO datetime like '2026-03-19T14:30'.",
-                    when
-                )
-            })?;
+        let timezone = match crate::proactive::utils::reminder_timezone(ctx.state, ctx.user_id, now)
+        {
+            Ok(timezone) => timezone,
+            Err(question) => return Ok(direct_reminder_response(&ctx, question)),
+        };
+        let remind_at =
+            match crate::proactive::utils::parse_reminder_time_in_zone(&when, &timezone, now) {
+                Ok(remind_at) => remind_at,
+                Err(question) => return Ok(direct_reminder_response(&ctx, question)),
+            };
 
         let new_event = NewOntEvent {
             user_id: ctx.user_id,
@@ -109,13 +131,33 @@ impl ToolHandler for SetReminderHandler {
             updated_at: now,
         };
 
-        match ctx.state.ontology_repository.create_event(&new_event) {
-            Ok(event) => Ok(ToolResult::Answer(format!(
-                "Reminder '{}' set (event id={}). Will fire at the scheduled time.",
-                name, event.id,
-            ))),
-            Err(e) => Err(format!("Failed to create reminder: {}", e)),
-        }
+        let created = ctx
+            .state
+            .ontology_repository
+            .create_reminder(&new_event, &timezone)
+            .map_err(|e| format!("Failed to create reminder: {}", e))?;
+        // Re-read the row used as source of truth for the direct confirmation.
+        let persisted = ctx
+            .state
+            .ontology_repository
+            .get_event(ctx.user_id, created.id)
+            .map_err(|e| format!("Failed to verify persisted reminder: {}", e))?;
+        let persisted_at = persisted
+            .remind_at
+            .ok_or_else(|| "Persisted reminder has no time".to_string())?;
+        let persisted_zone = persisted
+            .reminder_timezone
+            .as_deref()
+            .ok_or_else(|| "Persisted reminder has no timezone".to_string())?;
+        let rendered =
+            crate::proactive::utils::format_persisted_local_time(persisted_at, persisted_zone)?;
+        Ok(direct_reminder_response(
+            &ctx,
+            format!(
+                "Reminder '{}' persisted for {} (event id={}).",
+                name, rendered, persisted.id
+            ),
+        ))
     }
 }
 
@@ -365,23 +407,39 @@ impl ToolHandler for UpdateEventHandler {
             .ok_or_else(|| "event_id is required".to_string())? as i32;
         let append_description = args["append_description"].as_str();
         let status = args["status"].as_str();
-        let tz_offset = crate::proactive::utils::user_tz_offset_secs(ctx.state, ctx.user_id);
+        let now = chrono::Utc::now().timestamp() as i32;
+        let schedule_changed = args["remind_at"].is_string() || args["due_at"].is_string();
+        let timezone = if schedule_changed {
+            Some(crate::proactive::utils::reminder_timezone(
+                ctx.state,
+                ctx.user_id,
+                now,
+            )?)
+        } else {
+            None
+        };
         let remind_at = args["remind_at"]
             .as_str()
-            .map(|s| {
-                crate::proactive::utils::parse_iso_to_timestamp(s, tz_offset)
-                    .ok_or_else(|| "Invalid remind_at timestamp".to_string())
+            .map(|value| {
+                crate::proactive::utils::parse_reminder_time_in_zone(
+                    value,
+                    timezone.as_deref().expect("timezone loaded"),
+                    now,
+                )
             })
             .transpose()?;
         let due_at = args["due_at"]
             .as_str()
-            .map(|s| {
-                crate::proactive::utils::parse_iso_to_timestamp(s, tz_offset)
-                    .ok_or_else(|| "Invalid due_at timestamp".to_string())
+            .map(|value| {
+                crate::proactive::utils::parse_reminder_time_in_zone(
+                    value,
+                    timezone.as_deref().expect("timezone loaded"),
+                    now,
+                )
             })
             .transpose()?;
 
-        let event = ctx
+        let mut event = ctx
             .state
             .ontology_repository
             .update_event(
@@ -393,6 +451,17 @@ impl ToolHandler for UpdateEventHandler {
                 due_at,
             )
             .map_err(|e| format!("Failed to update event: {}", e))?;
+        if remind_at.is_some() {
+            event = ctx
+                .state
+                .ontology_repository
+                .reset_event_reminder_delivery(
+                    ctx.user_id,
+                    event_id,
+                    timezone.as_deref().expect("timezone loaded"),
+                )
+                .map_err(|e| format!("Failed to persist reminder timezone: {}", e))?;
+        }
 
         // Always link the current message to the event
         if let Some(message_id) = args["message_id"].as_i64() {
@@ -407,9 +476,23 @@ impl ToolHandler for UpdateEventHandler {
             );
         }
 
-        Ok(ToolResult::Answer(format!(
-            "Event {} updated. Status: {}, description: '{}'.",
-            event.id, event.status, event.description
-        )))
+        if let (Some(remind_at), Some(timezone)) =
+            (event.remind_at, event.reminder_timezone.as_deref())
+        {
+            let rendered =
+                crate::proactive::utils::format_persisted_local_time(remind_at, timezone)?;
+            Ok(direct_reminder_response(
+                &ctx,
+                format!(
+                    "Event {} updated. Persisted reminder: {}. Status: {}, description: '{}'.",
+                    event.id, rendered, event.status, event.description
+                ),
+            ))
+        } else {
+            Ok(ToolResult::Answer(format!(
+                "Event {} updated. Status: {}, description: '{}'.",
+                event.id, event.status, event.description
+            )))
+        }
     }
 }

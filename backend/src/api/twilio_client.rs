@@ -67,8 +67,20 @@ pub struct VoicePricingResult {
     pub inbound_price_per_min: Option<f32>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IncomingPhoneNumberConfig {
+    pub sid: String,
+    pub phone_number: String,
+    pub sms_capable: bool,
+    pub voice_capable: bool,
+    pub sms_url: String,
+    pub sms_method: String,
+    pub voice_url: String,
+    pub voice_method: String,
+}
+
 /// Errors that can occur when interacting with Twilio.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TwilioClientError {
     /// Missing required credentials.
     MissingCredentials(String),
@@ -170,6 +182,15 @@ pub trait TwilioClient: Send + Sync {
         voice_url: Option<&str>,
     ) -> Result<String, TwilioClientError>;
 
+    /// Read the exact user-owned IncomingPhoneNumber and its live capability
+    /// and webhook configuration. Implementations must reject zero/multiple
+    /// or non-exact phone matches.
+    async fn fetch_incoming_phone_number(
+        &self,
+        credentials: &TwilioCredentials,
+        phone_number: &str,
+    ) -> Result<IncomingPhoneNumberConfig, TwilioClientError>;
+
     /// Check if phone numbers are available for a country.
     /// Returns true if either Mobile or Local numbers are available.
     async fn check_phone_numbers_available(
@@ -242,6 +263,26 @@ struct PhoneNumbersResponse {
 #[derive(Deserialize)]
 struct PhoneNumberInfo {
     sid: String,
+    #[serde(default)]
+    phone_number: String,
+    #[serde(default)]
+    capabilities: PhoneNumberCapabilities,
+    #[serde(default)]
+    sms_url: String,
+    #[serde(default)]
+    sms_method: String,
+    #[serde(default)]
+    voice_url: String,
+    #[serde(default)]
+    voice_method: String,
+}
+
+#[derive(Deserialize, Default)]
+struct PhoneNumberCapabilities {
+    #[serde(default)]
+    sms: bool,
+    #[serde(default)]
+    voice: bool,
 }
 
 // Response types for availability/pricing APIs
@@ -467,39 +508,10 @@ impl TwilioClient for RealTwilioClient {
         sms_url: &str,
         voice_url: Option<&str>,
     ) -> Result<String, TwilioClientError> {
-        // First, find the phone number SID
-        let params = [("PhoneNumber", phone_number)];
-        let response = self
-            .http_client
-            .get(format!(
-                "https://api.twilio.com/2010-04-01/Accounts/{}/IncomingPhoneNumbers.json",
-                credentials.account_sid
-            ))
-            .basic_auth(&credentials.account_sid, Some(&credentials.auth_token))
-            .query(&params)
-            .send()
+        let owned = self
+            .fetch_incoming_phone_number(credentials, phone_number)
             .await?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let text = response.text().await.unwrap_or_default();
-            return Err(TwilioClientError::ApiError {
-                status: status.as_u16(),
-                message: text,
-            });
-        }
-
-        let data: PhoneNumbersResponse = response
-            .json()
-            .await
-            .map_err(|e| TwilioClientError::ParseError(e.to_string()))?;
-
-        let phone_sid = data
-            .incoming_phone_numbers
-            .first()
-            .ok_or_else(|| TwilioClientError::NotFound("No matching phone number found".into()))?
-            .sid
-            .clone();
+        let phone_sid = owned.sid;
 
         // Build the form params (SMS always set, voice only if provided)
         let mut update_params: Vec<(&str, &str)> = vec![("SmsUrl", sms_url), ("SmsMethod", "POST")];
@@ -521,14 +533,63 @@ impl TwilioClient for RealTwilioClient {
 
         let status = update_response.status();
         if !status.is_success() {
-            let text = update_response.text().await.unwrap_or_default();
             return Err(TwilioClientError::ApiError {
                 status: status.as_u16(),
-                message: text,
+                message: "IncomingPhoneNumber update was rejected".to_string(),
             });
         }
 
         Ok(phone_sid)
+    }
+
+    async fn fetch_incoming_phone_number(
+        &self,
+        credentials: &TwilioCredentials,
+        phone_number: &str,
+    ) -> Result<IncomingPhoneNumberConfig, TwilioClientError> {
+        let response = self
+            .http_client
+            .get(format!(
+                "https://api.twilio.com/2010-04-01/Accounts/{}/IncomingPhoneNumbers.json",
+                credentials.account_sid
+            ))
+            .basic_auth(&credentials.account_sid, Some(&credentials.auth_token))
+            .query(&[("PhoneNumber", phone_number)])
+            .send()
+            .await?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(TwilioClientError::ApiError {
+                status: status.as_u16(),
+                message: "IncomingPhoneNumber lookup was rejected".to_string(),
+            });
+        }
+        let data: PhoneNumbersResponse = response
+            .json()
+            .await
+            .map_err(|_| TwilioClientError::ParseError("Invalid Twilio response".to_string()))?;
+        let mut exact = data
+            .incoming_phone_numbers
+            .into_iter()
+            .filter(|number| number.phone_number == phone_number);
+        let number = exact.next().ok_or_else(|| {
+            TwilioClientError::NotFound("Phone number is not owned by this account".into())
+        })?;
+        if exact.next().is_some() {
+            return Err(TwilioClientError::Other(
+                "Multiple exact IncomingPhoneNumber records were returned".to_string(),
+            ));
+        }
+        Ok(IncomingPhoneNumberConfig {
+            sid: number.sid,
+            phone_number: number.phone_number,
+            sms_capable: number.capabilities.sms,
+            voice_capable: number.capabilities.voice,
+            sms_url: number.sms_url,
+            sms_method: number.sms_method,
+            voice_url: number.voice_url,
+            voice_method: number.voice_method,
+        })
     }
 
     async fn check_phone_numbers_available(
@@ -758,6 +819,8 @@ pub mod mock {
         pub delete_media_calls: Vec<(String, String)>,
         pub fetch_price_calls: Vec<String>,
         pub configure_webhook_calls: Vec<(String, String)>,
+        pub configure_webhook_voice_urls: Vec<Option<String>>,
+        pub fetch_incoming_phone_number_calls: Vec<String>,
         pub check_phone_numbers_calls: Vec<String>,
         pub get_messaging_pricing_calls: Vec<String>,
         pub get_voice_pricing_calls: Vec<(String, bool)>,
@@ -770,6 +833,7 @@ pub mod mock {
         pub delete_media_result: Mutex<Result<(), String>>,
         pub fetch_price_result: Mutex<Result<Option<MessagePrice>, String>>,
         pub configure_webhook_result: Mutex<Result<String, String>>,
+        pub phone_config_result: Mutex<Result<IncomingPhoneNumberConfig, TwilioClientError>>,
         /// Per-message price responses for testing.
         pub price_responses: Mutex<HashMap<String, Option<MessagePrice>>>,
         /// Response for check_phone_numbers_available calls.
@@ -791,6 +855,13 @@ pub mod mock {
                 delete_media_result: Mutex::new(Ok(())),
                 fetch_price_result: Mutex::new(Ok(None)),
                 configure_webhook_result: Mutex::new(Ok("PN_mock_sid".to_string())),
+                phone_config_result: Mutex::new(Ok(IncomingPhoneNumberConfig {
+                    sid: "PN_mock_sid".to_string(),
+                    phone_number: "+14155551234".to_string(),
+                    sms_capable: true,
+                    voice_capable: true,
+                    ..Default::default()
+                })),
                 price_responses: Mutex::new(HashMap::new()),
                 phone_numbers_available_result: Mutex::new(false),
                 messaging_pricing_responses: Mutex::new(HashMap::new()),
@@ -824,6 +895,14 @@ pub mod mock {
         /// Configure the mock to return an error for configure_webhook calls.
         pub fn with_configure_webhook_error(self, error: String) -> Self {
             *self.configure_webhook_result.lock().unwrap() = Err(error);
+            self
+        }
+
+        pub fn with_phone_config(
+            self,
+            result: Result<IncomingPhoneNumberConfig, TwilioClientError>,
+        ) -> Self {
+            *self.phone_config_result.lock().unwrap() = result;
             self
         }
 
@@ -994,18 +1073,45 @@ pub mod mock {
             _credentials: &TwilioCredentials,
             phone_number: &str,
             sms_url: &str,
-            _voice_url: Option<&str>,
+            voice_url: Option<&str>,
         ) -> Result<String, TwilioClientError> {
-            self.calls
-                .lock()
-                .unwrap()
-                .configure_webhook_calls
-                .push((phone_number.to_string(), sms_url.to_string()));
-            self.configure_webhook_result
+            {
+                let mut calls = self.calls.lock().unwrap();
+                calls
+                    .configure_webhook_calls
+                    .push((phone_number.to_string(), sms_url.to_string()));
+                calls
+                    .configure_webhook_voice_urls
+                    .push(voice_url.map(str::to_string));
+            }
+            let result = self
+                .configure_webhook_result
                 .lock()
                 .unwrap()
                 .clone()
-                .map_err(TwilioClientError::Other)
+                .map_err(TwilioClientError::Other)?;
+            if let Ok(config) = &mut *self.phone_config_result.lock().unwrap() {
+                config.sms_url = sms_url.to_string();
+                config.sms_method = "POST".to_string();
+                if let Some(voice_url) = voice_url {
+                    config.voice_url = voice_url.to_string();
+                    config.voice_method = "POST".to_string();
+                }
+            }
+            Ok(result)
+        }
+
+        async fn fetch_incoming_phone_number(
+            &self,
+            _credentials: &TwilioCredentials,
+            phone_number: &str,
+        ) -> Result<IncomingPhoneNumberConfig, TwilioClientError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .fetch_incoming_phone_number_calls
+                .push(phone_number.to_string());
+            self.phone_config_result.lock().unwrap().clone()
         }
 
         async fn check_phone_numbers_available(

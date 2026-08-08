@@ -313,6 +313,51 @@ pub async fn webhook_sms(
         }
     };
 
+    // A webhook trigger is still accepted/audited while a matching temporary
+    // suppression is active; only the outbound SMS is skipped.
+    let safe_label = sanitize_label(&token_row.label);
+    let outbound = format!("[{}] {}", safe_label, body);
+    let suppressions = crate::TemporaryAlertSuppressionsRepository::new(state.pg_pool.clone());
+    let suppressed = match suppressions.decision(user.id, "critical", &outbound, false) {
+        Ok(crate::repositories::temporary_alert_suppressions_repository::SuppressionDecision::Allow) => false,
+        Ok(_) => true,
+        Err(error) => {
+            tracing::warn!(user_id = user.id, "Failed to check temporary alert suppression: {error}");
+            false
+        }
+    };
+    if suppressed {
+        let suppressed_sid = "suppressed".to_string();
+        if let Some(id) = idempotency_row_id {
+            state
+                .webhook_tokens_repository
+                .complete_idempotency(id, &suppressed_sid)
+                .map_err(db_err)?;
+        }
+        let _ =
+            state
+                .user_repository
+                .log_usage(crate::repositories::user_repository::LogUsageParams {
+                    user_id: user.id,
+                    sid: None,
+                    activity_type: "webhook_sms".to_string(),
+                    credits: Some(0.0),
+                    time_consumed: None,
+                    success: Some(true),
+                    reason: Some("temporary_alert_suppression".to_string()),
+                    status: Some("suppressed".to_string()),
+                    recharge_threshold_timestamp: None,
+                    zero_credits_timestamp: None,
+                });
+        return Ok(no_store(
+            Json(WebhookSmsResponse {
+                status: "suppressed",
+                sid: suppressed_sid,
+            })
+            .into_response(),
+        ));
+    }
+
     // 6. Credit / tier / phone-service-active gate. Same call all other
     //    outbound paths use — keeps abuse posture identical and reuses
     //    the existing "out of credits" SMS warning behavior.

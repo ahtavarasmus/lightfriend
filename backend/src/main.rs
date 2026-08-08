@@ -1451,6 +1451,10 @@ async fn main() {
             get(whatsapp_auth::check_whatsapp_health),
         )
         .route(
+            "/api/auth/whatsapp/primary-phone-confirmed",
+            post(whatsapp_auth::confirm_whatsapp_primary_phone),
+        )
+        .route(
             "/api/whatsapp/test-messages",
             get(whatsapp_handlers::test_fetch_messages),
         )
@@ -1561,6 +1565,14 @@ async fn main() {
         .route(
             "/api/rules/{id}/status",
             patch(rule_handlers::update_rule_status),
+        )
+        .route(
+            "/api/always-show",
+            get(rule_handlers::list_always_show).post(rule_handlers::create_always_show),
+        )
+        .route(
+            "/api/always-show/{id}",
+            delete(rule_handlers::delete_always_show),
         )
         // Commitment detection dashboard
         .route(

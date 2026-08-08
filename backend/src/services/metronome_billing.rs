@@ -4,10 +4,14 @@ use crate::{AppState, BillingRepository, UserCoreOps};
 use anyhow::{anyhow, Context, Result};
 use reqwest::Client as HttpClient;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub const OVERAGE_CONSENT_VERSION: &str = "2026-07-21";
 pub const LEGACY_OVERAGE_CONSENT_VERSION: &str = "legacy-auto-topup-migration-2026-07-23";
+/// Provider outages never revoke access by themselves. Entitlement changes
+/// only from verified billing webhooks; locally queued usage keeps retrying.
+pub const ENTITLEMENT_OUTAGE_POLICY: &str = "continue_service_with_durable_backlog";
 const CUSTOMER_ALIAS_PREFIX: &str = "lightfriend-user-";
 const MONTHLY_INCLUDED_USAGE_USD: f64 = 25.0;
 
@@ -85,6 +89,8 @@ pub struct MetronomeConfig {
     pub api_key: String,
     pub package_alias: String,
     pub event_type: String,
+    pub billable_metric_id: Option<String>,
+    pub usage_product_id: Option<String>,
     pub webhook_secret: String,
     pub legacy_credit_product_id: Option<String>,
     pub credit_type_id: Option<String>,
@@ -99,10 +105,14 @@ impl MetronomeConfig {
             api_url: std::env::var("METRONOME_API_URL")
                 .unwrap_or_else(|_| "https://api.metronome.com".to_string()),
             api_key: std::env::var("METRONOME_API_KEY").unwrap_or_default(),
-            package_alias: std::env::var("METRONOME_PACKAGE_ALIAS")
-                .unwrap_or_else(|_| "lightfriend-monthly".to_string()),
-            event_type: std::env::var("METRONOME_USAGE_EVENT_TYPE")
-                .unwrap_or_else(|_| "lightfriend_usage".to_string()),
+            package_alias: std::env::var("METRONOME_PACKAGE_ALIAS").unwrap_or_default(),
+            event_type: std::env::var("METRONOME_USAGE_EVENT_TYPE").unwrap_or_default(),
+            billable_metric_id: std::env::var("METRONOME_BILLABLE_METRIC_ID")
+                .ok()
+                .filter(|value| !value.trim().is_empty()),
+            usage_product_id: std::env::var("METRONOME_USAGE_PRODUCT_ID")
+                .ok()
+                .filter(|value| !value.trim().is_empty()),
             webhook_secret: std::env::var("METRONOME_WEBHOOK_SECRET").unwrap_or_default(),
             legacy_credit_product_id: std::env::var("METRONOME_LEGACY_CREDIT_PRODUCT_ID")
                 .ok()
@@ -114,13 +124,110 @@ impl MetronomeConfig {
     }
 
     pub fn validate(&self) -> Result<()> {
-        if self.enabled && self.api_key.is_empty() {
+        if !self.enabled {
+            return Ok(());
+        }
+        let mut missing = Vec::new();
+        if self.api_key.trim().is_empty() {
+            missing.push("METRONOME_API_KEY");
+        }
+        if self.package_alias.trim().is_empty() {
+            missing.push("METRONOME_PACKAGE_ALIAS");
+        }
+        if self.event_type.trim().is_empty() {
+            missing.push("METRONOME_USAGE_EVENT_TYPE");
+        }
+        if self.billable_metric_id.is_none() {
+            missing.push("METRONOME_BILLABLE_METRIC_ID");
+        }
+        if self.usage_product_id.is_none() {
+            missing.push("METRONOME_USAGE_PRODUCT_ID");
+        }
+        if self.webhook_secret.trim().is_empty() {
+            missing.push("METRONOME_WEBHOOK_SECRET");
+        }
+        if self.legacy_credit_product_id.is_none() {
+            missing.push("METRONOME_LEGACY_CREDIT_PRODUCT_ID");
+        }
+        if self.credit_type_id.is_none() {
+            missing.push("METRONOME_CREDIT_TYPE_ID");
+        }
+        if !missing.is_empty() {
             return Err(anyhow!(
-                "METRONOME_API_KEY is required when METRONOME_BILLING_ENABLED=true"
+                "Metronome billing configuration is incomplete; missing {}",
+                missing.join(", ")
+            ));
+        }
+        let parsed = reqwest::Url::parse(&self.api_url)
+            .map_err(|_| anyhow!("METRONOME_API_URL must be a valid HTTPS URL"))?;
+        if parsed.scheme() != "https"
+            && !(parsed.scheme() == "http" && parsed.host_str() == Some("127.0.0.1"))
+            && !(parsed.scheme() == "http" && parsed.host_str() == Some("localhost"))
+        {
+            return Err(anyhow!(
+                "METRONOME_API_URL must use HTTPS outside local tests"
             ));
         }
         Ok(())
     }
+}
+
+/// Resolve the one Lightfriend-owned contract without depending on API order.
+/// An exact uniqueness-key match wins; a single legacy result is accepted,
+/// while multiple non-matching contracts require operator reconciliation.
+pub fn select_contract_id(
+    response: &Value,
+    expected_uniqueness_key: &str,
+) -> Result<Option<String>> {
+    let items = response["data"]
+        .as_array()
+        .ok_or_else(|| anyhow!("Metronome contract list returned an invalid response"))?;
+    let exact: Vec<&Value> = items
+        .iter()
+        .filter(|item| item["uniqueness_key"].as_str() == Some(expected_uniqueness_key))
+        .collect();
+    match exact.as_slice() {
+        [item] => return Ok(item["id"].as_str().map(ToString::to_string)),
+        [] => {}
+        _ => {
+            return Err(anyhow!(
+                "Multiple Metronome contracts share the expected uniqueness key"
+            ))
+        }
+    }
+    match items.as_slice() {
+        [] => Ok(None),
+        [item] => item["id"]
+            .as_str()
+            .map(|id| Some(id.to_string()))
+            .ok_or_else(|| anyhow!("Metronome contract response did not contain data.id")),
+        _ => Err(anyhow!(
+            "Multiple Metronome contracts exist and none matches Lightfriend's uniqueness key"
+        )),
+    }
+}
+
+pub fn billing_error_code(error: &anyhow::Error) -> &'static str {
+    let message = error.to_string().to_ascii_lowercase();
+    if message.contains("configuration is incomplete") || message.contains("api_url") {
+        "configuration_error"
+    } else if message.contains("http 401") || message.contains("http 403") {
+        "authentication_error"
+    } else if message.contains("http 429") {
+        "rate_limited"
+    } else if message.contains("http 5") || message.contains("timeout") {
+        "provider_unavailable"
+    } else if message.contains("contract") && message.contains("multiple") {
+        "ambiguous_contract"
+    } else if message.contains("connect") || message.contains("transport") {
+        "transport_error"
+    } else {
+        "billing_error"
+    }
+}
+
+pub fn provider_http_error(status: reqwest::StatusCode) -> anyhow::Error {
+    anyhow!("Metronome request failed (HTTP {})", status.as_u16())
 }
 
 #[derive(Clone)]
@@ -155,11 +262,15 @@ impl MetronomeClient {
 
     async fn response_json(response: reqwest::Response) -> Result<Value> {
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
         if !status.is_success() {
-            return Err(anyhow!("Metronome returned {}: {}", status, body));
+            // Never propagate provider response bodies: they can contain
+            // customer fields, request echoes, or internal diagnostics.
+            return Err(provider_http_error(status));
         }
-        serde_json::from_str(&body).context("Metronome returned invalid JSON")
+        response
+            .json::<Value>()
+            .await
+            .map_err(|_| anyhow!("Metronome returned an invalid response"))
     }
 
     async fn post(&self, path: &str, body: &Value, idempotency_key: &str) -> Result<Value> {
@@ -183,6 +294,29 @@ impl MetronomeClient {
             .send()
             .await?;
         Self::response_json(response).await
+    }
+
+    async fn get_read(&self, path: &str) -> Result<Value> {
+        let response = self
+            .http
+            .get(self.url(path))
+            .bearer_auth(&self.config.api_key)
+            .send()
+            .await?;
+        Self::response_json(response).await
+    }
+
+    async fn search_events(&self, transaction_ids: &[String]) -> Result<Value> {
+        self.post_read(
+            "/v1/events/search",
+            &json!({"transactionIds": transaction_ids}),
+        )
+        .await
+    }
+
+    async fn list_invoices(&self, customer_id: &str) -> Result<Value> {
+        self.get_read(&format!("/v1/customers/{}/invoices?limit=100", customer_id))
+            .await
     }
 
     pub async fn customer_usage_balance(
@@ -302,7 +436,7 @@ impl MetronomeClient {
         }
     }
 
-    async fn find_contract(&self, customer_id: &str) -> Result<Option<String>> {
+    async fn find_contract(&self, user_id: i32, customer_id: &str) -> Result<Option<String>> {
         let body = self
             .post(
                 "/v2/contracts/list",
@@ -310,11 +444,7 @@ impl MetronomeClient {
                 &format!("lightfriend-list-contracts-{}", customer_id),
             )
             .await?;
-        Ok(body["data"]
-            .as_array()
-            .and_then(|items| items.first())
-            .and_then(|item| item["id"].as_str())
-            .map(ToString::to_string))
+        select_contract_id(&body, &format!("lightfriend-contract-{}", user_id))
     }
 
     async fn create_contract(&self, user_id: i32, customer_id: &str) -> Result<String> {
@@ -338,7 +468,7 @@ impl MetronomeClient {
                 .map(ToString::to_string)
                 .ok_or_else(|| anyhow!("Metronome contract response did not contain data.id")),
             Err(error) if error.to_string().contains("409") => {
-                self.find_contract(customer_id).await?.ok_or(error)
+                self.find_contract(user_id, customer_id).await?.ok_or(error)
             }
             Err(error) => Err(error),
         }
@@ -463,6 +593,66 @@ impl MetronomeClient {
     }
 }
 
+pub fn provider_event_status(
+    search_response: &Value,
+    transaction_id: &str,
+    billable_metric_id: &str,
+) -> &'static str {
+    let Some(event) = search_response
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|event| event["transaction_id"].as_str() == Some(transaction_id))
+    else {
+        return "missing";
+    };
+    let customer_matched = event["matched_customer"].is_object();
+    let metric_matched = event["matched_billable_metrics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|metric| metric["id"].as_str() == Some(billable_metric_id));
+    if customer_matched && metric_matched {
+        "matched"
+    } else {
+        "unmatched"
+    }
+}
+
+pub fn invoice_contains_usage(
+    invoice_response: &Value,
+    contract_id: &str,
+    usage_product_id: &str,
+    occurred_at: i32,
+) -> bool {
+    let Some(occurred) = chrono::DateTime::from_timestamp(occurred_at as i64, 0) else {
+        return false;
+    };
+    invoice_response["data"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|invoice| invoice["contract_id"].as_str() == Some(contract_id))
+        .filter(|invoice| {
+            let starts = invoice["start_timestamp"]
+                .as_str()
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.to_utc());
+            let ends = invoice["end_timestamp"]
+                .as_str()
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.to_utc());
+            starts.is_some_and(|start| start <= occurred) && ends.is_some_and(|end| occurred < end)
+        })
+        .any(|invoice| {
+            invoice["line_items"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|line| line["product_id"].as_str() == Some(usage_product_id))
+        })
+}
+
 pub fn ordered_payment_method_candidates(
     subscription_payment_method_ids: impl IntoIterator<Item = String>,
     stored_payment_method_id: Option<&str>,
@@ -550,11 +740,11 @@ async fn ensure_stripe_payment_method(user: &User) -> Result<bool> {
     for (candidate_index, payment_method_id) in candidates.into_iter().enumerate() {
         let parsed_payment_method_id = match payment_method_id.parse() {
             Ok(payment_method_id) => payment_method_id,
-            Err(error) => {
+            Err(_error) => {
                 tracing::warn!(
                     user_id = user.id,
                     candidate_index,
-                    "Ignoring invalid Stripe payment method ID: {error}"
+                    "Ignoring invalid Stripe payment method ID"
                 );
                 continue;
             }
@@ -562,11 +752,11 @@ async fn ensure_stripe_payment_method(user: &User) -> Result<bool> {
         let payment_method =
             match PaymentMethod::retrieve(&client, &parsed_payment_method_id, &[]).await {
                 Ok(payment_method) => payment_method,
-                Err(error) => {
+                Err(_error) => {
                     tracing::warn!(
                         user_id = user.id,
                         candidate_index,
-                        "Could not retrieve Stripe payment method candidate: {error}"
+                        "Could not retrieve Stripe payment method candidate"
                     );
                     continue;
                 }
@@ -603,7 +793,7 @@ async fn ensure_stripe_payment_method(user: &User) -> Result<bool> {
                 tracing::warn!(
                     user_id = user.id,
                     candidate_index,
-                    "Could not set Stripe invoice default payment method: {error}"
+                    "Could not set Stripe invoice default payment method"
                 );
                 last_update_error = Some(error);
             }
@@ -619,11 +809,8 @@ async fn ensure_stripe_payment_method(user: &User) -> Result<bool> {
 async fn stripe_payment_ready(user: &User) -> bool {
     match ensure_stripe_payment_method(user).await {
         Ok(payment_ready) => payment_ready,
-        Err(error) => {
-            tracing::warn!(
-                user_id = user.id,
-                "Stripe payment readiness check failed: {error}"
-            );
+        Err(_error) => {
+            tracing::warn!(user_id = user.id, "Stripe payment readiness check failed");
             false
         }
     }
@@ -788,12 +975,13 @@ pub async fn provision_subscribers(state: Arc<AppState>) {
             continue;
         }
         if let Err(error) = provision_user(&state, &user).await {
+            let error_code = billing_error_code(&error);
             let _ = repository.ensure_account(user.id);
-            let _ = repository.mark_provisioning_failed(user.id, &error.to_string());
+            let _ = repository.mark_provisioning_failed(user.id, error_code);
             tracing::error!(
-                "Failed to provision user {} in Metronome: {}",
-                user.id,
-                error
+                user_id = user.id,
+                error_code,
+                "Failed to provision user in Metronome"
             );
         }
     }
@@ -826,18 +1014,108 @@ pub async fn flush_usage_outbox(state: Arc<AppState>) {
                 }
             }
             Err(error) => {
+                let error_code = billing_error_code(&error);
                 for event in chunk {
                     let _ = repository.mark_usage_failed(
                         &event.transaction_id,
                         event.attempts,
-                        &error.to_string(),
+                        error_code,
                     );
                 }
                 tracing::warn!(
-                    "Metronome usage ingest failed; events queued for retry: {}",
-                    error
+                    error_code,
+                    "Metronome usage ingest failed; events queued for retry"
                 );
             }
+        }
+    }
+}
+
+/// Sample the durable outbox against Metronome's observability APIs. This is
+/// read-only at the provider: it verifies event acceptance/customer+metric
+/// matching and whether the corresponding product is visible on an invoice.
+pub async fn reconcile_usage_outbox(state: Arc<AppState>) {
+    let client = match MetronomeClient::from_env() {
+        Ok(client) if client.is_enabled() => client,
+        _ => return,
+    };
+    let repository = BillingRepository::new(state.pg_pool.clone());
+    let events = match repository.usage_for_reconciliation(25) {
+        Ok(events) if !events.is_empty() => events,
+        Ok(_) => return,
+        Err(error) => {
+            tracing::error!("Failed to load billing reconciliation sample: {}", error);
+            return;
+        }
+    };
+    let transaction_ids: Vec<String> = events
+        .iter()
+        .map(|event| event.transaction_id.clone())
+        .collect();
+    let search = match client.search_events(&transaction_ids).await {
+        Ok(search) => search,
+        Err(error) => {
+            tracing::warn!(
+                error_code = billing_error_code(&error),
+                "Metronome event reconciliation deferred"
+            );
+            return;
+        }
+    };
+    let metric_id = client
+        .config
+        .billable_metric_id
+        .as_deref()
+        .expect("validated configuration has billable metric ID");
+    let product_id = client
+        .config
+        .usage_product_id
+        .as_deref()
+        .expect("validated configuration has usage product ID");
+    let mut invoices_by_user: HashMap<i32, Value> = HashMap::new();
+    for event in events {
+        let provider_status = provider_event_status(&search, &event.transaction_id, metric_id);
+        let invoice_visible = if provider_status == "matched" {
+            let account = match repository.get_account(event.user_id) {
+                Ok(Some(account)) => account,
+                _ => continue,
+            };
+            let (Some(customer_id), Some(contract_id)) = (
+                account.metronome_customer_id.as_deref(),
+                account.metronome_contract_id.as_deref(),
+            ) else {
+                continue;
+            };
+            if !invoices_by_user.contains_key(&event.user_id) {
+                match client.list_invoices(customer_id).await {
+                    Ok(invoices) => {
+                        invoices_by_user.insert(event.user_id, invoices);
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            user_id = event.user_id,
+                            error_code = billing_error_code(&error),
+                            "Metronome invoice reconciliation deferred"
+                        );
+                        continue;
+                    }
+                }
+            }
+            invoice_contains_usage(
+                &invoices_by_user[&event.user_id],
+                contract_id,
+                product_id,
+                event.occurred_at,
+            )
+        } else {
+            false
+        };
+        if let Err(error) = repository.mark_usage_reconciled(
+            &event.transaction_id,
+            provider_status,
+            invoice_visible,
+        ) {
+            tracing::error!("Failed to persist billing reconciliation result: {}", error);
         }
     }
 }
@@ -853,6 +1131,7 @@ pub fn enqueue_usage(
     cost_usd: f32,
     transaction_id: Option<String>,
 ) -> Result<String> {
+    MetronomeConfig::from_env().validate()?;
     let repository = BillingRepository::new(state.pg_pool.clone());
     repository.ensure_account(user_id)?;
     let cost_microusd = cost_to_microusd(cost_usd as f64)?;
@@ -865,7 +1144,40 @@ pub fn enqueue_usage(
     )?)
 }
 
+pub fn begin_usage_intent(state: &Arc<AppState>, user_id: i32, event_type: &str) -> Result<String> {
+    MetronomeConfig::from_env().validate()?;
+    let transaction_id = uuid::Uuid::new_v4().to_string();
+    let repository = BillingRepository::new(state.pg_pool.clone());
+    repository.ensure_account(user_id)?;
+    repository.begin_usage_intent(user_id, event_type, &transaction_id)?;
+    Ok(transaction_id)
+}
+
+pub fn finalize_usage_intent(
+    state: &Arc<AppState>,
+    transaction_id: &str,
+    cost_usd: f64,
+) -> Result<()> {
+    let repository = BillingRepository::new(state.pg_pool.clone());
+    if cost_usd <= 0.0 {
+        repository.abandon_usage_intent(transaction_id)?;
+        return Ok(());
+    }
+    repository.finalize_usage_intent(
+        transaction_id,
+        cost_to_microusd(cost_usd)?,
+        chrono::Utc::now().timestamp() as i32,
+    )?;
+    Ok(())
+}
+
+pub fn abandon_usage_intent(state: &Arc<AppState>, transaction_id: &str) {
+    let repository = BillingRepository::new(state.pg_pool.clone());
+    let _ = repository.abandon_usage_intent(transaction_id);
+}
+
 pub fn has_usage_entitlement(state: &Arc<AppState>, user_id: i32) -> Result<bool> {
+    MetronomeConfig::from_env().validate()?;
     let repository = BillingRepository::new(state.pg_pool.clone());
     let account = repository.ensure_account(user_id)?;
     Ok(account.usage_entitled)

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use chrono::{TimeZone, Utc};
@@ -20,6 +20,162 @@ use openai_api_rs::v1::{chat_completion, types};
 
 const COOLDOWN_SECS: i32 = 3600; // 1 hour per room
 const NOTIFICATION_CONTEXT_WINDOW_SECS: i32 = 3 * 3600;
+
+/// Normalize a delivered notification into stable event terms. The urgency
+/// classifier has already performed the semantic extraction; this only
+/// removes source-specific wording and lightweight grammatical variation so
+/// the same alert received through email and chat lands on the same key.
+pub fn alert_event_fingerprint(alert: &str) -> String {
+    fn canonical_term(term: &str) -> Option<String> {
+        let mut term = term.to_lowercase();
+        if (term.ends_with("am") || term.ends_with("pm"))
+            && term[..term.len().saturating_sub(2)]
+                .chars()
+                .all(|c| c.is_ascii_digit())
+        {
+            term.truncate(term.len() - 2);
+        }
+        let canonical = match term.as_str() {
+            "delayed" | "delays" => "delay",
+            "cancelled" | "canceled" | "cancellation" => "cancel",
+            "rescheduled" | "rescheduling" => "reschedule",
+            "arrived" | "arrives" | "arriving" | "arrival" => "arrive",
+            "departed" | "departs" | "departing" | "departure" => "depart",
+            "payments" | "paid" | "paying" => "payment",
+            "charges" | "charged" | "charging" => "charge",
+            "declined" | "declines" => "decline",
+            other => other,
+        };
+        if canonical.len() < 2
+            || matches!(
+                canonical,
+                "a" | "an"
+                    | "and"
+                    | "are"
+                    | "as"
+                    | "at"
+                    | "be"
+                    | "by"
+                    | "email"
+                    | "for"
+                    | "from"
+                    | "has"
+                    | "have"
+                    | "in"
+                    | "is"
+                    | "it"
+                    | "lightfriend"
+                    | "message"
+                    | "new"
+                    | "notification"
+                    | "of"
+                    | "on"
+                    | "reply"
+                    | "should"
+                    | "signal"
+                    | "telegram"
+                    | "the"
+                    | "this"
+                    | "to"
+                    | "until"
+                    | "via"
+                    | "wait"
+                    | "was"
+                    | "were"
+                    | "whatsapp"
+                    | "worth"
+                    | "your"
+            )
+        {
+            None
+        } else {
+            Some(canonical.to_string())
+        }
+    }
+
+    let cutoff = ["\n\nReply 1=", " [email_ref "]
+        .iter()
+        .filter_map(|marker| alert.find(marker))
+        .min()
+        .unwrap_or(alert.len());
+    let mut semantic = alert[..cutoff].trim();
+
+    // Classifier summaries conventionally begin with "Sender: ...". Sender
+    // labels differ by source, so remove a short non-numeric prefix.
+    if let Some(colon) = semantic.find(':').filter(|idx| *idx < 32) {
+        let prefix = &semantic[..colon];
+        if prefix.split_whitespace().count() <= 4 && !prefix.chars().any(|c| c.is_ascii_digit()) {
+            semantic = semantic[colon + 1..].trim();
+        }
+    }
+
+    let mut terms = BTreeSet::new();
+    for raw in semantic
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|term| !term.is_empty())
+    {
+        if let Some(term) = canonical_term(raw) {
+            terms.insert(term);
+        }
+    }
+    terms.into_iter().collect::<Vec<_>>().join(" ")
+}
+
+/// Conservative equivalence check for already-classified alert summaries.
+/// Shared identifiers/details are required so two merely similar incidents
+/// (for example different flight numbers or charge amounts) remain distinct.
+pub fn alerts_substantially_equivalent(left: &str, right: &str) -> bool {
+    let left_fingerprint = alert_event_fingerprint(left);
+    let right_fingerprint = alert_event_fingerprint(right);
+    if left_fingerprint.is_empty() || right_fingerprint.is_empty() {
+        return false;
+    }
+    if left_fingerprint == right_fingerprint {
+        return left_fingerprint.split_whitespace().count() >= 2;
+    }
+
+    let left_terms: BTreeSet<&str> = left_fingerprint.split_whitespace().collect();
+    let right_terms: BTreeSet<&str> = right_fingerprint.split_whitespace().collect();
+    let shared = left_terms.intersection(&right_terms).count();
+    if shared < 3 {
+        return false;
+    }
+
+    let left_details: BTreeSet<&str> = left_terms
+        .iter()
+        .copied()
+        .filter(|term| term.chars().any(|c| c.is_ascii_digit()))
+        .collect();
+    let right_details: BTreeSet<&str> = right_terms
+        .iter()
+        .copied()
+        .filter(|term| term.chars().any(|c| c.is_ascii_digit()))
+        .collect();
+    if !left_details.is_empty()
+        && !right_details.is_empty()
+        && left_details.intersection(&right_details).next().is_none()
+    {
+        return false;
+    }
+
+    let smaller = left_terms.len().min(right_terms.len()) as f64;
+    let union = left_terms.union(&right_terms).count() as f64;
+    let overlap = shared as f64 / smaller;
+    let jaccard = shared as f64 / union;
+    overlap >= 0.65 && jaccard >= 0.45
+}
+
+fn has_recent_equivalent_alert(
+    current_alert: &str,
+    recent_history: &[PgMessageHistory],
+    now: i32,
+) -> bool {
+    recent_history.iter().any(|message| {
+        message.role == "assistant"
+            && message.created_at >= now - COOLDOWN_SECS
+            && alerts_substantially_equivalent(current_alert, &message.encrypted_content)
+    })
+}
 
 /// Daily token budget per user for proactive AI processing (system_important, rules, etc.)
 /// 10M tokens/month target (~$15/user/month at $1.50/M input tokens).
@@ -79,6 +235,25 @@ pub async fn run_urgency_classification(
         return Ok(());
     }
 
+    // The message has already been ingested. During full/critical Quiet Mode,
+    // skip classification work that cannot produce an outbound notification.
+    let suppressions = crate::TemporaryAlertSuppressionsRepository::new(state.pg_pool.clone());
+    match suppressions.has_quiet_scope(user_id, "critical") {
+        Ok(true) => {
+            info!(
+                "Urgency classification skipped for user {} during Quiet Mode",
+                user_id
+            );
+            return Ok(());
+        }
+        Ok(false) => {}
+        Err(error) => tracing::warn!(
+            "Failed to check Quiet Mode for user {}; failing open: {}",
+            user_id,
+            error
+        ),
+    }
+
     if exceeds_daily_token_budget(state, user_id, "urgency_classification") {
         return Ok(());
     }
@@ -120,14 +295,6 @@ pub async fn run_urgency_classification(
         .get("imap_connection_id")
         .and_then(|v| v.as_i64())
         .map(|v| v as i32);
-
-    // Per-room cooldown: skip if we already notified for this room recently
-    let cooldown_key = (user_id, room_id.to_string());
-    if let Some(last_notify) = state.system_notify_cooldowns.get(&cooldown_key) {
-        if now - *last_notify < COOLDOWN_SECS {
-            return Ok(());
-        }
-    }
 
     // Build context early so we have the user's timezone for sender signals
     let ctx = ContextBuilder::for_user(state, user_id)
@@ -540,9 +707,54 @@ pub async fn run_urgency_classification(
                 let notification_meta = notification_meta_from_snapshot(entity_snapshot);
 
                 if !notification_message.is_empty() {
-                    state
-                        .system_notify_cooldowns
-                        .insert((user_id, room_id.to_string()), now);
+                    let fingerprint = alert_event_fingerprint(&notification_message);
+                    let cooldown_key = (user_id, fingerprint.clone());
+                    if has_recent_equivalent_alert(
+                        &notification_message,
+                        &recent_lightfriend_replies,
+                        now,
+                    ) {
+                        info!(
+                            "Urgency notification suppressed for user {}: equivalent alert already delivered recently",
+                            user_id
+                        );
+                        if let Some(mid) = message_id {
+                            let _ = state.ontology_repository.mark_digest_delivered(&[mid], now);
+                        }
+                        return Ok(());
+                    }
+
+                    // Claim exact fingerprints atomically so two channels
+                    // classified concurrently cannot both deliver the same
+                    // event before either notification reaches history.
+                    let claimed = if fingerprint.is_empty() {
+                        true
+                    } else {
+                        match state.system_notify_cooldowns.entry(cooldown_key.clone()) {
+                            dashmap::mapref::entry::Entry::Occupied(mut entry) => {
+                                if now - *entry.get() < COOLDOWN_SECS {
+                                    false
+                                } else {
+                                    entry.insert(now);
+                                    true
+                                }
+                            }
+                            dashmap::mapref::entry::Entry::Vacant(entry) => {
+                                entry.insert(now);
+                                true
+                            }
+                        }
+                    };
+                    if !claimed {
+                        info!(
+                            "Urgency notification suppressed for user {}: identical alert is already in flight",
+                            user_id
+                        );
+                        if let Some(mid) = message_id {
+                            let _ = state.ontology_repository.mark_digest_delivered(&[mid], now);
+                        }
+                        return Ok(());
+                    }
 
                     // Resolve once to an explicit route. A call notification
                     // always includes the companion SMS in the sender.
@@ -553,7 +765,7 @@ pub async fn run_urgency_classification(
                     )
                     .to_string();
 
-                    let _ = send_notification_with_context(
+                    let delivered = send_notification_with_context(
                         state,
                         user_id,
                         &notification_message,
@@ -562,6 +774,9 @@ pub async fn run_urgency_classification(
                         notification_meta,
                     )
                     .await;
+                    if !delivered && !fingerprint.is_empty() {
+                        state.system_notify_cooldowns.remove(&cooldown_key);
+                    }
                 }
             } else if sender_name != "You" {
                 let _ = state.user_repository.log_usage(LogUsageParams {
@@ -945,6 +1160,20 @@ pub async fn run_commitment_detection(
         info!(
             "commitment_detection skip user={} reason=setting_off platform={} sender={}",
             user_id, platform, sender_name
+        );
+        return Ok(());
+    }
+
+    // Full/critical Quiet Mode cannot surface a commitment prompt, so avoid
+    // the LLM classification while retaining the already-ingested message.
+    let suppressions = crate::TemporaryAlertSuppressionsRepository::new(state.pg_pool.clone());
+    if suppressions
+        .has_quiet_scope(user_id, "critical")
+        .unwrap_or(false)
+    {
+        info!(
+            "commitment_detection skip user={} reason=quiet_mode",
+            user_id
         );
         return Ok(());
     }

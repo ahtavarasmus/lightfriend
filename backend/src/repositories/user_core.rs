@@ -1152,16 +1152,18 @@ impl UserCoreOps for UserCore {
     }
 
     fn update_timezone(&self, user_id: i32, timezone: &str) -> Result<(), DieselError> {
-        // First fetch the user settings to check timezone_auto
-        let user_settings = self.get_user_settings(user_id)?;
-        // Only update if timezone_auto is false (manual timezone setting)
-        if !user_settings.timezone_auto.unwrap_or(false) {
-            let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
-            diesel::update(user_info::table)
-                .filter(user_info::user_id.eq(user_id))
-                .set(user_info::timezone.eq(timezone.to_string()))
-                .execute(&mut pg_conn)?;
-        }
+        // This method receives both manual choices and browser-detected zones.
+        // `timezone_auto` decides who supplies the value; it must not prevent
+        // the supplied IANA zone from being persisted.
+        self.ensure_user_info_exists(user_id)?;
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        diesel::update(user_info::table)
+            .filter(user_info::user_id.eq(user_id))
+            .set((
+                user_info::timezone.eq(timezone.to_string()),
+                user_info::timezone_updated_at.eq(Some(chrono::Utc::now().timestamp() as i32)),
+            ))
+            .execute(&mut pg_conn)?;
 
         Ok(())
     }

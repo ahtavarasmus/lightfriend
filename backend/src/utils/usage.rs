@@ -140,6 +140,15 @@ pub async fn check_user_credits(
                 .await
                 .unwrap_or_else(|| "your billing date".to_string());
                 let message = format!("$25 used. Resets {}. Enable overage?", reset_date);
+                let suppressions =
+                    crate::TemporaryAlertSuppressionsRepository::new(state_clone.pg_pool.clone());
+                if matches!(
+                    suppressions.decision(user_clone.id, "critical", &message, false),
+                    Ok(crate::repositories::temporary_alert_suppressions_repository::SuppressionDecision::SuppressQuiet { .. }
+                        | crate::repositories::temporary_alert_suppressions_repository::SuppressionDecision::SuppressTopic { .. })
+                ) {
+                    return;
+                }
                 let _ = state_clone
                     .channel_router
                     .send_to_user(&user_clone, &message, None)

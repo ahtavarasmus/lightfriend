@@ -508,6 +508,8 @@ pub fn phone_device_panel(props: &PhoneDevicePanelProps) -> Html {
                         profile.preferred_number = Some(phone.clone());
                         profile.sms_from_number = Some(phone);
                         profile.own_twilio_enabled = true;
+                        profile.byot_verification_status = Some("verified".to_string());
+                        profile.byot_error_code = None;
                         if !using_saved_credentials {
                             profile.twilio_sid = Some("...".to_string());
                             profile.twilio_token = Some("...".to_string());
@@ -657,6 +659,26 @@ pub fn phone_device_panel(props: &PhoneDevicePanelProps) -> Html {
                                                         >
                                                             {"Connect Twilio number"}
                                                         </button>
+                                                        {
+                                                            match user_profile.byot_verification_status.as_deref() {
+                                                                Some("verified") => html! {
+                                                                    <p class="connection-status" role="status">
+                                                                        {"Verified for SMS and voice"}
+                                                                    </p>
+                                                                },
+                                                                Some("configuring") => html! {
+                                                                    <p class="connection-status" role="status">
+                                                                        {"Verifying SMS and voice callbacks…"}
+                                                                    </p>
+                                                                },
+                                                                Some("error") | Some("drifted") => html! {
+                                                                    <p class="connection-error" role="alert">
+                                                                        {"Twilio verification is required before this number can be enabled."}
+                                                                    </p>
+                                                                },
+                                                                _ => html! {},
+                                                            }
+                                                        }
                                                     </div>
                                                 }
                                             } else {

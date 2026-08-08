@@ -198,6 +198,13 @@ pub struct OntEvent {
     pub created_at: i32,
     pub updated_at: i32,
     pub friend_notified_at: Option<i32>,
+    pub reminder_attempts: i32,
+    pub reminder_next_attempt_at: Option<i32>,
+    pub reminder_lease_until: Option<i32>,
+    pub reminder_last_error: Option<String>,
+    pub reminder_delivered_at: Option<i32>,
+    pub reminder_delivery_key: Option<String>,
+    pub reminder_timezone: Option<String>,
 }
 
 #[derive(Insertable, Debug)]

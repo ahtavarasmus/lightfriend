@@ -1354,6 +1354,11 @@ pub struct Contact {
     pub subtitle: Option<String>,
     pub platform: Option<String>,
     pub room_id: Option<String>,
+    /// Bridge-native routing key (WhatsApp JID / Telegram tgid) when known.
+    /// The conversational send tool consumes the same cached contact index as
+    /// this picker, so cold contacts do not need an inbound message or portal.
+    #[serde(default)]
+    pub chat_id: Option<String>,
     pub person_id: Option<i32>,
     #[serde(default)]
     pub is_group: bool,
@@ -1379,8 +1384,16 @@ pub async fn get_contacts(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<Vec<Contact>>, (StatusCode, Json<serde_json::Value>)> {
-    let user_id = auth_user.user_id;
+    Ok(Json(
+        get_or_build_contact_index(&state, auth_user.user_id).await,
+    ))
+}
 
+/// Return the same contact/chat index used by the legacy picker.
+///
+/// Conversational sends call this directly so both surfaces resolve newly
+/// synchronized contacts and chats from identical metadata and mappings.
+pub async fn get_or_build_contact_index(state: &Arc<AppState>, user_id: i32) -> Vec<Contact> {
     // Cache hit path.
     if let Some(entry) = state.rule_builder_contact_cache.get(&user_id) {
         let (at, cached) = entry.value();
@@ -1391,7 +1404,7 @@ pub async fn get_contacts(
                 cached.len(),
                 at.elapsed().as_secs()
             );
-            return Ok(Json(cached.clone()));
+            return cached.clone();
         }
     }
 
@@ -1438,6 +1451,7 @@ pub async fn get_contacts(
                     subtitle: Some(format!("Person · {} channel(s)", person.channels.len())),
                     platform: None,
                     room_id: None,
+                    chat_id: None,
                     person_id: Some(person.person.id),
                     is_group: false,
                     source: "person".to_string(),
@@ -1458,6 +1472,7 @@ pub async fn get_contacts(
                     subtitle: Some(format!("DM · {}", ch.platform)),
                     platform: Some(ch.platform.clone()),
                     room_id: ch.room_id.clone(),
+                    chat_id: ch.handle.clone(),
                     person_id: Some(person.person.id),
                     is_group: false,
                     source: "channel".to_string(),
@@ -1544,6 +1559,7 @@ pub async fn get_contacts(
                         subtitle: sub,
                         platform: Some(service.clone()),
                         room_id: Some(room.room_id),
+                        chat_id: None,
                         person_id: None,
                         is_group: room.is_group,
                         source: if room.is_group {
@@ -1634,6 +1650,7 @@ pub async fn get_contacts(
                                 subtitle,
                                 platform: Some("telegram".to_string()),
                                 room_id: c.mxid,
+                                chat_id: Some(c.tgid.to_string()),
                                 person_id: None,
                                 is_group: c.is_group,
                                 source: if c.is_group {
@@ -1693,6 +1710,7 @@ pub async fn get_contacts(
                                 subtitle,
                                 platform: Some("whatsapp".to_string()),
                                 room_id: c.mxid,
+                                chat_id: Some(c.chat_id),
                                 person_id: None,
                                 is_group: c.is_group,
                                 source: if c.is_group {
@@ -1741,6 +1759,7 @@ pub async fn get_contacts(
                 subtitle: Some(platform.clone()),
                 platform: Some(platform.clone()),
                 room_id: None,
+                chat_id: None,
                 person_id: None,
                 is_group: false,
                 source: "chat".to_string(),
@@ -1782,7 +1801,7 @@ pub async fn get_contacts(
         .rule_builder_contact_cache
         .insert(user_id, (std::time::Instant::now(), contacts.clone()));
 
-    Ok(Json(contacts))
+    contacts
 }
 
 /// POST /api/events/{id}/dismiss

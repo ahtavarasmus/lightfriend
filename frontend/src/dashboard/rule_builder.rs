@@ -44,7 +44,7 @@ pub struct Contact {
 /// Order: exact (3) > starts-with (2) > contains (1) > no match (None).
 /// Runs in the browser per keystroke across the whole contact list —
 /// stays under a millisecond for lists of several thousand.
-fn score_contact(query_lower: &str, c: &Contact) -> Option<i32> {
+pub(super) fn score_contact(query_lower: &str, c: &Contact) -> Option<i32> {
     let name = c.display_name.to_lowercase();
     if name == query_lower {
         Some(3)

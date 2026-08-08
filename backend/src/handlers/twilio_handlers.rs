@@ -501,6 +501,23 @@ impl crate::api::twilio_client::TwilioClient for NoOpTwilioClient {
         Ok("noop".to_string())
     }
 
+    async fn fetch_incoming_phone_number(
+        &self,
+        _credentials: &crate::api::twilio_client::TwilioCredentials,
+        phone_number: &str,
+    ) -> Result<
+        crate::api::twilio_client::IncomingPhoneNumberConfig,
+        crate::api::twilio_client::TwilioClientError,
+    > {
+        Ok(crate::api::twilio_client::IncomingPhoneNumberConfig {
+            sid: "noop".to_string(),
+            phone_number: phone_number.to_string(),
+            sms_capable: false,
+            voice_capable: false,
+            ..Default::default()
+        })
+    }
+
     async fn check_phone_numbers_available(
         &self,
         _credentials: &crate::api::twilio_client::TwilioCredentials,

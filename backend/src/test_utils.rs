@@ -91,7 +91,11 @@ pub fn create_test_pg_pool() -> crate::PgDbPool {
             "TRUNCATE ont_links, ont_changelog, ont_channels, ont_person_edits, ont_persons, ont_messages, ont_events, ont_rules CASCADE",
         )
         .execute(&mut conn);
-        let _ = diesel::sql_query("TRUNCATE tuwunel_cleanup_events CASCADE").execute(&mut conn);
+        let _ = diesel::sql_query(
+            "TRUNCATE tuwunel_cleanup_events, scheduler_health, billing_webhook_events, \
+             billing_usage_intents, billing_usage_events, billing_accounts CASCADE",
+        )
+        .execute(&mut conn);
     }
 
     pool

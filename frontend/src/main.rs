@@ -55,6 +55,7 @@ mod components {
 }
 mod dashboard {
     pub mod activity_feed;
+    pub mod always_show;
     pub mod chat_box;
     pub mod dashboard_view;
     pub mod emoji_utils;
@@ -67,7 +68,6 @@ mod dashboard {
     pub mod settings_panel;
     pub mod tesla_quick_panel;
     pub mod timeline_view;
-    pub mod triage_indicator;
     pub mod webhooks_panel;
     pub mod youtube_quick_panel;
 }

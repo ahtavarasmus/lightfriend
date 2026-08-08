@@ -2120,6 +2120,39 @@ impl OntologyRepository {
         Ok(created)
     }
 
+    /// Create a one-shot reminder and persist the IANA timezone used to
+    /// interpret it in the same transaction.
+    pub fn create_reminder(
+        &self,
+        event: &NewOntEvent,
+        timezone: &str,
+    ) -> Result<OntEvent, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        conn.transaction(|conn| {
+            let created: OntEvent = diesel::insert_into(ont_events::table)
+                .values(event)
+                .get_result(conn)?;
+            let delivery_key = format!("reminder-event-{}", created.id);
+            diesel::update(ont_events::table.find(created.id))
+                .set((
+                    ont_events::reminder_timezone.eq(Some(timezone)),
+                    ont_events::reminder_delivery_key.eq(Some(delivery_key)),
+                    ont_events::reminder_next_attempt_at.eq(event.remind_at),
+                ))
+                .execute(conn)?;
+            Self::log_change(
+                conn,
+                event.user_id,
+                "Event",
+                created.id,
+                "created",
+                Some(format!("description={}", event.description)),
+                "user_action",
+            );
+            ont_events::table.find(created.id).first(conn)
+        })
+    }
+
     pub fn get_event(&self, user_id: i32, event_id: i32) -> Result<OntEvent, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         ont_events::table
@@ -2302,21 +2335,172 @@ impl OntologyRepository {
             .first(&mut conn)
     }
 
-    /// Get active events with remind_at <= now (due for reminder).
-    pub fn get_events_due_for_notification(&self, now: i32) -> Result<Vec<OntEvent>, DieselError> {
+    pub fn reset_event_reminder_delivery(
+        &self,
+        user_id: i32,
+        event_id: i32,
+        timezone: &str,
+    ) -> Result<OntEvent, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        ont_events::table
-            .filter(ont_events::status.eq("active"))
-            .filter(ont_events::remind_at.is_not_null())
-            .filter(ont_events::remind_at.le(now))
-            .load(&mut conn)
+        let event: OntEvent = ont_events::table
+            .filter(ont_events::id.eq(event_id))
+            .filter(ont_events::user_id.eq(user_id))
+            .first(&mut conn)?;
+        diesel::update(
+            ont_events::table
+                .filter(ont_events::id.eq(event_id))
+                .filter(ont_events::user_id.eq(user_id)),
+        )
+        .set((
+            ont_events::reminder_timezone.eq(Some(timezone)),
+            ont_events::reminder_next_attempt_at.eq(event.remind_at),
+            ont_events::reminder_lease_until.eq::<Option<i32>>(None),
+            ont_events::reminder_last_error.eq::<Option<String>>(None),
+            ont_events::reminder_delivered_at.eq::<Option<i32>>(None),
+            ont_events::reminder_attempts.eq(0),
+            ont_events::status.eq("active"),
+            ont_events::updated_at.eq(Self::now()),
+        ))
+        .get_result(&mut conn)
+    }
+
+    /// Atomically lease due reminders. PostgreSQL row locks plus SKIP LOCKED
+    /// make concurrent scheduler replicas claim disjoint events. Expired
+    /// leases are recoverable after a crash/restart.
+    pub fn claim_due_reminders(
+        &self,
+        now: i32,
+        lease_seconds: i32,
+        limit: i64,
+    ) -> Result<Vec<OntEvent>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        conn.transaction(|conn| {
+            let candidates = ont_events::table
+                .filter(ont_events::remind_at.is_not_null())
+                .filter(ont_events::remind_at.le(now))
+                .filter(
+                    ont_events::reminder_next_attempt_at
+                        .is_null()
+                        .or(ont_events::reminder_next_attempt_at.le(now)),
+                )
+                .filter(
+                    ont_events::status.eq("active").or(ont_events::status
+                        .eq("reminder_sending")
+                        .and(ont_events::reminder_lease_until.is_not_null())
+                        .and(ont_events::reminder_lease_until.le(now))),
+                )
+                .order(ont_events::remind_at.asc())
+                .for_update()
+                .skip_locked()
+                .limit(limit)
+                .load::<OntEvent>(conn)?;
+            let ids: Vec<i32> = candidates.iter().map(|event| event.id).collect();
+            if ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            diesel::update(ont_events::table.filter(ont_events::id.eq_any(&ids)))
+                .set((
+                    ont_events::status.eq("reminder_sending"),
+                    ont_events::reminder_lease_until.eq(Some(now.saturating_add(lease_seconds))),
+                    ont_events::reminder_attempts.eq(ont_events::reminder_attempts + 1),
+                    ont_events::updated_at.eq(now),
+                ))
+                .execute(conn)?;
+            ont_events::table
+                .filter(ont_events::id.eq_any(ids))
+                .load(conn)
+        })
+    }
+
+    pub fn mark_reminder_delivered(
+        &self,
+        user_id: i32,
+        event_id: i32,
+        delivered_at: i32,
+    ) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(
+            ont_events::table
+                .filter(ont_events::id.eq(event_id))
+                .filter(ont_events::user_id.eq(user_id))
+                .filter(ont_events::status.eq("reminder_sending")),
+        )
+        .set((
+            ont_events::status.eq("notified"),
+            ont_events::reminder_delivered_at.eq(Some(delivered_at)),
+            ont_events::reminder_lease_until.eq::<Option<i32>>(None),
+            ont_events::reminder_last_error.eq::<Option<String>>(None),
+            ont_events::updated_at.eq(delivered_at),
+        ))
+        .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn release_reminder_for_retry(
+        &self,
+        user_id: i32,
+        event_id: i32,
+        attempts: i32,
+        error_code: &str,
+        now: i32,
+    ) -> Result<(), DieselError> {
+        let delay = 2_i32.saturating_pow(attempts.clamp(1, 11) as u32).min(3600);
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(
+            ont_events::table
+                .filter(ont_events::id.eq(event_id))
+                .filter(ont_events::user_id.eq(user_id))
+                .filter(ont_events::status.eq("reminder_sending")),
+        )
+        .set((
+            ont_events::status.eq("active"),
+            ont_events::reminder_next_attempt_at.eq(Some(now.saturating_add(delay))),
+            ont_events::reminder_lease_until.eq::<Option<i32>>(None),
+            ont_events::reminder_last_error.eq(Some(error_code)),
+            ont_events::updated_at.eq(now),
+        ))
+        .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn update_scheduler_health(
+        &self,
+        job_name: &str,
+        started_at: i32,
+        completed_at: Option<i32>,
+        error_code: Option<&str>,
+    ) -> Result<(), DieselError> {
+        use diesel::sql_types::{Integer, Nullable, Text};
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::sql_query(
+            "INSERT INTO scheduler_health (job_name, last_started_at, last_completed_at, last_error, updated_at) \
+             VALUES ($1, $2, $3, $4, $2) \
+             ON CONFLICT (job_name) DO UPDATE SET \
+               last_started_at = EXCLUDED.last_started_at, \
+               last_completed_at = COALESCE(EXCLUDED.last_completed_at, scheduler_health.last_completed_at), \
+               last_error = EXCLUDED.last_error, updated_at = EXCLUDED.updated_at",
+        )
+        .bind::<Text, _>(job_name)
+        .bind::<Integer, _>(started_at)
+        .bind::<Nullable<Integer>, _>(completed_at)
+        .bind::<Nullable<Text>, _>(error_code)
+        .execute(&mut conn)?;
+        Ok(())
     }
 
     /// Get active or already-notified events with due_at <= now.
     pub fn get_expired_events(&self, now: i32) -> Result<Vec<OntEvent>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         ont_events::table
-            .filter(ont_events::status.eq_any(&["active", "notified"]))
+            .filter(
+                ont_events::status
+                    .eq("notified")
+                    .or(ont_events::status.eq("active").and(
+                        ont_events::remind_at
+                            .is_null()
+                            .or(ont_events::reminder_delivered_at.is_not_null()),
+                    )),
+            )
             .filter(ont_events::due_at.is_not_null())
             .filter(ont_events::due_at.le(now))
             .load(&mut conn)

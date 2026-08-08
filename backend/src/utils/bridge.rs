@@ -245,7 +245,10 @@ async fn whatsapp_room_muted(state: &Arc<AppState>, matrix_user_id: &str, room_i
         Ok(Ok(muted)) => muted,
         Ok(Err(e)) => {
             tracing::warn!("WhatsApp mute lookup failed for room {}: {}", room_id, e);
-            false
+            // A transient bridge-metadata failure must not turn a natively muted
+            // conversation into an alert. Keep ingesting the message, but fail
+            // closed for attention until the next event re-checks the metadata.
+            true
         }
         Err(e) => {
             tracing::warn!(
@@ -253,8 +256,27 @@ async fn whatsapp_room_muted(state: &Arc<AppState>, matrix_user_id: &str, room_i
                 room_id,
                 e
             );
-            false
+            true
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AttentionDisposition {
+    pub notify_or_evaluate: bool,
+    pub include_in_digest: bool,
+    pub fire_reply_watch: bool,
+}
+
+/// Native/Matrix mute is the highest-priority attention choice. It suppresses
+/// proactive rules (including Always Show), reply watches and digests while
+/// leaving the underlying message available in history. This function is kept
+/// pure so the precedence remains explicit and regression-testable.
+pub fn attention_disposition(is_muted: bool) -> AttentionDisposition {
+    AttentionDisposition {
+        notify_or_evaluate: !is_muted,
+        include_in_digest: !is_muted,
+        fire_reply_watch: !is_muted,
     }
 }
 
@@ -2043,6 +2065,11 @@ pub async fn handle_bridge_message(
         }
     };
     let client_user_id = matrix_user_id.to_string();
+    let explicitly_mentions_user = event
+        .content
+        .mentions
+        .as_ref()
+        .is_some_and(|mentions| mentions.user_ids.contains(&matrix_user_id));
     // Extract the local part of the Matrix user ID (before the domain)
     let local_user_id = client_user_id
         .split(':')
@@ -2469,12 +2496,13 @@ pub async fn handle_bridge_message(
     let attention_muted = matrix_room_muted
         || (service == "whatsapp"
             && whatsapp_room_muted(&state, &client_user_id, &current_room_id).await);
+    let attention = attention_disposition(attention_muted);
 
     // Pending reply watch: if the user armed one for this room, SMS them
     // the first inbound message from the recipient and clear the watch.
     // Runs before the tier-2/auto-features gates because the user has
     // already paid for SMS and explicitly asked to be told.
-    if !attention_muted && !is_group {
+    if attention.fire_reply_watch && !is_group {
         let watch_content = match &event.content.msgtype {
             MessageType::Text(t) => t.body.clone(),
             MessageType::Notice(n) => n.body.clone(),
@@ -2488,7 +2516,7 @@ pub async fn handle_bridge_message(
         };
         match state
             .pending_reply_watches_repository
-            .find_active_bridge(user_id, &current_room_id)
+            .claim_active_bridge(user_id, &current_room_id)
         {
             Ok(Some(watch)) => {
                 let body = if watch_content.is_empty() {
@@ -2499,18 +2527,27 @@ pub async fn handle_bridge_message(
                         watch.contact_display_name, watch_content
                     )
                 };
-                // Only clear the watch once we've successfully notified the
-                // user. If the SMS fails (e.g. transient Twilio outage), leave
-                // the watch armed so the next inbound message retries.
-                match state.channel_router.send_to_user(&user, &body, None).await {
-                    Ok(_) => {
-                        if let Err(e) = state.pending_reply_watches_repository.delete(watch.id) {
-                            tracing::warn!(
-                                "REPLY_WATCH failed to delete fired watch id={}: {}",
-                                watch.id,
-                                e
-                            );
-                        } else {
+                let suppressions =
+                    crate::TemporaryAlertSuppressionsRepository::new(state.pg_pool.clone());
+                let suppressed = suppressions
+                    .decision(user_id, "critical", &body, true)
+                    .map(|decision| {
+                        !matches!(
+                            decision,
+                            crate::repositories::temporary_alert_suppressions_repository::SuppressionDecision::Allow
+                        )
+                    })
+                    .unwrap_or(false);
+                if suppressed {
+                    tracing::info!(
+                        "REPLY_WATCH fired+cleared without delivery during Quiet Mode id={} user={} room={}",
+                        watch.id,
+                        user_id,
+                        current_room_id
+                    );
+                } else {
+                    match state.channel_router.send_to_user(&user, &body, None).await {
+                        Ok(_) => {
                             tracing::info!(
                                 "REPLY_WATCH fired+cleared bridge watch id={} user={} room={}",
                                 watch.id,
@@ -2518,13 +2555,24 @@ pub async fn handle_bridge_message(
                                 current_room_id
                             );
                         }
+                        Err(e) => {
+                            tracing::warn!(
+                                "REPLY_WATCH SMS failed user={} watch={}, restoring for retry: {}",
+                                user_id,
+                                watch.id,
+                                e
+                            );
+                            if let Err(restore_error) =
+                                state.pending_reply_watches_repository.restore(&watch)
+                            {
+                                tracing::warn!(
+                                    "REPLY_WATCH failed to restore watch id={}: {}",
+                                    watch.id,
+                                    restore_error
+                                );
+                            }
+                        }
                     }
-                    Err(e) => tracing::warn!(
-                        "REPLY_WATCH SMS failed user={} watch={}, leaving armed for retry: {}",
-                        user_id,
-                        watch.id,
-                        e
-                    ),
                 }
             }
             Ok(None) => {}
@@ -2784,6 +2832,7 @@ pub async fn handle_bridge_message(
                     "content": msg.content,
                     "room_id": msg.room_id,
                     "is_group": is_group,
+                    "is_mentioned": explicitly_mentions_user,
                 });
                 if let Some(ref pn) = person_name {
                     snapshot["person_name"] = serde_json::Value::String(pn.clone());
@@ -2791,7 +2840,19 @@ pub async fn handle_bridge_message(
                 if let Some(pid) = person_id {
                     snapshot["person_id"] = serde_json::json!(pid);
                 }
-                if has_auto_features && !attention_muted {
+                if !attention.include_in_digest {
+                    if let Err(e) = state_clone
+                        .ontology_repository
+                        .mark_digest_delivered(&[created.id], msg.created_at)
+                    {
+                        tracing::warn!(
+                            "Failed to exclude muted bridge message {} from digests: {}",
+                            created.id,
+                            e
+                        );
+                    }
+                }
+                if has_auto_features && attention.notify_or_evaluate {
                     let entity_type = if is_call_event { "Call" } else { "Message" };
                     crate::proactive::rules::emit_ontology_change(
                         &state_clone,

@@ -4,15 +4,32 @@
 //! If any code tries to use these with a SQLite connection, it won't compile.
 
 use crate::pg_schema::{
-    admin_alerts, billing_accounts, billing_usage_events, billing_webhook_events,
-    bridge_bandwidth_logs, bridge_disconnection_events, bridges, country_availability,
-    disabled_alert_types, imap_connection, llm_usage_logs, mcp_servers, message_history,
-    message_status_log, processed_emails, refund_info, site_metrics, tesla, totp_backup_codes,
-    totp_secrets, tuwunel_cleanup_events, usage_logs, user_info, user_secrets, waitlist,
-    webauthn_challenges, webauthn_credentials, youtube,
+    admin_alerts, billing_accounts, billing_usage_events, billing_usage_intents,
+    billing_webhook_events, bridge_bandwidth_logs, bridge_disconnection_events, bridges,
+    byot_verifications, country_availability, disabled_alert_types, imap_connection,
+    llm_usage_logs, mcp_servers, message_history, message_status_log, processed_emails,
+    refund_info, site_metrics, tesla, totp_backup_codes, totp_secrets, tuwunel_cleanup_events,
+    usage_logs, user_info, user_secrets, waitlist, webauthn_challenges, webauthn_credentials,
+    youtube,
 };
 use diesel::prelude::*;
 use serde::Serialize;
+
+#[derive(Queryable, Selectable, Clone, Debug, Serialize)]
+#[diesel(table_name = byot_verifications)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct ByotVerification {
+    pub user_id: i32,
+    pub phone_number: String,
+    pub phone_sid: Option<String>,
+    pub status: String,
+    pub attempt_id: String,
+    pub configured_at: Option<i32>,
+    pub verified_at: Option<i32>,
+    pub last_checked_at: i32,
+    pub error_code: Option<String>,
+    pub updated_at: i32,
+}
 
 #[derive(Queryable, Selectable, Clone, Debug, Serialize)]
 #[diesel(table_name = billing_accounts)]
@@ -57,6 +74,9 @@ pub struct BillingUsageEvent {
     pub last_error: Option<String>,
     pub created_at: i32,
     pub sent_at: Option<i32>,
+    pub provider_reconciled_at: Option<i32>,
+    pub provider_status: String,
+    pub invoice_visible: bool,
 }
 
 #[derive(Insertable)]
@@ -71,12 +91,53 @@ pub struct NewBillingUsageEvent {
     pub created_at: i32,
 }
 
+#[derive(Queryable, Selectable, Clone, Debug)]
+#[diesel(table_name = billing_usage_intents)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct BillingUsageIntent {
+    pub transaction_id: String,
+    pub user_id: i32,
+    pub event_type: String,
+    pub status: String,
+    pub created_at: i32,
+    pub finalized_at: Option<i32>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = billing_usage_intents)]
+pub struct NewBillingUsageIntent<'a> {
+    pub transaction_id: &'a str,
+    pub user_id: i32,
+    pub event_type: &'a str,
+    pub created_at: i32,
+}
+
+#[derive(Queryable, Selectable, Clone, Debug)]
+#[diesel(table_name = billing_webhook_events)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct BillingWebhookEvent {
+    pub event_id: String,
+    pub event_type: String,
+    pub received_at: i32,
+    pub status: String,
+    pub attempts: i32,
+    pub lease_until: Option<i32>,
+    pub processed_at: Option<i32>,
+    pub last_error: Option<String>,
+}
+
 #[derive(Insertable)]
 #[diesel(table_name = billing_webhook_events)]
 pub struct NewBillingWebhookEvent<'a> {
     pub event_id: &'a str,
     pub event_type: &'a str,
     pub received_at: i32,
+    pub status: &'a str,
+    pub attempts: i32,
+    pub lease_until: Option<i32>,
+    pub processed_at: Option<i32>,
+    pub last_error: Option<&'a str>,
 }
 
 // -- user_secrets (NEW table, consolidates matrix/twilio secrets) --
@@ -123,6 +184,7 @@ pub struct PgUserInfo {
     pub nearby_places: Option<String>,
     pub latitude: Option<f32>,
     pub longitude: Option<f32>,
+    pub timezone_updated_at: Option<i32>,
 }
 
 #[derive(Insertable)]

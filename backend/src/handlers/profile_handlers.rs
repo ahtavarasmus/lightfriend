@@ -114,9 +114,14 @@ pub struct ProfileResponse {
     estimated_monitoring_cost: f32,
     location: Option<String>,
     nearby_places: Option<String>,
-    plan_type: Option<String>,    // "autopilot"; "assistant" is legacy
-    own_twilio_enabled: bool,     // whether phone traffic routes through user's Twilio account
-    phone_service_active: bool,   // whether phone service is active - can be disabled for security
+    plan_type: Option<String>, // "autopilot"; "assistant" is legacy
+    own_twilio_enabled: bool,  // whether phone traffic routes through user's Twilio account
+    byot_verification_status: Option<String>,
+    byot_configured_at: Option<i32>,
+    byot_verified_at: Option<i32>,
+    byot_last_checked_at: Option<i32>,
+    byot_error_code: Option<String>,
+    phone_service_active: bool, // whether phone service is active - can be disabled for security
     llm_provider: Option<String>, // "openai" (default) or "tinfoil" - user's LLM provider preference
     voice_provider: String,       // "openai_realtime"; Tinfoil voice is temporarily disabled
     openai_realtime_voice: String,
@@ -254,6 +259,15 @@ pub async fn get_profile(
                 Some("sinch") => std::env::var("SINCH_US_FROM_NUMBER").ok(),
                 _ => user.preferred_number.clone(),
             };
+            let byot_verification = crate::ByotRepository::new(state.pg_pool.clone())
+                .get(auth_user.user_id)
+                .map_err(|error| {
+                    tracing::error!(%error, "get_profile: BYOT verification lookup failed");
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "Database error"})),
+                    )
+                })?;
             Ok(Json(ProfileResponse {
                 id: user.id,
                 email: user.email,
@@ -284,6 +298,19 @@ pub async fn get_profile(
                 nearby_places: user_info.nearby_places,
                 plan_type: user.plan_type,
                 own_twilio_enabled: user.own_twilio_enabled,
+                byot_verification_status: byot_verification
+                    .as_ref()
+                    .map(|verification| verification.status.clone()),
+                byot_configured_at: byot_verification
+                    .as_ref()
+                    .and_then(|verification| verification.configured_at),
+                byot_verified_at: byot_verification
+                    .as_ref()
+                    .and_then(|verification| verification.verified_at),
+                byot_last_checked_at: byot_verification
+                    .as_ref()
+                    .map(|verification| verification.last_checked_at),
+                byot_error_code: byot_verification.and_then(|verification| verification.error_code),
                 phone_service_active: user_settings.phone_service_active,
                 llm_provider: user_settings.llm_provider,
                 voice_provider: "openai_realtime".to_string(),
@@ -448,13 +475,32 @@ pub async fn update_timezone(
     auth_user: AuthUser,
     Json(request): Json<TimezoneUpdateRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if request.timezone.parse::<chrono_tz::Tz>().is_err() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid IANA timezone"})),
+        ));
+    }
     match state
         .user_core
         .update_timezone(auth_user.user_id, &request.timezone)
     {
-        Ok(_) => Ok(Json(json!({
-            "message": "Timezone updated successfully"
-        }))),
+        Ok(_) => {
+            let persisted = state
+                .user_core
+                .get_user_info(auth_user.user_id)
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Database error: {}", e)})),
+                    )
+                })?;
+            Ok(Json(json!({
+                "message": "Timezone updated successfully",
+                "timezone": persisted.timezone,
+                "timezone_updated_at": persisted.timezone_updated_at,
+            })))
+        }
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)})),

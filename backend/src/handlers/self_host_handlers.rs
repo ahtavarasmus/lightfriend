@@ -1,11 +1,15 @@
+use crate::api::twilio_client::{TwilioClient, TwilioCredentials};
 use crate::handlers::auth_middleware::AuthUser;
-use crate::AppState;
-use crate::UserCoreOps;
+use crate::services::byot_setup::{
+    configure_and_verify, safe_twilio_error, verify_live_configuration, ByotWebhookEndpoints,
+};
+use crate::{AppState, ByotRepository, UserCoreOps};
 use axum::{extract::State, http::StatusCode, Json};
-use std::sync::Arc;
-
 use serde::Deserialize;
 use serde_json::json;
+use std::sync::Arc;
+
+type ApiError = (StatusCode, Json<serde_json::Value>);
 
 #[derive(Deserialize)]
 pub struct UpdateTwilioPhoneRequest {
@@ -23,380 +27,313 @@ pub struct UpdateOwnTwilioEnabledRequest {
     enabled: bool,
 }
 
+fn api_error(status: StatusCode, message: &str) -> ApiError {
+    (status, Json(json!({ "error": message })))
+}
+
+fn valid_e164(phone: &str) -> bool {
+    phone.len() >= 3
+        && phone.len() <= 16
+        && phone.starts_with('+')
+        && phone.as_bytes().get(1).is_some_and(u8::is_ascii_digit)
+        && phone[1..]
+            .chars()
+            .all(|character| character.is_ascii_digit())
+        && !phone.starts_with("+0")
+}
+
+fn valid_account_sid(account_sid: &str) -> bool {
+    account_sid.len() == 34
+        && account_sid.starts_with("AC")
+        && account_sid
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
+}
+
+fn valid_auth_token(auth_token: &str) -> bool {
+    auth_token.len() >= 20
+        && auth_token.len() <= 128
+        && !auth_token.chars().any(char::is_whitespace)
+}
+
+fn webhook_endpoints() -> Result<ByotWebhookEndpoints, ApiError> {
+    let server_url = std::env::var("SERVER_URL").unwrap_or_default();
+    ByotWebhookEndpoints::from_server_url(&server_url).map_err(|error| {
+        tracing::error!(code = error.code, "BYOT webhook base URL is invalid");
+        api_error(StatusCode::SERVICE_UNAVAILABLE, error.user_message)
+    })
+}
+
+fn current_phone(state: &AppState, user_id: i32) -> Result<String, ApiError> {
+    state
+        .user_core
+        .find_by_id(user_id)
+        .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "Failed to fetch user"))?
+        .and_then(|user| user.preferred_number)
+        .filter(|phone| !phone.is_empty())
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::BAD_REQUEST,
+                "Add your Twilio phone number before enabling own Twilio mode",
+            )
+        })
+}
+
 pub async fn update_twilio_phone(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Json(req): Json<UpdateTwilioPhoneRequest>,
-) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
-    match state
-        .user_core
-        .update_preferred_number(auth_user.user_id, &req.twilio_phone)
-    {
-        Ok(_) => {
-            tracing::debug!(
-                "Successfully updated Twilio phone for user: {}",
-                auth_user.user_id
-            );
-
-            if let Ok((account_sid, auth_token)) = state
-                .user_repository
-                .get_twilio_credentials(auth_user.user_id)
-            {
-                let phone = req.twilio_phone.clone();
-                let user_id = auth_user.user_id;
-                let state_clone = state.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = crate::api::twilio_utils::set_twilio_webhook(
-                        &account_sid,
-                        &auth_token,
-                        &phone,
-                        user_id,
-                        state_clone,
-                    )
-                    .await
-                    {
-                        tracing::error!("Failed to set Twilio webhook for phone {}: {}", phone, e);
-                        // Proceed anyway(probably user hasn't given their twilio credentials yet, we will try again when they do)
-                    } else {
-                        tracing::debug!("Successfully set Twilio webhook for phone: {}", phone);
-                    }
-                });
-            } else {
-                tracing::warn!(
-                    "Twilio credentials not found for user {}, skipping webhook update",
-                    auth_user.user_id
-                );
-            }
-
-            Ok(StatusCode::OK)
-        }
-        Err(e) => {
-            tracing::error!("Failed to update Twilio phone: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to update Twilio phone"})),
-            ))
-        }
+) -> Result<StatusCode, ApiError> {
+    let phone = req.twilio_phone.trim();
+    if !valid_e164(phone) {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "Phone number must be in E.164 format (for example, +14155551234)",
+        ));
     }
+
+    let byot = ByotRepository::new(state.pg_pool.clone());
+    byot.update_phone_and_invalidate(auth_user.user_id, phone)
+        .map_err(|_| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update Twilio phone number",
+            )
+        })?;
+    Ok(StatusCode::OK)
 }
 
 pub async fn update_twilio_creds(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Json(req): Json<UpdateTwilioCredsRequest>,
-) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
-    let user_opt = match state.user_core.find_by_id(auth_user.user_id) {
-        Ok(opt) => opt,
-        Err(e) => {
-            tracing::error!("Failed to fetch user: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to fetch user"})),
-            ));
-        }
-    };
-
-    let user = match user_opt {
-        Some(u) => u,
-        None => {
-            tracing::error!("User not found: {}", auth_user.user_id);
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "User not found"})),
-            ));
-        }
-    };
-
-    match state.user_repository.update_twilio_credentials(
-        auth_user.user_id,
-        &req.account_sid,
-        &req.auth_token,
-    ) {
-        Ok(_) => {
-            tracing::debug!(
-                "Successfully updated Twilio credentials for user: {}",
-                auth_user.user_id
-            );
-
-            if let Some(phone) = user.preferred_number {
-                let account_sid = req.account_sid.clone();
-                let auth_token = req.auth_token.clone();
-                let phone = phone.clone();
-                let user_id = auth_user.user_id;
-                let state_clone = state.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = crate::api::twilio_utils::set_twilio_webhook(
-                        &account_sid,
-                        &auth_token,
-                        &phone,
-                        user_id,
-                        state_clone,
-                    )
-                    .await
-                    {
-                        tracing::error!("Failed to set Twilio webhook for phone {}: {}", phone, e);
-                        // Proceed anyway(probably user hasn't inputted their twilio number yet, we try again when they do)
-                    } else {
-                        tracing::debug!("Successfully set Twilio webhook for phone: {}", phone);
-                    }
-                });
-            }
-
-            Ok(StatusCode::OK)
-        }
-        Err(e) => {
-            tracing::error!("Failed to update Twilio credentials: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to update Twilio credentials"})),
-            ))
-        }
+) -> Result<StatusCode, ApiError> {
+    if !valid_account_sid(req.account_sid.trim()) || !valid_auth_token(req.auth_token.trim()) {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "Enter a valid Twilio Account SID and Auth Token",
+        ));
     }
+
+    let phone = current_phone(&state, auth_user.user_id).unwrap_or_default();
+    let byot = ByotRepository::new(state.pg_pool.clone());
+    let encrypted_account_sid =
+        crate::utils::encryption::encrypt(req.account_sid.trim()).map_err(|_| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to store Twilio credentials",
+            )
+        })?;
+    let encrypted_auth_token =
+        crate::utils::encryption::encrypt(req.auth_token.trim()).map_err(|_| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to store Twilio credentials",
+            )
+        })?;
+    byot.replace_credentials_and_invalidate(
+        auth_user.user_id,
+        &phone,
+        &encrypted_account_sid,
+        &encrypted_auth_token,
+    )
+    .map_err(|_| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to store Twilio credentials",
+        )
+    })?;
+    Ok(StatusCode::OK)
 }
 
-/// Verify BYOT Twilio setup by making read-only API calls.
-/// Checks:
-///   1. Credentials authenticate successfully
-///   2. The phone number exists in their Twilio account
-///   3. SMS webhook is pointing at our server
-///   4. Voice webhook is pointing at our server
-///
-/// Returns a detailed status report without sending any message.
+/// Read the live Twilio state and detect configuration drift. This endpoint
+/// performs no provider mutation; a mismatch immediately disables BYOT.
 pub async fn verify_byot_setup(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<serde_json::Value>, ApiError> {
     let user_id = auth_user.user_id;
-
-    // Fetch user
-    let user = state
-        .user_core
-        .find_by_id(user_id)
-        .map_err(|e| {
-            tracing::error!("Failed to fetch user: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to fetch user"})),
+    let phone_number = current_phone(&state, user_id)?;
+    let endpoints = webhook_endpoints()?;
+    let (account_sid, auth_token) = state
+        .user_repository
+        .get_twilio_credentials(user_id)
+        .map_err(|_| {
+            api_error(
+                StatusCode::BAD_REQUEST,
+                "Add your Twilio credentials before verifying this number",
             )
-        })?
-        .ok_or((
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "User not found"})),
-        ))?;
+        })?;
+    let credentials = TwilioCredentials::new(account_sid, auth_token);
+    let byot = ByotRepository::new(state.pg_pool.clone());
 
-    // Get phone number
-    let phone_number = match user.preferred_number {
-        Some(p) if !p.is_empty() => p,
-        _ => {
-            return Ok(Json(json!({
-                "ok": false,
-                "step": "phone_number",
-                "error": "No BYOT phone number configured",
-            })));
-        }
-    };
-
-    // Get credentials
-    let (account_sid, auth_token) = match state.user_repository.get_twilio_credentials(user_id) {
-        Ok(creds) => creds,
-        Err(_) => {
-            return Ok(Json(json!({
-                "ok": false,
-                "step": "credentials",
-                "error": "No Twilio credentials configured",
-            })));
-        }
-    };
-
-    // Call Twilio API to list incoming phone numbers and find ours
-    let client = reqwest::Client::new();
-    let url = format!(
-        "https://api.twilio.com/2010-04-01/Accounts/{}/IncomingPhoneNumbers.json",
-        account_sid
-    );
-    let response = match client
-        .get(&url)
-        .basic_auth(&account_sid, Some(&auth_token))
-        .query(&[("PhoneNumber", phone_number.as_str())])
-        .send()
+    let live = match state
+        .twilio_client
+        .fetch_incoming_phone_number(&credentials, &phone_number)
         .await
     {
-        Ok(r) => r,
-        Err(e) => {
+        Ok(config) => config,
+        Err(provider_error) => {
+            let safe = safe_twilio_error(&provider_error);
+            let _ = byot.mark_drifted(user_id, safe.code);
+            tracing::warn!(user_id, code = safe.code, "BYOT verification failed");
             return Ok(Json(json!({
                 "ok": false,
-                "step": "twilio_api",
-                "error": format!("Network error contacting Twilio: {}", e),
+                "status": "error",
+                "error_code": safe.code,
+                "error": safe.user_message,
             })));
         }
     };
 
-    let status = response.status();
-    if status == reqwest::StatusCode::UNAUTHORIZED {
-        return Ok(Json(json!({
-            "ok": false,
-            "step": "auth",
-            "error": "Twilio rejected your credentials (check Account SID and Auth Token)",
-        })));
-    }
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Ok(Json(json!({
-            "ok": false,
-            "step": "twilio_api",
-            "error": format!("Twilio API error {}: {}", status, body),
-        })));
-    }
-
-    // Parse response and find the number
-    let data: serde_json::Value = response.json().await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to parse Twilio response: {}", e)})),
-        )
-    })?;
-
-    let numbers = data["incoming_phone_numbers"].as_array();
-    let number_info = numbers.and_then(|arr| arr.first());
-    let number_info = match number_info {
-        Some(n) => n,
-        None => {
-            return Ok(Json(json!({
-                "ok": false,
-                "step": "phone_number_lookup",
-                "error": format!("Phone number {} not found in your Twilio account", phone_number),
-            })));
+    match verify_live_configuration(&live, &phone_number, &endpoints) {
+        Ok(()) => {
+            let remains_enabled = byot.mark_checked(user_id).map_err(|_| {
+                api_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to persist Twilio verification",
+                )
+            })?;
+            if !remains_enabled || !state.user_core.is_byot_user(user_id) {
+                return Ok(Json(json!({
+                    "ok": false,
+                    "status": "configuration_valid",
+                    "error_code": "reconnect_required",
+                    "error": "The live callbacks are valid, but this number must be reconnected before routing is enabled.",
+                })));
+            }
+            Ok(Json(json!({
+                "ok": true,
+                "status": "verified",
+                "phone_number": phone_number,
+                "sms_webhook": { "ok": true, "method": "POST" },
+                "voice_webhook": { "ok": true, "method": "POST" },
+            })))
         }
-    };
-
-    // Build expected webhook URLs from SERVER_URL
-    let server_url = std::env::var("SERVER_URL").unwrap_or_default();
-    let expected_sms = format!("{}/api/sms/server", server_url.trim_end_matches('/'));
-    let expected_voice = format!("{}/api/voice/incoming", server_url.trim_end_matches('/'));
-
-    let actual_sms = number_info["sms_url"].as_str().unwrap_or("").to_string();
-    let actual_voice = number_info["voice_url"].as_str().unwrap_or("").to_string();
-
-    let sms_ok = actual_sms == expected_sms;
-    let voice_ok = actual_voice == expected_voice;
-    let ok = sms_ok && voice_ok;
-
-    Ok(Json(json!({
-        "ok": ok,
-        "phone_number": phone_number,
-        "credentials_valid": true,
-        "sms_webhook": {
-            "ok": sms_ok,
-            "expected": expected_sms,
-            "actual": actual_sms,
-        },
-        "voice_webhook": {
-            "ok": voice_ok,
-            "expected": expected_voice,
-            "actual": actual_voice,
-        },
-    })))
+        Err(error) => {
+            byot.mark_drifted(user_id, error.code).map_err(|_| {
+                api_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to persist Twilio drift state",
+                )
+            })?;
+            tracing::warn!(
+                user_id,
+                code = error.code,
+                "BYOT configuration drift detected"
+            );
+            Ok(Json(json!({
+                "ok": false,
+                "status": "drifted",
+                "error_code": error.code,
+                "error": error.user_message,
+            })))
+        }
+    }
 }
 
 pub async fn update_own_twilio_enabled(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Json(req): Json<UpdateOwnTwilioEnabledRequest>,
-) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
-    if req.enabled {
-        let user = state
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let user_id = auth_user.user_id;
+    if !req.enabled {
+        state
             .user_core
-            .find_by_id(auth_user.user_id)
-            .map_err(|e| {
-                tracing::error!("Failed to fetch user: {}", e);
-                (
+            .update_own_twilio_enabled(user_id, false)
+            .map_err(|_| {
+                api_error(
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "Failed to fetch user"})),
+                    "Failed to disable own Twilio mode",
                 )
-            })?
-            .ok_or((
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "User not found"})),
-            ))?;
-
-        if user.preferred_number.as_deref().unwrap_or("").is_empty() {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(
-                    json!({"error": "Add your Twilio phone number before enabling own Twilio mode"}),
-                ),
-            ));
-        }
-
-        if state
-            .user_repository
-            .get_twilio_credentials(auth_user.user_id)
-            .is_err()
-        {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(
-                    json!({"error": "Add your Twilio credentials before enabling own Twilio mode"}),
-                ),
-            ));
-        }
-    }
-
-    state
-        .user_core
-        .update_own_twilio_enabled(auth_user.user_id, req.enabled)
-        .map_err(|e| {
-            tracing::error!("Failed to update own Twilio mode: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to update own Twilio mode"})),
-            )
-        })?;
-
-    if req.enabled {
-        let _ = state
-            .user_repository
-            .clear_included_usage_window(auth_user.user_id);
-    } else if let Some(user) = state.user_core.find_by_id(auth_user.user_id).ok().flatten() {
-        if user.sub_tier.as_deref() == Some("tier 2") {
-            if let Err(e) = crate::utils::usage::ensure_current_included_usage_window(&state, &user)
-            {
-                tracing::error!(
-                    "Failed to refresh included usage after own Twilio disable: {}",
-                    e
-                );
+            })?;
+        if let Some(user) = state.user_core.find_by_id(user_id).ok().flatten() {
+            if user.sub_tier.as_deref() == Some("tier 2") {
+                if let Err(error) =
+                    crate::utils::usage::ensure_current_included_usage_window(&state, &user)
+                {
+                    tracing::error!(user_id, %error, "Failed to refresh included usage");
+                }
             }
         }
+        return Ok(Json(json!({ "enabled": false })));
     }
 
-    Ok(StatusCode::OK)
+    let phone_number = current_phone(&state, user_id)?;
+    let endpoints = webhook_endpoints()?;
+    let (account_sid, auth_token) = state
+        .user_repository
+        .get_twilio_credentials(user_id)
+        .map_err(|_| {
+            api_error(
+                StatusCode::BAD_REQUEST,
+                "Add your Twilio credentials before enabling own Twilio mode",
+            )
+        })?;
+    let credentials = TwilioCredentials::new(account_sid, auth_token);
+    let byot = ByotRepository::new(state.pg_pool.clone());
+    let attempt_id = byot.start_attempt(user_id, &phone_number).map_err(|_| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to start Twilio verification",
+        )
+    })?;
+
+    let verified = match configure_and_verify(
+        state.twilio_client.as_ref(),
+        &credentials,
+        &phone_number,
+        &endpoints,
+    )
+    .await
+    {
+        Ok(config) => config,
+        Err(error) => {
+            let _ = byot.fail_if_current(user_id, &attempt_id, error.code);
+            tracing::warn!(user_id, code = error.code, "BYOT setup verification failed");
+            return Err(api_error(StatusCode::BAD_REQUEST, error.user_message));
+        }
+    };
+
+    let activated = byot
+        .activate_if_current(user_id, &attempt_id, &verified.sid)
+        .map_err(|_| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to persist Twilio verification",
+            )
+        })?;
+    if !activated {
+        return Err(api_error(
+            StatusCode::CONFLICT,
+            "Twilio settings changed while they were being verified. Please retry.",
+        ));
+    }
+
+    if let Err(error) = state.user_repository.clear_included_usage_window(user_id) {
+        tracing::error!(user_id, %error, "Failed to clear included usage after BYOT activation");
+    }
+    Ok(Json(json!({
+        "enabled": true,
+        "verification_status": "verified",
+        "phone_number": phone_number,
+    })))
 }
 
-/// Clear BYOT Twilio credentials (manual removal)
+/// Clear BYOT Twilio credentials (manual removal).
 pub async fn clear_twilio_creds(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
-) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
-    match state
-        .user_repository
-        .clear_twilio_credentials(auth_user.user_id)
-    {
-        Ok(_) => {
-            let _ = state
-                .user_core
-                .update_own_twilio_enabled(auth_user.user_id, false);
-            tracing::info!(
-                "Successfully cleared BYOT credentials for user: {}",
-                auth_user.user_id
-            );
-            Ok(StatusCode::OK)
-        }
-        Err(e) => {
-            tracing::error!("Failed to clear BYOT credentials: {}", e);
-            Err((
+) -> Result<StatusCode, ApiError> {
+    let phone = current_phone(&state, auth_user.user_id).unwrap_or_default();
+    let byot = ByotRepository::new(state.pg_pool.clone());
+    byot.clear_credentials_and_invalidate(auth_user.user_id, &phone)
+        .map_err(|_| {
+            api_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to clear BYOT credentials"})),
-            ))
-        }
-    }
+                "Failed to disable own Twilio mode",
+            )
+        })?;
+    Ok(StatusCode::OK)
 }

@@ -26,6 +26,23 @@ use matrix_sdk::ruma::events::room::MediaSource;
 use std::path::Path;
 use tokio::fs;
 
+const LINKED_DEVICE_RISK_SECONDS: i32 = 10 * 24 * 60 * 60;
+const LINKED_DEVICE_ACTION_SECONDS: i32 = 13 * 24 * 60 * 60;
+
+/// Periodic primary-phone check-in state for WhatsApp Linked Devices.
+/// This uses only a user-confirmed check-in (or initial link time), never
+/// message traffic or local notification delivery as a proxy.
+pub fn linked_device_attention_state(last_confirmed_at: i32, now: i32) -> &'static str {
+    let age = now.saturating_sub(last_confirmed_at);
+    if age >= LINKED_DEVICE_ACTION_SECONDS {
+        "action_now"
+    } else if age >= LINKED_DEVICE_RISK_SECONDS {
+        "risk_soon"
+    } else {
+        "healthy"
+    }
+}
+
 // Helper function to detect the one-time key conflict error
 fn is_one_time_key_conflict(error: &anyhow::Error) -> bool {
     if let Some(http_err) = error.downcast_ref::<matrix_sdk::HttpError>() {
@@ -881,12 +898,25 @@ pub async fn get_whatsapp_status(
         })?;
 
     match bridge {
-        Some(bridge) => Ok(AxumJson(json!({
-            "connected": bridge.status == "connected",
-            "status": bridge.status,
-            "created_at": bridge.created_at.unwrap_or(0),
-            "connected_account": bridge.data,
-        }))),
+        Some(bridge) => {
+            let now = chrono::Utc::now().timestamp() as i32;
+            // Keep the dashboard and the day-12 reminder on the same native-app
+            // inactivity clock. `last_seen_online` also includes bridge traffic
+            // handled by Lightfriend and therefore is not proof that the user
+            // opened WhatsApp on the primary phone.
+            let last_confirmed_at = bridge
+                .last_native_activity_at
+                .or(bridge.created_at)
+                .unwrap_or(now);
+            Ok(AxumJson(json!({
+                "connected": bridge.status == "connected",
+                "status": bridge.status,
+                "created_at": bridge.created_at.unwrap_or(0),
+                "connected_account": bridge.data,
+                "linked_device_attention": linked_device_attention_state(last_confirmed_at, now),
+                "linked_device_last_confirmed_at": last_confirmed_at,
+            })))
+        }
         None => Ok(AxumJson(json!({
             "connected": false,
             "status": "not_connected",
@@ -894,6 +924,37 @@ pub async fn get_whatsapp_status(
             "connected_account": null,
         }))),
     }
+}
+
+/// Confirm that the user opened WhatsApp on their primary phone. The bridge
+/// cannot always observe that authoritatively, so the dashboard accepts the
+/// user's explicit confirmation as native-app activity. This also clears the
+/// one-shot inactivity reminder claim for the previous inactivity period.
+pub async fn confirm_whatsapp_primary_phone(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
+    let now = chrono::Utc::now().timestamp() as i32;
+    let updated = state
+        .user_repository
+        .record_whatsapp_native_activity(auth_user.user_id, now)
+        .map_err(|e| {
+            tracing::error!("Failed to confirm WhatsApp primary phone check-in: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": "Failed to save WhatsApp check-in"})),
+            )
+        })?;
+    if updated == 0 {
+        return Err((
+            StatusCode::NOT_FOUND,
+            AxumJson(json!({"error": "WhatsApp is not connected"})),
+        ));
+    }
+    Ok(AxumJson(json!({
+        "linked_device_attention": "healthy",
+        "linked_device_last_confirmed_at": now,
+    })))
 }
 
 /// Poll `!wa list-logins` until a CONNECTED login appears, then mark the
@@ -983,6 +1044,10 @@ async fn monitor_whatsapp_connection(
         };
         state.user_repository.delete_bridge(user_id, "whatsapp")?;
         state.user_repository.create_bridge(new_bridge)?;
+        state
+            .user_repository
+            .update_bridge_last_seen_online(user_id, "whatsapp", current_time)?;
+        state.rule_builder_contact_cache.remove(&user_id);
 
         // Stale ont_channels.room_id values from a previous login are
         // handled at send-time now: the send path queries the bridge
@@ -1008,6 +1073,10 @@ async fn monitor_whatsapp_connection(
                 "!wa sync groups --create-portals",
             ))
             .await;
+
+        // Discard any index rebuilt during the initial bridge sync so the
+        // next picker open or conversational send sees the new account.
+        state.rule_builder_contact_cache.remove(&user_id);
 
         return Ok(());
     }

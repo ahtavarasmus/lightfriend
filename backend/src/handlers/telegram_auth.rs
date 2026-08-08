@@ -1467,6 +1467,7 @@ async fn monitor_telegram_connection(
                                 };
                                 state.user_repository.delete_bridge(user_id, "telegram")?;
                                 state.user_repository.create_bridge(new_bridge)?;
+                                state.rule_builder_contact_cache.remove(&user_id);
 
                                 // Nuke stale ont_channels.room_id values from
                                 // the previous login. mautrix-telegram can
@@ -1527,6 +1528,12 @@ async fn monitor_telegram_connection(
                                         );
                                     }
                                 }
+
+                                // A caller may have rebuilt the index while the
+                                // bridge was synchronizing. Force the next picker
+                                // or conversational send to observe the completed
+                                // contact/chat metadata.
+                                state.rule_builder_contact_cache.remove(&user_id);
 
                                 return Ok(());
                             }

@@ -92,6 +92,95 @@ struct ResolvedChat {
     room_id: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub enum CachedContactMatch {
+    Match(crate::handlers::dashboard_handlers::Contact),
+    Ambiguous(Vec<String>),
+    None,
+}
+
+/// Resolve against the exact index shown by the contact picker.
+///
+/// A route must carry either a Matrix room or a bridge-native chat id. Close
+/// matches for different routes are rejected rather than silently choosing a
+/// similarly named person or group.
+pub fn select_cached_contact(
+    contacts: &[crate::handlers::dashboard_handlers::Contact],
+    platform: &str,
+    search_term: &str,
+) -> CachedContactMatch {
+    let query = search_term.trim().to_lowercase();
+    if query.is_empty() {
+        return CachedContactMatch::None;
+    }
+
+    let mut matches: Vec<(f64, crate::handlers::dashboard_handlers::Contact)> = contacts
+        .iter()
+        .filter(|contact| contact.platform.as_deref() == Some(platform))
+        .filter(|contact| contact.room_id.is_some() || contact.chat_id.is_some())
+        .filter_map(|contact| {
+            let name = contact.display_name.trim().to_lowercase();
+            let score = if name == query {
+                1.0
+            } else if name.starts_with(&query) {
+                0.92
+            } else if name.contains(&query) {
+                0.88
+            } else {
+                strsim::jaro_winkler(&query, &name)
+            };
+            (score >= 0.7).then(|| (score, contact.clone()))
+        })
+        .collect();
+    matches.sort_by(|left, right| {
+        right
+            .0
+            .partial_cmp(&left.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(left.1.id.cmp(&right.1.id))
+    });
+
+    // The index can contain two representations of the same route (for
+    // example ontology + bridge DB). Collapse those before ambiguity checks.
+    let mut seen_routes = std::collections::HashSet::new();
+    matches.retain(|(_, contact)| {
+        let key = contact
+            .room_id
+            .as_deref()
+            .map(|id| format!("room:{platform}:{id}"))
+            .or_else(|| {
+                contact
+                    .chat_id
+                    .as_deref()
+                    .map(|id| format!("chat:{platform}:{id}"))
+            })
+            .expect("sendable contact has a routing key");
+        seen_routes.insert(key)
+    });
+
+    let Some((best_score, best)) = matches.first() else {
+        return CachedContactMatch::None;
+    };
+    if let Some((second_score, second)) = matches.get(1) {
+        let best_exact = best
+            .display_name
+            .trim()
+            .eq_ignore_ascii_case(search_term.trim());
+        let second_exact = second
+            .display_name
+            .trim()
+            .eq_ignore_ascii_case(search_term.trim());
+        if (best_exact && second_exact) || (!best_exact && best_score - second_score < 0.08) {
+            let mut names = vec![best.display_name.clone(), second.display_name.clone()];
+            names.sort();
+            names.dedup();
+            return CachedContactMatch::Ambiguous(names);
+        }
+    }
+
+    CachedContactMatch::Match(best.clone())
+}
+
 /// Fuzzy search the ontology for a matching Person on the given platform.
 /// Returns everything we know about the channel (handle + room_id), not just
 /// the room_id, so the send path can fall back to bridge-DB portal lookup if
@@ -522,14 +611,58 @@ pub async fn handle_send_chat_message(
             }),
         ));
     }
-    // Step 1: Try to find a Person on this platform (fast, no Matrix needed)
+    // Step 0: Resolve from the same cached index shown by the dashboard
+    // picker. This includes bridge-DB contacts/chats that have never sent an
+    // inbound message and therefore do not exist in the ontology yet.
+    let contact_index =
+        crate::handlers::dashboard_handlers::get_or_build_contact_index(state, user_id).await;
+    let cached_match = select_cached_contact(&contact_index, &args.platform, &args.chat_name);
+    let cached_match = match cached_match {
+        CachedContactMatch::Match(contact) => Some(ResolvedChat {
+            display_name: contact.display_name,
+            chat_id: contact.chat_id,
+            room_id: contact.room_id,
+        }),
+        CachedContactMatch::Ambiguous(names) => {
+            let choices = if names.is_empty() {
+                "multiple chats".to_string()
+            } else {
+                names.join(", ")
+            };
+            let error_msg = format!(
+                "More than one {} contact matches '{}': {}. Please use a more specific name.",
+                capitalized_platform, args.chat_name, choices
+            );
+            if !skip_sms {
+                if let Err(e) = state
+                    .channel_router
+                    .send_to_user(user, &error_msg, None)
+                    .await
+                {
+                    tracing::warn!("Failed to send ambiguous-contact message: {}", e);
+                }
+            }
+            return Ok((
+                StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                Json(TwilioResponse {
+                    message: error_msg,
+                    created_item_id: None,
+                }),
+            ));
+        }
+        CachedContactMatch::None => None,
+    };
+
+    // Step 1: If the shared index has no route, try an ontology Person.
     tracing::info!(
         "SEND_FLOW Step 1: Fuzzy searching Persons for '{}' on {} for user={}",
         args.chat_name,
         args.platform,
         user_id
     );
-    let best_match = find_person_room(state, user_id, &args.chat_name, &args.platform);
+    let best_match =
+        cached_match.or_else(|| find_person_room(state, user_id, &args.chat_name, &args.platform));
 
     // Step 2: If no Person match, fall back to service-specific search.
     //   - WhatsApp: search the bridge DB (covers contacts + groups, returns
@@ -916,138 +1049,6 @@ pub async fn handle_send_chat_message(
             created_item_id: None,
         }),
     ))
-}
-
-#[derive(Deserialize)]
-struct SearchChatContactsArgs {
-    platform: String,
-    search_term: String,
-}
-
-pub async fn handle_search_chat_contacts(
-    state: &Arc<AppState>,
-    user_id: i32,
-    args: &str,
-) -> String {
-    let args: SearchChatContactsArgs = match serde_json::from_str(args) {
-        Ok(args) => args,
-        Err(e) => {
-            eprintln!("Failed to parse search arguments: {}", e);
-            return "Failed to parse search request.".to_string();
-        }
-    };
-
-    // Search ontology Persons
-    let mut person_results = Vec::new();
-    if let Ok(persons) = state
-        .ontology_repository
-        .search_persons(user_id, &args.search_term)
-    {
-        for p in persons {
-            let platforms: Vec<&str> = p
-                .channels
-                .iter()
-                .filter(|c| c.platform == args.platform)
-                .map(|c| c.platform.as_str())
-                .collect();
-            if !platforms.is_empty() {
-                person_results.push(format!(
-                    "{} (platforms: {})",
-                    p.display_name(),
-                    p.channels
-                        .iter()
-                        .map(|c| c.platform.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
-            }
-        }
-    }
-
-    match crate::utils::bridge::search_bridge_rooms(
-        &args.platform,
-        state,
-        user_id,
-        &args.search_term,
-    )
-    .await
-    {
-        Ok(rooms) => {
-            if rooms.is_empty() && person_results.is_empty() {
-                let capitalized_platform = args
-                    .platform
-                    .chars()
-                    .next()
-                    .map(|c| c.to_uppercase().collect::<String>())
-                    .unwrap_or_default()
-                    + &args.platform[1..];
-                format!(
-                    "No {} contacts found matching '{}'.",
-                    capitalized_platform, args.search_term
-                )
-            } else {
-                let mut response = String::new();
-
-                // Show ontology person results first
-                if !person_results.is_empty() {
-                    response.push_str("Known contacts:\n");
-                    for (i, pr) in person_results.iter().enumerate() {
-                        if i > 0 {
-                            response.push('\n');
-                        }
-                        response.push_str(&format!("- {}", pr));
-                    }
-                    if !rooms.is_empty() {
-                        response.push_str("\n\nBridge results:\n");
-                    }
-                }
-
-                for (i, room) in rooms.iter().take(5).enumerate() {
-                    if i == 0 && person_results.is_empty() {
-                        response.push_str(&format!(
-                            "{}. {} (last active: {})",
-                            i + 1,
-                            room.display_name
-                                .trim_end_matches(" (WA)")
-                                .trim_end_matches(" (Telegram)"),
-                            room.last_activity_formatted
-                        ));
-                    } else {
-                        response.push_str(&format!(
-                            "\n{}. {} (last active: {})",
-                            i + 1,
-                            room.display_name
-                                .trim_end_matches(" (WA)")
-                                .trim_end_matches(" (Telegram)"),
-                            room.last_activity_formatted
-                        ));
-                    }
-                }
-
-                if rooms.len() > 5 {
-                    response.push_str(&format!("\n\n(+ {} more contacts)", rooms.len() - 5));
-                }
-
-                response
-            }
-        }
-        Err(e) => {
-            // If bridge search fails but we have person results, return those
-            if !person_results.is_empty() {
-                let mut response = String::from("Known contacts:\n");
-                for (i, pr) in person_results.iter().enumerate() {
-                    if i > 0 {
-                        response.push('\n');
-                    }
-                    response.push_str(&format!("- {}", pr));
-                }
-                response
-            } else {
-                eprintln!("Failed to search rooms: {}", e);
-                e.to_string()
-            }
-        }
-    }
 }
 
 #[derive(Deserialize)]

@@ -670,7 +670,7 @@ pub async fn insert_email_into_ontology(
     if let (Some(conn_id), Some(key)) = (imap_connection_id, sender_key.as_deref()) {
         match state
             .pending_reply_watches_repository
-            .find_active_email(user_id, conn_id, key)
+            .claim_active_email(user_id, conn_id, key)
         {
             Ok(Some(watch)) => {
                 let subject_line = preview.subject.as_deref().unwrap_or("");
@@ -686,10 +686,28 @@ pub async fn insert_email_into_ontology(
                 // user. If the SMS fails (e.g. transient Twilio outage) or we
                 // can't load the user record, leave the watch armed so the
                 // next inbound email retries.
-                let mut notified = false;
-                match state.user_core.find_by_id(user_id) {
-                    Ok(Some(user)) => {
-                        match state.channel_router.send_to_user(&user, &body, None).await {
+                let suppressions =
+                    crate::TemporaryAlertSuppressionsRepository::new(state.pg_pool.clone());
+                let suppressed = suppressions
+                    .decision(user_id, "critical", &body, true)
+                    .map(|decision| {
+                        !matches!(
+                            decision,
+                            crate::repositories::temporary_alert_suppressions_repository::SuppressionDecision::Allow
+                        )
+                    })
+                    .unwrap_or(false);
+                let mut notified = suppressed;
+                if suppressed {
+                    tracing::info!(
+                        "REPLY_WATCH email fired+cleared without delivery during Quiet Mode id={} user={}",
+                        watch.id,
+                        user_id
+                    );
+                } else {
+                    match state.user_core.find_by_id(user_id) {
+                        Ok(Some(user)) => {
+                            match state.channel_router.send_to_user(&user, &body, None).await {
                             Ok(_) => notified = true,
                             Err(e) => tracing::warn!(
                                 "REPLY_WATCH SMS failed user={} watch={}, leaving armed for retry: {}",
@@ -698,32 +716,31 @@ pub async fn insert_email_into_ontology(
                                 e
                             ),
                         }
-                    }
-                    Ok(None) => tracing::warn!(
-                        "REPLY_WATCH user {} not found while firing email watch id={}",
-                        user_id,
-                        watch.id
-                    ),
-                    Err(e) => {
-                        tracing::warn!("REPLY_WATCH user lookup failed user={}: {}", user_id, e)
+                        }
+                        Ok(None) => tracing::warn!(
+                            "REPLY_WATCH user {} not found while firing email watch id={}",
+                            user_id,
+                            watch.id
+                        ),
+                        Err(e) => {
+                            tracing::warn!("REPLY_WATCH user lookup failed user={}: {}", user_id, e)
+                        }
                     }
                 }
                 if notified {
-                    if let Err(e) = state.pending_reply_watches_repository.delete(watch.id) {
-                        tracing::warn!(
-                            "REPLY_WATCH failed to delete fired email watch id={}: {}",
-                            watch.id,
-                            e
-                        );
-                    } else {
-                        tracing::info!(
-                            "REPLY_WATCH fired+cleared email watch id={} user={} account={} sender={}",
-                            watch.id,
-                            user_id,
-                            conn_id,
-                            key
-                        );
-                    }
+                    tracing::info!(
+                        "REPLY_WATCH fired+cleared email watch id={} user={} account={} sender={}",
+                        watch.id,
+                        user_id,
+                        conn_id,
+                        key
+                    );
+                } else if let Err(e) = state.pending_reply_watches_repository.restore(&watch) {
+                    tracing::warn!(
+                        "REPLY_WATCH failed to restore email watch id={}: {}",
+                        watch.id,
+                        e
+                    );
                 }
             }
             Ok(None) => {}

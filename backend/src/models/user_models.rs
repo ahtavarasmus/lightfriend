@@ -1,7 +1,7 @@
 use crate::pg_schema::{
     admin_alerts, country_availability, disabled_alert_types, message_status_log,
-    pending_reply_watches, provider_routes, site_metrics, user_settings, users, waitlist,
-    webhook_idempotency_keys, webhook_tokens,
+    pending_reply_watches, provider_routes, site_metrics, temporary_alert_suppressions,
+    user_settings, users, waitlist, webhook_idempotency_keys, webhook_tokens,
 };
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -330,6 +330,34 @@ pub struct NewPendingReplyWatch {
     pub imap_connection_id: Option<i32>,
     pub contact_identifier: String,
     pub contact_display_name: String,
+    pub created_at: i32,
+    pub expires_at: i32,
+}
+
+#[derive(Queryable, Selectable, Clone, Debug, Serialize)]
+#[diesel(table_name = temporary_alert_suppressions)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct TemporaryAlertSuppression {
+    pub id: i32,
+    pub user_id: i32,
+    pub kind: String,
+    pub scope: String,
+    pub match_text: Option<String>,
+    pub timezone: String,
+    pub created_at: i32,
+    pub expires_at: i32,
+    pub ended_at: Option<i32>,
+}
+
+#[derive(Insertable, Clone, Debug)]
+#[diesel(table_name = temporary_alert_suppressions)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewTemporaryAlertSuppression<'a> {
+    pub user_id: i32,
+    pub kind: &'a str,
+    pub scope: &'a str,
+    pub match_text: Option<&'a str>,
+    pub timezone: &'a str,
     pub created_at: i32,
     pub expires_at: i32,
 }

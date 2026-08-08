@@ -112,6 +112,7 @@ pub mod api {
 pub mod agent_core;
 pub mod context;
 pub mod tools {
+    pub mod alerts;
     pub mod email;
     pub mod messaging;
     pub mod ontology;
@@ -134,6 +135,7 @@ pub mod repositories {
     pub mod bandwidth_repository;
     pub mod billing_repository;
     pub mod bridge_login_repository;
+    pub mod byot_repository;
     pub mod commitment_repository;
     pub mod light_tool_devices_repository;
     pub mod light_tool_pairing_repository;
@@ -150,6 +152,7 @@ pub mod repositories {
     pub mod signup_repository;
     pub mod signup_repository_impl;
     pub mod telegram_bridge_repository;
+    pub mod temporary_alert_suppressions_repository;
     pub mod totp_repository;
     pub mod tuwunel_cleanup_repository;
     pub mod twilio_status_repository;
@@ -162,6 +165,7 @@ pub mod repositories {
     pub mod whatsapp_bridge_repository;
 }
 pub mod services {
+    pub mod byot_setup;
     pub mod country_service;
     pub mod data_purge;
     pub mod light_tool_agent_responder;
@@ -211,6 +215,7 @@ pub use api::twilio_client::RealTwilioClient;
 pub use repositories::admin_alert_repository::AdminAlertRepository;
 pub use repositories::bandwidth_repository::BandwidthRepository;
 pub use repositories::billing_repository::BillingRepository;
+pub use repositories::byot_repository::ByotRepository;
 pub use repositories::commitment_repository::CommitmentRepository;
 pub use repositories::llm_usage_repository::LlmUsageRepository;
 pub use repositories::metrics_repository::MetricsRepository;
@@ -218,6 +223,7 @@ pub use repositories::ontology_repository::OntologyRepository;
 pub use repositories::pending_reply_watches_repository::PendingReplyWatchesRepository;
 pub use repositories::provider_routes_repository::ProviderRoutesRepository;
 pub use repositories::telegram_bridge_repository::{TelegramBridgeRepository, TelegramContact};
+pub use repositories::temporary_alert_suppressions_repository::TemporaryAlertSuppressionsRepository;
 pub use repositories::totp_repository::TotpRepository;
 pub use repositories::tuwunel_cleanup_repository::TuwunelCleanupRepository;
 pub use repositories::user_core::{UserCore, UserCoreOps};
@@ -352,7 +358,8 @@ pub struct AppState {
     pub pending_rule_tests: Arc<DashMap<String, handlers::rule_handlers::PendingRuleTest>>,
     pub maintenance_mode: Arc<AtomicBool>,
     pub blog_store: Arc<blog::content::BlogStore>,
-    // (user_id, room_id) -> unix timestamp of last system_important notification
+    // (user_id, semantic alert fingerprint) -> unix timestamp of the latest
+    // accepted system-important notification. This spans source platforms.
     pub system_notify_cooldowns: DashMap<(i32, String), i32>,
     // user_id -> unix timestamp of last digest delivery
     pub digest_cooldowns: DashMap<i32, i32>,
@@ -407,6 +414,8 @@ pub fn build_tool_registry() -> tools::registry::ToolRegistry {
 
     // Messaging tools
     registry.register(Arc::new(tools::messaging::SendMessageHandler));
+    registry.register(Arc::new(tools::messaging::WaitForReplyHandler));
+    registry.register(Arc::new(tools::alerts::ManageAlertSuppressionHandler));
 
     // Rules (Automation -> Logic -> Action)
     registry.register(Arc::new(tools::rules::SetReminderHandler));

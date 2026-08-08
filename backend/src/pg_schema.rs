@@ -25,6 +25,7 @@ diesel::table! {
         nearby_places -> Nullable<Text>,
         latitude -> Nullable<Float4>,
         longitude -> Nullable<Float4>,
+        timezone_updated_at -> Nullable<Int4>,
     }
 }
 
@@ -391,6 +392,20 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    temporary_alert_suppressions (id) {
+        id -> Int4,
+        user_id -> Int4,
+        kind -> Text,
+        scope -> Text,
+        match_text -> Nullable<Text>,
+        timezone -> Text,
+        created_at -> Int4,
+        expires_at -> Int4,
+        ended_at -> Nullable<Int4>,
+    }
+}
+
 // Ontology v1: Person + Channel tables
 
 diesel::table! {
@@ -494,6 +509,23 @@ diesel::table! {
         created_at -> Int4,
         updated_at -> Int4,
         friend_notified_at -> Nullable<Int4>,
+        reminder_attempts -> Int4,
+        reminder_next_attempt_at -> Nullable<Int4>,
+        reminder_lease_until -> Nullable<Int4>,
+        reminder_last_error -> Nullable<Text>,
+        reminder_delivered_at -> Nullable<Int4>,
+        reminder_delivery_key -> Nullable<Text>,
+        reminder_timezone -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    scheduler_health (job_name) {
+        job_name -> Text,
+        last_started_at -> Int4,
+        last_completed_at -> Nullable<Int4>,
+        last_error -> Nullable<Text>,
+        updated_at -> Int4,
     }
 }
 
@@ -569,6 +601,21 @@ diesel::table! {
 }
 
 diesel::table! {
+    byot_verifications (user_id) {
+        user_id -> Int4,
+        phone_number -> Text,
+        phone_sid -> Nullable<Text>,
+        status -> Text,
+        attempt_id -> Text,
+        configured_at -> Nullable<Int4>,
+        verified_at -> Nullable<Int4>,
+        last_checked_at -> Int4,
+        error_code -> Nullable<Text>,
+        updated_at -> Int4,
+    }
+}
+
+diesel::table! {
     billing_accounts (user_id) {
         user_id -> Int4,
         metronome_customer_id -> Nullable<Text>,
@@ -600,6 +647,9 @@ diesel::table! {
         last_error -> Nullable<Text>,
         created_at -> Int4,
         sent_at -> Nullable<Int4>,
+        provider_reconciled_at -> Nullable<Int4>,
+        provider_status -> Text,
+        invoice_visible -> Bool,
     }
 }
 
@@ -608,6 +658,23 @@ diesel::table! {
         event_id -> Text,
         event_type -> Text,
         received_at -> Int4,
+        status -> Text,
+        attempts -> Int4,
+        lease_until -> Nullable<Int4>,
+        processed_at -> Nullable<Int4>,
+        last_error -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    billing_usage_intents (transaction_id) {
+        transaction_id -> Text,
+        user_id -> Int4,
+        event_type -> Text,
+        status -> Text,
+        created_at -> Int4,
+        finalized_at -> Nullable<Int4>,
+        last_error -> Nullable<Text>,
     }
 }
 
@@ -757,7 +824,9 @@ diesel::joinable!(ont_channels -> ont_persons (person_id));
 
 diesel::joinable!(refund_info -> users (user_id));
 diesel::joinable!(billing_accounts -> users (user_id));
+diesel::joinable!(byot_verifications -> users (user_id));
 diesel::joinable!(billing_usage_events -> users (user_id));
+diesel::joinable!(billing_usage_intents -> users (user_id));
 diesel::joinable!(user_settings -> users (user_id));
 diesel::joinable!(light_tool_devices -> users (user_id));
 diesel::joinable!(light_tool_push_registrations -> light_tool_devices (device_id));
@@ -808,6 +877,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     commitment_prompts,
     provider_routes,
     pending_reply_watches,
+    temporary_alert_suppressions,
     light_tool_devices,
     light_tool_push_registrations,
     light_tool_runs,
@@ -816,6 +886,9 @@ diesel::allow_tables_to_appear_in_same_query!(
     webhook_idempotency_keys,
     mcp_access_tokens,
     billing_accounts,
+    byot_verifications,
     billing_usage_events,
+    billing_usage_intents,
     billing_webhook_events,
+    scheduler_health,
 );

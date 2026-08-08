@@ -95,6 +95,45 @@ const FOCUSED_DASHBOARD_STYLES: &str = r#"
     padding: 1.35rem 0;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
+.try-asking {
+    padding: 1.35rem 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.try-asking-copy {
+    margin: -0.25rem 0 0.8rem;
+    color: #777;
+    font-size: 0.76rem;
+}
+.try-asking-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+}
+.try-asking-example {
+    min-height: 48px;
+    padding: 0.65rem 0.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.025);
+    color: #aaa;
+    font: inherit;
+    font-size: 0.78rem;
+    line-height: 1.4;
+    text-align: left;
+    cursor: copy;
+}
+.try-asking-example:hover:not(:disabled) {
+    border-color: rgba(126, 178, 255, 0.32);
+    color: #d3e3ff;
+}
+.try-asking-example:focus-visible {
+    outline: 2px solid rgba(126, 178, 255, 0.7);
+    outline-offset: 2px;
+}
+.try-asking-example:disabled {
+    cursor: not-allowed;
+    opacity: 0.42;
+}
 .focused-controls-label {
     margin: 0 0 0.75rem;
     color: #707070;
@@ -299,6 +338,8 @@ const FOCUSED_DASHBOARD_STYLES: &str = r#"
     .focused-controls {
         border-top-color: rgba(0, 0, 0, 0.08);
     }
+    .try-asking { border-top-color: rgba(0, 0, 0, 0.08); }
+    .try-asking-example { border-color: rgba(0, 0, 0, 0.09); background: rgba(0, 0, 0, 0.02); color: #666; }
     .focused-control-button {
         border-color: rgba(0, 0, 0, 0.1);
         background: rgba(0, 0, 0, 0.025);
@@ -323,6 +364,9 @@ const FOCUSED_DASHBOARD_STYLES: &str = r#"
         transition: none;
     }
 }
+@media (max-width: 560px) {
+    .try-asking-grid { grid-template-columns: 1fr; }
+}
 "#;
 
 #[derive(Clone, Default, PartialEq)]
@@ -335,6 +379,9 @@ struct ConnectionState {
     email: bool,
     tesla: bool,
     youtube: bool,
+    core_check_failed: bool,
+    core_issue: Option<String>,
+    whatsapp_linked_device_attention: Option<String>,
 }
 
 impl ConnectionState {
@@ -354,6 +401,107 @@ impl ConnectionState {
         }
         names
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DashboardAttentionState {
+    Loading,
+    StatusUnavailable,
+    IntegrationIssue,
+    WhatsappActionNow,
+    WhatsappRiskSoon,
+    Healthy,
+    SetupNeeded,
+}
+
+fn dashboard_attention_state(connections: &ConnectionState) -> DashboardAttentionState {
+    if !connections.loaded {
+        DashboardAttentionState::Loading
+    } else if !connections.available || connections.core_check_failed {
+        DashboardAttentionState::StatusUnavailable
+    } else if connections.core_issue.is_some() {
+        DashboardAttentionState::IntegrationIssue
+    } else if connections.whatsapp_linked_device_attention.as_deref() == Some("action_now") {
+        DashboardAttentionState::WhatsappActionNow
+    } else if connections.whatsapp_linked_device_attention.as_deref() == Some("risk_soon") {
+        DashboardAttentionState::WhatsappRiskSoon
+    } else if !connections.names().is_empty() {
+        DashboardAttentionState::Healthy
+    } else {
+        DashboardAttentionState::SetupNeeded
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TryAskingExample {
+    prompt: String,
+    available: bool,
+}
+
+fn try_asking_examples(connections: &ConnectionState) -> Vec<TryAskingExample> {
+    let has_messages = !connections.names().is_empty();
+    let bridge_platform = if connections.whatsapp {
+        Some("WhatsApp")
+    } else if connections.telegram {
+        Some("Telegram")
+    } else if connections.signal {
+        Some("Signal")
+    } else {
+        None
+    };
+    let catch_up_source = connections.names().join(", ");
+
+    vec![
+        TryAskingExample {
+            prompt: if has_messages {
+                format!("Catch me up on recent messages across {}.", catch_up_source)
+            } else {
+                "Connect a message service to ask for a catch-up.".to_string()
+            },
+            available: has_messages,
+        },
+        TryAskingExample {
+            prompt: bridge_platform
+                .map(|platform| format!("Send ‘Running late’ to Alex on {}.", platform))
+                .unwrap_or_else(|| {
+                    "Connect WhatsApp, Telegram, or Signal to send a message.".to_string()
+                }),
+            available: bridge_platform.is_some(),
+        },
+        TryAskingExample {
+            prompt: "Remind me tomorrow at 9 AM to call the dentist. What exact time is that?"
+                .to_string(),
+            available: true,
+        },
+        TryAskingExample {
+            prompt: bridge_platform
+                .map(|platform| {
+                    format!(
+                        "Send ‘Can you confirm?’ to Alex on {} and tell me when they reply.",
+                        platform
+                    )
+                })
+                .unwrap_or_else(|| {
+                    "Connect a chat service to wait for someone’s reply.".to_string()
+                }),
+            available: bridge_platform.is_some(),
+        },
+        TryAskingExample {
+            // Lightfriend cannot currently create a global temporary quiet
+            // mode conversationally. Phrase this as a capability question so
+            // the example never promises an unsupported action.
+            prompt: "How can I quiet noncritical alerts for the next hour?".to_string(),
+            available: true,
+        },
+        TryAskingExample {
+            prompt: if has_messages {
+                "How do I manage my connected services?".to_string()
+            } else {
+                "Which message services can I connect?".to_string()
+            },
+            available: true,
+        },
+    ]
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
@@ -396,6 +544,8 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
     let preference_error = use_state(|| None::<String>);
     let quick_panel = use_state(|| None::<QuickPanel>);
     let selected_video = use_state(|| None::<MediaItem>);
+    let whatsapp_confirm_saving = use_state(|| false);
+    let copied_example = use_state(|| None::<usize>);
 
     {
         let connections = connections.clone();
@@ -409,8 +559,8 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
 
                     for bridge in ["whatsapp", "signal", "telegram"] {
                         let url = format!("/api/auth/{}/status", bridge);
-                        if let Ok(response) = Api::get(&url).send().await {
-                            if response.ok() {
+                        match Api::get(&url).send().await {
+                            Ok(response) if response.ok() => {
                                 next.available = true;
                                 if let Ok(data) = response.json::<serde_json::Value>().await {
                                     let connected = data
@@ -423,13 +573,28 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
                                         "telegram" => next.telegram = connected,
                                         _ => {}
                                     }
+                                    let status = data
+                                        .get("status")
+                                        .and_then(|value| value.as_str())
+                                        .unwrap_or("not_connected");
+                                    if !connected && status != "not_connected" {
+                                        next.core_issue =
+                                            Some(format!("{} needs reconnecting", bridge));
+                                    }
+                                    if bridge == "whatsapp" {
+                                        next.whatsapp_linked_device_attention = data
+                                            .get("linked_device_attention")
+                                            .and_then(|value| value.as_str())
+                                            .map(str::to_string);
+                                    }
                                 }
                             }
+                            _ => next.core_check_failed = true,
                         }
                     }
 
-                    if let Ok(response) = Api::get("/api/auth/imap/status").send().await {
-                        if response.ok() {
+                    match Api::get("/api/auth/imap/status").send().await {
+                        Ok(response) if response.ok() => {
                             next.available = true;
                             if let Ok(data) = response.json::<serde_json::Value>().await {
                                 next.email = data
@@ -438,6 +603,7 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
                                     .unwrap_or(false);
                             }
                         }
+                        _ => next.core_check_failed = true,
                     }
 
                     if let Ok(response) = Api::get("/api/auth/tesla/status").send().await {
@@ -543,9 +709,43 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
         })
     };
 
+    let open_always_show_settings = {
+        let settings_open = settings_open.clone();
+        let settings_initial_tab = settings_initial_tab.clone();
+        Callback::from(move |_: MouseEvent| {
+            settings_initial_tab.set(SettingsTab::AlwaysShow);
+            settings_open.set(true);
+        })
+    };
+
     let toggle_history = {
         let show_history = show_history.clone();
         Callback::from(move |_: MouseEvent| show_history.set(!*show_history))
+    };
+
+    let confirm_whatsapp_primary_phone = {
+        let connections = connections.clone();
+        let saving = whatsapp_confirm_saving.clone();
+        Callback::from(move |_: MouseEvent| {
+            if *saving {
+                return;
+            }
+            saving.set(true);
+            let connections = connections.clone();
+            let saving = saving.clone();
+            spawn_local(async move {
+                let saved = matches!(
+                    Api::post("/api/auth/whatsapp/primary-phone-confirmed").send().await,
+                    Ok(response) if response.ok()
+                );
+                if saved {
+                    let mut next = (*connections).clone();
+                    next.whatsapp_linked_device_attention = Some("healthy".to_string());
+                    connections.set(next);
+                }
+                saving.set(false);
+            });
+        })
     };
 
     let toggle_critical_notifications = {
@@ -666,34 +866,54 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
     let has_connections = !names.is_empty();
     let source_summary = names.join(", ");
 
-    let (status_label, status_class, title, description) = if !connections.loaded {
-        (
+    let attention_state = dashboard_attention_state(&connections);
+    let asking_examples = try_asking_examples(&connections);
+    let (status_label, status_class, title, description) = match attention_state {
+        DashboardAttentionState::Loading => (
             "Checking status",
             "waiting",
             "Checking what needs your attention.",
             "This should only take a moment.",
-        )
-    } else if !connections.available {
-        (
+        ),
+        DashboardAttentionState::StatusUnavailable => (
             "Needs attention",
             "unavailable",
             "Lightfriend's status could not be checked.",
             "Your existing services may still be running. Check again in a moment.",
-        )
-    } else if has_connections {
-        (
+        ),
+        DashboardAttentionState::IntegrationIssue => (
+            "Needs attention",
+            "unavailable",
+            "A connected service needs attention.",
+            connections
+                .core_issue
+                .as_deref()
+                .unwrap_or("Open Connections to reconnect it."),
+        ),
+        DashboardAttentionState::WhatsappActionNow => (
+            "Action needed",
+            "unavailable",
+            "Open WhatsApp on your primary phone now.",
+            "Linked Devices may expire after about two weeks without the primary phone being active.",
+        ),
+        DashboardAttentionState::WhatsappRiskSoon => (
+            "At risk soon",
+            "waiting",
+            "Open WhatsApp on your primary phone soon.",
+            "This keeps the Lightfriend Linked Device from timing out.",
+        ),
+        DashboardAttentionState::Healthy => (
             "Working quietly",
             "",
             "Nothing needs your attention.",
             "Lightfriend is working in the background.",
-        )
-    } else {
-        (
+        ),
+        DashboardAttentionState::SetupNeeded => (
             "Setup needed",
             "waiting",
             "Connect the places that matter.",
             "Lightfriend needs at least one connection before it can watch for important messages.",
-        )
+        ),
     };
 
     html! {
@@ -743,6 +963,21 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
                                 </button>
                             }
 
+                            if matches!(
+                                attention_state,
+                                DashboardAttentionState::WhatsappActionNow
+                                    | DashboardAttentionState::WhatsappRiskSoon
+                            ) {
+                                <button
+                                    type="button"
+                                    class="focused-primary-action"
+                                    disabled={*whatsapp_confirm_saving}
+                                    onclick={confirm_whatsapp_primary_phone}
+                                >
+                                    {if *whatsapp_confirm_saving { "Saving…" } else { "I opened WhatsApp" }}
+                                </button>
+                            }
+
                             if let Some(stats) = (*value_stats).as_ref() {
                                 <p class="focused-value">
                                     {format!(
@@ -762,6 +997,39 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
                                     )}
                                 </p>
                             }
+                        </section>
+
+                        <section class="try-asking" aria-labelledby="try-asking-title">
+                            <h2 id="try-asking-title" class="focused-controls-label">{"Try asking"}</h2>
+                            <p class="try-asking-copy">{"Tap an example to copy it."}</p>
+                            <div class="try-asking-grid">
+                                { for asking_examples.iter().enumerate().map(|(index, example)| {
+                                    let prompt = example.prompt.clone();
+                                    let copied_for_click = copied_example.clone();
+                                    html! {
+                                        <button
+                                            type="button"
+                                            class="try-asking-example"
+                                            disabled={!example.available}
+                                            aria-label={if example.available { format!("Copy: {}", prompt) } else { prompt.clone() }}
+                                            onclick={Callback::from(move |_| {
+                                                if let Some(window) = web_sys::window() {
+                                                    let clipboard = window.navigator().clipboard();
+                                                    let prompt = prompt.clone();
+                                                    let copied_example = copied_for_click.clone();
+                                                    spawn_local(async move {
+                                                        if wasm_bindgen_futures::JsFuture::from(clipboard.write_text(&prompt)).await.is_ok() {
+                                                            copied_example.set(Some(index));
+                                                        }
+                                                    });
+                                                }
+                                            })}
+                                        >
+                                            {if *copied_example == Some(index) { "Copied".to_string() } else { example.prompt.clone() }}
+                                        </button>
+                                    }
+                                }) }
+                            </div>
                         </section>
 
                         <section class="focused-controls" aria-labelledby="focused-controls-title">
@@ -790,6 +1058,14 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
                                     <span class={classes!("focused-control-state", (*digests).then_some("on"))}>
                                         {if *digest_saving { "Saving…" } else if *digests { "On" } else { "Off" }}
                                     </span>
+                                </button>
+                                <button
+                                    type="button"
+                                    class="focused-control-button"
+                                    onclick={open_always_show_settings}
+                                >
+                                    <span>{"Always show"}</span>
+                                    <span class="focused-control-state">{"Manage"}</span>
                                 </button>
                                 if connections.tesla {
                                     <button
@@ -890,5 +1166,97 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
                 initial_tab={*settings_initial_tab}
             />
         </>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        dashboard_attention_state, try_asking_examples, ConnectionState, DashboardAttentionState,
+    };
+
+    fn loaded_connections() -> ConnectionState {
+        ConnectionState {
+            loaded: true,
+            available: true,
+            ..ConnectionState::default()
+        }
+    }
+
+    #[test]
+    fn healthy_only_when_a_connection_has_no_attention_conditions() {
+        let mut connections = loaded_connections();
+        connections.whatsapp = true;
+        assert_eq!(
+            dashboard_attention_state(&connections),
+            DashboardAttentionState::Healthy
+        );
+
+        connections.whatsapp_linked_device_attention = Some("risk_soon".to_string());
+        assert_eq!(
+            dashboard_attention_state(&connections),
+            DashboardAttentionState::WhatsappRiskSoon
+        );
+    }
+
+    #[test]
+    fn linked_device_action_is_more_urgent_than_risk() {
+        let mut connections = loaded_connections();
+        connections.whatsapp = true;
+        connections.whatsapp_linked_device_attention = Some("action_now".to_string());
+
+        assert_eq!(
+            dashboard_attention_state(&connections),
+            DashboardAttentionState::WhatsappActionNow
+        );
+    }
+
+    #[test]
+    fn integration_problem_suppresses_generic_healthy_state() {
+        let mut connections = loaded_connections();
+        connections.telegram = true;
+        connections.core_issue = Some("whatsapp needs reconnecting".to_string());
+
+        assert_eq!(
+            dashboard_attention_state(&connections),
+            DashboardAttentionState::IntegrationIssue
+        );
+    }
+
+    #[test]
+    fn incomplete_status_check_never_claims_healthy() {
+        let mut connections = loaded_connections();
+        connections.email = true;
+        connections.core_check_failed = true;
+
+        assert_eq!(
+            dashboard_attention_state(&connections),
+            DashboardAttentionState::StatusUnavailable
+        );
+    }
+
+    #[test]
+    fn asking_examples_are_short_source_aware_and_cover_six_core_jobs() {
+        let mut connections = loaded_connections();
+        connections.telegram = true;
+        let examples = try_asking_examples(&connections);
+
+        assert_eq!(examples.len(), 6);
+        assert!(examples[0].prompt.contains("Telegram"));
+        assert!(examples[1].prompt.contains("Telegram"));
+        assert!(examples[3].prompt.contains("tell me when they reply"));
+        assert!(examples.iter().all(|example| example.prompt.len() < 100));
+    }
+
+    #[test]
+    fn unavailable_message_jobs_are_disabled_in_the_empty_state() {
+        let examples = try_asking_examples(&loaded_connections());
+
+        assert!(!examples[0].available);
+        assert!(!examples[1].available);
+        assert!(!examples[3].available);
+        assert!(examples[2].available);
+        assert!(examples[4].available);
+        assert!(examples[5].available);
     }
 }

@@ -302,125 +302,155 @@ pub async fn metronome_webhook(
         )
     })?;
     let repository = crate::BillingRepository::new(state.pg_pool.clone());
-    if repository
-        .webhook_seen(event_id)
+    match repository
+        .claim_webhook(event_id, event_type, 120)
         .map_err(internal_billing_error)?
     {
-        return Ok(StatusCode::OK);
+        crate::repositories::billing_repository::BillingWebhookClaim::AlreadyProcessed => {
+            return Ok(StatusCode::OK)
+        }
+        crate::repositories::billing_repository::BillingWebhookClaim::InFlight => {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"error": "Billing webhook is already being processed"})),
+            ))
+        }
+        crate::repositories::billing_repository::BillingWebhookClaim::Claimed => {}
     }
-    let customer_id = payload["properties"]["customer_id"]
-        .as_str()
-        .or_else(|| payload["customer_id"].as_str());
-    let Some(customer_id) = customer_id else {
-        repository
-            .record_webhook_once(event_id, event_type)
-            .map_err(internal_billing_error)?;
-        return Ok(StatusCode::OK);
-    };
-    let Some(account) = repository
-        .find_by_metronome_customer_id(customer_id)
-        .map_err(internal_billing_error)?
-    else {
-        tracing::warn!("Metronome webhook for unknown customer {}", customer_id);
-        return Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error": "Billing customer is still provisioning"})),
-        ));
-    };
 
-    match event_type {
-        "payment_gate.payment_status" => {
-            let paid = payload["properties"]["payment_status"].as_str() == Some("paid");
-            repository
-                .set_payment_ready(account.user_id, paid)
-                .map_err(internal_billing_error)?;
-            repository
-                .set_usage_entitled(account.user_id, paid && account.overage_enabled)
-                .map_err(internal_billing_error)?;
-            if !paid {
+    let processing_result: Result<(), (StatusCode, Json<serde_json::Value>)> = async {
+        let customer_id = payload["properties"]["customer_id"]
+            .as_str()
+            .or_else(|| payload["customer_id"].as_str());
+        let Some(customer_id) = customer_id else {
+            return Ok(());
+        };
+        let Some(account) = repository
+            .find_by_metronome_customer_id(customer_id)
+            .map_err(internal_billing_error)?
+        else {
+            tracing::warn!("Metronome webhook referenced an unknown billing customer");
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"error": "Billing customer is still provisioning"})),
+            ));
+        };
+
+        match event_type {
+            "payment_gate.payment_status" => {
+                let paid = payload["properties"]["payment_status"].as_str() == Some("paid");
+                repository
+                    .set_payment_ready(account.user_id, paid)
+                    .map_err(internal_billing_error)?;
+                repository
+                    .set_usage_entitled(account.user_id, paid && account.overage_enabled)
+                    .map_err(internal_billing_error)?;
+                if !paid {
+                    repository
+                        .set_overage(account.user_id, false, None)
+                        .map_err(internal_billing_error)?;
+                }
+            }
+            "payment_gate.payment_pending_action_required" | "invoice.billing_provider_error" => {
+                repository
+                    .set_payment_ready(account.user_id, false)
+                    .map_err(internal_billing_error)?;
+                repository
+                    .set_usage_entitled(account.user_id, false)
+                    .map_err(internal_billing_error)?;
                 repository
                     .set_overage(account.user_id, false, None)
                     .map_err(internal_billing_error)?;
             }
-        }
-        "payment_gate.payment_pending_action_required" | "invoice.billing_provider_error" => {
-            repository
-                .set_payment_ready(account.user_id, false)
-                .map_err(internal_billing_error)?;
-            repository
-                .set_usage_entitled(account.user_id, false)
-                .map_err(internal_billing_error)?;
-            repository
-                .set_overage(account.user_id, false, None)
-                .map_err(internal_billing_error)?;
-        }
-        kind if kind.starts_with("alerts.low_remaining_") && kind.ends_with("_resolved") => {
-            repository
-                .set_usage_entitled(account.user_id, true)
-                .map_err(internal_billing_error)?;
-            let _ = state
-                .user_core
-                .clear_last_credits_notification(account.user_id);
-        }
-        kind if kind.starts_with("alerts.low_remaining_") => {
-            let remaining_cents = payload["properties"]["remaining_balance"]
-                .as_f64()
-                .or_else(|| {
-                    payload["properties"]["remaining_balance"]
-                        .as_i64()
-                        .map(|value| value as f64)
-                })
-                .unwrap_or(0.0);
-            let exhausted = remaining_cents <= 0.0;
-            let entitled = !exhausted || (account.overage_enabled && account.payment_ready);
-            if exhausted {
+            kind if kind.starts_with("alerts.low_remaining_") && kind.ends_with("_resolved") => {
                 repository
-                    .set_usage_entitled(account.user_id, entitled)
+                    .set_usage_entitled(account.user_id, true)
                     .map_err(internal_billing_error)?;
+                let _ = state
+                    .user_core
+                    .clear_last_credits_notification(account.user_id);
             }
-            if let Ok(Some(user)) = state.user_core.find_by_id(account.user_id) {
-                let reset_date = crate::services::metronome_billing::customer_reset_date_label(
-                    &state,
-                    account.user_id,
-                )
-                .await
-                .unwrap_or_else(|| "your billing date".to_string());
-                let message = if !exhausted {
-                    format!(
-                        "${:.2} left. Resets {}.",
-                        remaining_cents / 100.0,
-                        reset_date
+            kind if kind.starts_with("alerts.low_remaining_") => {
+                let remaining_cents = payload["properties"]["remaining_balance"]
+                    .as_f64()
+                    .or_else(|| {
+                        payload["properties"]["remaining_balance"]
+                            .as_i64()
+                            .map(|value| value as f64)
+                    })
+                    .unwrap_or(0.0);
+                let exhausted = remaining_cents <= 0.0;
+                let entitled = !exhausted || (account.overage_enabled && account.payment_ready);
+                if exhausted {
+                    repository
+                        .set_usage_entitled(account.user_id, entitled)
+                        .map_err(internal_billing_error)?;
+                }
+                if let Ok(Some(user)) = state.user_core.find_by_id(account.user_id) {
+                    let reset_date = crate::services::metronome_billing::customer_reset_date_label(
+                        &state,
+                        account.user_id,
                     )
-                } else if entitled {
-                    format!("$25 used. Overage on. Resets {}.", reset_date)
-                } else {
-                    format!("$25 used. Resets {}. Enable overage?", reset_date)
-                };
-                let _ = state.user_core.update_last_credits_notification(
-                    account.user_id,
-                    chrono::Utc::now().timestamp() as i32,
-                );
-                let state = state.clone();
-                tokio::spawn(async move {
-                    if let Err(error) = state
-                        .channel_router
-                        .send_to_user(&user, &message, None)
-                        .await
-                    {
-                        tracing::warn!(
-                            user_id = user.id,
-                            "Failed to send monthly usage notice: {error}"
+                    .await
+                    .unwrap_or_else(|| "your billing date".to_string());
+                    let message = if !exhausted {
+                        format!(
+                            "${:.2} left. Resets {}.",
+                            remaining_cents / 100.0,
+                            reset_date
+                        )
+                    } else if entitled {
+                        format!("$25 used. Overage on. Resets {}.", reset_date)
+                    } else {
+                        format!("$25 used. Resets {}. Enable overage?", reset_date)
+                    };
+                    let _ = state.user_core.update_last_credits_notification(
+                        account.user_id,
+                        chrono::Utc::now().timestamp() as i32,
+                    );
+                    let state = state.clone();
+                    tokio::spawn(async move {
+                        let suppressions = crate::TemporaryAlertSuppressionsRepository::new(
+                            state.pg_pool.clone(),
                         );
-                    }
-                });
+                        if matches!(
+                            suppressions.decision(user.id, "critical", &message, false),
+                            Ok(crate::repositories::temporary_alert_suppressions_repository::SuppressionDecision::SuppressQuiet { .. }
+                                | crate::repositories::temporary_alert_suppressions_repository::SuppressionDecision::SuppressTopic { .. })
+                        ) {
+                            return;
+                        }
+                        if let Err(error) = state
+                            .channel_router
+                            .send_to_user(&user, &message, None)
+                            .await
+                        {
+                            tracing::warn!(
+                                user_id = user.id,
+                                "Failed to send monthly usage notice: {error}"
+                            );
+                        }
+                    });
+                }
             }
+            _ => {}
         }
-        _ => {}
+        Ok(())
     }
-    repository
-        .record_webhook_once(event_id, event_type)
-        .map_err(internal_billing_error)?;
-    Ok(StatusCode::OK)
+    .await;
+
+    match processing_result {
+        Ok(()) => {
+            repository
+                .complete_webhook(event_id)
+                .map_err(internal_billing_error)?;
+            Ok(StatusCode::OK)
+        }
+        Err(error) => {
+            let _ = repository.fail_webhook(event_id, "processing_failed");
+            Err(error)
+        }
+    }
 }
 
 #[derive(Deserialize)]

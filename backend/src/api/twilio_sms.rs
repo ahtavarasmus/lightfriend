@@ -460,6 +460,30 @@ pub async fn process_sms(
     // Only created for the web chat SSE path (when status_tx exists).
     let reasoning_tx = status::spawn_reasoning_bridge(options.status_tx.as_ref());
 
+    // Record intent before the external AI action. Normal completion turns
+    // this into the durable usage outbox before the response is delivered;
+    // a crash leaves an auditable open intent instead of silent revenue loss.
+    let billing_intent = if options.channel == MessageChannel::WebChat
+        && crate::services::metronome_billing::metronome_enabled()
+    {
+        match crate::services::metronome_billing::begin_usage_intent(state, user.id, "web_chat") {
+            Ok(intent) => Some(intent),
+            Err(error) => {
+                tracing::error!(
+                    user_id = user.id,
+                    error_code = crate::services::metronome_billing::billing_error_code(&error),
+                    "Failed to persist web chat billing intent"
+                );
+                return SmsResult::SystemError {
+                    log_msg: "Billing is temporarily unavailable".to_string(),
+                }
+                .into_response();
+            }
+        }
+    } else {
+        None
+    };
+
     let mut mock_llm_response = options.mock_llm_response.take();
     let mock_tool_responses = options.mock_tool_responses.take();
     let agent_loop_output =
@@ -518,26 +542,24 @@ pub async fn process_sms(
     })
     .await;
 
-    if options.channel == MessageChannel::WebChat
-        && crate::services::metronome_billing::metronome_enabled()
-    {
+    if let Some(transaction_id) = billing_intent.as_deref() {
         let billed_cost = crate::services::usage_pricing::billable_customer_cost_usd(
             finalized_response.provider_cost_usd,
         );
-        if billed_cost > 0.0 {
-            if let Err(error) = crate::services::metronome_billing::enqueue_usage(
-                state,
-                user.id,
-                "web_chat",
-                billed_cost as f32,
-                None,
-            ) {
-                tracing::error!(
-                    user_id = user.id,
-                    billed_cost,
-                    "Failed to queue actual web chat usage: {error}"
-                );
+        if let Err(error) = crate::services::metronome_billing::finalize_usage_intent(
+            state,
+            transaction_id,
+            billed_cost,
+        ) {
+            tracing::error!(
+                user_id = user.id,
+                error_code = crate::services::metronome_billing::billing_error_code(&error),
+                "Failed to finalize web chat billing outbox"
+            );
+            return SmsResult::SystemError {
+                log_msg: "Billing is temporarily unavailable".to_string(),
             }
+            .into_response();
         }
     }
 

@@ -3,7 +3,123 @@ use crate::AppState;
 use crate::UserCoreOps;
 use std::sync::Arc;
 
-use chrono::{NaiveDate, NaiveDateTime, Offset};
+use chrono::{LocalResult, NaiveDate, NaiveDateTime, Offset, TimeZone};
+
+const AUTO_TIMEZONE_MAX_AGE_SECS: i32 = 90 * 24 * 3600;
+
+/// Return a verified stored IANA timezone suitable for scheduling a reminder.
+/// Automatically detected zones must have been refreshed recently; manual
+/// zones remain authoritative until the user changes them.
+pub fn reminder_timezone(state: &AppState, user_id: i32, now: i32) -> Result<String, String> {
+    let info = state.user_core.get_user_info(user_id).map_err(|_| {
+        "I couldn't read your timezone. Please confirm it in your profile.".to_string()
+    })?;
+    let timezone = info
+        .timezone
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "What timezone should I use for this reminder?".to_string())?;
+    timezone.parse::<chrono_tz::Tz>().map_err(|_| {
+        "Your saved timezone is invalid. Please choose an IANA timezone in your profile."
+            .to_string()
+    })?;
+    let settings = state
+        .user_core
+        .get_user_settings(user_id)
+        .map_err(|_| "I couldn't verify your timezone settings. Please try again.".to_string())?;
+    if settings.timezone_auto.unwrap_or(false) {
+        let updated_at = info.timezone_updated_at.ok_or_else(|| {
+            "Your automatic timezone has not been verified recently. Open your profile once, then try again."
+                .to_string()
+        })?;
+        if now.saturating_sub(updated_at) > AUTO_TIMEZONE_MAX_AGE_SECS {
+            return Err(
+                "Your automatic timezone may be stale. Open your profile to refresh it, then try again."
+                    .to_string(),
+            );
+        }
+    }
+    Ok(timezone)
+}
+
+/// Interpret a future wall-clock time in the stored IANA zone using the
+/// offset at the target datetime. DST gaps and folds are surfaced for
+/// conversational clarification instead of silently choosing an instant.
+pub fn parse_reminder_time_in_zone(input: &str, timezone: &str, now: i32) -> Result<i32, String> {
+    let tz = timezone
+        .parse::<chrono_tz::Tz>()
+        .map_err(|_| "The saved timezone is invalid.".to_string())?;
+    let input = input.trim();
+    let instant = if let Ok(explicit) = chrono::DateTime::parse_from_rfc3339(input) {
+        let zone_offset = explicit
+            .to_utc()
+            .with_timezone(&tz)
+            .offset()
+            .fix()
+            .local_minus_utc();
+        if zone_offset != explicit.offset().local_minus_utc() {
+            return Err(format!(
+                "That timestamp's offset does not match {} at that date. What local time should I use?",
+                timezone
+            ));
+        }
+        explicit.timestamp()
+    } else {
+        let naive = NaiveDateTime::parse_from_str(input, "%Y-%m-%dT%H:%M:%S")
+            .or_else(|_| NaiveDateTime::parse_from_str(input, "%Y-%m-%dT%H:%M"))
+            .map_err(|_| {
+                "Please give an exact local date and time, for example 2026-03-19T14:30."
+                    .to_string()
+            })?;
+        match tz.from_local_datetime(&naive) {
+            LocalResult::Single(value) => value.timestamp(),
+            LocalResult::Ambiguous(first, second) => {
+                return Err(format!(
+                    "{} occurs twice in {} ({} or {}). Which one do you mean?",
+                    input,
+                    timezone,
+                    first.format("%Z UTC%:z"),
+                    second.format("%Z UTC%:z")
+                ))
+            }
+            LocalResult::None => {
+                return Err(format!(
+                    "{} does not exist in {} because the clock changes then. What later time should I use?",
+                    input, timezone
+                ))
+            }
+        }
+    };
+    let instant =
+        i32::try_from(instant).map_err(|_| "That reminder time is out of range.".to_string())?;
+    if instant <= now {
+        return Err(
+            "That reminder time has already passed. What future time should I use?".to_string(),
+        );
+    }
+    Ok(instant)
+}
+
+pub fn format_persisted_local_time(timestamp: i32, timezone: &str) -> Result<String, String> {
+    let tz = timezone
+        .parse::<chrono_tz::Tz>()
+        .map_err(|_| "The persisted timezone is invalid.".to_string())?;
+    let local = chrono::Utc
+        .timestamp_opt(timestamp as i64, 0)
+        .single()
+        .ok_or_else(|| "The persisted reminder time is invalid.".to_string())?
+        .with_timezone(&tz);
+    let offset = local.offset().fix().local_minus_utc();
+    let sign = if offset >= 0 { '+' } else { '-' };
+    let absolute = offset.abs();
+    Ok(format!(
+        "{} ({} UTC{}{:02}:{:02})",
+        local.format("%Y-%m-%d %H:%M %Z"),
+        timezone,
+        sign,
+        absolute / 3600,
+        (absolute % 3600) / 60
+    ))
+}
 
 /// Get the user's timezone offset in seconds from their stored timezone name.
 pub fn user_tz_offset_secs(state: &AppState, user_id: i32) -> i32 {
@@ -274,6 +390,66 @@ pub async fn send_notification_with_context(
             return false;
         }
     };
+
+    let category = if content_type == "digest" {
+        crate::repositories::temporary_alert_suppressions_repository::SCOPE_DIGEST
+    } else {
+        crate::repositories::temporary_alert_suppressions_repository::SCOPE_CRITICAL
+    };
+    let always_show = meta
+        .as_ref()
+        .and_then(|item| item.sender.as_deref())
+        .and_then(|sender| {
+            state
+                .ontology_repository
+                .find_person_by_name(user_id, sender)
+                .ok()
+                .flatten()
+        })
+        .map(|person| {
+            person.edits.iter().any(|edit| {
+                edit.property_name == "notification_mode"
+                    && matches!(edit.value.as_str(), "always" | "always_show" | "all")
+            }) || person.channels.iter().any(|channel| {
+                matches!(
+                    channel.notification_mode.as_str(),
+                    "always" | "always_show" | "all"
+                )
+            })
+        })
+        .unwrap_or(false);
+    let searchable = meta
+        .as_ref()
+        .map(|item| {
+            format!(
+                "{} {} {} {}",
+                item.sender.as_deref().unwrap_or(""),
+                item.platform.as_deref().unwrap_or(""),
+                item.content.as_deref().unwrap_or(""),
+                notification
+            )
+        })
+        .unwrap_or_else(|| notification.to_string());
+    let suppressions = crate::TemporaryAlertSuppressionsRepository::new(state.pg_pool.clone());
+    match suppressions.decision(user_id, category, &searchable, always_show) {
+        Ok(crate::repositories::temporary_alert_suppressions_repository::SuppressionDecision::Allow) => {}
+        Ok(decision) => {
+            tracing::info!(
+                user_id,
+                content_type,
+                ?decision,
+                "Temporary alert suppression skipped outbound notification"
+            );
+            // Suppression is an intentional terminal outcome, not a delivery
+            // failure. Callers must not retry the same alert after expiry.
+            return true;
+        }
+        Err(error) => tracing::warn!(
+            user_id,
+            "Failed to check temporary alert suppression; failing open: {}",
+            error
+        ),
+    }
 
     let _user_info = match state.user_core.get_user_info(user_id) {
         Ok(info) => info,

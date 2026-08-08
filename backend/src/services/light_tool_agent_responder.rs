@@ -239,31 +239,48 @@ impl LightToolResponder for LightToolAgentResponder {
                 }
 
                 let input = build_account_agent_input(&state, &user, user_message).await?;
-                persist_account_turn(&state, user.id, "user", user_message, input.current_time);
-                let reply =
-                    execute_account_agent(&state, &user, input, image_data_url, activity_tx)
-                        .await?;
-                if crate::services::metronome_billing::metronome_enabled() {
-                    let billed_cost = crate::services::usage_pricing::billable_customer_cost_usd(
-                        reply.provider_cost_usd,
-                    );
-                    if billed_cost > 0.0 {
-                        crate::services::metronome_billing::enqueue_usage(
+                let billing_intent = if crate::services::metronome_billing::metronome_enabled() {
+                    Some(
+                        crate::services::metronome_billing::begin_usage_intent(
                             &state,
                             user.id,
                             "light_tool",
-                            billed_cost as f32,
-                            None,
                         )
                         .map_err(|error| {
                             tracing::error!(
                                 user_id,
-                                billed_cost,
-                                "Failed to queue Light Tool usage: {error}"
+                                error_code =
+                                    crate::services::metronome_billing::billing_error_code(&error),
+                                "Failed to persist Light Tool billing intent"
                             );
                             "Billing is temporarily unavailable".to_string()
-                        })?;
-                    }
+                        })?,
+                    )
+                } else {
+                    None
+                };
+                persist_account_turn(&state, user.id, "user", user_message, input.current_time);
+                let reply =
+                    execute_account_agent(&state, &user, input, image_data_url, activity_tx)
+                        .await?;
+                if let Some(transaction_id) = billing_intent.as_deref() {
+                    let billed_cost = crate::services::usage_pricing::billable_customer_cost_usd(
+                        reply.provider_cost_usd,
+                    );
+                    crate::services::metronome_billing::finalize_usage_intent(
+                        &state,
+                        transaction_id,
+                        billed_cost,
+                    )
+                    .map_err(|error| {
+                        tracing::error!(
+                            user_id,
+                            error_code =
+                                crate::services::metronome_billing::billing_error_code(&error),
+                            "Failed to finalize Light Tool billing outbox"
+                        );
+                        "Billing is temporarily unavailable".to_string()
+                    })?;
                 }
                 let user_facing = nonempty_reply(reply.user_facing)?;
                 persist_account_turn(

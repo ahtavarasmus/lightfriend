@@ -608,7 +608,9 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         tokio::spawn(async move {
             crate::services::metronome_billing::provision_subscribers(Arc::clone(&billing_state))
                 .await;
-            crate::services::metronome_billing::flush_usage_outbox(billing_state).await;
+            crate::services::metronome_billing::flush_usage_outbox(Arc::clone(&billing_state))
+                .await;
+            crate::services::metronome_billing::reconcile_usage_outbox(billing_state).await;
         });
     }
 
@@ -644,6 +646,21 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .add(metronome_provisioning_job)
         .await
         .expect("Failed to add Metronome provisioning job");
+
+    // Read-only provider reconciliation. Event Search is rate limited, so the
+    // worker samples at most 25 durable outbox rows per run.
+    let state_clone = Arc::clone(&state);
+    let metronome_reconciliation_job = Job::new_async("45 */15 * * * *", move |_, _| {
+        let state = Arc::clone(&state_clone);
+        Box::pin(async move {
+            crate::services::metronome_billing::reconcile_usage_outbox(state).await;
+        })
+    })
+    .expect("Failed to create Metronome reconciliation job");
+    sched
+        .add(metronome_reconciliation_job)
+        .await
+        .expect("Failed to add Metronome reconciliation job");
 
     // Create a job that runs every 10 minutes to check for new IMAP messages
     let state_clone = Arc::clone(&state);
@@ -1102,14 +1119,30 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 .unwrap_or_default()
                 .as_secs() as i32;
 
-            // Notify events that are due
-            let due_events = state
+            let _ = state.ontology_repository.update_scheduler_health(
+                "event_reminders",
+                now,
+                None,
+                None,
+            );
+            let mut reminder_health_error: Option<&str> = None;
+
+            // Atomically lease due reminders. A second scheduler replica skips
+            // locked rows; a crashed worker's lease becomes claimable again.
+            let due_events = match state
                 .ontology_repository
-                .get_events_due_for_notification(now)
-                .unwrap_or_default();
+                .claim_due_reminders(now, 120, 100)
+            {
+                Ok(events) => events,
+                Err(error) => {
+                    error!("Failed to claim due reminders: {}", error);
+                    reminder_health_error = Some("claim_failed");
+                    Vec::new()
+                }
+            };
             for event in &due_events {
                 let message = format!("Event reminder: {}", event.description);
-                let _ = crate::proactive::utils::send_notification(
+                let delivered = crate::proactive::utils::send_notification(
                     &state,
                     event.user_id,
                     &message,
@@ -1117,11 +1150,28 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                     None,
                 )
                 .await;
-                let _ = state.ontology_repository.update_event_status(
-                    event.user_id,
-                    event.id,
-                    "notified",
-                );
+                let result = if delivered {
+                    state.ontology_repository.mark_reminder_delivered(
+                        event.user_id,
+                        event.id,
+                        now,
+                    )
+                } else {
+                    state.ontology_repository.release_reminder_for_retry(
+                        event.user_id,
+                        event.id,
+                        event.reminder_attempts,
+                        "notification_delivery_failed",
+                        now,
+                    )
+                };
+                if let Err(error) = result {
+                    error!(
+                        "Failed to persist reminder delivery state event={} user={}: {}",
+                        event.id, event.user_id, error
+                    );
+                    reminder_health_error = Some("state_update_failed");
+                }
             }
 
             // Accountability friend nudge: events whose due_at is within the
@@ -1200,6 +1250,17 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                     "expired",
                 );
             }
+
+            let completed_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i32;
+            let _ = state.ontology_repository.update_scheduler_health(
+                "event_reminders",
+                now,
+                Some(completed_at),
+                reminder_health_error,
+            );
         })
     })
     .expect("Failed to create event cron job");

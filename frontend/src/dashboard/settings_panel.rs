@@ -1,3 +1,4 @@
+use super::always_show::AlwaysShowSettings;
 use super::phone_device_panel::PhoneDevicePanel;
 use super::webhooks_panel::WebhooksPanel;
 use crate::auth::connect::Connect;
@@ -219,6 +220,7 @@ const SETTINGS_STYLES: &str = r#"
 #[derive(Clone, PartialEq, Copy)]
 pub enum SettingsTab {
     Connections,
+    AlwaysShow,
     Account,
     Billing,
 }
@@ -301,6 +303,7 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
 
     let panel_title = match *active_tab {
         SettingsTab::Connections => "Connections",
+        SettingsTab::AlwaysShow => "Always show messages from…",
         SettingsTab::Billing => "Billing",
         SettingsTab::Account => "Settings",
     };
@@ -366,6 +369,11 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                 html! { <div class="settings-content"><div class="loading-spinner-inline"></div></div> }
             }
         }
+        SettingsTab::AlwaysShow => html! {
+            <div class="settings-content">
+                <AlwaysShowSettings />
+            </div>
+        },
         SettingsTab::Account => {
             if let Some(profile) = props.user_profile.as_ref() {
                 let on_profile_update = props.on_profile_update.clone();
@@ -435,6 +443,17 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                         }}
                     >
                         {"Connections"}
+                    </button>
+                    <button
+                        class={classes!("settings-tab", (*active_tab == SettingsTab::AlwaysShow).then(|| "active"))}
+                        role="tab"
+                        aria-selected={(*active_tab == SettingsTab::AlwaysShow).to_string()}
+                        onclick={{
+                            let active_tab = active_tab.clone();
+                            Callback::from(move |_| active_tab.set(SettingsTab::AlwaysShow))
+                        }}
+                    >
+                        {"Always show"}
                     </button>
                     <button
                         class={classes!("settings-tab", (*active_tab == SettingsTab::Account).then(|| "active"))}

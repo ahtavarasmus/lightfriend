@@ -208,6 +208,18 @@ pub struct TriggerConfig {
     /// Checked after `resolved_room_id` — if neither is set, fall back to
     /// the legacy name filter.
     pub resolved_person_id: Option<i32>,
+    /// Exact normalized sender key, used by the simplified allow-list for
+    /// email addresses. Unlike the legacy display-name fallback this matches
+    /// the envelope sender identity stored on the message.
+    pub resolved_sender_key: Option<String>,
+    /// Simplified allow-list entries only act on incoming messages. Kept as
+    /// an opt-in flag so existing custom-rule behavior is unchanged.
+    #[serde(default)]
+    pub incoming_only: bool,
+    /// Whether a simplified allow-list selection is known to be a group.
+    /// None is retained for historical chat rows where the bridge could not
+    /// authoritatively distinguish a DM from a group.
+    pub always_show_is_group: Option<bool>,
     // For schedule triggers
     pub schedule: Option<String>,
     pub pattern: Option<String>,
@@ -275,12 +287,34 @@ pub fn matches_trigger(
             .get("is_group")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+    if config.incoming_only
+        && (entity_snapshot
+            .get("is_outgoing")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+            || entity_snapshot
+                .get("sender_name")
+                .and_then(|v| v.as_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("You")))
+    {
+        return false;
+    }
     if is_group_message {
         let room_id = entity_snapshot
             .get("room_id")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        if config.group_mode.is_none() || config.resolved_room_id.as_deref() != Some(room_id) {
+        if config.incoming_only {
+            if config.always_show_is_group == Some(false) {
+                return false;
+            }
+            if let Some(expected_room_id) = config.resolved_room_id.as_deref() {
+                if expected_room_id != room_id {
+                    return false;
+                }
+            }
+        } else if config.group_mode.is_none() || config.resolved_room_id.as_deref() != Some(room_id)
+        {
             return false;
         }
         if entity_snapshot
@@ -290,6 +324,8 @@ pub fn matches_trigger(
         {
             return false;
         }
+    } else if config.incoming_only && config.always_show_is_group == Some(true) {
+        return false;
     }
 
     // Resolved-identity sender match (preferred over name filter when
@@ -301,8 +337,9 @@ pub fn matches_trigger(
     //   1. resolved_room_id → match entity.room_id exactly
     //   2. resolved_person_id → match entity.person_id exactly
     //   3. neither → fall through to legacy sender-name filter below
-    let has_resolved_sender =
-        config.resolved_room_id.is_some() || config.resolved_person_id.is_some();
+    let has_resolved_sender = config.resolved_room_id.is_some()
+        || config.resolved_person_id.is_some()
+        || config.resolved_sender_key.is_some();
     if let Some(ref rrid) = config.resolved_room_id {
         let got = entity_snapshot
             .get("room_id")
@@ -317,6 +354,14 @@ pub fn matches_trigger(
             .and_then(|v| v.as_i64())
             .unwrap_or(-1);
         if got != rpid as i64 {
+            return false;
+        }
+    } else if let Some(ref expected_key) = config.resolved_sender_key {
+        let got = entity_snapshot
+            .get("sender_key")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if !got.trim().eq_ignore_ascii_case(expected_key.trim()) {
             return false;
         }
     }
@@ -354,6 +399,14 @@ pub fn matches_trigger(
                 if !matched {
                     return false;
                 }
+            } else if config.incoming_only && key == "platform" {
+                let actual = entity_snapshot
+                    .get(key)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if !actual.eq_ignore_ascii_case(expected_value) {
+                    return false;
+                }
             } else {
                 // Other filters: substring match (content, platform, etc.)
                 let actual = entity_snapshot
@@ -370,17 +423,17 @@ pub fn matches_trigger(
         }
     }
 
-    // Group chat "mention_only" filter: skip messages that don't contain @mention
+    // Group chat "mention_only" is based exclusively on authoritative Matrix
+    // m.mentions metadata supplied by the bridge. Display text is intentionally
+    // ignored: an '@' in a message is not proof that this user was tagged.
     if let Some(ref mode) = config.group_mode {
-        if mode == "mention_only" {
-            let content = entity_snapshot
-                .get("content")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            // Check for @mention patterns (bridged platforms relay mentions as @name)
-            if !content.contains('@') {
-                return false;
-            }
+        if mode == "mention_only"
+            && !entity_snapshot
+                .get("is_mentioned")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        {
+            return false;
         }
     }
 
@@ -438,7 +491,7 @@ pub async fn evaluate_and_execute(
         .llm_usage_repository
         .get_user_tokens_since(rule.user_id, day_start)
         .unwrap_or(0);
-    if used_today >= 166_000 {
+    if !crate::handlers::rule_handlers::is_always_show_rule(rule) && used_today >= 166_000 {
         tracing::warn!(
             "User {} exceeded daily token budget ({}/166000), skipping rule {}",
             rule.user_id,
@@ -1071,7 +1124,7 @@ async fn execute_flow_action(
                 .map(|snap| compact_email_notification(message, snap))
                 .unwrap_or_else(|| message.to_string());
             let notification_meta = trigger_snapshot.and_then(notification_meta_from_snapshot);
-            let _ = send_notification_with_context(
+            let delivered = send_notification_with_context(
                 state,
                 rule.user_id,
                 &notification_message,
@@ -1080,6 +1133,26 @@ async fn execute_flow_action(
                 notification_meta,
             )
             .await;
+            if delivered && crate::handlers::rule_handlers::is_always_show_rule(rule) {
+                if let Some(message_id) = trigger_snapshot
+                    .and_then(|snapshot| snapshot.get("message_id"))
+                    .and_then(|value| value.as_i64())
+                {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i32;
+                    if let Err(e) = state
+                        .ontology_repository
+                        .mark_digest_delivered(&[message_id], now)
+                    {
+                        warn!(
+                            "Always-show rule {} delivered but message {} could not be marked delivered: {}",
+                            rule.id, message_id, e
+                        );
+                    }
+                }
+            }
             info!(
                 "Rule {} ({}): sent {} notification",
                 rule.id, rule.name, method
@@ -1486,6 +1559,25 @@ pub async fn emit_ontology_change(
         }
     }
 
+    // Load custom rules once. The simplified always-show UI stores tagged
+    // rules in the same table as legacy custom rules, preserving existing
+    // behavior without introducing a parallel matching system.
+    let rules = match state.ontology_repository.get_ontology_change_rules(user_id) {
+        Ok(rules) => rules,
+        Err(e) => {
+            error!(
+                "Failed to load ontology_change rules for user {}: {}",
+                user_id, e
+            );
+            Vec::new()
+        }
+    };
+    let bypasses_normal_filter = entity_type == "Message"
+        && rules.iter().any(|rule| {
+            crate::handlers::rule_handlers::is_always_show_rule(rule)
+                && matches_trigger(rule, entity_type, change_type, &entity_snapshot)
+        });
+
     // === System behaviors (automatic, no user rules needed) ===
     let is_group = entity_snapshot
         .get("is_group")
@@ -1509,8 +1601,10 @@ pub async fn emit_ontology_change(
             });
         }
 
-        // Urgency classification: 5-min delay + seen-check (no point notifying about read messages)
-        {
+        // Urgency classification: 5-min delay + seen-check (no point notifying about read messages).
+        // An always-show match has its own immediate deterministic delivery,
+        // so do not also schedule a filtered notification for the same message.
+        if !bypasses_normal_filter {
             let state_urgency = Arc::clone(state);
             let snap_urgency = entity_snapshot.clone();
             let platform_sys = entity_snapshot
@@ -1593,17 +1687,7 @@ pub async fn emit_ontology_change(
         }
     }
 
-    // === Custom rules ===
-    let rules = match state.ontology_repository.get_ontology_change_rules(user_id) {
-        Ok(r) => r,
-        Err(e) => {
-            error!(
-                "Failed to load ontology_change rules for user {}: {}",
-                user_id, e
-            );
-            return;
-        }
-    };
+    // === Custom rules (legacy + simplified always-show entries) ===
 
     let trigger_context = format!(
         "{} {} (id={}): {}",
@@ -1651,6 +1735,7 @@ pub async fn emit_ontology_change(
             let is_message = entity_type == "Message";
             let message_id = msg_id;
             let imap_connection_id = msg_imap_connection_id;
+            let always_show = crate::handlers::rule_handlers::is_always_show_rule(&rule);
 
             // Parse delay from trigger config (default 300s for ontology_change)
             let trigger: TriggerConfig =
@@ -1658,7 +1743,7 @@ pub async fn emit_ontology_change(
             let delay = trigger.delay_seconds.unwrap_or(600);
 
             tokio::spawn(async move {
-                if is_message {
+                if is_message && !always_show {
                     if delay > 0 {
                         tokio::time::sleep(tokio::time::Duration::from_secs(delay as u64)).await;
                     }

@@ -1,6 +1,8 @@
 use backend::services::metronome_billing::{
-    contract_starting_at, cost_to_microusd, legacy_overage_migration_target,
-    ordered_payment_method_candidates, payment_method_owner_matches, verify_webhook_signature,
+    contract_starting_at, cost_to_microusd, invoice_contains_usage,
+    legacy_overage_migration_target, ordered_payment_method_candidates,
+    payment_method_owner_matches, provider_event_status, provider_http_error, select_contract_id,
+    verify_webhook_signature, MetronomeConfig,
 };
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -114,4 +116,111 @@ fn accepts_only_payment_methods_attached_to_the_current_customer() {
         Some("cus_other")
     ));
     assert!(!payment_method_owner_matches("cus_current", None));
+}
+
+fn complete_config() -> MetronomeConfig {
+    MetronomeConfig {
+        enabled: true,
+        api_url: "https://api.metronome.com".to_string(),
+        api_key: "test-key".to_string(),
+        package_alias: "lightfriend-monthly".to_string(),
+        event_type: "lightfriend_usage".to_string(),
+        billable_metric_id: Some("metric-1".to_string()),
+        usage_product_id: Some("product-1".to_string()),
+        webhook_secret: "webhook-secret".to_string(),
+        legacy_credit_product_id: Some("legacy-product".to_string()),
+        credit_type_id: Some("credit-type".to_string()),
+    }
+}
+
+#[test]
+fn enabled_billing_requires_complete_configuration() {
+    let mut config = complete_config();
+    config.webhook_secret.clear();
+    config.billable_metric_id = None;
+    let error = config.validate().unwrap_err().to_string();
+    assert!(error.contains("METRONOME_WEBHOOK_SECRET"));
+    assert!(error.contains("METRONOME_BILLABLE_METRIC_ID"));
+    config.enabled = false;
+    assert!(config.validate().is_ok());
+}
+
+#[test]
+fn contract_selection_rejects_ambiguous_provider_results() {
+    let ambiguous = serde_json::json!({"data": [
+        {"id": "contract-a", "uniqueness_key": "other-a"},
+        {"id": "contract-b", "uniqueness_key": "other-b"}
+    ]});
+    assert!(select_contract_id(&ambiguous, "lightfriend-contract-7").is_err());
+
+    let exact = serde_json::json!({"data": [
+        {"id": "contract-a", "uniqueness_key": "other-a"},
+        {"id": "contract-b", "uniqueness_key": "lightfriend-contract-7"}
+    ]});
+    assert_eq!(
+        select_contract_id(&exact, "lightfriend-contract-7").unwrap(),
+        Some("contract-b".to_string())
+    );
+}
+
+#[test]
+fn provider_http_errors_never_include_raw_response_bodies() {
+    let raw_secret = "customer_email@example.com token=super-secret";
+    let error = provider_http_error(reqwest::StatusCode::BAD_REQUEST).to_string();
+    assert!(error.contains("HTTP 400"));
+    assert!(!error.contains(raw_secret));
+    assert!(!error.contains("customer_email"));
+}
+
+#[test]
+fn reconciliation_requires_customer_and_expected_metric_matches() {
+    let response = serde_json::json!([
+        {
+            "transaction_id": "tx-good",
+            "matched_customer": {"id": "customer-1"},
+            "matched_billable_metrics": [{"id": "metric-1"}]
+        },
+        {
+            "transaction_id": "tx-wrong-metric",
+            "matched_customer": {"id": "customer-1"},
+            "matched_billable_metrics": [{"id": "metric-other"}]
+        }
+    ]);
+    assert_eq!(
+        provider_event_status(&response, "tx-good", "metric-1"),
+        "matched"
+    );
+    assert_eq!(
+        provider_event_status(&response, "tx-wrong-metric", "metric-1"),
+        "unmatched"
+    );
+    assert_eq!(
+        provider_event_status(&response, "tx-missing", "metric-1"),
+        "missing"
+    );
+}
+
+#[test]
+fn reconciliation_detects_usage_product_on_the_covering_invoice() {
+    let invoices = serde_json::json!({"data": [{
+        "contract_id": "contract-1",
+        "start_timestamp": "2026-08-01T00:00:00Z",
+        "end_timestamp": "2026-09-01T00:00:00Z",
+        "line_items": [{"product_id": "product-1"}]
+    }]});
+    let occurred_at = chrono::DateTime::parse_from_rfc3339("2026-08-15T12:00:00Z")
+        .unwrap()
+        .timestamp() as i32;
+    assert!(invoice_contains_usage(
+        &invoices,
+        "contract-1",
+        "product-1",
+        occurred_at
+    ));
+    assert!(!invoice_contains_usage(
+        &invoices,
+        "contract-1",
+        "product-other",
+        occurred_at
+    ));
 }

@@ -3,12 +3,13 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::convert::Infallible;
 use std::sync::Arc;
 
 use crate::handlers::auth_middleware::AuthUser;
+use crate::handlers::dashboard_handlers::Contact;
 use crate::models::ontology_models::{NewOntRule, OntRule};
 use crate::proactive::rules::{
     compute_next_fire_at, evaluate_flow_test, ActionConfig, FlowNode, RuleTestStep, TriggerConfig,
@@ -16,6 +17,376 @@ use crate::proactive::rules::{
 use crate::repositories::user_core::UserCoreOps;
 use crate::repositories::user_repository::LogUsageParams;
 use crate::AppState;
+
+pub const ALWAYS_SHOW_LOGIC_TYPE: &str = "always_show";
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CreateAlwaysShowRequest {
+    Platform {
+        contact_id: String,
+        #[serde(default)]
+        group_mode: Option<String>,
+    },
+    Email {
+        email: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct AlwaysShowEntry {
+    pub id: i32,
+    pub platform: String,
+    pub display_name: String,
+    pub subtitle: String,
+}
+
+pub fn is_always_show_rule(rule: &OntRule) -> bool {
+    rule.logic_type == ALWAYS_SHOW_LOGIC_TYPE
+}
+
+fn always_show_metadata(rule: &OntRule) -> Option<(String, String, String)> {
+    if !is_always_show_rule(rule) {
+        return None;
+    }
+    let config: serde_json::Value = serde_json::from_str(&rule.trigger_config).ok()?;
+    Some((
+        config.get("always_show_platform")?.as_str()?.to_string(),
+        config
+            .get("always_show_display_name")?
+            .as_str()?
+            .to_string(),
+        config.get("always_show_identity")?.as_str()?.to_string(),
+    ))
+}
+
+fn always_show_entry(rule: &OntRule) -> Option<AlwaysShowEntry> {
+    let (platform, display_name, _) = always_show_metadata(rule)?;
+    let config: serde_json::Value = serde_json::from_str(&rule.trigger_config).ok()?;
+    let subtitle = if platform == "email" {
+        "Email address".to_string()
+    } else if config.get("always_show_is_group").and_then(|v| v.as_bool()) == Some(true)
+        && config.get("group_mode").and_then(|v| v.as_str()) == Some("mention_only")
+    {
+        format!("Mentions only · {}", platform)
+    } else {
+        format!("Always shown from {}", platform)
+    };
+    Some(AlwaysShowEntry {
+        id: rule.id,
+        platform,
+        display_name,
+        subtitle,
+    })
+}
+
+fn build_always_show_rule(
+    user_id: i32,
+    platform: &str,
+    display_name: &str,
+    identity: &str,
+    room_id: Option<&str>,
+    person_id: Option<i32>,
+    sender_key: Option<&str>,
+    is_group: Option<bool>,
+    group_mode: Option<&str>,
+    now: i32,
+) -> NewOntRule {
+    let mut trigger = json!({
+        "entity_type": "Message",
+        "change": "created",
+        "filters": {
+            "sender": display_name,
+            "platform": platform,
+        },
+        "delay_seconds": 0,
+        "incoming_only": true,
+        "always_show_platform": platform,
+        "always_show_display_name": display_name,
+        "always_show_identity": identity,
+    });
+    if let Some(room_id) = room_id {
+        trigger["resolved_room_id"] = json!(room_id);
+    }
+    if let Some(person_id) = person_id {
+        trigger["resolved_person_id"] = json!(person_id);
+    }
+    if let Some(sender_key) = sender_key {
+        trigger["resolved_sender_key"] = json!(sender_key);
+    }
+    if let Some(is_group) = is_group {
+        trigger["always_show_is_group"] = json!(is_group);
+    }
+    if let Some(group_mode) = group_mode {
+        trigger["group_mode"] = json!(group_mode);
+    }
+
+    let action = json!({ "method": "sms" });
+    let flow = json!({
+        "type": "action",
+        "action_type": "notify",
+        "config": action,
+    });
+
+    NewOntRule {
+        user_id,
+        name: format!("Always show: {}", display_name),
+        trigger_type: "ontology_change".to_string(),
+        trigger_config: trigger.to_string(),
+        logic_type: ALWAYS_SHOW_LOGIC_TYPE.to_string(),
+        logic_prompt: None,
+        logic_fetch: None,
+        action_type: "notify".to_string(),
+        action_config: action.to_string(),
+        status: "active".to_string(),
+        next_fire_at: None,
+        expires_at: None,
+        created_at: now,
+        updated_at: now,
+        flow_config: Some(flow.to_string()),
+    }
+}
+
+pub fn build_platform_always_show_rule(
+    user_id: i32,
+    contact: &Contact,
+    now: i32,
+) -> Result<NewOntRule, &'static str> {
+    build_platform_always_show_rule_with_mode(user_id, contact, None, now)
+}
+
+pub fn platform_supports_authoritative_mentions(platform: &str) -> bool {
+    // mautrix-whatsapp exposes source-platform tags as Matrix m.mentions.
+    // Do not advertise mention-only for bridges whose native-to-Matrix
+    // mention mapping has not been verified here.
+    platform == "whatsapp"
+}
+
+pub fn build_platform_always_show_rule_with_mode(
+    user_id: i32,
+    contact: &Contact,
+    requested_group_mode: Option<&str>,
+    now: i32,
+) -> Result<NewOntRule, &'static str> {
+    let platform = contact
+        .platform
+        .as_deref()
+        .ok_or("Contact has no platform")?;
+    if platform == "email" {
+        return Err("Use the email entry form for email addresses");
+    }
+    let group_mode = if contact.is_group {
+        let mode = requested_group_mode.unwrap_or("all");
+        if mode != "all" && mode != "mention_only" {
+            return Err("Choose all messages or mentions only");
+        }
+        if mode == "mention_only" && !platform_supports_authoritative_mentions(platform) {
+            return Err("Mentions-only is not reliably available for this platform");
+        }
+        Some(mode)
+    } else {
+        if requested_group_mode.is_some() {
+            return Err("Delivery mode is only available for group chats");
+        }
+        None
+    };
+    Ok(build_always_show_rule(
+        user_id,
+        platform,
+        contact.display_name.trim(),
+        &contact.id,
+        contact.room_id.as_deref(),
+        contact.person_id,
+        None,
+        Some(contact.is_group),
+        group_mode,
+        now,
+    ))
+}
+
+pub fn build_email_always_show_rule(
+    user_id: i32,
+    email: &str,
+    now: i32,
+) -> Result<NewOntRule, &'static str> {
+    let normalized = email.trim().to_lowercase();
+    if !crate::handlers::imap_auth::is_valid_email(&normalized) {
+        return Err("Enter a valid email address");
+    }
+    Ok(build_always_show_rule(
+        user_id,
+        "email",
+        &normalized,
+        &format!("email:{}", normalized),
+        None,
+        None,
+        Some(&normalized),
+        Some(false),
+        None,
+        now,
+    ))
+}
+
+pub async fn list_always_show(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<Vec<AlwaysShowEntry>>, StatusCode> {
+    state
+        .ontology_repository
+        .get_rules(auth_user.user_id)
+        .map(|rules| {
+            Json(
+                rules
+                    .iter()
+                    .filter(|rule| rule.status == "active")
+                    .filter_map(always_show_entry)
+                    .collect(),
+            )
+        })
+        .map_err(|e| {
+            tracing::error!("Failed to list always-show entries: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+pub async fn create_always_show(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(req): Json<CreateAlwaysShowRequest>,
+) -> Result<Json<AlwaysShowEntry>, (StatusCode, Json<serde_json::Value>)> {
+    let user_id = auth_user.user_id;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i32;
+
+    let new_rule = match req {
+        CreateAlwaysShowRequest::Platform {
+            contact_id,
+            group_mode,
+        } => {
+            let contact = state
+                .rule_builder_contact_cache
+                .get(&user_id)
+                .and_then(|entry| {
+                    entry
+                        .value()
+                        .1
+                        .iter()
+                        .find(|contact| contact.id == contact_id)
+                        .cloned()
+                })
+                .ok_or_else(|| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(
+                            json!({ "error": "Select a contact or chat from the search results" }),
+                        ),
+                    )
+                })?;
+            build_platform_always_show_rule_with_mode(user_id, &contact, group_mode.as_deref(), now)
+        }
+        CreateAlwaysShowRequest::Email { email } => {
+            build_email_always_show_rule(user_id, &email, now)
+        }
+    }
+    .map_err(|message| (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))))?;
+
+    let identity = always_show_metadata_from_new(&new_rule).2;
+    let existing = state
+        .ontology_repository
+        .get_active_rules(user_id)
+        .map_err(|e| {
+            tracing::error!("Failed to check always-show entries: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to save entry" })),
+            )
+        })?
+        .into_iter()
+        .find(|rule| {
+            always_show_metadata(rule)
+                .is_some_and(|(_, _, existing_identity)| existing_identity == identity)
+        });
+
+    let rule = if let Some(existing) = existing {
+        // Re-adding the same group is how the compact UI changes its single
+        // delivery mode. Update in place so duplicate modes cannot coexist.
+        state
+            .ontology_repository
+            .update_rule(
+                user_id,
+                existing.id,
+                &new_rule.name,
+                &new_rule.trigger_type,
+                &new_rule.trigger_config,
+                &new_rule.logic_type,
+                new_rule.logic_prompt.as_deref(),
+                new_rule.logic_fetch.as_deref(),
+                &new_rule.action_type,
+                &new_rule.action_config,
+                new_rule.next_fire_at,
+                new_rule.flow_config.as_deref(),
+            )
+            .map_err(|e| {
+                tracing::error!("Failed to update always-show entry: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Failed to save entry" })),
+                )
+            })?
+    } else {
+        state
+            .ontology_repository
+            .create_rule(&new_rule)
+            .map_err(|e| {
+                tracing::error!("Failed to create always-show entry: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Failed to save entry" })),
+                )
+            })?
+    };
+
+    Ok(Json(
+        always_show_entry(&rule).expect("new always-show rule has metadata"),
+    ))
+}
+
+fn always_show_metadata_from_new(rule: &NewOntRule) -> (String, String, String) {
+    let config: serde_json::Value =
+        serde_json::from_str(&rule.trigger_config).expect("always-show trigger is valid JSON");
+    (
+        config["always_show_platform"].as_str().unwrap().to_string(),
+        config["always_show_display_name"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        config["always_show_identity"].as_str().unwrap().to_string(),
+    )
+}
+
+pub async fn delete_always_show(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(rule_id): Path<i32>,
+) -> Result<StatusCode, StatusCode> {
+    let rule = state
+        .ontology_repository
+        .get_rule(auth_user.user_id, rule_id)
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    if !is_always_show_rule(&rule) {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    state
+        .ontology_repository
+        .delete_rule(auth_user.user_id, rule_id)
+        .map_err(|e| {
+            tracing::error!("Failed to delete always-show entry: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(StatusCode::NO_CONTENT)
+}
 
 #[derive(Deserialize)]
 pub struct CreateRuleRequest {
