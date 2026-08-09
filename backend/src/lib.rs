@@ -20,7 +20,6 @@ pub mod handlers {
     pub mod person_handlers;
     pub mod pricing_handlers;
     pub mod profile_handlers;
-    pub mod public_mcp_handlers;
     pub mod rule_handlers;
 
     pub mod maintenance_handlers;

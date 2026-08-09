@@ -29,50 +29,14 @@ pub struct McpTestResponse {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub struct McpAccessTokenSummary {
-    pub id: i32,
-    pub token_prefix: String,
-    pub label: String,
-    pub created_at: i32,
-    pub last_used_at: Option<i32>,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub struct CreateMcpAccessTokenResponse {
-    pub id: i32,
-    pub token_prefix: String,
-    pub label: String,
-    pub created_at: i32,
-    pub last_used_at: Option<i32>,
-    pub token: String,
-    pub endpoint: String,
-}
-
-#[derive(Properties, PartialEq)]
-pub struct McpConnectProps {
-    pub user_id: i32,
-}
-
-fn public_mcp_endpoint() -> String {
-    web_sys::window()
-        .and_then(|window| window.location().origin().ok())
-        .filter(|origin| !origin.is_empty() && origin != "null")
-        .unwrap_or_else(|| "https://lightfriend.ai".to_string())
-        + "/api/mcp"
-}
-
 #[function_component(McpConnect)]
-pub fn mcp_connect(props: &McpConnectProps) -> Html {
+pub fn mcp_connect() -> Html {
     let servers = use_state(Vec::<McpServer>::new);
     let loading = use_state(|| true);
     let error = use_state(|| None::<String>);
     let show_add_modal = use_state(|| false);
     let testing_server = use_state(|| None::<i32>);
     let test_result = use_state(|| None::<McpTestResponse>);
-    let access_tokens = use_state(Vec::<McpAccessTokenSummary>::new);
-    let new_access_token = use_state(|| None::<String>);
-    let access_token_busy = use_state(|| false);
 
     // Add form state
     let new_name = use_state(String::new);
@@ -114,122 +78,6 @@ pub fn mcp_connect(props: &McpConnectProps) -> Html {
             (),
         );
     }
-
-    // Fetch the dedicated credentials used when an external MCP client
-    // connects to Lightfriend. These are intentionally separate from the
-    // credentials for third-party servers above.
-    {
-        let access_tokens = access_tokens.clone();
-        let error = error.clone();
-        use_effect_with_deps(
-            move |_| {
-                spawn_local(async move {
-                    match Api::get("/api/me/mcp-tokens").send().await {
-                        Ok(response) if response.ok() => {
-                            if let Ok(tokens) = response.json::<Vec<McpAccessTokenSummary>>().await
-                            {
-                                access_tokens.set(tokens);
-                            }
-                        }
-                        Ok(_) => error.set(Some("Failed to fetch Lightfriend MCP access".into())),
-                        Err(err) => error.set(Some(format!("Network error: {}", err))),
-                    }
-                });
-                || ()
-            },
-            (),
-        );
-    }
-
-    let on_create_access_token = {
-        let access_tokens = access_tokens.clone();
-        let new_access_token = new_access_token.clone();
-        let access_token_busy = access_token_busy.clone();
-        let error = error.clone();
-        Callback::from(move |_: MouseEvent| {
-            let access_tokens = access_tokens.clone();
-            let new_access_token = new_access_token.clone();
-            let access_token_busy = access_token_busy.clone();
-            let error = error.clone();
-            access_token_busy.set(true);
-            spawn_local(async move {
-                let request = match Api::post("/api/me/mcp-tokens")
-                    .json(&serde_json::json!({"label": "External MCP client"}))
-                {
-                    Ok(request) => request,
-                    Err(err) => {
-                        error.set(Some(format!("Failed to create request: {}", err)));
-                        access_token_busy.set(false);
-                        return;
-                    }
-                };
-                match request.send().await {
-                    Ok(response) if response.ok() => {
-                        match response.json::<CreateMcpAccessTokenResponse>().await {
-                            Ok(created) => {
-                                let mut tokens = (*access_tokens).clone();
-                                tokens.insert(
-                                    0,
-                                    McpAccessTokenSummary {
-                                        id: created.id,
-                                        token_prefix: created.token_prefix,
-                                        label: created.label,
-                                        created_at: created.created_at,
-                                        last_used_at: created.last_used_at,
-                                    },
-                                );
-                                access_tokens.set(tokens);
-                                new_access_token.set(Some(created.token));
-                            }
-                            Err(_) => error.set(Some("Invalid token response".into())),
-                        }
-                    }
-                    Ok(response) => {
-                        let message = response
-                            .json::<serde_json::Value>()
-                            .await
-                            .ok()
-                            .and_then(|value| {
-                                value
-                                    .get("error")
-                                    .and_then(|error| error.as_str())
-                                    .map(str::to_string)
-                            })
-                            .unwrap_or_else(|| "Failed to create MCP token".into());
-                        error.set(Some(message));
-                    }
-                    Err(err) => error.set(Some(format!("Network error: {}", err))),
-                }
-                access_token_busy.set(false);
-            });
-        })
-    };
-
-    let on_revoke_access_token = {
-        let access_tokens = access_tokens.clone();
-        let new_access_token = new_access_token.clone();
-        Callback::from(move |token_id: i32| {
-            let access_tokens = access_tokens.clone();
-            let new_access_token = new_access_token.clone();
-            spawn_local(async move {
-                if let Ok(response) = Api::delete(&format!("/api/me/mcp-tokens/{}", token_id))
-                    .send()
-                    .await
-                {
-                    if response.ok() {
-                        access_tokens.set(
-                            (*access_tokens)
-                                .iter()
-                                .filter(|token| token.id != token_id)
-                                .cloned()
-                                .collect(),
-                        );
-                        new_access_token.set(None);
-                    }
-                }
-            });
-        })
-    };
 
     let on_add_server = {
         let servers = servers.clone();
@@ -482,52 +330,6 @@ pub fn mcp_connect(props: &McpConnectProps) -> Html {
             <p class="mcp-description">
                 {"Connect custom MCP servers to extend your AI assistant with additional tools and integrations."}
             </p>
-
-            <section class="lightfriend-mcp-access" aria-labelledby="lightfriend-mcp-heading">
-                <div class="lightfriend-mcp-access-header">
-                    <div>
-                        <h3 id="lightfriend-mcp-heading">{"Use Lightfriend from an MCP client"}</h3>
-                        <p>{"Create a separate read-only credential for an external client to query your Lightfriend messages, people, and tracked events."}</p>
-                    </div>
-                    <button
-                        class="add-server-btn"
-                        onclick={on_create_access_token}
-                        disabled={*access_token_busy}
-                    >
-                        {if *access_token_busy { "Creating..." } else { "Create access token" }}
-                    </button>
-                </div>
-                <div class="mcp-client-config">
-                    <span>{"Endpoint"}</span>
-                    <code>{public_mcp_endpoint()}</code>
-                </div>
-                if let Some(token) = (*new_access_token).as_ref() {
-                    <div class="mcp-token-once" role="status">
-                        <strong>{"Copy this token now. It will not be shown again."}</strong>
-                        <code>{token}</code>
-                        <p>{"Send it as Authorization: Bearer <token>. Revoking it immediately blocks future requests."}</p>
-                    </div>
-                }
-                if !access_tokens.is_empty() {
-                    <div class="mcp-access-token-list">
-                        {for access_tokens.iter().map(|token| {
-                            let token_id = token.id;
-                            let on_revoke = {
-                                let on_revoke_access_token = on_revoke_access_token.clone();
-                                Callback::from(move |_: MouseEvent| on_revoke_access_token.emit(token_id))
-                            };
-                            html! {
-                                <div class="mcp-access-token-row">
-                                    <span>{format!("{} ({})", token.label, token.token_prefix)}</span>
-                                    <button class="delete-btn" onclick={on_revoke} aria-label="Revoke MCP access token">
-                                        <i class="fa-solid fa-trash"></i>
-                                    </button>
-                                </div>
-                            }
-                        })}
-                    </div>
-                }
-            </section>
 
             if let Some(err) = (*error).as_ref() {
                 <div class="error-message">
@@ -804,47 +606,6 @@ pub fn mcp_connect(props: &McpConnectProps) -> Html {
             {r#"
 .mcp-connect {
     padding: 1rem;
-}
-.lightfriend-mcp-access {
-    margin: 1rem 0 1.5rem;
-    padding: 1rem;
-    border: 1px solid rgba(126, 178, 255, 0.25);
-    border-radius: 10px;
-    background: rgba(126, 178, 255, 0.06);
-}
-.lightfriend-mcp-access-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 1rem;
-}
-.lightfriend-mcp-access h3 { margin: 0 0 0.35rem; font-size: 1rem; }
-.lightfriend-mcp-access p { margin: 0; color: #999; font-size: 0.85rem; line-height: 1.5; }
-.mcp-client-config, .mcp-token-once {
-    display: grid;
-    gap: 0.4rem;
-    margin-top: 0.8rem;
-}
-.mcp-client-config code, .mcp-token-once code {
-    display: block;
-    overflow-wrap: anywhere;
-    padding: 0.65rem;
-    border-radius: 6px;
-    background: rgba(0, 0, 0, 0.3);
-}
-.mcp-token-once {
-    padding: 0.8rem;
-    border: 1px solid rgba(232, 168, 56, 0.4);
-    border-radius: 8px;
-}
-.mcp-access-token-list { margin-top: 0.75rem; }
-.mcp-access-token-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    min-height: 44px;
-    padding: 0.35rem 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 .mcp-header {
     display: flex;

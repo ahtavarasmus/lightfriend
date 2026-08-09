@@ -2,7 +2,7 @@ use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
 use axum::routing::post;
 use axum::Router;
-use backend::pg_schema::{agent_credentials, ont_events};
+use backend::pg_schema::{agent_credentials, imap_connection, ont_events, pending_reply_watches};
 use backend::repositories::agent_integration_repository::{
     AgentIntegrationRepository, CredentialClaim, CredentialIssue, IdempotencyClaim, PairingPoll,
 };
@@ -96,6 +96,14 @@ fn pairing_tokens_are_one_time_hashed_scoped_and_revocable() {
     assert_eq!(stored_hash, hash(&raw));
     assert_ne!(stored_hash, raw);
     assert_eq!(credential.scopes, "reminders,reply_watch_email");
+    assert_eq!(
+        repository.list_credentials(user.id, now + 3).unwrap().len(),
+        1
+    );
+    assert!(repository
+        .list_credentials(user.id, credential.expires_at)
+        .unwrap()
+        .is_empty());
 
     assert!(matches!(
         repository.claim_credential(&hash(&raw), "reminders", now + 3),
@@ -122,6 +130,77 @@ fn pairing_tokens_are_one_time_hashed_scoped_and_revocable() {
         .authenticate_credential(&hash(&raw), "reminders", now + 6)
         .unwrap()
         .is_none());
+}
+
+#[test]
+#[serial_test::serial]
+fn reply_watch_cap_counts_actions_not_connected_inboxes() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let now = chrono::Utc::now().timestamp() as i32;
+    let mut conn = state.pg_pool.get().unwrap();
+    let connection_ids = (0..3)
+        .map(|index| {
+            diesel::insert_into(imap_connection::table)
+                .values((
+                    imap_connection::user_id.eq(user.id),
+                    imap_connection::method.eq("password"),
+                    imap_connection::encrypted_password.eq("test"),
+                    imap_connection::status.eq("active"),
+                    imap_connection::last_update.eq(now),
+                    imap_connection::created_on.eq(now),
+                    imap_connection::description.eq(format!("person{index}@example.com")),
+                ))
+                .returning(imap_connection::id)
+                .get_result::<i32>(&mut conn)
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let repository = AgentIntegrationRepository::new(state.pg_pool.clone());
+
+    for index in 0..5 {
+        assert!(repository
+            .create_email_reply_watches(
+                user.id,
+                &connection_ids,
+                &format!("sender{index}@example.com"),
+                &format!("Sender {index}"),
+                now + index,
+                now + 3600 + index,
+                5,
+            )
+            .unwrap());
+    }
+    assert!(!repository
+        .create_email_reply_watches(
+            user.id,
+            &connection_ids,
+            "sixth@example.com",
+            "Sixth",
+            now + 6,
+            now + 3606,
+            5,
+        )
+        .unwrap());
+    assert!(!repository
+        .create_email_reply_watches(
+            user.id,
+            &connection_ids,
+            "sender0@example.com",
+            "Sender zero again",
+            now + 7,
+            now + 3607,
+            5,
+        )
+        .unwrap());
+    assert_eq!(
+        pending_reply_watches::table
+            .filter(pending_reply_watches::user_id.eq(user.id))
+            .count()
+            .get_result::<i64>(&mut conn)
+            .unwrap(),
+        15
+    );
 }
 
 #[tokio::test]

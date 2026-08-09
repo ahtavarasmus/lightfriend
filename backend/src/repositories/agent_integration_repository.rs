@@ -10,6 +10,7 @@ use crate::pg_schema::{
 use crate::PgDbPool;
 use diesel::prelude::*;
 use diesel::result::{DatabaseErrorKind, Error as DieselError};
+use std::collections::HashSet;
 
 const IDEMPOTENCY_TTL_SECONDS: i32 = 86_400;
 
@@ -61,16 +62,26 @@ impl AgentIntegrationRepository {
         expires_at: i32,
     ) -> Result<(), DieselError> {
         let mut conn = self.pool.get().map_err(|_| DieselError::NotFound)?;
-        diesel::insert_into(agent_pairing_sessions::table)
-            .values(NewAgentPairingSession {
-                device_code_hash,
-                user_code_hash,
-                client_name,
-                created_at: now,
-                expires_at,
-            })
-            .execute(&mut conn)?;
-        Ok(())
+        conn.transaction(|conn| {
+            diesel::delete(
+                agent_pairing_sessions::table.filter(
+                    agent_pairing_sessions::expires_at
+                        .le(now)
+                        .or(agent_pairing_sessions::consumed_at.is_not_null()),
+                ),
+            )
+            .execute(conn)?;
+            diesel::insert_into(agent_pairing_sessions::table)
+                .values(NewAgentPairingSession {
+                    device_code_hash,
+                    user_code_hash,
+                    client_name,
+                    created_at: now,
+                    expires_at,
+                })
+                .execute(conn)?;
+            Ok(())
+        })
     }
 
     pub fn approve_pairing(
@@ -186,11 +197,16 @@ impl AgentIntegrationRepository {
         })
     }
 
-    pub fn list_credentials(&self, user_id: i32) -> Result<Vec<AgentCredential>, DieselError> {
+    pub fn list_credentials(
+        &self,
+        user_id: i32,
+        now: i32,
+    ) -> Result<Vec<AgentCredential>, DieselError> {
         let mut conn = self.pool.get().map_err(|_| DieselError::NotFound)?;
         agent_credentials::table
             .filter(agent_credentials::user_id.eq(user_id))
             .filter(agent_credentials::revoked_at.is_null())
+            .filter(agent_credentials::expires_at.gt(now))
             .order(agent_credentials::created_at.desc())
             .select(AgentCredential::as_select())
             .load(&mut conn)
@@ -391,15 +407,6 @@ impl AgentIntegrationRepository {
             .load(&mut conn)
     }
 
-    pub fn count_active_reply_watches(&self, user_id: i32, now: i32) -> Result<i64, DieselError> {
-        let mut conn = self.pool.get().map_err(|_| DieselError::NotFound)?;
-        pending_reply_watches::table
-            .filter(pending_reply_watches::user_id.eq(user_id))
-            .filter(pending_reply_watches::expires_at.gt(now))
-            .count()
-            .get_result(&mut conn)
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn create_email_reply_watches(
         &self,
@@ -420,12 +427,30 @@ impl AgentIntegrationRepository {
                 .select(users::id)
                 .for_update()
                 .first::<i32>(conn)?;
-            let active = pending_reply_watches::table
+            let active_rows = pending_reply_watches::table
                 .filter(pending_reply_watches::user_id.eq(user_id))
                 .filter(pending_reply_watches::expires_at.gt(now))
-                .count()
-                .get_result::<i64>(conn)?;
-            if connection_ids.is_empty() || active + connection_ids.len() as i64 > max_active {
+                .select((
+                    pending_reply_watches::platform,
+                    pending_reply_watches::contact_identifier,
+                    pending_reply_watches::room_id,
+                ))
+                .load::<(String, String, Option<String>)>(conn)?;
+            let active_groups = active_rows
+                .into_iter()
+                .map(|(platform, contact, room)| {
+                    if platform == "email" {
+                        format!("email:{contact}")
+                    } else {
+                        format!("{platform}:{}", room.unwrap_or(contact))
+                    }
+                })
+                .collect::<HashSet<_>>();
+            let email_group = format!("email:{email}");
+            if connection_ids.is_empty()
+                || active_groups.contains(&email_group)
+                || active_groups.len() as i64 >= max_active
+            {
                 return Ok(false);
             }
             for connection_id in connection_ids {

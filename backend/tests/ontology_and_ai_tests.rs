@@ -8,5 +8,3 @@ mod ontology_query_test;
 mod ontology_registry_test;
 #[path = "ontology_repository_test.rs"]
 mod ontology_repository_test;
-#[path = "public_mcp_server_test.rs"]
-mod public_mcp_server_test;

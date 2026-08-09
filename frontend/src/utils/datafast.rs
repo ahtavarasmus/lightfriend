@@ -49,7 +49,8 @@ pub fn attribute_payment(email: &str) -> bool {
     let Some(window) = web_sys::window() else {
         return false;
     };
-    let Ok(tracker) = Reflect::get(window.as_ref(), &JsValue::from_str(PAYMENT_TRACKER_NAME)) else {
+    let Ok(tracker) = Reflect::get(window.as_ref(), &JsValue::from_str(PAYMENT_TRACKER_NAME))
+    else {
         return false;
     };
     let Ok(tracker) = tracker.dyn_into::<Function>() else {

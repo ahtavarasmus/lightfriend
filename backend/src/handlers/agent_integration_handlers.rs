@@ -233,7 +233,7 @@ pub async fn approve_pairing(
 
 pub async fn list_credentials(State(state): State<Arc<AppState>>, auth_user: AuthUser) -> Response {
     let repository = AgentIntegrationRepository::new(state.pg_pool.clone());
-    match repository.list_credentials(auth_user.user_id) {
+    match repository.list_credentials(auth_user.user_id, now_unix()) {
         Ok(credentials) => no_store(
             Json(
                 credentials
@@ -484,9 +484,21 @@ pub async fn create_reply_watch(
         );
         return minimal(StatusCode::FORBIDDEN, "rejected");
     }
-    let connection_ids = repository
-        .active_imap_connection_ids(credential.user_id)
-        .unwrap_or_default();
+    let connection_ids = match repository.active_imap_connection_ids(credential.user_id) {
+        Ok(ids) => ids,
+        Err(error) => {
+            tracing::error!(credential_id = credential.id, error = %error, "agent IMAP account lookup failed");
+            let _ = repository.clear_idempotency(reservation);
+            let _ = repository.audit(
+                credential.id,
+                credential.user_id,
+                "reply_watch_email",
+                "failed",
+                now,
+            );
+            return minimal(StatusCode::INTERNAL_SERVER_ERROR, "failed");
+        }
+    };
     let expires_at = now + request.expires_in_seconds;
     match repository.create_email_reply_watches(
         credential.user_id,

@@ -645,6 +645,16 @@ enum RemovalKind {
     Suppression,
 }
 
+impl RemovalKind {
+    fn matches_wait(self, wait_kind: &str) -> bool {
+        match self {
+            Self::Reminder => false,
+            Self::ReplyWatch => wait_kind == "reply_watch",
+            Self::Suppression => wait_kind != "reply_watch",
+        }
+    }
+}
+
 #[derive(Clone, PartialEq)]
 struct PendingRemoval {
     id: i32,
@@ -1163,13 +1173,7 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
                                 .iter()
                                 .filter(|wait| {
                                     wait.id != removal.id
-                                        || matches!(
-                                            (removal.kind, wait.kind.as_str()),
-                                            (RemovalKind::ReplyWatch, kind)
-                                                if kind != "reply_watch"
-                                        )
-                                        || matches!(removal.kind, RemovalKind::Suppression)
-                                            && wait.kind == "reply_watch"
+                                        || !removal.kind.matches_wait(wait.kind.as_str())
                                 })
                                 .cloned()
                                 .collect(),

@@ -500,9 +500,9 @@ jobs:
               --timeout-seconds 15 2>/dev/null || true
           fi
 
-      # ── Step 0: Ensure launch template is up to date ──
-      # Skipped until TF_API_TOKEN is configured. Run terraform apply manually
-      # when user_data.sh changes. See DEPLOY_CLEANUP.md for details.
+      # Launch-template changes still require Terraform apply. The small host
+      # maintenance script is refreshed explicitly below so housekeeping fixes
+      # do not wait for a launch-template rollout.
 
       - name: Capture current Tesla public key
         id: tesla-before
@@ -593,6 +593,9 @@ jobs:
             echo "FATAL: Pre-warm timed out after 20 minutes"
             exit 1
           fi
+
+      - name: Install current host maintenance
+        run: .github/scripts/install-host-log-maintenance.sh "${{ steps.launch.outputs.new_instance }}"
 
       # ── Step 3: Approve new image for Marlin KMS ──
       # The root server computes image_id = SHA-256(bitflags || PCR0 || PCR1 || PCR2 || PCR16)

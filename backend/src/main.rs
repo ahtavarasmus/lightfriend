@@ -16,7 +16,7 @@ use tokio::sync::Mutex;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
-use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
+use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tower_sessions::{MemoryStore, SessionManagerLayer};
 use tracing::Level;
 
@@ -707,12 +707,6 @@ async fn main() {
             post(handlers::webhook_sms_handlers::webhook_sms),
         )
         .layer(DefaultBodyLimit::max(4096));
-    // Public, stateless MCP endpoint. A dedicated per-user bearer token is
-    // authenticated inside the handler; it is intentionally separate from
-    // browser JWTs and notification-webhook tokens.
-    let public_mcp_routes = Router::new()
-        .route("/api/mcp", post(handlers::public_mcp_handlers::public_mcp))
-        .layer(DefaultBodyLimit::max(64 * 1024));
     // Local agent clients authenticate with a dedicated write-only bearer.
     // These routes expose no reads and reject credentials in query strings.
     let agent_routes = Router::new()
@@ -1667,15 +1661,6 @@ async fn main() {
             delete(handlers::webhook_sms_handlers::revoke_token),
         )
         .route(
-            "/api/me/mcp-tokens",
-            get(handlers::public_mcp_handlers::list_tokens)
-                .post(handlers::public_mcp_handlers::create_token),
-        )
-        .route(
-            "/api/me/mcp-tokens/{token_id}",
-            delete(handlers::public_mcp_handlers::revoke_token),
-        )
-        .route(
             "/api/me/agent-credentials",
             get(handlers::agent_integration_handlers::list_credentials),
         )
@@ -1752,7 +1737,6 @@ async fn main() {
         .merge(telnyx_routes)
         .merge(voice_routes)
         .merge(webhook_sms_routes)
-        .merge(public_mcp_routes)
         .merge(agent_routes)
         .nest_service("/uploads", ServeDir::new("uploads"))
         .route("/blog/md/{slug}", get(blog::handlers::blog_post_md_handler))
@@ -1778,7 +1762,13 @@ async fn main() {
         .layer(DefaultBodyLimit::max(10 * 1024 * 1024))
         .layer(
             TraceLayer::new_for_http()
-                .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
+                .make_span_with(|request: &axum::http::Request<axum::body::Body>| {
+                    tracing::info_span!(
+                        "http_request",
+                        method = %request.method(),
+                        path = %request.uri().path()
+                    )
+                })
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
         .layer({

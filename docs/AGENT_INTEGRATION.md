@@ -33,14 +33,17 @@ agent prompt.
 - Reminder times must be RFC 3339 with an explicit offset, at least one minute
   ahead, and no more than one year ahead.
 - Reply watches accept one syntactically valid sender email, expire in 15
-  minutes to 24 hours, fire once, and are limited to five active database rows
-  per user.
+  minutes to 24 hours, fire once, and are limited to five active sender watches
+  per user. Connecting multiple inboxes does not consume the cap multiple times.
 - Audit rows contain only credential ID, user ID, action kind, outcome, and
   timestamp. Reminder text and email addresses are intentionally excluded.
 - Action responses contain only `accepted`, `rejected`, or `failed`. They do
   not reveal whether a contact, message, reminder, or account datum exists.
 - Action and credential endpoints reject query strings so a bearer leaked into
   a URL cannot be accepted. Responses use `Cache-Control: no-store`.
+- Lightfriend does not issue agent-facing MCP tokens or expose private data over
+  MCP. Custom MCP servers configured in the dashboard are outbound tools used
+  by Lightfriend itself; they do not change the local CLI's write-only boundary.
 
 ## CLI examples
 

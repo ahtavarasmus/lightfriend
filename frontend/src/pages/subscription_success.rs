@@ -24,12 +24,10 @@ pub fn subscription_success() -> Html {
                     .and_then(|search| web_sys::UrlSearchParams::new_with_str(&search).ok())
                     .and_then(|params| params.get("session_id"))
                 {
-                    if let Ok(response) = Api::get(&format!(
-                        "/api/stripe/datafast-attribution/{}",
-                        session_id
-                    ))
-                    .send()
-                    .await
+                    if let Ok(response) =
+                        Api::get(&format!("/api/stripe/datafast-attribution/{}", session_id))
+                            .send()
+                            .await
                     {
                         if response.ok() {
                             if let Ok(attribution) =

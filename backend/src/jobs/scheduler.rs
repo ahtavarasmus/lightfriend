@@ -2099,6 +2099,9 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
         } else {
             should_deliver_now(&AUTO_DIGEST_SLOTS, current_minute_of_day)
         };
+        if !in_target_window {
+            continue;
+        }
 
         // Cooldown: don't send more than one digest per N seconds.
         // Manual mode uses 9 min — just under the 10-min cron cadence — so consecutive
@@ -2119,20 +2122,12 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
                 None => continue, // nothing to send (empty after filters)
             };
 
-        // Window check: only fire if we're in the user's delivery window. Skip
-        // the staleness fallback now that the digest is built — anything in the
-        // sections is at most 24h old already.
-        if !in_target_window {
-            continue;
-        }
-
         tracing::info!(
-            "Built digest for user {} (msgs={}, slot={:02}:{:02}):\n{}",
+            "Built digest for user {} (msgs={}, slot={:02}:{:02})",
             user_id,
             message_ids.len(),
             current_slot / 60,
-            current_slot % 60,
-            digest_text
+            current_slot % 60
         );
 
         let delivered = crate::proactive::utils::send_notification(

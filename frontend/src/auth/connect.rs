@@ -224,7 +224,7 @@ pub fn connect(props: &ConnectProps) -> Html {
             "youtube" => {
                 html! { <YouTubeConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} /> }
             }
-            "mcp" => html! { <McpConnect user_id={props.user_id} /> },
+            "mcp" => html! { <McpConnect /> },
             _ => html! {},
         }
     } else {

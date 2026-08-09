@@ -71,9 +71,12 @@ resource "aws_launch_template" "enclave" {
   vpc_security_group_ids = [var.security_group_id]
 
   user_data = base64gzip(templatefile("${path.module}/user_data.sh", {
-    environment = var.environment
-    domain      = var.domain
-    subdomain   = var.subdomain
+    environment                  = var.environment
+    domain                       = var.domain
+    subdomain                    = var.subdomain
+    host_log_maintenance         = file("${path.module}/host-log-maintenance.sh")
+    host_log_maintenance_service = file("${path.module}/host-log-maintenance.service")
+    host_log_maintenance_timer   = file("${path.module}/host-log-maintenance.timer")
   }))
 
   tag_specifications {

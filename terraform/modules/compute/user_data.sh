@@ -56,78 +56,16 @@ chown -R ec2-user:ec2-user /opt/lightfriend
 # ── Host log/artifact maintenance ────────────────────────────────────────────
 
 cat > /opt/lightfriend/host-log-maintenance.sh <<'SCRIPT'
-#!/bin/bash
-set -uo pipefail
-
-LOG_DIR="/opt/lightfriend/logs"
-RESTORE_FAILED_DIR="/opt/lightfriend/restore/failed"
-mkdir -p "$LOG_DIR" "$RESTORE_FAILED_DIR"
-
-cap_file() {
-    local file="$1"
-    local max_bytes="$2"
-    local keep_bytes="$3"
-    [ -f "$file" ] || return 0
-    local size
-    size=$(stat -c%s "$file" 2>/dev/null || echo 0)
-    if [ "$size" -gt "$max_bytes" ]; then
-        tail -c "$keep_bytes" "$file" > "$file.tmp" 2>/dev/null && cat "$file.tmp" > "$file"
-        rm -f "$file.tmp" 2>/dev/null || true
-    fi
-}
-
-for f in \
-    "$LOG_DIR/gvproxy.log" \
-    "$LOG_DIR/gvproxy-err.log" \
-    "$LOG_DIR/scheduled-backup.log" \
-    "$LOG_DIR/cloudflared-edge-stdout.log" \
-    "$LOG_DIR/cloudflared-edge-stderr.log" \
-    "$LOG_DIR/telegram-proxy-bridge.log" \
-    "$LOG_DIR/config-server.log" \
-    "$LOG_DIR/dot-bridge.log"; do
-    cap_file "$f" 5242880 1048576
-done
-
-cap_file /tmp/restore-enclave-debug.log 5242880 1048576
-cap_file /tmp/launch.log 5242880 1048576
-cap_file /tmp/eif-download.log 2097152 524288
-
-# Boot traces are useful during failed deploys, but each launch creates a new file.
-find "$LOG_DIR" -maxdepth 1 -type f -name 'boot-trace-*.log' -mtime +7 -delete 2>/dev/null || true
-if [ -d "$LOG_DIR" ]; then
-    ls -1t "$LOG_DIR"/boot-trace-*.log 2>/dev/null | tail -n +11 | xargs -r rm -f || true
-fi
-
-# Failed restore artifacts are full encrypted backups. Keep only recent evidence.
-find "$RESTORE_FAILED_DIR" -type f -mtime +3 -delete 2>/dev/null || true
-find "$RESTORE_FAILED_DIR" -maxdepth 1 -type f -printf '%T@ %p\n' 2>/dev/null \
-    | sort -rn \
-    | tail -n +4 \
-    | cut -d' ' -f2- \
-    | xargs -r rm -f
+${host_log_maintenance}
 SCRIPT
 chmod +x /opt/lightfriend/host-log-maintenance.sh
 
 cat > /etc/systemd/system/lightfriend-log-maintenance.service <<'LOGMAINTSVCEOF'
-[Unit]
-Description=Lightfriend host log and artifact maintenance
-
-[Service]
-Type=oneshot
-ExecStart=/opt/lightfriend/host-log-maintenance.sh
+${host_log_maintenance_service}
 LOGMAINTSVCEOF
 
 cat > /etc/systemd/system/lightfriend-log-maintenance.timer <<'LOGMAINTTIMEREOF'
-[Unit]
-Description=Run Lightfriend host log maintenance every 5 minutes
-
-[Timer]
-OnBootSec=2min
-OnUnitActiveSec=5min
-Persistent=true
-
-[Install]
-WantedBy=timers.target
+${host_log_maintenance_timer}
 LOGMAINTTIMEREOF
 
 # ── Install HTTP forward proxy for enclave outbound traffic ──────────────────

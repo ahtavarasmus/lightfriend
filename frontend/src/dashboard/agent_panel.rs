@@ -140,6 +140,18 @@ pub fn agent_panel() -> Html {
         let credentials = credentials.clone();
         let message = message.clone();
         Callback::from(move |id: i32| {
+            let confirmed = web_sys::window()
+                .and_then(|window| {
+                    window
+                        .confirm_with_message(
+                            "Revoke this local agent credential? The agent will stop working immediately.",
+                        )
+                        .ok()
+                })
+                .unwrap_or(false);
+            if !confirmed {
+                return;
+            }
             let credentials = credentials.clone();
             let message = message.clone();
             spawn_local(async move {

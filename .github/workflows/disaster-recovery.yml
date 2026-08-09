@@ -343,6 +343,9 @@ jobs:
             exit 1
           fi
 
+      - name: Install current host maintenance
+        run: .github/scripts/install-host-log-maintenance.sh "${{ steps.launch.outputs.new_instance }}"
+
       # ── Step 3: Approve new image for Marlin KMS ──
       - name: Approve image for Marlin KMS
         id: approve

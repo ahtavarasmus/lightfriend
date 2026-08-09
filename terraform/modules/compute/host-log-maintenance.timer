@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Lightfriend host log maintenance every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

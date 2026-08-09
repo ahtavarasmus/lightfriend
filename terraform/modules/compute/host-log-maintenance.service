@@ -1,0 +1,6 @@
+[Unit]
+Description=Lightfriend host log and artifact maintenance
+
+[Service]
+Type=oneshot
+ExecStart=/opt/lightfriend/host-log-maintenance.sh

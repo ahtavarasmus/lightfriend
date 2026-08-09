@@ -20,8 +20,12 @@ jobs:
         with:
           components: rustfmt
 
-      - name: Check formatting
+      - name: Check backend formatting
         working-directory: backend
+        run: cargo fmt --check
+
+      - name: Check frontend formatting
+        working-directory: frontend
         run: cargo fmt --check
 
   # Single backend job: clippy + tests + migration test
@@ -192,6 +196,8 @@ jobs:
           shellcheck -s bash enclave/storage-health.sh
           shellcheck -s bash enclave/verify.sh
           shellcheck -s bash enclave/enter-maintenance.sh
+          shellcheck -s bash .github/scripts/install-host-log-maintenance.sh
+          shellcheck -s bash terraform/modules/compute/host-log-maintenance.sh
           shellcheck -s bash enclave/tests/backup-artifact-lock-test.sh
           shellcheck -s bash enclave/tests/tuwunel-rocksdb-diagnostics-test.sh
           bash enclave/tests/backup-artifact-lock-test.sh
