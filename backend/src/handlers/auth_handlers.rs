@@ -48,7 +48,7 @@ pub async fn get_users(
             Json(json!({"error": "Database error"})),
         )
     })?;
-    users_list.sort_by(|a, b| b.id.cmp(&a.id));
+    users_list.sort_by_key(|user| std::cmp::Reverse(user.id));
 
     tracing::debug!("Converting users to response format");
     let mut users_response = Vec::with_capacity(users_list.len());
