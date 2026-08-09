@@ -570,7 +570,11 @@ fn linked_account_run_snapshots_principal_without_spending_trial_quota() {
             NOW + TRIAL_DURATION_SECONDS + 1,
         )
         .unwrap();
-    assert_eq!(replay, AccountRunCreation::IdempotencyConflict);
+    let AccountRunCreation::Existing(replay) = replay else {
+        panic!("expected an idempotent account replay");
+    };
+    assert_eq!(replay.id, run.id);
+    assert_eq!(replay.user_message, "Check my email");
 
     assert_eq!(
         repository
