@@ -44,11 +44,12 @@ RUN apt-get update && apt-get install -y \
 
 ENV RUSTC_WRAPPER=/usr/local/cargo/bin/sccache
 ENV SCCACHE_DIR=/sccache
+ENV RUSTFLAGS="-C link-arg=-fuse-ld=mold -C linker=clang"
 
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/sccache \
-    cargo chef cook --release --recipe-path recipe.json && \
+RUN --mount=type=cache,id=lightfriend-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=lightfriend-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=lightfriend-sccache,target=/sccache,sharing=locked \
+    cargo chef cook --release --features tuwunel-restore --recipe-path recipe.json && \
     sccache --show-stats
 
 # Build application
@@ -69,10 +70,9 @@ ENV RUSTC_WRAPPER=/usr/local/cargo/bin/sccache
 ENV SCCACHE_DIR=/sccache
 ENV RUSTFLAGS="-C link-arg=-fuse-ld=mold -C linker=clang"
 
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/sccache \
-    --mount=type=cache,target=/app/target \
+RUN --mount=type=cache,id=lightfriend-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=lightfriend-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=lightfriend-sccache,target=/sccache,sharing=locked \
     cargo build --release --features tuwunel-restore && \
     sccache --show-stats && \
     cp target/release/backend /backend && \
