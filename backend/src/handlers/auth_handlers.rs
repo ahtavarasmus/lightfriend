@@ -41,13 +41,14 @@ pub async fn get_users(
     _auth_user: AuthUser,
 ) -> Result<Json<Vec<UserResponse>>, (StatusCode, Json<serde_json::Value>)> {
     tracing::debug!("Attempting to get all users");
-    let users_list = state.user_core.get_all_users().map_err(|e| {
+    let mut users_list = state.user_core.get_all_users().map_err(|e| {
         tracing::error!("Database error while fetching users: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "Database error"})),
         )
     })?;
+    users_list.sort_by(|a, b| b.id.cmp(&a.id));
 
     tracing::debug!("Converting users to response format");
     let mut users_response = Vec::with_capacity(users_list.len());
