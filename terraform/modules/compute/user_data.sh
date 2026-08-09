@@ -95,7 +95,7 @@ cap_file /tmp/eif-download.log 2097152 524288
 # Boot traces are useful during failed deploys, but each launch creates a new file.
 find "$LOG_DIR" -maxdepth 1 -type f -name 'boot-trace-*.log' -mtime +7 -delete 2>/dev/null || true
 if [ -d "$LOG_DIR" ]; then
-    ls -1t "$LOG_DIR"/boot-trace-*.log 2>/dev/null | tail -n +11 | xargs -r rm -f
+    ls -1t "$LOG_DIR"/boot-trace-*.log 2>/dev/null | tail -n +11 | xargs -r rm -f || true
 fi
 
 # Failed restore artifacts are full encrypted backups. Keep only recent evidence.

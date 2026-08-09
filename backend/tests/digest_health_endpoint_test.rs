@@ -1,5 +1,7 @@
 use axum::http::{HeaderMap, HeaderValue};
-use backend::handlers::health_handlers::{user_digest_health_requested, UserDigestHealthRow};
+use backend::handlers::health_handlers::{
+    user_digest_health_requested, UserDigestHealthRow, USER_DIGEST_HEALTH_QUERY,
+};
 
 #[test]
 fn personal_digest_health_requires_exact_explicit_opt_in() {
@@ -56,4 +58,10 @@ fn personal_digest_health_row_serializes_aggregate_fields_only() {
     ] {
         assert!(!serialized.contains(forbidden));
     }
+}
+
+#[test]
+fn personal_digest_health_query_uses_the_production_processed_email_timestamp() {
+    assert!(USER_DIGEST_HEALTH_QUERY.contains("pe.processed_at >= $1"));
+    assert!(!USER_DIGEST_HEALTH_QUERY.contains("pe.created_at"));
 }

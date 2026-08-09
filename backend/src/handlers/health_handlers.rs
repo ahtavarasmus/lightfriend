@@ -521,6 +521,48 @@ pub fn user_digest_health_requested(headers: &HeaderMap) -> bool {
         == Some("true")
 }
 
+pub const USER_DIGEST_HEALTH_QUERY: &str =
+    "SELECT u.id AS user_id, us.digest_enabled, us.digest_time, ui.timezone, \
+     (SELECT COUNT(*) FROM imap_connection ic \
+        WHERE ic.user_id = u.id AND ic.status = 'active') AS active_imap_connections, \
+     (SELECT COUNT(*) FROM processed_emails pe \
+        WHERE pe.user_id = u.id AND pe.processed_at >= $1) AS processed_emails_24h, \
+     (SELECT COUNT(*) FROM ont_messages m \
+        WHERE m.user_id = u.id AND m.platform = 'email' AND m.created_at >= $1) AS ingested_emails_24h, \
+     (SELECT MAX(m.created_at) FROM ont_messages m \
+        WHERE m.user_id = u.id AND m.platform = 'email') AS latest_email_ingested_at, \
+     (SELECT COUNT(*) FROM ont_messages m \
+        WHERE m.user_id = u.id AND m.platform = 'email' AND m.created_at >= $1 \
+          AND m.digest_delivered_at IS NULL AND m.seen_at IS NULL AND m.sender_name <> 'You' \
+          AND m.urgency IN ('later', 'medium', 'low') \
+          AND (m.category IS NULL OR m.category <> 'spam')) AS pending_later_emails_24h, \
+     (SELECT COUNT(*) FROM ont_messages m \
+        WHERE m.user_id = u.id AND m.platform = 'email' AND m.created_at >= $1 \
+          AND m.digest_delivered_at IS NULL AND m.seen_at IS NULL AND m.sender_name <> 'You' \
+          AND m.urgency IN ('now', 'high', 'critical') \
+          AND (m.category IS NULL OR m.category <> 'spam')) AS pending_now_emails_24h, \
+     (SELECT COUNT(*) FROM ont_messages m \
+        WHERE m.user_id = u.id AND m.platform = 'email' AND m.created_at >= $1 \
+          AND m.digest_delivered_at IS NULL AND m.seen_at IS NULL AND m.sender_name <> 'You' \
+          AND m.urgency IS NULL \
+          AND (m.category IS NULL OR m.category <> 'spam')) AS pending_unclassified_emails_24h, \
+     (SELECT COUNT(*) FROM ont_messages m \
+        WHERE m.user_id = u.id AND m.platform = 'email' AND m.created_at >= $1 \
+          AND m.seen_at IS NOT NULL) AS seen_emails_24h, \
+     (SELECT COUNT(*) FROM ont_messages m \
+        WHERE m.user_id = u.id AND m.platform = 'email' AND m.created_at >= $1 \
+          AND m.digest_delivered_at IS NOT NULL) AS digest_delivered_emails_24h, \
+     (SELECT ul.created_at FROM usage_logs ul \
+        WHERE ul.user_id = u.id AND ul.activity_type = 'digest' \
+        ORDER BY ul.created_at DESC LIMIT 1) AS last_digest_attempt_at, \
+     (SELECT ul.success FROM usage_logs ul \
+        WHERE ul.user_id = u.id AND ul.activity_type = 'digest' \
+        ORDER BY ul.created_at DESC LIMIT 1) AS last_digest_attempt_success \
+     FROM users u \
+     JOIN user_settings us ON us.user_id = u.id \
+     LEFT JOIN user_info ui ON ui.user_id = u.id \
+     ORDER BY u.id";
+
 #[derive(QueryableByName)]
 struct AlertGroupRow {
     #[diesel(sql_type = Text)]
@@ -620,51 +662,10 @@ pub async fn alerts_digest(
             .collect();
 
         let user_digest_health = if include_user_digest_health {
-            let users = diesel::sql_query(
-                "SELECT u.id AS user_id, us.digest_enabled, us.digest_time, ui.timezone, \
-                 (SELECT COUNT(*) FROM imap_connection ic \
-                    WHERE ic.user_id = u.id AND ic.status = 'active') AS active_imap_connections, \
-                 (SELECT COUNT(*) FROM processed_emails pe \
-                    WHERE pe.user_id = u.id AND pe.created_at >= $1) AS processed_emails_24h, \
-                 (SELECT COUNT(*) FROM ont_messages m \
-                    WHERE m.user_id = u.id AND m.platform = 'email' AND m.created_at >= $1) AS ingested_emails_24h, \
-                 (SELECT MAX(m.created_at) FROM ont_messages m \
-                    WHERE m.user_id = u.id AND m.platform = 'email') AS latest_email_ingested_at, \
-                 (SELECT COUNT(*) FROM ont_messages m \
-                    WHERE m.user_id = u.id AND m.platform = 'email' AND m.created_at >= $1 \
-                      AND m.digest_delivered_at IS NULL AND m.seen_at IS NULL AND m.sender_name <> 'You' \
-                      AND m.urgency IN ('later', 'medium', 'low') \
-                      AND (m.category IS NULL OR m.category <> 'spam')) AS pending_later_emails_24h, \
-                 (SELECT COUNT(*) FROM ont_messages m \
-                    WHERE m.user_id = u.id AND m.platform = 'email' AND m.created_at >= $1 \
-                      AND m.digest_delivered_at IS NULL AND m.seen_at IS NULL AND m.sender_name <> 'You' \
-                      AND m.urgency IN ('now', 'high', 'critical') \
-                      AND (m.category IS NULL OR m.category <> 'spam')) AS pending_now_emails_24h, \
-                 (SELECT COUNT(*) FROM ont_messages m \
-                    WHERE m.user_id = u.id AND m.platform = 'email' AND m.created_at >= $1 \
-                      AND m.digest_delivered_at IS NULL AND m.seen_at IS NULL AND m.sender_name <> 'You' \
-                      AND m.urgency IS NULL \
-                      AND (m.category IS NULL OR m.category <> 'spam')) AS pending_unclassified_emails_24h, \
-                 (SELECT COUNT(*) FROM ont_messages m \
-                    WHERE m.user_id = u.id AND m.platform = 'email' AND m.created_at >= $1 \
-                      AND m.seen_at IS NOT NULL) AS seen_emails_24h, \
-                 (SELECT COUNT(*) FROM ont_messages m \
-                    WHERE m.user_id = u.id AND m.platform = 'email' AND m.created_at >= $1 \
-                      AND m.digest_delivered_at IS NOT NULL) AS digest_delivered_emails_24h, \
-                 (SELECT ul.created_at FROM usage_logs ul \
-                    WHERE ul.user_id = u.id AND ul.activity_type = 'digest' \
-                    ORDER BY ul.created_at DESC LIMIT 1) AS last_digest_attempt_at, \
-                 (SELECT ul.success FROM usage_logs ul \
-                    WHERE ul.user_id = u.id AND ul.activity_type = 'digest' \
-                    ORDER BY ul.created_at DESC LIMIT 1) AS last_digest_attempt_success \
-                 FROM users u \
-                 JOIN user_settings us ON us.user_id = u.id \
-                 LEFT JOIN user_info ui ON ui.user_id = u.id \
-                 ORDER BY u.id",
-            )
-            .bind::<Integer, _>(cutoff)
-            .load::<UserDigestHealthRow>(&mut conn)
-            .map_err(|e| format!("user digest health query: {}", e))?;
+            let users = diesel::sql_query(USER_DIGEST_HEALTH_QUERY)
+                .bind::<Integer, _>(cutoff)
+                .load::<UserDigestHealthRow>(&mut conn)
+                .map_err(|e| format!("user digest health query: {}", e))?;
 
             let scheduler = diesel::sql_query(
                 "SELECT last_started_at, last_completed_at, last_error \
