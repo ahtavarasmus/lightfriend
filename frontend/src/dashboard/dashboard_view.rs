@@ -2014,7 +2014,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                         <span>
                                             {
                                                 if (*digest_time_display).is_empty() {
-                                                    "Auto-scheduled".to_string()
+                                                    "Auto: 08:00, 13:00, 18:00".to_string()
                                                 } else {
                                                     format!("Custom: {}", (*digest_time_display).replace(',', ", "))
                                                 }
@@ -2041,7 +2041,7 @@ pub fn dashboard_view(props: &DashboardViewProps) -> Html {
                                             onchange={on_digest_schedule_change.clone()}
                                         >
                                             <option value="auto" selected={(*digest_time_display).is_empty()}>
-                                                {"Auto (activity-based)"}
+                                                {"Auto (08:00, 13:00, 18:00)"}
                                             </option>
                                             <option value="custom" selected={!(*digest_time_display).is_empty()}>
                                                 {"Custom times"}

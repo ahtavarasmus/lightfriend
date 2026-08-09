@@ -8,7 +8,7 @@
 //! These tests exercise the behavior with realistic timezone offsets to make
 //! sure a user in UTC+5 or UTC-5 gets fired at their local 08:00, not server UTC.
 
-use backend::jobs::scheduler::{parse_digest_times, should_deliver_now};
+use backend::jobs::scheduler::{parse_digest_times, should_deliver_now, AUTO_DIGEST_SLOTS};
 
 /// Helper: compute the local minute-of-day that a scheduler tick would see
 /// given the UTC minute-of-day and the user's offset in minutes.
@@ -98,6 +98,15 @@ fn fires_on_any_configured_slot_of_multiple() {
     assert!(should_deliver_now(&slots, 1080));
     // In between slots → no fire
     assert!(!should_deliver_now(&slots, 600));
+}
+
+#[test]
+fn auto_schedule_is_stable_across_days() {
+    assert_eq!(AUTO_DIGEST_SLOTS, [480, 780, 1080]);
+    assert!(should_deliver_now(&AUTO_DIGEST_SLOTS, 8 * 60));
+    assert!(should_deliver_now(&AUTO_DIGEST_SLOTS, 13 * 60));
+    assert!(should_deliver_now(&AUTO_DIGEST_SLOTS, 18 * 60));
+    assert!(!should_deliver_now(&AUTO_DIGEST_SLOTS, 14 * 60));
 }
 
 #[test]

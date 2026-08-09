@@ -1339,7 +1339,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .await
         .expect("Failed to add rule schedule job to scheduler");
 
-    // Every 10 minutes: deliver smart digests to users at their predicted wake time
+    // Every 10 minutes: deliver smart digests at each user's local schedule
     // (10-min interval is the granularity for user-set custom digest times)
     let state_clone = Arc::clone(&state);
     let digest_job = Job::new_async("0 */10 * * * *", move |_, _| {
@@ -1438,6 +1438,13 @@ pub fn should_deliver_now(slots: &[u16], local_minute_of_day: u16) -> bool {
     let current_slot = (local_minute_of_day / 10) * 10;
     slots.contains(&current_slot)
 }
+
+/// Stable local-time defaults for users who leave digest scheduling on Auto.
+///
+/// These must not depend on a moving activity estimate: exact scheduler slots
+/// combined with a prediction that can change day-to-day can silently skip an
+/// entire day's digests. Users who want different hours can choose custom times.
+pub const AUTO_DIGEST_SLOTS: [u16; 3] = [8 * 60, 13 * 60, 18 * 60];
 
 /// Score a message's category for in-section ordering. Higher = more important.
 /// Spam returns a very negative value so callers can drop those messages outright.
@@ -2077,7 +2084,7 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
         let current_slot = (current_minute_of_day / 10) * 10;
         // Determine if we're in a delivery window:
         // - Manual mode: exact 10-min slot match against user's configured times
-        // - Auto mode: 3 fixed slots at wake, wake+5h, wake+10h
+        // - Auto mode: stable local slots at 08:00, 13:00, and 18:00
         let in_target_window = if let Some(ref time_str) = settings.digest_time {
             match parse_digest_times(time_str) {
                 Ok((_, slots)) => should_deliver_now(&slots, current_minute_of_day),
@@ -2090,17 +2097,7 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
                 }
             }
         } else {
-            // Auto mode: 3 fixed slots relative to predicted wake hour.
-            // Morning (wake), midday (wake+5h), evening (wake+10h).
-            let predicted = state
-                .ontology_repository
-                .compute_user_wake_hour(user_id, tz_offset_secs);
-            let wake_hour = predicted.unwrap_or(8);
-            let slots: Vec<u16> = [0, 5, 10]
-                .iter()
-                .map(|offset| (((wake_hour + offset) % 24) * 60) as u16)
-                .collect();
-            should_deliver_now(&slots, current_minute_of_day)
+            should_deliver_now(&AUTO_DIGEST_SLOTS, current_minute_of_day)
         };
 
         // Cooldown: don't send more than one digest per N seconds.
