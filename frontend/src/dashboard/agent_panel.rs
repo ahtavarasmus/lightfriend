@@ -4,7 +4,7 @@ use wasm_bindgen_futures::{spawn_local, JsFuture};
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
-const SETUP_INSTRUCTION: &str = "Set up Lightfriend's write-only local CLI. Clone https://github.com/ahtavarasmus/lightfriend, run `cargo install --path lightfriend/lightfriend-cli`, then run `lightfriend login` in the local terminal and give me the pairing code to approve in Lightfriend Settings > Connect an agent. Never paste or request a Lightfriend token in this chat, any prompt, or any URL. After login, use only `lightfriend remind --at <RFC3339 time with offset> --message <text>` or `lightfriend watch-reply --email <sender> --for-minutes <15-1440>`. This integration can create those outbound actions but cannot read conversations, contacts, history, reminders, or account data.";
+const SETUP_INSTRUCTION: &str = "Set up Lightfriend's write-only local CLI. Clone https://github.com/ahtavarasmus/lightfriend, run `cargo install --path lightfriend/lightfriend-cli`, then run `lightfriend login` in the local terminal and give me the pairing code to approve in Lightfriend Settings > Connections > Webhooks & API & CLI. Never paste or request a Lightfriend token in this chat, any prompt, or any URL. After login, use only `lightfriend remind --at <RFC3339 time with offset> --message <text>` or `lightfriend watch-reply --email <sender> --for-minutes <15-1440>`. This integration can create those outbound actions but cannot read conversations, contacts, history, reminders, or account data.";
 
 const AGENT_STYLES: &str = r#"
 .agent-panel { color: #111; background: #fff; border: 1px solid #111; border-radius: 10px; overflow: hidden; }
@@ -16,6 +16,9 @@ const AGENT_STYLES: &str = r#"
 .agent-step { display: grid; gap: .45rem; }
 .agent-step strong { color: #111; font-size: .8rem; }
 .agent-step p { color: #444; font-size: .74rem; line-height: 1.45; margin: 0; }
+.agent-step code { padding: .05rem .25rem; border-radius: 3px; background: #ececec; color: #111; font-size: .7rem; }
+.agent-copy-button { justify-self: start; margin-top: .2rem; }
+.agent-code-label { color: #333; font-size: .7rem; font-weight: 600; }
 .agent-code-form { display: flex; gap: .45rem; }
 .agent-code-form input { min-width: 0; flex: 1; min-height: 42px; border: 1px solid #111; border-radius: 6px; background: #fff; color: #111; padding: .55rem .65rem; font: 600 .8rem/1 monospace; text-transform: uppercase; letter-spacing: .04em; }
 .agent-button { min-height: 42px; padding: .55rem .75rem; border: 1px solid #111; border-radius: 6px; background: #111; color: #fff; font: 600 .76rem/1 sans-serif; cursor: pointer; }
@@ -28,11 +31,7 @@ const AGENT_STYLES: &str = r#"
 .agent-row-meta { min-width: 0; display: grid; gap: .16rem; }
 .agent-row-label { color: #111; font-size: .8rem; font-weight: 650; }
 .agent-row-sub { color: #555; font-size: .68rem; line-height: 1.35; overflow-wrap: anywhere; }
-.agent-helper { position: fixed; right: 1rem; bottom: 1rem; z-index: 1250; width: min(330px, calc(100vw - 2rem)); padding: .85rem; border: 1px solid #111; border-radius: 12px; background: #fff; box-shadow: 0 10px 35px rgba(0,0,0,.25); color: #111; }
-.agent-helper strong { display: block; font-size: .8rem; }
-.agent-helper p { margin: .35rem 0 .65rem; color: #444; font-size: .7rem; line-height: 1.4; }
-.agent-helper .agent-button { width: 100%; }
-@media (max-width: 540px) { .agent-code-form { flex-direction: column; } .agent-helper { right: .65rem; bottom: .65rem; width: calc(100vw - 1.3rem); } }
+@media (max-width: 540px) { .agent-code-form { flex-direction: column; } }
 @media (prefers-reduced-motion: reduce) { .agent-button { transition: none; } }
 "#;
 
@@ -185,7 +184,7 @@ pub fn agent_panel() -> Html {
             <style>{AGENT_STYLES}</style>
             <section class="agent-panel" aria-labelledby="agent-panel-title">
                 <header class="agent-panel-header">
-                    <h4 id="agent-panel-title">{"Connect an agent"}</h4>
+                    <h4 id="agent-panel-title">{"Local agent CLI"}</h4>
                     <p>{"Use Codex, Claude Code, or another local assistant to create a reminder or start a short email reply watch."}</p>
                     <div class="agent-boundary" role="note">
                         <strong>{"Write-only by design. "}</strong>
@@ -194,13 +193,16 @@ pub fn agent_panel() -> Html {
                 </header>
                 <div class="agent-body">
                     <div class="agent-step">
-                        <strong>{"1. Start pairing locally"}</strong>
-                        <p>{"Copy the helper instruction below to your assistant. It uses `lightfriend login`; no secret is pasted into a chat, prompt, or URL."}</p>
+                        <strong>{"1. Give your agent the setup instruction"}</strong>
+                        <p>{"This copies a safe CLI instruction with no token or private Lightfriend data. Your agent will run "}<code>{"lightfriend login"}</code>{" locally and show you a pairing code."}</p>
+                        <button class="agent-button agent-copy-button" type="button" onclick={copy_instruction}>{if *copied { "Copied" } else { "Copy setup instruction" }}</button>
                     </div>
                     <form class="agent-step" onsubmit={approve}>
-                        <strong>{"2. Approve the one-time code"}</strong>
+                        <strong>{"2. Approve the pairing code"}</strong>
+                        <p>{"Paste the code shown by "}<code>{"lightfriend login"}</code>{" in the local terminal. It expires after 10 minutes, works once, and is not the agent's credential."}</p>
+                        <label class="agent-code-label" for="agent-pairing-code">{"Pairing code from the local terminal"}</label>
                         <div class="agent-code-form">
-                            <input value={(*code).clone()} oninput={on_code} maxlength="14" autocomplete="one-time-code" spellcheck="false" aria-label="Pairing code" placeholder="ABCD-EFGH-JKLM" />
+                            <input id="agent-pairing-code" value={(*code).clone()} oninput={on_code} maxlength="14" autocomplete="one-time-code" spellcheck="false" placeholder="ABCD-EFGH-JKLM" />
                             <button class="agent-button" type="submit" disabled={*busy}>{if *busy { "Approving..." } else { "Approve" }}</button>
                         </div>
                     </form>
@@ -233,11 +235,6 @@ pub fn agent_panel() -> Html {
                     </div>
                 </div>
             </section>
-            <aside class="agent-helper" aria-label="Agent setup helper">
-                <strong>{"Ask your local agent to set this up"}</strong>
-                <p>{"Copies a safe CLI instruction. It contains no token or private Lightfriend data."}</p>
-                <button class="agent-button" type="button" onclick={copy_instruction}>{if *copied { "Copied" } else { "Copy safe setup instruction" }}</button>
-            </aside>
         </>
     }
 }

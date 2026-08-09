@@ -259,6 +259,15 @@ const SETTINGS_STYLES: &str = r#"
     border-top: 1px solid rgba(255, 255, 255, 0.08);
     padding-top: 0.9rem;
 }
+.developer-tools-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+.developer-tools-stack > section + section {
+    padding-top: 1.25rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
 @media (prefers-reduced-motion: reduce) {
     .settings-panel {
         animation: none;
@@ -366,10 +375,6 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                     <div class="settings-content">
                         <p class="settings-connection-prompt">{"Choose what Lightfriend can watch."}</p>
                         <div class="connections-stack">
-                            <section class="connections-group" aria-label="Local agents">
-                                <AgentPanel />
-                            </section>
-
                             <section class="connections-group" aria-label="Apps">
                                 <Connect
                                     user_id={profile.id}
@@ -402,18 +407,25 @@ pub fn settings_panel(props: &SettingsPanelProps) -> Html {
                                 </details>
                             </section>
 
-                            <section class="connections-group" aria-label="Webhooks and API">
+                            <section class="connections-group" aria-label="Webhooks, API, and CLI">
                                 <details class="connections-disclosure">
                                     <summary>
                                         <span>
-                                            {"Webhooks & API"}
+                                            {"Webhooks & API & CLI"}
                                             <span class="connections-disclosure-copy">
-                                                {"Send Lightfriend messages from scripts, services, and external assistants."}
+                                                {"Connect scripts, services, and write-only local agents."}
                                             </span>
                                         </span>
                                     </summary>
                                     <div class="connections-disclosure-body">
-                                        <WebhooksPanel />
+                                        <div class="developer-tools-stack">
+                                            <section aria-label="Webhooks">
+                                                <WebhooksPanel />
+                                            </section>
+                                            <section aria-label="Local agent CLI">
+                                                <AgentPanel />
+                                            </section>
+                                        </div>
                                     </div>
                                 </details>
                             </section>
