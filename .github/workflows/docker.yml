@@ -595,7 +595,7 @@ jobs:
           fi
 
       - name: Install current host maintenance
-        run: .github/scripts/install-host-log-maintenance.sh "${{ steps.launch.outputs.new_instance }}"
+        run: .github/scripts/install-host-log-maintenance.sh "${{ steps.launch.outputs.new_instance }}" "${{ steps.infra.outputs.s3_bucket }}"
 
       # ── Step 3: Approve new image for Marlin KMS ──
       # The root server computes image_id = SHA-256(bitflags || PCR0 || PCR1 || PCR2 || PCR16)
