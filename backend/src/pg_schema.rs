@@ -781,6 +781,19 @@ diesel::table! {
 }
 
 diesel::table! {
+    light_tool_push_outbox (device_id) {
+        device_id -> Int4,
+        event_type -> Text,
+        version -> Int8,
+        attempt_count -> Int4,
+        next_attempt_at -> Int4,
+        lease_until -> Int4,
+        created_at -> Int4,
+        updated_at -> Int4,
+    }
+}
+
+diesel::table! {
     webhook_tokens (id) {
         id -> Int4,
         user_id -> Int4,
@@ -883,6 +896,7 @@ diesel::joinable!(billing_usage_events -> users (user_id));
 diesel::joinable!(billing_usage_intents -> users (user_id));
 diesel::joinable!(user_settings -> users (user_id));
 diesel::joinable!(light_tool_devices -> users (user_id));
+diesel::joinable!(light_tool_push_outbox -> light_tool_devices (device_id));
 diesel::joinable!(light_tool_push_registrations -> light_tool_devices (device_id));
 diesel::joinable!(light_tool_runs -> light_tool_devices (device_id));
 diesel::joinable!(light_tool_pairing_sessions -> users (user_id));
@@ -938,6 +952,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     pending_reply_watches,
     temporary_alert_suppressions,
     light_tool_devices,
+    light_tool_push_outbox,
     light_tool_push_registrations,
     light_tool_runs,
     light_tool_pairing_sessions,

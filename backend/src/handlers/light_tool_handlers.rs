@@ -7,6 +7,7 @@ use crate::{
     repositories::{
         light_tool_devices_repository::LightToolDevicesRepository,
         light_tool_pairing_repository::{LightToolPairingRepository, PairingConsumption},
+        light_tool_push_outbox_repository::LightToolPushOutboxRepository,
         light_tool_push_repository::LightToolPushRepository,
         light_tool_runs_repository::{
             AccountRunCreation, AnonymousTrialRunCreation, LightToolRunRecord,
@@ -21,7 +22,6 @@ use crate::{
         light_tool_pairing::{
             LightToolPairingError, LightToolPairingService, LightToolPairingStatus,
         },
-        light_tool_push_delivery::LightToolPushDeliveryService,
         light_tool_run_dispatcher::{dispatch_light_tool_run, LightToolDispatchOutcome},
     },
     AppState, UserCoreOps,
@@ -551,18 +551,14 @@ fn enqueue_message(
                     outcome,
                     LightToolDispatchOutcome::Completed | LightToolDispatchOutcome::Failed
                 ) {
-                    let delivery = match LightToolPushDeliveryService::from_env(pool) {
-                        Ok(delivery) => delivery,
-                        Err(error) => {
-                            tracing::error!(run_id = %run_id, "Light Tool push setup failed: {error}");
-                            return;
-                        }
-                    };
-                    if let Err(error) = delivery.send_conversation_changed(device_id).await {
+                    let now = chrono::Utc::now().timestamp() as i32;
+                    if let Err(error) = LightToolPushOutboxRepository::new(pool)
+                        .enqueue_conversation_changed(device_id, now)
+                    {
                         tracing::warn!(
                             run_id = %run_id,
                             device_id,
-                            "Light Tool conversation push failed: {error}"
+                            "Could not enqueue Light Tool conversation push: {error}"
                         );
                     }
                 }

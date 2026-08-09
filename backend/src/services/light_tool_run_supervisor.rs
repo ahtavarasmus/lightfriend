@@ -1,12 +1,10 @@
 use crate::{
-    repositories::light_tool_runs_repository::{
-        LightToolRunsRepository, LightToolRunsRepositoryError,
+    repositories::{
+        light_tool_push_outbox_repository::LightToolPushOutboxRepository,
+        light_tool_runs_repository::{LightToolRunsRepository, LightToolRunsRepositoryError},
     },
-    services::{
-        light_tool_push_delivery::LightToolPushDeliveryService,
-        light_tool_run_dispatcher::{
-            dispatch_light_tool_run, LightToolDispatchOutcome, LightToolResponder,
-        },
+    services::light_tool_run_dispatcher::{
+        dispatch_light_tool_run, LightToolDispatchOutcome, LightToolResponder,
     },
     PgDbPool,
 };
@@ -47,7 +45,7 @@ pub async fn supervise_light_tool_runs_once(
         .map(|(_, device_id)| device_id)
         .collect::<HashSet<_>>()
     {
-        spawn_push(pool.clone(), device_id);
+        enqueue_push(&pool, device_id);
     }
 
     for (run_id, device_id) in queued {
@@ -67,7 +65,7 @@ pub async fn supervise_light_tool_runs_once(
                 outcome,
                 LightToolDispatchOutcome::Completed | LightToolDispatchOutcome::Failed
             ) {
-                send_push(pool, device_id).await;
+                enqueue_push(&pool, device_id);
             }
         });
     }
@@ -75,19 +73,14 @@ pub async fn supervise_light_tool_runs_once(
     Ok(())
 }
 
-fn spawn_push(pool: PgDbPool, device_id: i32) {
-    tokio::spawn(send_push(pool, device_id));
-}
-
-async fn send_push(pool: PgDbPool, device_id: i32) {
-    let delivery = match LightToolPushDeliveryService::from_env(pool) {
-        Ok(delivery) => delivery,
-        Err(error) => {
-            tracing::error!(device_id, "Light Tool recovery push setup failed: {error}");
-            return;
-        }
-    };
-    if let Err(error) = delivery.send_conversation_changed(device_id).await {
-        tracing::warn!(device_id, "Light Tool recovery push failed: {error}");
+fn enqueue_push(pool: &PgDbPool, device_id: i32) {
+    let now = chrono::Utc::now().timestamp() as i32;
+    if let Err(error) = LightToolPushOutboxRepository::new(pool.clone())
+        .enqueue_conversation_changed(device_id, now)
+    {
+        tracing::warn!(
+            device_id,
+            "Could not enqueue Light Tool recovery push: {error}"
+        );
     }
 }

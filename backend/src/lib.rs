@@ -142,6 +142,7 @@ pub mod repositories {
     pub mod commitment_repository;
     pub mod light_tool_devices_repository;
     pub mod light_tool_pairing_repository;
+    pub mod light_tool_push_outbox_repository;
     pub mod light_tool_push_repository;
     pub mod light_tool_runs_repository;
     pub mod llm_usage_repository;
@@ -176,6 +177,7 @@ pub mod services {
     pub mod light_tool_identity;
     pub mod light_tool_pairing;
     pub mod light_tool_push_delivery;
+    pub mod light_tool_push_outbox;
     pub mod light_tool_run_dispatcher;
     pub mod light_tool_run_execution;
     pub mod light_tool_run_supervisor;

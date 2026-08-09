@@ -14,6 +14,8 @@ mod light_tool_pairing_test;
 mod light_tool_push_delivery_test;
 #[path = "light_tool_push_handler_test.rs"]
 mod light_tool_push_handler_test;
+#[path = "light_tool_push_outbox_test.rs"]
+mod light_tool_push_outbox_test;
 #[path = "light_tool_runs_repository_test.rs"]
 mod light_tool_runs_repository_test;
 #[path = "light_tool_voice_session_test.rs"]

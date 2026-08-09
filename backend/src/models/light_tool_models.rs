@@ -1,5 +1,6 @@
 use crate::pg_schema::{
-    light_tool_devices, light_tool_pairing_sessions, light_tool_push_registrations, light_tool_runs,
+    light_tool_devices, light_tool_pairing_sessions, light_tool_push_outbox,
+    light_tool_push_registrations, light_tool_runs,
 };
 use diesel::prelude::*;
 
@@ -107,5 +108,33 @@ pub struct NewLightToolPushRegistration {
     pub encrypted_endpoint: String,
     pub endpoint_hash: String,
     pub registered_at: i32,
+    pub updated_at: i32,
+}
+
+#[derive(Queryable, Selectable, Clone, Debug, PartialEq, Eq)]
+#[diesel(table_name = light_tool_push_outbox)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct LightToolPushOutboxEvent {
+    pub device_id: i32,
+    pub event_type: String,
+    pub version: i64,
+    pub attempt_count: i32,
+    pub next_attempt_at: i32,
+    pub lease_until: i32,
+    pub created_at: i32,
+    pub updated_at: i32,
+}
+
+#[derive(Insertable, Clone, Debug)]
+#[diesel(table_name = light_tool_push_outbox)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewLightToolPushOutboxEvent {
+    pub device_id: i32,
+    pub event_type: String,
+    pub version: i64,
+    pub attempt_count: i32,
+    pub next_attempt_at: i32,
+    pub lease_until: i32,
+    pub created_at: i32,
     pub updated_at: i32,
 }

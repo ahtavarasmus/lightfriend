@@ -24,6 +24,7 @@ use tracing::Level;
 use api::{twilio_sms, voice_pipeline};
 use backend::services::{
     light_tool_agent_responder::LightToolAgentResponder,
+    light_tool_push_outbox::start_light_tool_push_outbox_worker,
     light_tool_run_dispatcher::LightToolResponder,
     light_tool_run_supervisor::start_light_tool_run_supervisor,
 };
@@ -1850,6 +1851,8 @@ async fn main() {
         let pool = state.pg_pool.clone();
         tokio::spawn(start_light_tool_run_supervisor(pool, responder));
     }
+
+    tokio::spawn(start_light_tool_push_outbox_worker(state.pg_pool.clone()));
 
     let state_for_tuwunel_purge = state.clone();
     tokio::spawn(async move {
