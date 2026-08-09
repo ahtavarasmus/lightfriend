@@ -89,6 +89,21 @@ impl TemporaryAlertSuppressionsRepository {
         }
     }
 
+    pub fn end_for_user(&self, user_id: i32, id: i32) -> Result<bool, DieselError> {
+        let now = chrono::Utc::now().timestamp() as i32;
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+        let changed = diesel::update(
+            temporary_alert_suppressions::table
+                .filter(temporary_alert_suppressions::id.eq(id))
+                .filter(temporary_alert_suppressions::user_id.eq(user_id))
+                .filter(temporary_alert_suppressions::ended_at.is_null())
+                .filter(temporary_alert_suppressions::expires_at.gt(now)),
+        )
+        .set(temporary_alert_suppressions::ended_at.eq(Some(now)))
+        .execute(&mut conn)?;
+        Ok(changed == 1)
+    }
+
     pub fn active_for_user(
         &self,
         user_id: i32,

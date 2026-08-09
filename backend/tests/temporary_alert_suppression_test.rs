@@ -222,3 +222,30 @@ fn confirmation_is_rendered_from_the_persisted_scope_expiry_and_zone() {
     assert!(confirmation.contains("2026-12-15 09:00"));
     assert!(confirmation.contains("Europe/Helsinki UTC+02:00"));
 }
+
+#[test]
+#[serial]
+fn dashboard_cancellation_of_suppression_is_user_scoped() {
+    let state = create_test_state();
+    let owner = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let other = create_test_user(&state, &TestUserParams::finland_user(10.0, 5.0));
+    let repository = TemporaryAlertSuppressionsRepository::new(state.pg_pool.clone());
+    let now = chrono::Utc::now().timestamp() as i32;
+    let suppression = repository
+        .create(
+            owner.id,
+            KIND_TOPIC,
+            SCOPE_ALL,
+            Some("Coinbase transactions"),
+            "Europe/Helsinki",
+            now + 3600,
+        )
+        .unwrap();
+
+    assert!(!repository.end_for_user(other.id, suppression.id).unwrap());
+    assert!(repository.end_for_user(owner.id, suppression.id).unwrap());
+    assert!(repository
+        .active_for_user(owner.id, now)
+        .unwrap()
+        .is_empty());
+}

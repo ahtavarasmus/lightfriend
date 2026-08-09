@@ -1507,6 +1507,22 @@ async fn main() {
             get(dashboard_handlers::get_dashboard_summary),
         )
         .route(
+            "/api/dashboard/reminders",
+            post(dashboard_handlers::create_dashboard_reminder),
+        )
+        .route(
+            "/api/dashboard/reminders/{id}",
+            delete(dashboard_handlers::cancel_dashboard_reminder),
+        )
+        .route(
+            "/api/dashboard/reply-watches/{id}",
+            delete(dashboard_handlers::cancel_dashboard_reply_watch),
+        )
+        .route(
+            "/api/dashboard/suppressions/{id}",
+            delete(dashboard_handlers::cancel_dashboard_suppression),
+        )
+        .route(
             "/api/dashboard/activity-feed",
             get(dashboard_handlers::get_activity_feed),
         )

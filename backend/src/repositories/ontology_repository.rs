@@ -2266,6 +2266,30 @@ impl OntologyRepository {
         self.update_event_status(user_id, event_id, "dismissed")
     }
 
+    /// Cancel a still-pending reminder owned by the signed-in user.
+    ///
+    /// Keeping the row as `cancelled` preserves the event audit trail while
+    /// removing it from both the active dashboard and scheduler claims.
+    pub fn cancel_reminder(&self, user_id: i32, event_id: i32) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let now = Self::now();
+        let changed = diesel::update(
+            ont_events::table
+                .filter(ont_events::id.eq(event_id))
+                .filter(ont_events::user_id.eq(user_id))
+                .filter(ont_events::status.eq("active"))
+                .filter(ont_events::remind_at.is_not_null()),
+        )
+        .set((
+            ont_events::status.eq("cancelled"),
+            ont_events::reminder_next_attempt_at.eq::<Option<i32>>(None),
+            ont_events::reminder_lease_until.eq::<Option<i32>>(None),
+            ont_events::updated_at.eq(now),
+        ))
+        .execute(&mut conn)?;
+        Ok(changed == 1)
+    }
+
     pub fn update_event(
         &self,
         user_id: i32,

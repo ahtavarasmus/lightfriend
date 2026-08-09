@@ -1,7 +1,7 @@
 use crate::profile::billing_models::UserProfile;
 use crate::utils::api::Api;
 use serde::Deserialize;
-use wasm_bindgen::JsCast;
+use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
@@ -99,6 +99,14 @@ const FOCUSED_DASHBOARD_STYLES: &str = r#"
     padding: 1.35rem 0;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
+.focused-reminders-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+.focused-reminders-heading .focused-controls-label { margin-bottom: 0; }
 .focused-reminder-list {
     display: grid;
     gap: 0;
@@ -109,13 +117,14 @@ const FOCUSED_DASHBOARD_STYLES: &str = r#"
 .focused-reminder-empty { margin: 0; color: #777; font-size: 0.78rem; }
 .focused-reminder-row {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     justify-content: space-between;
     gap: 1rem;
     padding: 0.72rem 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 .focused-reminder-row:last-child { border-bottom: 0; }
+.focused-reminder-main { min-width: 0; flex: 1; display: grid; gap: 0.18rem; }
 .focused-reminder-text {
     min-width: 0;
     color: #d5d5d5;
@@ -123,12 +132,118 @@ const FOCUSED_DASHBOARD_STYLES: &str = r#"
     line-height: 1.45;
     overflow-wrap: anywhere;
 }
+.focused-reminder-kind {
+    color: #6f6f6f;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
 .focused-reminder-time {
     flex: 0 0 auto;
     color: #858585;
     font-size: 0.72rem;
     font-variant-numeric: tabular-nums;
 }
+.focused-reminder-actions { display: flex; align-items: center; gap: 0.45rem; }
+.focused-icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 50%;
+    background: transparent;
+    color: #858585;
+    font: inherit;
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+.focused-icon-button:hover:not(:disabled) {
+    border-color: rgba(255, 255, 255, 0.22);
+    background: rgba(255, 255, 255, 0.06);
+    color: #e2e2e2;
+}
+.focused-icon-button:active:not(:disabled) { transform: scale(0.96); }
+.focused-icon-button:focus-visible {
+    outline: 2px solid rgba(126, 178, 255, 0.7);
+    outline-offset: 3px;
+}
+.focused-icon-button:disabled { cursor: wait; opacity: 0.55; }
+.focused-active-waits {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.focused-active-waits h3 {
+    margin: 0 0 0.45rem;
+    color: #707070;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+.focused-reminder-dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1400;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.72);
+}
+.focused-reminder-dialog {
+    width: min(100%, 430px);
+    box-sizing: border-box;
+    padding: 1.25rem;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 12px;
+    background: #171717;
+    color: #f3f3f3;
+    box-shadow: 0 20px 55px rgba(0, 0, 0, 0.36);
+}
+.focused-reminder-dialog h2 { margin: 0; font-size: 1.05rem; font-weight: 600; }
+.focused-reminder-dialog p { margin: 0.55rem 0 0; color: #999; font-size: 0.8rem; line-height: 1.5; }
+.focused-reminder-form { display: grid; gap: 0.9rem; margin-top: 1rem; }
+.focused-reminder-field { display: grid; gap: 0.38rem; }
+.focused-reminder-field span { color: #aaa; font-size: 0.72rem; font-weight: 600; }
+.focused-reminder-field input {
+    min-height: 44px;
+    box-sizing: border-box;
+    width: 100%;
+    padding: 0.65rem 0.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    background: #101010;
+    color: #f0f0f0;
+    font: inherit;
+    font-size: 0.84rem;
+}
+.focused-reminder-field input:focus-visible {
+    outline: 2px solid rgba(126, 178, 255, 0.7);
+    outline-offset: 2px;
+}
+.focused-reminder-field input[type="datetime-local"] { font-variant-numeric: tabular-nums; }
+.focused-reminder-dialog-actions { display: flex; justify-content: flex-end; gap: 0.55rem; margin-top: 1rem; }
+.focused-reminder-dialog-button {
+    min-height: 40px;
+    padding: 0.55rem 0.85rem;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 8px;
+    background: transparent;
+    color: #bbb;
+    font: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+}
+.focused-reminder-dialog-button.primary { background: #f2f2f2; color: #151515; }
+.focused-reminder-dialog-button.danger { border-color: rgba(255, 112, 112, 0.38); color: #ff9c9c; }
+.focused-reminder-dialog-button:disabled { cursor: wait; opacity: 0.55; }
+.focused-reminder-error { margin-top: 0.75rem !important; color: #ff9292 !important; }
 .focused-controls-label {
     margin: 0 0 0.75rem;
     color: #707070;
@@ -343,6 +458,27 @@ const FOCUSED_DASHBOARD_STYLES: &str = r#"
         background: rgba(0, 0, 0, 0.05);
         color: #333;
     }
+    .focused-icon-button {
+        border-color: rgba(0, 0, 0, 0.12);
+        color: #6a6a6a;
+    }
+    .focused-icon-button:hover:not(:disabled) {
+        border-color: rgba(0, 0, 0, 0.22);
+        background: rgba(0, 0, 0, 0.05);
+        color: #222;
+    }
+    .focused-reminder-dialog {
+        border-color: rgba(0, 0, 0, 0.12);
+        background: #fff;
+        color: #1d1d1f;
+    }
+    .focused-reminder-field input {
+        border-color: rgba(0, 0, 0, 0.16);
+        background: #fff;
+        color: #1d1d1f;
+    }
+    .focused-reminder-dialog-button { border-color: rgba(0, 0, 0, 0.14); color: #555; }
+    .focused-reminder-dialog-button.primary { background: #171717; color: #fff; }
     .focused-footer button:hover,
     .focused-footer a:hover {
         color: #444;
@@ -356,6 +492,7 @@ const FOCUSED_DASHBOARD_STYLES: &str = r#"
     .focused-footer a {
         transition: none;
     }
+    .focused-icon-button { transition: none; }
 }
 "#;
 
@@ -482,12 +619,43 @@ struct DashboardSummary {
     value_stats: DashboardValueStats,
     #[serde(default)]
     events: Vec<UpcomingReminder>,
+    #[serde(default)]
+    active_waits: Vec<ActiveWait>,
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
 struct UpcomingReminder {
+    id: i32,
     description: String,
     remind_at: Option<i32>,
+}
+
+#[derive(Clone, PartialEq, Deserialize)]
+struct ActiveWait {
+    id: i32,
+    kind: String,
+    description: String,
+    expires_at: i32,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum RemovalKind {
+    Reminder,
+    ReplyWatch,
+    Suppression,
+}
+
+#[derive(Clone, PartialEq)]
+struct PendingRemoval {
+    id: i32,
+    kind: RemovalKind,
+    description: String,
+}
+
+#[derive(Clone, PartialEq)]
+enum ReminderDialog {
+    Create,
+    Confirm(PendingRemoval),
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -510,6 +678,12 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
     let show_history = use_state(|| false);
     let value_stats = use_state(|| None::<DashboardValueStats>);
     let upcoming_reminders = use_state(Vec::<UpcomingReminder>::new);
+    let active_waits = use_state(Vec::<ActiveWait>::new);
+    let reminder_dialog = use_state(|| None::<ReminderDialog>);
+    let reminder_message = use_state(String::new);
+    let reminder_at = use_state(default_local_reminder_time);
+    let reminder_saving = use_state(|| false);
+    let reminder_error = use_state(|| None::<String>);
     let critical_notifications =
         use_state(|| props.user_profile.system_important_notify.unwrap_or(false));
     let digests = use_state(|| props.user_profile.digest_enabled.unwrap_or(false));
@@ -612,6 +786,7 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
     {
         let value_stats = value_stats.clone();
         let upcoming_reminders = upcoming_reminders.clone();
+        let active_waits = active_waits.clone();
         use_effect_with_deps(
             move |_| {
                 spawn_local(async move {
@@ -626,8 +801,8 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
                                     .filter(|event| event.remind_at.is_some_and(|at| at >= now))
                                     .collect::<Vec<_>>();
                                 reminders.sort_by_key(|event| event.remind_at);
-                                reminders.truncate(5);
                                 upcoming_reminders.set(reminders);
+                                active_waits.set(summary.active_waits);
                             }
                         }
                     }
@@ -821,6 +996,194 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
         })
     };
 
+    let open_reminder_create = {
+        let dialog = reminder_dialog.clone();
+        let message = reminder_message.clone();
+        let at = reminder_at.clone();
+        let error = reminder_error.clone();
+        Callback::from(move |_: MouseEvent| {
+            message.set(String::new());
+            at.set(default_local_reminder_time());
+            error.set(None);
+            dialog.set(Some(ReminderDialog::Create));
+        })
+    };
+
+    let close_reminder_dialog = {
+        let dialog = reminder_dialog.clone();
+        let error = reminder_error.clone();
+        let saving = reminder_saving.clone();
+        Callback::from(move |_| {
+            if !*saving {
+                error.set(None);
+                dialog.set(None);
+            }
+        })
+    };
+
+    let on_reminder_message = {
+        let message = reminder_message.clone();
+        Callback::from(move |event: InputEvent| {
+            message.set(
+                event
+                    .target_unchecked_into::<web_sys::HtmlInputElement>()
+                    .value(),
+            );
+        })
+    };
+
+    let on_reminder_at = {
+        let at = reminder_at.clone();
+        Callback::from(move |event: InputEvent| {
+            at.set(
+                event
+                    .target_unchecked_into::<web_sys::HtmlInputElement>()
+                    .value(),
+            );
+        })
+    };
+
+    let create_reminder = {
+        let message = reminder_message.clone();
+        let at = reminder_at.clone();
+        let saving = reminder_saving.clone();
+        let error = reminder_error.clone();
+        let dialog = reminder_dialog.clone();
+        let reminders = upcoming_reminders.clone();
+        Callback::from(move |event: SubmitEvent| {
+            event.prevent_default();
+            if *saving {
+                return;
+            }
+            let clean_message = message.trim().to_string();
+            if clean_message.is_empty() {
+                error.set(Some(
+                    "Enter what you want to be reminded about.".to_string(),
+                ));
+                return;
+            }
+            let date = js_sys::Date::new(&JsValue::from_str(at.trim()));
+            if date.get_time().is_nan() {
+                error.set(Some("Choose a valid date and time.".to_string()));
+                return;
+            }
+            let Some(rfc3339) = date.to_iso_string().as_string() else {
+                error.set(Some("Choose a valid date and time.".to_string()));
+                return;
+            };
+            saving.set(true);
+            error.set(None);
+            let saving = saving.clone();
+            let error = error.clone();
+            let dialog = dialog.clone();
+            let reminders = reminders.clone();
+            spawn_local(async move {
+                let request = serde_json::json!({
+                    "message": clean_message,
+                    "at": rfc3339,
+                });
+                let result = match Api::post("/api/dashboard/reminders").json(&request) {
+                    Ok(builder) => match builder.send().await {
+                        Ok(response) if response.ok() => {
+                            response.json::<UpcomingReminder>().await.ok()
+                        }
+                        _ => None,
+                    },
+                    Err(_) => None,
+                };
+                if let Some(created) = result {
+                    let mut next = (*reminders).clone();
+                    next.push(created);
+                    next.sort_by_key(|reminder| reminder.remind_at);
+                    reminders.set(next);
+                    dialog.set(None);
+                } else {
+                    error.set(Some(
+                        "Could not create that reminder. Choose a time at least one minute ahead."
+                            .to_string(),
+                    ));
+                }
+                saving.set(false);
+            });
+        })
+    };
+
+    let ask_to_remove = {
+        let dialog = reminder_dialog.clone();
+        let error = reminder_error.clone();
+        Callback::from(move |removal: PendingRemoval| {
+            error.set(None);
+            dialog.set(Some(ReminderDialog::Confirm(removal)));
+        })
+    };
+
+    let remove_item = {
+        let dialog = reminder_dialog.clone();
+        let saving = reminder_saving.clone();
+        let error = reminder_error.clone();
+        let reminders = upcoming_reminders.clone();
+        let waits = active_waits.clone();
+        Callback::from(move |_: MouseEvent| {
+            if *saving {
+                return;
+            }
+            let Some(ReminderDialog::Confirm(removal)) = (*dialog).clone() else {
+                return;
+            };
+            let path = match removal.kind {
+                RemovalKind::Reminder => format!("/api/dashboard/reminders/{}", removal.id),
+                RemovalKind::ReplyWatch => {
+                    format!("/api/dashboard/reply-watches/{}", removal.id)
+                }
+                RemovalKind::Suppression => {
+                    format!("/api/dashboard/suppressions/{}", removal.id)
+                }
+            };
+            saving.set(true);
+            error.set(None);
+            let dialog = dialog.clone();
+            let saving = saving.clone();
+            let error = error.clone();
+            let reminders = reminders.clone();
+            let waits = waits.clone();
+            spawn_local(async move {
+                let removed =
+                    matches!(Api::delete(&path).send().await, Ok(response) if response.ok());
+                if removed {
+                    match removal.kind {
+                        RemovalKind::Reminder => reminders.set(
+                            (*reminders)
+                                .iter()
+                                .filter(|reminder| reminder.id != removal.id)
+                                .cloned()
+                                .collect(),
+                        ),
+                        RemovalKind::ReplyWatch | RemovalKind::Suppression => waits.set(
+                            (*waits)
+                                .iter()
+                                .filter(|wait| {
+                                    wait.id != removal.id
+                                        || matches!(
+                                            (removal.kind, wait.kind.as_str()),
+                                            (RemovalKind::ReplyWatch, kind)
+                                                if kind != "reply_watch"
+                                        )
+                                        || matches!(removal.kind, RemovalKind::Suppression)
+                                            && wait.kind == "reply_watch"
+                                })
+                                .cloned()
+                                .collect(),
+                        ),
+                    }
+                    dialog.set(None);
+                } else {
+                    error.set(Some("Could not remove that item. Try again.".to_string()));
+                }
+                saving.set(false);
+            });
+        })
+    };
+
     let toggle_tesla_panel = {
         let quick_panel = quick_panel.clone();
         Callback::from(move |_: MouseEvent| {
@@ -991,22 +1354,100 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
                         </section>
 
                         <section class="focused-reminders" aria-labelledby="focused-reminders-title">
-                            <h2 id="focused-reminders-title" class="focused-controls-label">{"Upcoming reminders"}</h2>
+                            <div class="focused-reminders-heading">
+                                <h2 id="focused-reminders-title" class="focused-controls-label">{"Upcoming reminders"}</h2>
+                                <button
+                                    type="button"
+                                    class="focused-icon-button"
+                                    aria-label="Add reminder"
+                                    title="Add reminder"
+                                    onclick={open_reminder_create}
+                                >
+                                    <span aria-hidden="true">{"+"}</span>
+                                </button>
+                            </div>
                             if upcoming_reminders.is_empty() {
                                 <p class="focused-reminder-empty">{"No reminders scheduled."}</p>
                             } else {
                                 <ul class="focused-reminder-list">
                                     {for upcoming_reminders.iter().filter_map(|reminder| {
-                                        reminder.remind_at.map(|at| html! {
+                                        reminder.remind_at.map(|at| {
+                                            let removal = PendingRemoval {
+                                                id: reminder.id,
+                                                kind: RemovalKind::Reminder,
+                                                description: reminder.description.clone(),
+                                            };
+                                            let ask_to_remove = ask_to_remove.clone();
+                                            html! {
                                             <li class="focused-reminder-row">
-                                                <span class="focused-reminder-text">{&reminder.description}</span>
-                                                <time class="focused-reminder-time" datetime={chrono::DateTime::from_timestamp(i64::from(at), 0).map(|date| date.to_rfc3339()).unwrap_or_default()}>
-                                                    {format_reminder_time(at, props.user_profile.timezone.as_deref())}
-                                                </time>
+                                                <div class="focused-reminder-main">
+                                                    <span class="focused-reminder-text">{&reminder.description}</span>
+                                                </div>
+                                                <div class="focused-reminder-actions">
+                                                    <time class="focused-reminder-time" datetime={chrono::DateTime::from_timestamp(i64::from(at), 0).map(|date| date.to_rfc3339()).unwrap_or_default()}>
+                                                        {format_reminder_time(at, props.user_profile.timezone.as_deref())}
+                                                    </time>
+                                                    <button
+                                                        type="button"
+                                                        class="focused-icon-button"
+                                                        aria-label={format!("Delete reminder: {}", reminder.description)}
+                                                        title="Delete reminder"
+                                                        onclick={Callback::from(move |_| ask_to_remove.emit(removal.clone()))}
+                                                    >
+                                                        <span aria-hidden="true">{"×"}</span>
+                                                    </button>
+                                                </div>
                                             </li>
-                                        })
+                                        }})
                                     })}
                                 </ul>
+                            }
+                            if !active_waits.is_empty() {
+                                <div class="focused-active-waits">
+                                    <h3>{"Active waits"}</h3>
+                                    <ul class="focused-reminder-list">
+                                        {for active_waits.iter().map(|wait| {
+                                            let kind_label = match wait.kind.as_str() {
+                                                "reply_watch" => "Reply wait",
+                                                "quiet" => "Quiet mode",
+                                                "topic" => "Ignored topic",
+                                                _ => "Active wait",
+                                            };
+                                            let removal = PendingRemoval {
+                                                id: wait.id,
+                                                kind: if wait.kind == "reply_watch" {
+                                                    RemovalKind::ReplyWatch
+                                                } else {
+                                                    RemovalKind::Suppression
+                                                },
+                                                description: wait.description.clone(),
+                                            };
+                                            let ask_to_remove = ask_to_remove.clone();
+                                            html! {
+                                                <li class="focused-reminder-row">
+                                                    <div class="focused-reminder-main">
+                                                        <span class="focused-reminder-kind">{kind_label}</span>
+                                                        <span class="focused-reminder-text">{&wait.description}</span>
+                                                    </div>
+                                                    <div class="focused-reminder-actions">
+                                                        <time class="focused-reminder-time" datetime={chrono::DateTime::from_timestamp(i64::from(wait.expires_at), 0).map(|date| date.to_rfc3339()).unwrap_or_default()}>
+                                                            {format!("Until {}", format_reminder_time(wait.expires_at, props.user_profile.timezone.as_deref()))}
+                                                        </time>
+                                                        <button
+                                                            type="button"
+                                                            class="focused-icon-button"
+                                                            aria-label={format!("Cancel: {}", wait.description)}
+                                                            title="Cancel"
+                                                            onclick={Callback::from(move |_| ask_to_remove.emit(removal.clone()))}
+                                                        >
+                                                            <span aria-hidden="true">{"×"}</span>
+                                                        </button>
+                                                    </div>
+                                                </li>
+                                            }
+                                        })}
+                                    </ul>
+                                </div>
                             }
                         </section>
 
@@ -1136,6 +1577,78 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
                     </footer>
                 </div>
             </main>
+            if let Some(dialog) = (*reminder_dialog).as_ref() {
+                <div class="focused-reminder-dialog-backdrop" onclick={close_reminder_dialog.clone()}>
+                    <section
+                        class="focused-reminder-dialog"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="focused-reminder-dialog-title"
+                        onclick={Callback::from(|event: MouseEvent| event.stop_propagation())}
+                    >
+                        {match dialog {
+                            ReminderDialog::Create => html! {
+                                <>
+                                    <h2 id="focused-reminder-dialog-title">{"Add reminder"}</h2>
+                                    <p>{"Lightfriend will notify you through your existing phone channel."}</p>
+                                    <form class="focused-reminder-form" onsubmit={create_reminder}>
+                                        <label class="focused-reminder-field">
+                                            <span>{"Reminder"}</span>
+                                            <input
+                                                type="text"
+                                                maxlength="280"
+                                                value={(*reminder_message).clone()}
+                                                oninput={on_reminder_message}
+                                                placeholder="What should Lightfriend remind you about?"
+                                                autocomplete="off"
+                                                autofocus={true}
+                                            />
+                                        </label>
+                                        <label class="focused-reminder-field">
+                                            <span>{"Date and time"}</span>
+                                            <input
+                                                type="datetime-local"
+                                                min={minimum_local_reminder_time()}
+                                                value={(*reminder_at).clone()}
+                                                oninput={on_reminder_at}
+                                            />
+                                        </label>
+                                        if let Some(error) = (*reminder_error).as_ref() {
+                                            <p class="focused-reminder-error" role="alert">{error}</p>
+                                        }
+                                        <div class="focused-reminder-dialog-actions">
+                                            <button type="button" class="focused-reminder-dialog-button" disabled={*reminder_saving} onclick={close_reminder_dialog.clone()}>{"Cancel"}</button>
+                                            <button type="submit" class="focused-reminder-dialog-button primary" disabled={*reminder_saving}>
+                                                {if *reminder_saving { "Adding…" } else { "Add reminder" }}
+                                            </button>
+                                        </div>
+                                    </form>
+                                </>
+                            },
+                            ReminderDialog::Confirm(removal) => html! {
+                                <>
+                                    <h2 id="focused-reminder-dialog-title">{"Are you sure?"}</h2>
+                                    <p>{match removal.kind {
+                                        RemovalKind::Reminder => "This reminder will be cancelled and will not notify you.",
+                                        RemovalKind::ReplyWatch => "Lightfriend will stop waiting for this reply.",
+                                        RemovalKind::Suppression => "This quiet or ignore period will end immediately.",
+                                    }}</p>
+                                    <p><strong>{&removal.description}</strong></p>
+                                    if let Some(error) = (*reminder_error).as_ref() {
+                                        <p class="focused-reminder-error" role="alert">{error}</p>
+                                    }
+                                    <div class="focused-reminder-dialog-actions">
+                                        <button type="button" class="focused-reminder-dialog-button" disabled={*reminder_saving} onclick={close_reminder_dialog.clone()}>{"Keep it"}</button>
+                                        <button type="button" class="focused-reminder-dialog-button danger" disabled={*reminder_saving} onclick={remove_item}>
+                                            {if *reminder_saving { "Removing…" } else { "Yes, remove" }}
+                                        </button>
+                                    </div>
+                                </>
+                            },
+                        }}
+                    </section>
+                </div>
+            }
             <SettingsPanel
                 is_open={*settings_open}
                 user_profile={Some(props.user_profile.clone())}
@@ -1146,6 +1659,27 @@ pub fn focused_dashboard_view(props: &FocusedDashboardViewProps) -> Html {
             />
         </>
     }
+}
+
+fn local_datetime_after(minutes: u32) -> String {
+    let date = js_sys::Date::new_0();
+    date.set_minutes(date.get_minutes().saturating_add(minutes));
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}",
+        date.get_full_year(),
+        date.get_month() + 1,
+        date.get_date(),
+        date.get_hours(),
+        date.get_minutes(),
+    )
+}
+
+fn default_local_reminder_time() -> String {
+    local_datetime_after(5)
+}
+
+fn minimum_local_reminder_time() -> String {
+    local_datetime_after(2)
 }
 
 fn format_reminder_time(timestamp: i32, timezone: Option<&str>) -> String {

@@ -1,5 +1,6 @@
 use std::sync::{Arc, Barrier};
 
+use backend::handlers::agent_integration_handlers::validate_reminder_input;
 use backend::models::ontology_models::NewOntEvent;
 use backend::proactive::utils::{
     format_persisted_local_time, parse_reminder_time_in_zone, reminder_timezone,
@@ -18,6 +19,53 @@ fn due_reminder(user_id: i32, now: i32) -> NewOntEvent {
         created_at: now - 60,
         updated_at: now - 60,
     }
+}
+
+#[test]
+fn dashboard_and_agent_reminder_validation_share_strict_limits() {
+    let now = 1_800_000_000;
+    assert_eq!(
+        validate_reminder_input("Call the dentist", "2027-01-15T10:02:00+02:00", now),
+        Some(("Call the dentist".to_string(), 1_800_000_120))
+    );
+    assert!(validate_reminder_input("", "2027-01-15T10:02:00+02:00", now).is_none());
+    assert!(validate_reminder_input("Too soon", "2027-01-15T08:00:30Z", now).is_none());
+    assert!(validate_reminder_input("Bad time", "tomorrow morning", now).is_none());
+}
+
+#[test]
+#[serial]
+fn cancelling_a_reminder_is_user_scoped_and_stops_scheduler_claims() {
+    let state = create_test_state();
+    let owner = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let other = create_test_user(&state, &TestUserParams::finland_user(10.0, 5.0));
+    let now = chrono::Utc::now().timestamp() as i32;
+    let event = state
+        .ontology_repository
+        .create_reminder(&due_reminder(owner.id, now + 120), "UTC")
+        .unwrap();
+
+    assert!(!state
+        .ontology_repository
+        .cancel_reminder(other.id, event.id)
+        .unwrap());
+    assert!(state
+        .ontology_repository
+        .cancel_reminder(owner.id, event.id)
+        .unwrap());
+    assert_eq!(
+        state
+            .ontology_repository
+            .get_event(owner.id, event.id)
+            .unwrap()
+            .status,
+        "cancelled"
+    );
+    assert!(state
+        .ontology_repository
+        .claim_due_reminders(now + 121, 120, 10)
+        .unwrap()
+        .is_empty());
 }
 
 #[test]

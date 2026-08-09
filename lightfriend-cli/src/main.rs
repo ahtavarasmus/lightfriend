@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 use url::Url;
 
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+compile_error!("lightfriend supports macOS, Linux, and Windows credential stores");
+
 const KEYRING_SERVICE: &str = "ai.lightfriend.cli";
 
 #[derive(Parser)]
@@ -179,7 +182,7 @@ async fn login(client: &Client, server: &Url, name: &str) -> Result<()> {
     }
     let verification_url = server.join(pairing.verification_path.trim_start_matches('/'))?;
     println!("Open {verification_url}");
-    println!("Then open Settings > Connections > Connect an agent.");
+    println!("Then open Settings > Connections > Webhooks & API & CLI > Local agent CLI.");
     println!("Enter pairing code: {}", pairing.user_code);
     println!("Never paste a Lightfriend token into an agent chat, prompt, or URL.");
     let _ = webbrowser::open(verification_url.as_str());

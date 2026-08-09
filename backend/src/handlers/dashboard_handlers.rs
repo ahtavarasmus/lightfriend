@@ -15,7 +15,12 @@ use crate::repositories::user_repository::{
     SYSTEM_ALERT_ACTIVITY_TYPES, SYSTEM_ALERT_FEEDBACK_ACTIVITY_TYPES,
     SYSTEM_ALERT_FEEDBACK_SHOULD_WAIT, SYSTEM_ALERT_FEEDBACK_WORTH_IT,
 };
-use crate::{handlers::auth_middleware::AuthUser, AppState, UserCoreOps};
+use crate::{
+    handlers::{agent_integration_handlers::validate_reminder_input, auth_middleware::AuthUser},
+    models::ontology_models::NewOntEvent,
+    repositories::temporary_alert_suppressions_repository::{KIND_QUIET, KIND_TOPIC},
+    AppState, TemporaryAlertSuppressionsRepository, UserCoreOps,
+};
 
 #[derive(Deserialize)]
 pub struct DashboardQuery {
@@ -32,6 +37,7 @@ pub struct DashboardSummaryResponse {
     pub action_items: Vec<ActionItem>,
     pub filtered_count: i64,
     pub events: Vec<EventItem>,
+    pub active_waits: Vec<ActiveWaitItem>,
     pub sunrise_hour: Option<f32>,
     pub sunset_hour: Option<f32>,
     pub watched_contacts: Vec<WatchedContact>,
@@ -60,6 +66,20 @@ pub struct EventItem {
     pub due_at: Option<i32>,
     pub status: String,
     pub created_at: i32,
+}
+
+#[derive(Serialize)]
+pub struct ActiveWaitItem {
+    pub id: i32,
+    pub kind: &'static str,
+    pub description: String,
+    pub expires_at: i32,
+}
+
+#[derive(Deserialize)]
+pub struct CreateDashboardReminderRequest {
+    pub message: String,
+    pub at: String,
 }
 
 #[derive(Serialize)]
@@ -292,6 +312,53 @@ pub async fn get_dashboard_summary(
         })
         .collect();
 
+    let mut active_waits = state
+        .pending_reply_watches_repository
+        .active_for_user(user_id, now_ts)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|watch| ActiveWaitItem {
+            id: watch.id,
+            kind: "reply_watch",
+            description: format!("Waiting for a reply from {}", watch.contact_display_name),
+            expires_at: watch.expires_at,
+        })
+        .collect::<Vec<_>>();
+    active_waits.extend(
+        TemporaryAlertSuppressionsRepository::new(state.pg_pool.clone())
+            .active_for_user(user_id, now_ts)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|suppression| {
+                let (kind, description) = match suppression.kind.as_str() {
+                    KIND_QUIET => (
+                        "quiet",
+                        match suppression.scope.as_str() {
+                            "all" => "Quiet mode for all notifications".to_string(),
+                            "critical" => "Quiet mode for critical notifications".to_string(),
+                            "digest" => "Quiet mode for digest notifications".to_string(),
+                            scope => format!("Quiet mode for {scope} notifications"),
+                        },
+                    ),
+                    KIND_TOPIC => (
+                        "topic",
+                        format!(
+                            "Ignoring alerts about {}",
+                            suppression.match_text.as_deref().unwrap_or("this topic")
+                        ),
+                    ),
+                    _ => return None,
+                };
+                Some(ActiveWaitItem {
+                    id: suppression.id,
+                    kind,
+                    description,
+                    expires_at: suppression.expires_at,
+                })
+            }),
+    );
+    active_waits.sort_by_key(|wait| wait.expires_at);
+
     Ok(Json(DashboardSummaryResponse {
         status,
         messages_handled_today,
@@ -300,11 +367,120 @@ pub async fn get_dashboard_summary(
         action_items,
         filtered_count,
         events,
+        active_waits,
         sunrise_hour,
         sunset_hour,
         watched_contacts,
         value_stats,
     }))
+}
+
+/// POST /api/dashboard/reminders
+pub async fn create_dashboard_reminder(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<CreateDashboardReminderRequest>,
+) -> Result<(StatusCode, Json<EventItem>), (StatusCode, Json<serde_json::Value>)> {
+    let now = chrono::Utc::now().timestamp() as i32;
+    let Some((message, remind_at)) = validate_reminder_input(&request.message, &request.at, now)
+    else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(
+                serde_json::json!({ "error": "Enter a reminder up to 280 characters and a valid future time." }),
+            ),
+        ));
+    };
+    let timezone = state
+        .user_core
+        .get_user_info(auth_user.user_id)
+        .ok()
+        .and_then(|info| info.timezone)
+        .unwrap_or_else(|| "UTC".to_string());
+    let event = NewOntEvent {
+        user_id: auth_user.user_id,
+        description: message,
+        remind_at: Some(remind_at),
+        due_at: Some(remind_at),
+        status: "active".to_string(),
+        created_at: now,
+        updated_at: now,
+    };
+    match state.ontology_repository.create_reminder(&event, &timezone) {
+        Ok(event) => Ok((
+            StatusCode::CREATED,
+            Json(EventItem {
+                id: event.id,
+                description: event.description,
+                remind_at: event.remind_at,
+                due_at: event.due_at,
+                status: event.status,
+                created_at: event.created_at,
+            }),
+        )),
+        Err(error) => {
+            tracing::error!(user_id = auth_user.user_id, error = %error, "dashboard reminder creation failed");
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Could not create the reminder." })),
+            ))
+        }
+    }
+}
+
+/// DELETE /api/dashboard/reminders/:id
+pub async fn cancel_dashboard_reminder(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(id): Path<i32>,
+) -> StatusCode {
+    match state
+        .ontology_repository
+        .cancel_reminder(auth_user.user_id, id)
+    {
+        Ok(true) => StatusCode::NO_CONTENT,
+        Ok(false) => StatusCode::NOT_FOUND,
+        Err(error) => {
+            tracing::error!(user_id = auth_user.user_id, reminder_id = id, error = %error, "dashboard reminder cancellation failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
+}
+
+/// DELETE /api/dashboard/reply-watches/:id
+pub async fn cancel_dashboard_reply_watch(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(id): Path<i32>,
+) -> StatusCode {
+    match state
+        .pending_reply_watches_repository
+        .delete_for_user(auth_user.user_id, id)
+    {
+        Ok(true) => StatusCode::NO_CONTENT,
+        Ok(false) => StatusCode::NOT_FOUND,
+        Err(error) => {
+            tracing::error!(user_id = auth_user.user_id, reply_watch_id = id, error = %error, "dashboard reply watch cancellation failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
+}
+
+/// DELETE /api/dashboard/suppressions/:id
+pub async fn cancel_dashboard_suppression(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(id): Path<i32>,
+) -> StatusCode {
+    let repository = TemporaryAlertSuppressionsRepository::new(state.pg_pool.clone());
+    match repository.end_for_user(auth_user.user_id, id) {
+        Ok(true) => StatusCode::NO_CONTENT,
+        Ok(false) => StatusCode::NOT_FOUND,
+        Err(error) => {
+            tracing::error!(user_id = auth_user.user_id, suppression_id = id, error = %error, "dashboard suppression cancellation failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
 }
 
 fn percent(part: i64, total: i64) -> Option<i64> {

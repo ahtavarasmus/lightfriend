@@ -211,6 +211,31 @@ impl PendingReplyWatchesRepository {
         Ok(())
     }
 
+    pub fn active_for_user(
+        &self,
+        user_id: i32,
+        now: i32,
+    ) -> Result<Vec<PendingReplyWatch>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        pending_reply_watches::table
+            .filter(pending_reply_watches::user_id.eq(user_id))
+            .filter(pending_reply_watches::expires_at.gt(now))
+            .order(pending_reply_watches::expires_at.asc())
+            .select(PendingReplyWatch::as_select())
+            .load(&mut conn)
+    }
+
+    pub fn delete_for_user(&self, user_id: i32, id: i32) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let deleted = diesel::delete(
+            pending_reply_watches::table
+                .filter(pending_reply_watches::id.eq(id))
+                .filter(pending_reply_watches::user_id.eq(user_id)),
+        )
+        .execute(&mut conn)?;
+        Ok(deleted == 1)
+    }
+
     /// Best-effort cleanup of expired rows. Safe to call on any cadence;
     /// queries already filter by `expires_at > now`.
     pub fn delete_expired(&self) -> Result<usize, DieselError> {

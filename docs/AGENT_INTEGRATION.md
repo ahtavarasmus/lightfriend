@@ -15,10 +15,11 @@ lightfriend login
 ```
 
 The CLI shows a short-lived pairing code. In the Lightfriend dashboard, open
-Settings, find **Connect an agent**, and approve that code. The device secret is
-sent only in JSON request bodies and the resulting bearer is returned only once
-to the polling CLI. It is then stored in the operating-system credential store.
-Neither secret is placed in a URL or an agent prompt.
+**Settings > Connections > Webhooks & API & CLI > Local agent CLI** and approve
+that code. The device secret is sent only in JSON request bodies and the
+resulting bearer is returned only once to the polling CLI. It is then stored in
+the operating-system credential store. Neither secret is placed in a URL or an
+agent prompt.
 
 ## Security boundary
 

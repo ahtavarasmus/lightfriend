@@ -309,17 +309,11 @@ pub async fn create_reminder(
     if uri.query().is_some() {
         return minimal(StatusCode::BAD_REQUEST, "rejected");
     }
-    let Some(message) = printable(&request.message, 280) else {
-        return minimal(StatusCode::BAD_REQUEST, "rejected");
-    };
-    let Ok(parsed_at) = chrono::DateTime::parse_from_rfc3339(request.at.trim()) else {
-        return minimal(StatusCode::BAD_REQUEST, "rejected");
-    };
     let now = now_unix();
-    let remind_at = parsed_at.timestamp();
-    if remind_at < i64::from(now) + 60 || remind_at > i64::from(now) + MAX_REMINDER_SECONDS {
+    let Some((message, remind_at)) = validate_reminder_input(&request.message, &request.at, now)
+    else {
         return minimal(StatusCode::BAD_REQUEST, "rejected");
-    }
+    };
     let Some(idempotency_key) = idempotency_key(&headers) else {
         return minimal(StatusCode::BAD_REQUEST, "rejected");
     };
@@ -378,8 +372,8 @@ pub async fn create_reminder(
     let event = NewOntEvent {
         user_id: credential.user_id,
         description: message,
-        remind_at: Some(remind_at as i32),
-        due_at: Some(remind_at as i32),
+        remind_at: Some(remind_at),
+        due_at: Some(remind_at),
         status: "active".to_string(),
         created_at: now,
         updated_at: now,
@@ -400,6 +394,18 @@ pub async fn create_reminder(
             minimal(StatusCode::INTERNAL_SERVER_ERROR, "failed")
         }
     }
+}
+
+/// Shared validation for both agent-created and signed-in dashboard reminders.
+/// The caller still owns authentication, authorization, caps, and response shape.
+pub fn validate_reminder_input(message: &str, at: &str, now: i32) -> Option<(String, i32)> {
+    let message = printable(message, 280)?;
+    let parsed_at = chrono::DateTime::parse_from_rfc3339(at.trim()).ok()?;
+    let remind_at = parsed_at.timestamp();
+    if remind_at < i64::from(now) + 60 || remind_at > i64::from(now) + MAX_REMINDER_SECONDS {
+        return None;
+    }
+    i32::try_from(remind_at).ok().map(|at| (message, at))
 }
 
 pub async fn create_reply_watch(

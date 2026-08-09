@@ -153,3 +153,38 @@ fn wait_for_reply_is_available_to_the_conversational_agent() {
     let registry = backend::build_tool_registry();
     assert!(registry.get("wait_for_reply").is_some());
 }
+
+#[test]
+#[serial]
+fn dashboard_listing_and_cancellation_are_user_scoped() {
+    let state = create_test_state();
+    let owner = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let other = create_test_user(&state, &TestUserParams::finland_user(10.0, 5.0));
+    let watch = state
+        .pending_reply_watches_repository
+        .arm_bridge(owner.id, "!anna:example.org", "anna@wa", "Anna")
+        .unwrap();
+    let now = chrono::Utc::now().timestamp() as i32;
+
+    assert_eq!(
+        state
+            .pending_reply_watches_repository
+            .active_for_user(owner.id, now)
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(state
+        .pending_reply_watches_repository
+        .active_for_user(other.id, now)
+        .unwrap()
+        .is_empty());
+    assert!(!state
+        .pending_reply_watches_repository
+        .delete_for_user(other.id, watch.id)
+        .unwrap());
+    assert!(state
+        .pending_reply_watches_repository
+        .delete_for_user(owner.id, watch.id)
+        .unwrap());
+}

@@ -1,4 +1,5 @@
 use crate::utils::api::Api;
+use gloo_timers::future::TimeoutFuture;
 use serde::Deserialize;
 use wasm_bindgen_futures::{spawn_local, JsFuture};
 use web_sys::HtmlInputElement;
@@ -119,6 +120,11 @@ pub fn agent_panel() -> Html {
                         "Approved. The local CLI will finish securely.".to_string(),
                     )));
                     refresh.emit(());
+                    let refresh_after_cli_poll = refresh.clone();
+                    spawn_local(async move {
+                        TimeoutFuture::new(5_000).await;
+                        refresh_after_cli_poll.emit(());
+                    });
                 } else {
                     message.set(Some((
                         false,
