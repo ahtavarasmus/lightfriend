@@ -340,6 +340,24 @@ impl BillingRepository {
             .optional()
     }
 
+    pub fn usage_cost_microusd_between(
+        &self,
+        user_id: i32,
+        period_start: i32,
+        period_end: i32,
+    ) -> Result<i64, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+        let costs = billing_usage_events::table
+            .filter(billing_usage_events::user_id.eq(user_id))
+            .filter(billing_usage_events::occurred_at.ge(period_start))
+            .filter(billing_usage_events::occurred_at.lt(period_end))
+            .select(billing_usage_events::cost_microusd)
+            .load::<i64>(&mut conn)?;
+        Ok(costs
+            .into_iter()
+            .fold(0_i64, |total, cost| total.saturating_add(cost)))
+    }
+
     pub fn mark_usage_sent(&self, transaction_id: &str) -> Result<(), DieselError> {
         let now = chrono::Utc::now().timestamp() as i32;
         let mut conn = self.pool.get().expect("Failed to get PG connection");

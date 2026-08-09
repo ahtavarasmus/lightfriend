@@ -149,6 +149,54 @@ pub fn usage_invoice_total_usd(
         / 100.0
 }
 
+pub fn billing_period_from_anchor(
+    anchor_timestamp: i32,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Option<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)> {
+    let mut period_start = chrono::DateTime::from_timestamp(anchor_timestamp as i64, 0)?;
+    let mut period_end = period_start.checked_add_months(chrono::Months::new(1))?;
+    while period_end <= now {
+        period_start = period_end;
+        period_end = period_start.checked_add_months(chrono::Months::new(1))?;
+    }
+    Some((period_start, period_end))
+}
+
+pub fn local_usage_balance_from_total(
+    total_usage_microusd: i64,
+    period_start: chrono::DateTime<chrono::Utc>,
+    period_end: chrono::DateTime<chrono::Utc>,
+) -> CustomerUsageBalance {
+    let total_usage_usd = (total_usage_microusd.max(0) as f64) / 1_000_000.0;
+    CustomerUsageBalance {
+        available_usage_usd: (MONTHLY_INCLUDED_USAGE_USD - total_usage_usd).max(0.0),
+        included_allowance_usd: MONTHLY_INCLUDED_USAGE_USD,
+        included_usage_used_usd: total_usage_usd.min(MONTHLY_INCLUDED_USAGE_USD),
+        overage_usage_usd: Some((total_usage_usd - MONTHLY_INCLUDED_USAGE_USD).max(0.0)),
+        period_start_at: Some(period_start.to_rfc3339()),
+        resets_at: Some(period_end.to_rfc3339()),
+    }
+}
+
+pub fn local_usage_balance(
+    repository: &BillingRepository,
+    account: &BillingAccount,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<CustomerUsageBalance> {
+    let (period_start, period_end) = billing_period_from_anchor(account.created_at, now)
+        .ok_or_else(|| anyhow!("Billing account has an invalid period anchor"))?;
+    let total_usage_microusd = repository.usage_cost_microusd_between(
+        account.user_id,
+        period_start.timestamp() as i32,
+        period_end.timestamp() as i32,
+    )?;
+    Ok(local_usage_balance_from_total(
+        total_usage_microusd,
+        period_start,
+        period_end,
+    ))
+}
+
 pub fn verify_webhook_signature(
     secret: &str,
     date: &str,

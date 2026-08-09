@@ -148,3 +148,36 @@ fn reconciliation_summary_contains_only_aggregate_provider_evidence() {
     assert_eq!(summary.provider_unmatched, 0);
     assert_eq!(summary.stale_open_intents, 0);
 }
+
+#[test]
+#[serial]
+fn local_usage_total_includes_all_durable_events_in_the_period_only() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let repository = BillingRepository::new(state.pg_pool.clone());
+    repository.ensure_account(user.id).unwrap();
+
+    for (transaction_id, cost, occurred_at) in [
+        ("before-period", 5_000_000, 99),
+        ("period-pending", 1_250_000, 100),
+        ("period-sent", 2_750_000, 150),
+        ("after-period", 9_000_000, 200),
+    ] {
+        repository
+            .enqueue_usage(
+                user.id,
+                "web_chat",
+                cost,
+                occurred_at,
+                Some(transaction_id.to_string()),
+            )
+            .unwrap();
+    }
+
+    assert_eq!(
+        repository
+            .usage_cost_microusd_between(user.id, 100, 200)
+            .unwrap(),
+        4_000_000
+    );
+}

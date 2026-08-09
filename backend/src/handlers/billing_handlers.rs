@@ -74,7 +74,7 @@ pub async fn get_overage_status(
             }
         }
     }
-    let balance = if crate::services::metronome_billing::metronome_enabled()
+    let provider_balance = if crate::services::metronome_billing::metronome_enabled()
         && account.provisioning_status == "provisioned"
     {
         match crate::services::metronome_billing::MetronomeClient::from_env() {
@@ -96,6 +96,7 @@ pub async fn get_overage_status(
     } else {
         None
     };
+    let balance = billing_balance_with_local_fallback(&repository, &account, provider_balance);
     Ok(Json(overage_status(&account, balance.as_ref())))
 }
 
@@ -202,8 +203,45 @@ pub async fn update_overage(
                 Json(json!({"error": "Billing account not found"})),
             )
         })?;
-    let balance = client.customer_billing_summary(&account).await.ok();
+    let provider_balance = client.customer_billing_summary(&account).await.ok();
+    let balance = billing_balance_with_local_fallback(&repository, &account, provider_balance);
     Ok(Json(overage_status(&account, balance.as_ref())))
+}
+
+fn billing_balance_with_local_fallback(
+    repository: &crate::BillingRepository,
+    account: &crate::pg_models::BillingAccount,
+    provider_balance: Option<crate::services::metronome_billing::CustomerUsageBalance>,
+) -> Option<crate::services::metronome_billing::CustomerUsageBalance> {
+    let local_balance = crate::services::metronome_billing::local_usage_balance(
+        repository,
+        account,
+        chrono::Utc::now(),
+    )
+    .map_err(|error| {
+        tracing::warn!(
+            user_id = account.user_id,
+            "Failed to calculate local usage balance fallback: {error}"
+        );
+    })
+    .ok();
+
+    match (provider_balance, local_balance) {
+        (Some(mut provider), Some(local)) => {
+            if provider.overage_usage_usd.is_none() {
+                provider.overage_usage_usd = local.overage_usage_usd;
+            }
+            if provider.period_start_at.is_none() {
+                provider.period_start_at = local.period_start_at;
+            }
+            if provider.resets_at.is_none() {
+                provider.resets_at = local.resets_at;
+            }
+            Some(provider)
+        }
+        (Some(provider), None) => Some(provider),
+        (None, local) => local,
+    }
 }
 
 fn overage_status(

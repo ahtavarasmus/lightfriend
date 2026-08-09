@@ -1,6 +1,7 @@
 use backend::services::metronome_billing::{
-    contract_starting_at, cost_to_microusd, customer_usage_balance_from_response,
-    invoice_contains_usage, legacy_overage_migration_target, ordered_payment_method_candidates,
+    billing_period_from_anchor, contract_starting_at, cost_to_microusd,
+    customer_usage_balance_from_response, invoice_contains_usage, legacy_overage_migration_target,
+    local_usage_balance_from_total, ordered_payment_method_candidates,
     payment_method_owner_matches, provider_event_status, provider_http_error, select_contract_id,
     usage_invoice_total_usd, verify_webhook_signature, MetronomeConfig,
 };
@@ -57,6 +58,30 @@ fn rounds_contract_start_to_the_current_hour() {
         .to_utc();
 
     assert_eq!(contract_starting_at(now), "2026-07-24T15:00:00+00:00");
+}
+
+#[test]
+fn local_usage_summary_rolls_monthly_and_reports_overage() {
+    let anchor = chrono::DateTime::parse_from_rfc3339("2026-06-15T10:30:00Z")
+        .unwrap()
+        .timestamp() as i32;
+    let now = chrono::DateTime::parse_from_rfc3339("2026-08-20T12:00:00Z")
+        .unwrap()
+        .to_utc();
+    let (period_start, period_end) = billing_period_from_anchor(anchor, now).unwrap();
+
+    assert_eq!(period_start.to_rfc3339(), "2026-08-15T10:30:00+00:00");
+    assert_eq!(period_end.to_rfc3339(), "2026-09-15T10:30:00+00:00");
+
+    let summary = local_usage_balance_from_total(27_500_000, period_start, period_end);
+    assert_eq!(summary.available_usage_usd, 0.0);
+    assert_eq!(summary.included_allowance_usd, 25.0);
+    assert_eq!(summary.included_usage_used_usd, 25.0);
+    assert_eq!(summary.overage_usage_usd, Some(2.5));
+    assert_eq!(
+        summary.resets_at.as_deref(),
+        Some("2026-09-15T10:30:00+00:00")
+    );
 }
 
 #[test]
