@@ -470,6 +470,62 @@ fn creates_encrypted_run_and_reads_plaintext_for_its_device() {
 
 #[test]
 #[serial_test::serial]
+fn image_payload_is_encrypted_and_removed_when_run_finishes() {
+    set_test_encryption_key();
+    let (pool, device_id) = create_device();
+    let repository = LightToolRunsRepository::new(pool.clone());
+    let image_data_url = "data:image/jpeg;base64,/9j/2Q==";
+
+    let created = repository
+        .create_anonymous_trial_run_with_image(
+            device_id,
+            "photo-client-message",
+            "Photo",
+            Some(image_data_url),
+            NOW + 1,
+            TRIAL_MESSAGE_LIMIT,
+        )
+        .unwrap();
+    let AnonymousTrialRunCreation::Created { run, .. } = created else {
+        panic!("expected a newly created image run");
+    };
+    assert_eq!(run.image_data_url.as_deref(), Some(image_data_url));
+
+    let encrypted_image = {
+        let mut conn = pool.get().unwrap();
+        light_tool_runs::table
+            .find(&run.id)
+            .select(light_tool_runs::encrypted_image_data_url)
+            .first::<Option<String>>(&mut conn)
+            .unwrap()
+            .unwrap()
+    };
+    assert_ne!(encrypted_image, image_data_url);
+    assert_eq!(decrypt(&encrypted_image).unwrap(), image_data_url);
+
+    repository
+        .claim_queued_run(&run.id, "THINKING...", NOW + 2)
+        .unwrap()
+        .unwrap();
+    let completed = repository
+        .complete_running_run(&run.id, "I can see the photo.", NOW + 3)
+        .unwrap()
+        .unwrap();
+    assert_eq!(completed.image_data_url, None);
+
+    let stored_image = {
+        let mut conn = pool.get().unwrap();
+        light_tool_runs::table
+            .find(&run.id)
+            .select(light_tool_runs::encrypted_image_data_url)
+            .first::<Option<String>>(&mut conn)
+            .unwrap()
+    };
+    assert_eq!(stored_image, None);
+}
+
+#[test]
+#[serial_test::serial]
 fn linked_account_run_snapshots_principal_without_spending_trial_quota() {
     set_test_encryption_key();
     let state = create_test_state();
@@ -514,11 +570,7 @@ fn linked_account_run_snapshots_principal_without_spending_trial_quota() {
             NOW + TRIAL_DURATION_SECONDS + 1,
         )
         .unwrap();
-    let AccountRunCreation::Existing(replay) = replay else {
-        panic!("expected an idempotent account replay");
-    };
-    assert_eq!(replay.id, run.id);
-    assert_eq!(replay.user_message, "Check my email");
+    assert_eq!(replay, AccountRunCreation::IdempotencyConflict);
 
     assert_eq!(
         repository

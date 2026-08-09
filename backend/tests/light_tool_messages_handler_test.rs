@@ -421,6 +421,66 @@ async fn fresh_message_dispatches_injected_responder_in_background() {
 
 #[tokio::test]
 #[serial_test::serial]
+async fn image_message_is_normalized_dispatched_and_removed_after_completion() {
+    std::env::set_var("ENCRYPTION_KEY", TEST_ENCRYPTION_KEY);
+    let captured_image = Arc::new(Mutex::new(None));
+    let mut state = create_test_state();
+    Arc::get_mut(&mut state).unwrap().light_tool_responder =
+        Some(Arc::new(ImageCapturingResponder {
+            image_data_url: captured_image.clone(),
+        }));
+    let now = chrono::Utc::now().timestamp() as i32;
+    let session =
+        LightToolBootstrapService::new(LightToolDevicesRepository::new(state.pg_pool.clone()))
+            .bootstrap(INSTALLATION_ID, None, now)
+            .unwrap();
+    let device = LightToolDevicesRepository::new(state.pg_pool.clone())
+        .find_active_by_token_hash(&hash_device_token(&session.device_token).unwrap())
+        .unwrap()
+        .unwrap();
+    let app = light_tool_router(state.clone());
+    let client_message_id = Uuid::new_v4().to_string();
+    let mut png = Cursor::new(Vec::new());
+    image::DynamicImage::new_rgb8(2, 2)
+        .write_to(&mut png, image::ImageOutputFormat::Png)
+        .unwrap();
+
+    let response = send_image_request(
+        &app,
+        &session.device_token,
+        &client_message_id,
+        png.get_ref(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let run_id = response_json(response).await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let mut completed = false;
+    for _ in 0..100 {
+        let run = LightToolRunsRepository::new(state.pg_pool.clone())
+            .find_by_id_for_device(&run_id, device.id)
+            .unwrap()
+            .unwrap();
+        if run.status == "completed" {
+            assert_eq!(run.image_data_url, None);
+            completed = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(completed, "image run did not complete");
+    assert!(captured_image
+        .lock()
+        .unwrap()
+        .as_deref()
+        .is_some_and(|value| value.starts_with("data:image/jpeg;base64,")));
+}
+
+#[tokio::test]
+#[serial_test::serial]
 async fn run_status_endpoint_maps_progress_completion_and_failure() {
     std::env::set_var("ENCRYPTION_KEY", TEST_ENCRYPTION_KEY);
     let state = create_test_state();
