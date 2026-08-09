@@ -58,6 +58,11 @@ pub trait ToolHandler: Send + Sync {
         self.definition()
     }
 
+    /// Whether this tool should be exposed to this user at all.
+    fn enabled_for_user(&self, _state: &AppState, _user_id: i32) -> bool {
+        true
+    }
+
     /// Whether this tool sends data externally (requires user confirmation)
     fn is_outgoing(&self) -> bool {
         false
@@ -113,6 +118,7 @@ impl ToolRegistry {
     ) -> Vec<chat_completion::Tool> {
         self.handlers
             .values()
+            .filter(|h| h.enabled_for_user(state, user_id))
             .map(|h| h.definition_for_user(state, user_id))
             .collect()
     }
