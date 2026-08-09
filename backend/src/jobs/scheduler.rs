@@ -1998,6 +1998,15 @@ pub async fn build_digest_for_user(
 /// Deliver smart digests: check which users have pending unhandled messages
 /// and deliver a sectioned recap at the user's local digest window.
 async fn deliver_smart_digests(state: &Arc<AppState>) {
+    let started_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i32;
+    let _ =
+        state
+            .ontology_repository
+            .update_scheduler_health("smart_digests", started_at, None, None);
+
     // Iterate EVERY user with digest_enabled=true, not just users with
     // pending messages. The old `get_users_with_pending_digests` gate
     // silently dropped users whose traffic was all "later" tier — they
@@ -2013,6 +2022,16 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
         Ok(u) => u,
         Err(e) => {
             error!("Failed to get all users for digest delivery: {}", e);
+            let completed_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i32;
+            let _ = state.ontology_repository.update_scheduler_health(
+                "smart_digests",
+                started_at,
+                Some(completed_at),
+                Some("user_list_failed"),
+            );
             return;
         }
     };
@@ -2163,6 +2182,17 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
             );
         }
     }
+
+    let completed_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i32;
+    let _ = state.ontology_repository.update_scheduler_health(
+        "smart_digests",
+        started_at,
+        Some(completed_at),
+        None,
+    );
 }
 
 /// Sync email read receipts: check IMAP \Seen flags for recent unseen email

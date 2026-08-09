@@ -1,3 +1,5 @@
+#[path = "digest_health_endpoint_test.rs"]
+mod digest_health_endpoint_test;
 #[path = "event_lifecycle_test.rs"]
 mod event_lifecycle_test;
 #[path = "kani_signature_proofs.rs"]
