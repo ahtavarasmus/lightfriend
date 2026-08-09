@@ -60,7 +60,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: backend
-          shared-key: backend-ci
           cache-on-failure: true
 
       - name: Clippy
@@ -113,7 +112,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: backend
-          shared-key: backend-ci
           cache-on-failure: true
 
       - name: Startup smoke test
