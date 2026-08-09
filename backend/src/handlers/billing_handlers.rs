@@ -29,6 +29,9 @@ pub struct OverageStatus {
     pub invoice_cadence: &'static str,
     pub consent_version: &'static str,
     pub available_usage_usd: Option<f64>,
+    pub included_allowance_usd: Option<f64>,
+    pub included_usage_used_usd: Option<f64>,
+    pub overage_usage_usd: Option<f64>,
     pub resets_at: Option<String>,
 }
 
@@ -75,7 +78,7 @@ pub async fn get_overage_status(
         && account.provisioning_status == "provisioned"
     {
         match crate::services::metronome_billing::MetronomeClient::from_env() {
-            Ok(client) => match client.customer_usage_balance(&account).await {
+            Ok(client) => match client.customer_billing_summary(&account).await {
                 Ok(balance) => Some(balance),
                 Err(error) => {
                     tracing::warn!(user_id = user.id, "Failed to load usage balance: {error}");
@@ -199,7 +202,7 @@ pub async fn update_overage(
                 Json(json!({"error": "Billing account not found"})),
             )
         })?;
-    let balance = client.customer_usage_balance(&account).await.ok();
+    let balance = client.customer_billing_summary(&account).await.ok();
     Ok(Json(overage_status(&account, balance.as_ref())))
 }
 
@@ -221,6 +224,9 @@ fn overage_status(
         invoice_cadence: "weekly",
         consent_version: crate::services::metronome_billing::OVERAGE_CONSENT_VERSION,
         available_usage_usd: balance.map(|value| value.available_usage_usd),
+        included_allowance_usd: balance.map(|value| value.included_allowance_usd),
+        included_usage_used_usd: balance.map(|value| value.included_usage_used_usd),
+        overage_usage_usd: balance.and_then(|value| value.overage_usage_usd),
         resets_at: balance.and_then(|value| value.resets_at.clone()),
     }
 }

@@ -18,7 +18,135 @@ const MONTHLY_INCLUDED_USAGE_USD: f64 = 25.0;
 #[derive(Clone, Debug, Default)]
 pub struct CustomerUsageBalance {
     pub available_usage_usd: f64,
+    pub included_allowance_usd: f64,
+    pub included_usage_used_usd: f64,
+    pub overage_usage_usd: Option<f64>,
+    pub period_start_at: Option<String>,
     pub resets_at: Option<String>,
+}
+
+fn numeric_value(value: &Value) -> Option<f64> {
+    value
+        .as_f64()
+        .or_else(|| value.as_i64().map(|number| number as f64))
+}
+
+pub fn customer_usage_balance_from_response(
+    response: &Value,
+    now: chrono::DateTime<chrono::Utc>,
+) -> CustomerUsageBalance {
+    struct ActiveCredit {
+        available_cents: f64,
+        granted_cents: f64,
+        starts_at: chrono::DateTime<chrono::Utc>,
+        ends_at: chrono::DateTime<chrono::Utc>,
+    }
+
+    let mut active_credits = Vec::new();
+    for balance in response["data"].as_array().into_iter().flatten() {
+        if balance["type"].as_str() != Some("CREDIT") {
+            continue;
+        }
+        let available_cents = numeric_value(&balance["balance"]).unwrap_or(0.0).max(0.0);
+        let active_segment = balance["access_schedule"]["schedule_items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|segment| {
+                let starts_at = segment["starting_at"]
+                    .as_str()
+                    .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())?
+                    .with_timezone(&chrono::Utc);
+                let ends_at = segment["ending_before"]
+                    .as_str()
+                    .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())?
+                    .with_timezone(&chrono::Utc);
+                (starts_at <= now && now < ends_at).then_some((starts_at, ends_at, segment))
+            })
+            .min_by_key(|(_, ends_at, _)| *ends_at);
+        if let Some((starts_at, ends_at, segment)) = active_segment {
+            active_credits.push(ActiveCredit {
+                available_cents,
+                granted_cents: numeric_value(&segment["amount"])
+                    .unwrap_or(MONTHLY_INCLUDED_USAGE_USD * 100.0)
+                    .max(0.0),
+                starts_at,
+                ends_at,
+            });
+        }
+    }
+
+    let Some(resets_at) = active_credits.iter().map(|credit| credit.ends_at).min() else {
+        return CustomerUsageBalance {
+            included_allowance_usd: MONTHLY_INCLUDED_USAGE_USD,
+            ..CustomerUsageBalance::default()
+        };
+    };
+    // The recurring monthly allowance is the active credit segment that expires
+    // first. Longer-lived promotional or migrated balances must not inflate it.
+    let monthly_credits: Vec<&ActiveCredit> = active_credits
+        .iter()
+        .filter(|credit| credit.ends_at == resets_at)
+        .collect();
+    let available_usage_usd = monthly_credits
+        .iter()
+        .map(|credit| credit.available_cents)
+        .sum::<f64>()
+        / 100.0;
+    let included_allowance_usd = monthly_credits
+        .iter()
+        .map(|credit| credit.granted_cents)
+        .sum::<f64>()
+        / 100.0;
+    let period_start_at = monthly_credits
+        .iter()
+        .map(|credit| credit.starts_at)
+        .min()
+        .map(|value| value.to_rfc3339());
+
+    CustomerUsageBalance {
+        available_usage_usd,
+        included_allowance_usd,
+        included_usage_used_usd: (included_allowance_usd - available_usage_usd).max(0.0),
+        overage_usage_usd: None,
+        period_start_at,
+        resets_at: Some(resets_at.to_rfc3339()),
+    }
+}
+
+pub fn usage_invoice_total_usd(
+    invoice_response: &Value,
+    contract_id: &str,
+    period_start: chrono::DateTime<chrono::Utc>,
+    period_end: chrono::DateTime<chrono::Utc>,
+) -> f64 {
+    invoice_response["data"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|invoice| invoice["contract_id"].as_str() == Some(contract_id))
+        .filter(|invoice| {
+            matches!(
+                invoice["type"].as_str(),
+                Some("USAGE") | Some("CONTRACT_USAGE")
+            ) && invoice["status"].as_str() != Some("VOID")
+        })
+        .filter(|invoice| {
+            let starts_at = invoice["start_timestamp"]
+                .as_str()
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.with_timezone(&chrono::Utc));
+            let ends_at = invoice["end_timestamp"]
+                .as_str()
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.with_timezone(&chrono::Utc));
+            starts_at.is_some_and(|starts_at| starts_at < period_end)
+                && ends_at.is_some_and(|ends_at| ends_at > period_start)
+        })
+        .filter_map(|invoice| numeric_value(&invoice["total"]))
+        .map(|total_cents| total_cents.max(0.0))
+        .sum::<f64>()
+        / 100.0
 }
 
 pub fn verify_webhook_signature(
@@ -341,45 +469,41 @@ impl MetronomeClient {
             )
             .await?;
 
-        let mut available_cents = 0.0;
-        let mut resets_at: Option<chrono::DateTime<chrono::Utc>> = None;
-        for balance in response["data"].as_array().into_iter().flatten() {
-            if balance["type"].as_str() != Some("CREDIT") {
-                continue;
-            }
-            available_cents += balance["balance"]
-                .as_f64()
-                .or_else(|| balance["balance"].as_i64().map(|value| value as f64))
-                .unwrap_or(0.0)
-                .max(0.0);
+        Ok(customer_usage_balance_from_response(&response, now))
+    }
 
-            for segment in balance["access_schedule"]["schedule_items"]
-                .as_array()
-                .into_iter()
-                .flatten()
-            {
-                let starts = segment["starting_at"]
-                    .as_str()
-                    .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
-                    .map(|value| value.with_timezone(&chrono::Utc));
-                let ends = segment["ending_before"]
-                    .as_str()
-                    .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
-                    .map(|value| value.with_timezone(&chrono::Utc));
-                if starts.is_some_and(|start| start <= now) && ends.is_some_and(|end| end > now) {
-                    if let Some(end) = ends {
-                        if resets_at.is_none_or(|current| end < current) {
-                            resets_at = Some(end);
-                        }
-                    }
-                }
+    pub async fn customer_billing_summary(
+        &self,
+        account: &BillingAccount,
+    ) -> Result<CustomerUsageBalance> {
+        let mut summary = self.customer_usage_balance(account).await?;
+        let (Some(customer_id), Some(contract_id), Some(period_start_at), Some(resets_at)) = (
+            account.metronome_customer_id.as_deref(),
+            account.metronome_contract_id.as_deref(),
+            summary.period_start_at.as_deref(),
+            summary.resets_at.as_deref(),
+        ) else {
+            return Ok(summary);
+        };
+        let period_start = chrono::DateTime::parse_from_rfc3339(period_start_at)?.to_utc();
+        let period_end = chrono::DateTime::parse_from_rfc3339(resets_at)?.to_utc();
+        match self.list_invoices(customer_id).await {
+            Ok(invoices) => {
+                summary.overage_usage_usd = Some(usage_invoice_total_usd(
+                    &invoices,
+                    contract_id,
+                    period_start,
+                    period_end,
+                ));
+            }
+            Err(error) => {
+                tracing::warn!(
+                    user_id = account.user_id,
+                    "Failed to load current overage usage: {error}"
+                );
             }
         }
-
-        Ok(CustomerUsageBalance {
-            available_usage_usd: available_cents / 100.0,
-            resets_at: resets_at.map(|value| value.to_rfc3339()),
-        })
+        Ok(summary)
     }
 
     async fn find_customer(&self, alias: &str) -> Result<Option<String>> {

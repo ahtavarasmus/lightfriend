@@ -1,8 +1,8 @@
 use backend::services::metronome_billing::{
-    contract_starting_at, cost_to_microusd, invoice_contains_usage,
-    legacy_overage_migration_target, ordered_payment_method_candidates,
+    contract_starting_at, cost_to_microusd, customer_usage_balance_from_response,
+    invoice_contains_usage, legacy_overage_migration_target, ordered_payment_method_candidates,
     payment_method_owner_matches, provider_event_status, provider_http_error, select_contract_id,
-    verify_webhook_signature, MetronomeConfig,
+    usage_invoice_total_usd, verify_webhook_signature, MetronomeConfig,
 };
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -223,4 +223,102 @@ fn reconciliation_detects_usage_product_on_the_covering_invoice() {
         "product-other",
         occurred_at
     ));
+}
+
+#[test]
+fn billing_summary_uses_the_monthly_credit_instead_of_long_lived_credits() {
+    let response = serde_json::json!({"data": [
+        {
+            "type": "CREDIT",
+            "balance": 1875,
+            "access_schedule": {"schedule_items": [{
+                "amount": 2500,
+                "starting_at": "2026-08-01T00:00:00Z",
+                "ending_before": "2026-09-01T00:00:00Z"
+            }]}
+        },
+        {
+            "type": "CREDIT",
+            "balance": 4000,
+            "access_schedule": {"schedule_items": [{
+                "amount": 4000,
+                "starting_at": "2026-01-01T00:00:00Z",
+                "ending_before": "2036-01-01T00:00:00Z"
+            }]}
+        }
+    ]});
+    let now = chrono::DateTime::parse_from_rfc3339("2026-08-09T12:00:00Z")
+        .unwrap()
+        .to_utc();
+
+    let summary = customer_usage_balance_from_response(&response, now);
+
+    assert_eq!(summary.available_usage_usd, 18.75);
+    assert_eq!(summary.included_allowance_usd, 25.0);
+    assert_eq!(summary.included_usage_used_usd, 6.25);
+    assert_eq!(
+        summary.period_start_at.as_deref(),
+        Some("2026-08-01T00:00:00+00:00")
+    );
+    assert_eq!(
+        summary.resets_at.as_deref(),
+        Some("2026-09-01T00:00:00+00:00")
+    );
+}
+
+#[test]
+fn overage_total_includes_current_period_usage_invoices_only() {
+    let invoices = serde_json::json!({"data": [
+        {
+            "contract_id": "contract-1",
+            "type": "USAGE",
+            "status": "FINALIZED",
+            "start_timestamp": "2026-08-01T00:00:00Z",
+            "end_timestamp": "2026-08-08T00:00:00Z",
+            "total": 1000
+        },
+        {
+            "contract_id": "contract-1",
+            "type": "USAGE",
+            "status": "DRAFT",
+            "start_timestamp": "2026-08-08T00:00:00Z",
+            "end_timestamp": "2026-09-01T00:00:00Z",
+            "total": 325
+        },
+        {
+            "contract_id": "contract-1",
+            "type": "USAGE",
+            "status": "VOID",
+            "start_timestamp": "2026-08-01T00:00:00Z",
+            "end_timestamp": "2026-08-08T00:00:00Z",
+            "total": 9999
+        },
+        {
+            "contract_id": "contract-1",
+            "type": "CONTRACT_SCHEDULED",
+            "status": "FINALIZED",
+            "start_timestamp": "2026-08-01T00:00:00Z",
+            "end_timestamp": "2026-09-01T00:00:00Z",
+            "total": 6000
+        },
+        {
+            "contract_id": "contract-other",
+            "type": "USAGE",
+            "status": "DRAFT",
+            "start_timestamp": "2026-08-01T00:00:00Z",
+            "end_timestamp": "2026-09-01T00:00:00Z",
+            "total": 5000
+        }
+    ]});
+    let period_start = chrono::DateTime::parse_from_rfc3339("2026-08-01T00:00:00Z")
+        .unwrap()
+        .to_utc();
+    let period_end = chrono::DateTime::parse_from_rfc3339("2026-09-01T00:00:00Z")
+        .unwrap()
+        .to_utc();
+
+    assert_eq!(
+        usage_invoice_total_usd(&invoices, "contract-1", period_start, period_end),
+        13.25
+    );
 }

@@ -36,10 +36,13 @@ struct OverageStatus {
     invoice_cadence: String,
     consent_version: String,
     available_usage_usd: Option<f64>,
+    included_allowance_usd: Option<f64>,
+    included_usage_used_usd: Option<f64>,
+    overage_usage_usd: Option<f64>,
     resets_at: Option<String>,
 }
 
-fn format_reset_date(value: &str) -> String {
+fn format_reset_datetime(value: &str) -> String {
     let date = js_sys::Date::new(&JsValue::from_str(value));
     if date.get_time().is_nan() {
         return value.to_string();
@@ -47,10 +50,21 @@ fn format_reset_date(value: &str) -> String {
     let months = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
+    let hour = date.get_hours();
+    let (display_hour, meridiem) = match hour {
+        0 => (12, "AM"),
+        1..=11 => (hour, "AM"),
+        12 => (12, "PM"),
+        _ => (hour - 12, "PM"),
+    };
     format!(
-        "{} {}",
+        "{} {}, {} at {}:{:02} {} (your local time)",
         months.get(date.get_month() as usize).unwrap_or(&""),
-        date.get_date()
+        date.get_date(),
+        date.get_full_year(),
+        display_hour,
+        date.get_minutes(),
+        meridiem
     )
 }
 
@@ -733,27 +747,61 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                 </div>
                             }
                         } else if has_plan && uses_metronome {
-                            html! {
-                                <>
-                                    <div class="billing-primary-value">
-                                        {
-                                            overage_status
-                                                .as_ref()
-                                                .and_then(|status| status.available_usage_usd)
-                                                .map(|amount| format!("Included usage remaining: ${:.2}", amount))
-                                                .unwrap_or_else(|| "$25 monthly included-usage allowance".to_string())
-                                        }
-                                    </div>
-                                    <div class="billing-muted">
-                                        {
-                                            overage_status
-                                                .as_ref()
-                                                .and_then(|status| status.resets_at.as_deref())
-                                                .map(|date| format!("Monthly allowance resets {}.", format_reset_date(date)))
-                                                .unwrap_or_else(|| "Usage and allowance are metered by Stripe Metronome.".to_string())
-                                        }
-                                    </div>
-                                </>
+                            if let Some(status) = overage_status.as_ref() {
+                                html! {
+                                    <>
+                                        <div class="billing-stats metronome-billing-stats">
+                                            <div class="billing-stat">
+                                                <div class="billing-stat-label">{"Current balance"}</div>
+                                                <div class="billing-stat-value">
+                                                    {
+                                                        status.available_usage_usd
+                                                            .map(|amount| format!("${:.2}", amount))
+                                                            .unwrap_or_else(|| "Unavailable".to_string())
+                                                    }
+                                                </div>
+                                                <div class="billing-stat-detail">
+                                                    {
+                                                        status.included_allowance_usd
+                                                            .map(|allowance| format!("of ${:.2} monthly allowance", allowance))
+                                                            .unwrap_or_else(|| "Live balance is temporarily unavailable".to_string())
+                                                    }
+                                                </div>
+                                            </div>
+                                            <div class="billing-stat">
+                                                <div class="billing-stat-label">{"Included usage used"}</div>
+                                                <div class="billing-stat-value">
+                                                    {
+                                                        status.included_usage_used_usd
+                                                            .map(|amount| format!("${:.2}", amount))
+                                                            .unwrap_or_else(|| "Unavailable".to_string())
+                                                    }
+                                                </div>
+                                                <div class="billing-stat-detail">{"This allowance period"}</div>
+                                            </div>
+                                            <div class="billing-stat">
+                                                <div class="billing-stat-label">{"Overage used"}</div>
+                                                <div class="billing-stat-value">
+                                                    {
+                                                        status.overage_usage_usd
+                                                            .map(|amount| format!("${:.2}", amount))
+                                                            .unwrap_or_else(|| "Unavailable".to_string())
+                                                    }
+                                                </div>
+                                                <div class="billing-stat-detail">{"Billed and pending this period"}</div>
+                                            </div>
+                                        </div>
+                                        <div class="billing-muted">
+                                            {
+                                                status.resets_at.as_deref()
+                                                    .map(|date| format!("Monthly allowance resets {}.", format_reset_datetime(date)))
+                                                    .unwrap_or_else(|| "Reset time is temporarily unavailable.".to_string())
+                                            }
+                                        </div>
+                                    </>
+                                }
+                            } else {
+                                html! { <div class="billing-muted">{"Loading current balance…"}</div> }
                             }
                         } else if has_plan {
                             html! {
@@ -1840,6 +1888,17 @@ input:checked + .slider:before {
     margin-bottom: 0.25rem;
     color: #777;
     font-size: 0.74rem;
+}
+
+.billing-stat-detail {
+    margin-top: 0.25rem;
+    color: #777;
+    font-size: 0.7rem;
+    line-height: 1.35;
+}
+
+.metronome-billing-stats .billing-stat {
+    flex: 1 1 150px;
 }
 
 .billing-stat-value,
