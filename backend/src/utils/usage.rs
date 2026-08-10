@@ -120,6 +120,7 @@ pub async fn check_user_credits(
 
     if crate::services::metronome_billing::metronome_enabled() {
         if crate::services::metronome_billing::has_usage_entitlement(state, user.id)
+            .await
             .map_err(|error| format!("Failed to check billing entitlement: {}", error))?
         {
             return Ok(());

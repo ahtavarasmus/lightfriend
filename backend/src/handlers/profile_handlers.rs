@@ -1850,12 +1850,13 @@ pub async fn delete_user(
 const WEB_CHAT_COST_EUR: f32 = 0.01; // €0.01 per message for Euro countries
 const WEB_CHAT_COST_US: f32 = 0.5; // 0.5 messages for US/CA (uses credits_left as message count)
 
-fn charge_web_chat_usage(
+async fn charge_web_chat_usage(
     state: &Arc<AppState>,
     user: &crate::models::user_models::User,
 ) -> Result<f32, String> {
     if crate::services::metronome_billing::metronome_enabled() {
         if !crate::services::metronome_billing::has_usage_entitlement(state, user.id)
+            .await
             .map_err(|error| format!("Failed to check billing entitlement: {}", error))?
         {
             return Err("Included usage depleted. Enable overage billing to continue.".to_string());
@@ -1948,6 +1949,7 @@ pub async fn web_chat(
     }
 
     let charged_amount = charge_web_chat_usage(&state, &user)
+        .await
         .map_err(|error| (StatusCode::PAYMENT_REQUIRED, Json(json!({"error": error}))))?;
 
     // Log the usage
@@ -2087,7 +2089,7 @@ pub async fn web_chat_stream(
             return;
         }
 
-        let charged_amount = match charge_web_chat_usage(&state, &user) {
+        let charged_amount = match charge_web_chat_usage(&state, &user).await {
             Ok(amount) => amount,
             Err(error) => {
                 yield Ok(axum::response::sse::Event::default().data(
@@ -2396,6 +2398,7 @@ pub async fn web_chat_with_image(
     }
 
     let charged_amount = charge_web_chat_usage(&state, &user)
+        .await
         .map_err(|error| (StatusCode::PAYMENT_REQUIRED, Json(json!({"error": error}))))?;
 
     // Log the usage

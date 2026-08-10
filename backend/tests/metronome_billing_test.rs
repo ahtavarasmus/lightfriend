@@ -121,7 +121,7 @@ fn ready_overage_consent_survives_a_stale_entitlement_flag() {
 }
 
 #[test]
-fn remaining_included_allowance_survives_a_stale_entitlement_flag() {
+fn provider_remaining_allowance_survives_a_stale_entitlement_flag() {
     assert!(usage_entitled_from_account_state(
         false,
         false,

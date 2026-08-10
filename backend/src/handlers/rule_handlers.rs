@@ -819,12 +819,13 @@ pub async fn start_rule_test(
 
     let charged_amount = if crate::services::metronome_billing::metronome_enabled() {
         let entitled = crate::services::metronome_billing::has_usage_entitlement(&state, user.id)
+            .await
             .map_err(|error| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("Billing check failed: {}", error) })),
-            )
-        })?;
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": format!("Billing check failed: {}", error) })),
+                )
+            })?;
         if !entitled {
             return Err((
                 StatusCode::PAYMENT_REQUIRED,

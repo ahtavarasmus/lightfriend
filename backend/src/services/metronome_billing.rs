@@ -1359,17 +1359,23 @@ pub fn usage_entitled_from_account_state(
         || (overage_enabled && payment_ready)
 }
 
-pub fn has_usage_entitlement(state: &Arc<AppState>, user_id: i32) -> Result<bool> {
+pub async fn has_usage_entitlement(state: &Arc<AppState>, user_id: i32) -> Result<bool> {
     MetronomeConfig::from_env().validate()?;
     let repository = BillingRepository::new(state.pg_pool.clone());
     let account = repository.ensure_account(user_id)?;
     let available_usage_usd = if account.usage_entitled {
         None
     } else {
-        // The usage outbox is the durable source for metered usage. A billing
-        // webhook can race or carry stale balance state, so a cached false flag
-        // must not override included allowance that is still available.
-        Some(local_usage_balance(&repository, &account, chrono::Utc::now())?.available_usage_usd)
+        // Metronome is authoritative for the active credit grant and its
+        // billing-period boundaries. The local usage outbox can span a
+        // different period after a contract change, so it must not decide
+        // access when a webhook has cached a false entitlement flag.
+        Some(
+            MetronomeClient::from_env()?
+                .customer_usage_balance(&account)
+                .await?
+                .available_usage_usd,
+        )
     };
     let entitled = usage_entitled_from_account_state(
         account.usage_entitled,
@@ -1380,6 +1386,11 @@ pub fn has_usage_entitlement(state: &Arc<AppState>, user_id: i32) -> Result<bool
     if entitled && !account.usage_entitled {
         repository.set_usage_entitled(user_id, true)?;
         let _ = state.user_core.clear_last_credits_notification(user_id);
+        tracing::info!(
+            user_id,
+            available_usage_usd,
+            "Restored usage entitlement from the live Metronome balance"
+        );
     }
     Ok(entitled)
 }
