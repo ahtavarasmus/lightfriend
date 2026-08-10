@@ -383,11 +383,19 @@ pub async fn send_notification_with_context(
         }
     };
 
-    let user_settings = match state.user_core.get_user_settings(user_id) {
-        Ok(settings) => settings,
-        Err(e) => {
-            tracing::error!("Failed to get settings for user {}: {}", user_id, e);
-            return false;
+    // Digest delivery has already checked the dedicated opt-in bit and always
+    // uses SMS. Do not make it depend on deserializing the entire settings row;
+    // unrelated legacy/default columns can otherwise reject a valid digest
+    // before any provider attempt or failure log is created.
+    let user_settings = if content_type == "digest" {
+        None
+    } else {
+        match state.user_core.get_user_settings(user_id) {
+            Ok(settings) => Some(settings),
+            Err(e) => {
+                tracing::error!("Failed to get settings for user {}: {}", user_id, e);
+                return false;
+            }
         }
     };
 
@@ -451,16 +459,20 @@ pub async fn send_notification_with_context(
         ),
     }
 
-    let _user_info = match state.user_core.get_user_info(user_id) {
-        Ok(info) => info,
-        Err(e) => {
-            tracing::error!("Failed to get info for user {}: {}", user_id, e);
+    // No user-info field participates in digest routing. Keep the historical
+    // existence check for other notification types only.
+    if content_type != "digest" {
+        if let Err(error) = state.user_core.get_user_info(user_id) {
+            tracing::error!("Failed to get info for user {}: {}", user_id, error);
             return false;
         }
-    };
+    }
 
     let notification_type = if content_type.contains("critical") {
-        user_settings.critical_enabled.as_deref().unwrap_or("sms")
+        user_settings
+            .as_ref()
+            .and_then(|settings| settings.critical_enabled.as_deref())
+            .unwrap_or("sms")
     } else if content_type == "digest" {
         "sms" // Digests are always SMS - never call for informational summaries
     } else if content_type.contains("_call") {
@@ -468,7 +480,10 @@ pub async fn send_notification_with_context(
     } else if content_type.contains("_sms") {
         "sms"
     } else {
-        user_settings.notification_type.as_deref().unwrap_or("sms")
+        user_settings
+            .as_ref()
+            .and_then(|settings| settings.notification_type.as_deref())
+            .unwrap_or("sms")
     };
 
     let mut sms_delivered = false;
