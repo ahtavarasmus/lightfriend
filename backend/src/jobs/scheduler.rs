@@ -1725,8 +1725,9 @@ pub async fn build_digest_for_user(
     let local_day_start = (local_day_start_local - tz_offset_secs as i64) as i32;
     let local_day_end = local_day_start.saturating_add(86400);
 
-    // Window for catching unhandled messages: last 24 hours.
-    let since_window: i32 = now.saturating_sub(86400);
+    // Keep a week of undelivered backlog eligible. A strict 24-hour window can
+    // strand messages forever after a day-long scheduler or deployment issue.
+    let since_window: i32 = now.saturating_sub(7 * 86_400);
 
     // -------- Section 1: Today's events (due_at within local day) --------
     let today_events = state
@@ -1768,10 +1769,39 @@ pub async fn build_digest_for_user(
     // message. Spam is still filtered by category below.
     //
     // Accepts legacy values ("medium", "low") for the same transition reason.
-    let mut later_msgs = state
-        .ontology_repository
-        .get_pending_messages_by_urgency(user_id, &["later", "medium", "low"], since_window, 30)
-        .unwrap_or_default();
+    let mut later_msgs = match state.ontology_repository.get_pending_messages_by_urgency(
+        user_id,
+        &["later", "medium", "low"],
+        since_window,
+        30,
+    ) {
+        Ok(messages) => messages,
+        Err(error) => {
+            tracing::warn!(
+                user_id,
+                "Failed to load pending digest messages by urgency: {}",
+                error
+            );
+            Vec::new()
+        }
+    };
+
+    // The simple pending-digest query is the same path used by the dashboard.
+    // Fall back to it when the sectioned/legacy-urgency query resolves empty so
+    // a valid undelivered `later` backlog cannot be silently checkpointed away.
+    if later_msgs.is_empty() {
+        match state
+            .ontology_repository
+            .get_pending_digest_messages(user_id)
+        {
+            Ok(messages) => later_msgs = messages,
+            Err(error) => tracing::warn!(
+                user_id,
+                "Failed to load pending digest messages from fallback: {}",
+                error
+            ),
+        }
+    }
 
     // -------- Section 4: Unclassified (NULL urgency) safety net --------
     // Messages where classification failed or was skipped (token budget,
@@ -2153,28 +2183,7 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
         let (digest_text, message_ids) =
             match build_digest_for_user(state, user_id, &settings, now, tz_offset_secs).await {
                 Some(d) => d,
-                None => {
-                    if let Err(error) = state.user_repository.log_usage(
-                        crate::repositories::user_repository::LogUsageParams {
-                            user_id,
-                            sid: None,
-                            activity_type: "digest_empty".to_string(),
-                            credits: None,
-                            time_consumed: None,
-                            success: Some(true),
-                            reason: Some("No pending digest items at scheduled slot".to_string()),
-                            status: Some("empty".to_string()),
-                            recharge_threshold_timestamp: None,
-                            zero_credits_timestamp: None,
-                        },
-                    ) {
-                        error!(
-                            "Failed to persist empty digest checkpoint for user {}: {}",
-                            user_id, error
-                        );
-                    }
-                    continue;
-                }
+                None => continue,
             };
 
         tracing::info!(

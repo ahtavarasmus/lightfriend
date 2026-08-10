@@ -71,7 +71,7 @@ fn personal_digest_health_query_uses_the_production_processed_email_timestamp() 
 
 #[test]
 #[serial]
-fn durable_digest_checkpoint_counts_only_successful_slot_outcomes() {
+fn durable_digest_checkpoint_counts_only_successful_deliveries() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
 
@@ -104,6 +104,15 @@ fn durable_digest_checkpoint_counts_only_successful_slot_outcomes() {
     );
 
     log("digest_empty", true);
+    assert_eq!(
+        state
+            .user_repository
+            .latest_successful_digest_checkpoint(user.id)
+            .unwrap(),
+        None
+    );
+
+    log("digest", true);
     assert!(state
         .user_repository
         .latest_successful_digest_checkpoint(user.id)

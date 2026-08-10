@@ -701,9 +701,9 @@ impl UserRepository {
             .get_result(&mut conn)
     }
 
-    /// Latest durable checkpoint for a scheduled digest slot. Successful SMS
-    /// deliveries use `digest`; empty slots use `digest_empty` so a restart
-    /// does not turn newly-arrived messages into an off-schedule catch-up.
+    /// Latest durable checkpoint for an actually delivered digest. Empty build
+    /// attempts are deliberately excluded: recording them can suppress a real
+    /// backlog when an enclave is still restoring data during pre-warm.
     pub fn latest_successful_digest_checkpoint(
         &self,
         user_id: i32,
@@ -711,7 +711,7 @@ impl UserRepository {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         usage_logs::table
             .filter(usage_logs::user_id.eq(user_id))
-            .filter(usage_logs::activity_type.eq_any(["digest", "digest_empty"]))
+            .filter(usage_logs::activity_type.eq("digest"))
             .filter(usage_logs::success.eq(true))
             .select(diesel::dsl::max(usage_logs::created_at))
             .first(&mut conn)

@@ -934,6 +934,38 @@ async fn digest_skips_critical_section_when_pushes_enabled() {
 
 #[tokio::test(flavor = "current_thread")]
 #[serial]
+async fn digest_recovers_an_old_undelivered_later_backlog() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    state
+        .user_core
+        .update_digest_enabled(user.id, true)
+        .unwrap();
+
+    let now: i32 = 1_775_894_400;
+    let message_id = insert_classified_message(
+        &state,
+        user.id,
+        "!old_backlog",
+        "Alice",
+        "The delayed digest should still include this",
+        "later",
+        "work",
+        "Alice shared an update that is still waiting",
+        now - 8 * 86_400,
+    );
+
+    let settings = state.user_core.get_user_settings(user.id).unwrap();
+    let (digest_text, message_ids) = build_digest_for_user(&state, user.id, &settings, now, 0)
+        .await
+        .expect("old undelivered backlog should produce a digest");
+
+    assert!(digest_text.contains("Alice"));
+    assert_eq!(message_ids, vec![message_id]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[serial]
 async fn digest_stays_compact_on_busy_day() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
