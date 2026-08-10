@@ -1352,22 +1352,36 @@ pub fn usage_entitled_from_account_state(
     usage_entitled: bool,
     overage_enabled: bool,
     payment_ready: bool,
+    available_usage_usd: Option<f64>,
 ) -> bool {
-    usage_entitled || (overage_enabled && payment_ready)
+    usage_entitled
+        || available_usage_usd.is_some_and(|available| available > 0.0)
+        || (overage_enabled && payment_ready)
 }
 
 pub fn has_usage_entitlement(state: &Arc<AppState>, user_id: i32) -> Result<bool> {
     MetronomeConfig::from_env().validate()?;
     let repository = BillingRepository::new(state.pg_pool.clone());
     let account = repository.ensure_account(user_id)?;
-    // Overage consent plus a reusable payment method is itself a durable
-    // entitlement. Do not let a delayed/exhausted-balance webhook leave the
-    // cached flag false and silently block core SMS features such as digests.
-    Ok(usage_entitled_from_account_state(
+    let available_usage_usd = if account.usage_entitled {
+        None
+    } else {
+        // The usage outbox is the durable source for metered usage. A billing
+        // webhook can race or carry stale balance state, so a cached false flag
+        // must not override included allowance that is still available.
+        Some(local_usage_balance(&repository, &account, chrono::Utc::now())?.available_usage_usd)
+    };
+    let entitled = usage_entitled_from_account_state(
         account.usage_entitled,
         account.overage_enabled,
         account.payment_ready,
-    ))
+        available_usage_usd,
+    );
+    if entitled && !account.usage_entitled {
+        repository.set_usage_entitled(user_id, true)?;
+        let _ = state.user_core.clear_last_credits_notification(user_id);
+    }
+    Ok(entitled)
 }
 
 pub async fn customer_reset_date_label(state: &Arc<AppState>, user_id: i32) -> Option<String> {

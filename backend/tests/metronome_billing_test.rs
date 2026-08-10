@@ -114,10 +114,26 @@ fn never_reapplies_an_already_migrated_preference() {
 
 #[test]
 fn ready_overage_consent_survives_a_stale_entitlement_flag() {
-    assert!(usage_entitled_from_account_state(false, true, true));
-    assert!(!usage_entitled_from_account_state(false, true, false));
-    assert!(!usage_entitled_from_account_state(false, false, true));
-    assert!(usage_entitled_from_account_state(true, false, false));
+    assert!(usage_entitled_from_account_state(false, true, true, None));
+    assert!(!usage_entitled_from_account_state(false, true, false, None));
+    assert!(!usage_entitled_from_account_state(false, false, true, None));
+    assert!(usage_entitled_from_account_state(true, false, false, None));
+}
+
+#[test]
+fn remaining_included_allowance_survives_a_stale_entitlement_flag() {
+    assert!(usage_entitled_from_account_state(
+        false,
+        false,
+        false,
+        Some(24.36)
+    ));
+    assert!(!usage_entitled_from_account_state(
+        false,
+        false,
+        false,
+        Some(0.0)
+    ));
 }
 
 #[test]

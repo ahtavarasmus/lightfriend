@@ -525,11 +525,13 @@ fn nonempty_reply(reply: String) -> Result<String, String> {
     Ok(reply.to_string())
 }
 
-fn account_access_message(error: &str) -> &'static str {
+pub fn account_access_message(error: &str) -> &'static str {
     if error.contains("subscription") {
         "Your Lightfriend account needs an active subscription. Visit the Lightfriend dashboard to continue."
     } else if error.contains("deactivated") {
         "Your Lightfriend phone service is deactivated. Visit the Lightfriend dashboard to continue."
+    } else if error.contains("Failed to check billing entitlement") {
+        "Lightfriend billing is temporarily unavailable. Please try again shortly."
     } else {
         "Your Lightfriend quota or credits are depleted. Visit the Lightfriend dashboard to continue."
     }

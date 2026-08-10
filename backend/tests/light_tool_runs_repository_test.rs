@@ -15,7 +15,7 @@ use backend::{
     },
     services::{
         light_tool_agent_responder::{
-            attach_image_to_latest_user_message, build_account_agent_input,
+            account_access_message, attach_image_to_latest_user_message, build_account_agent_input,
             build_anonymous_chat_request, LightToolAgentResponder,
         },
         light_tool_bootstrap::{
@@ -399,6 +399,16 @@ async fn account_responder_returns_subscription_guidance_without_calling_the_mod
         .unwrap();
 
     assert!(response.contains("active subscription"));
+}
+
+#[test]
+fn account_responder_does_not_report_internal_billing_failures_as_depleted_quota() {
+    let response = account_access_message(
+        "Failed to check billing entitlement: billing database temporarily unavailable",
+    );
+
+    assert!(response.contains("temporarily unavailable"));
+    assert!(!response.contains("depleted"));
 }
 
 fn set_test_encryption_key() {

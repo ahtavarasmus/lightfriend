@@ -31,6 +31,13 @@ pub(super) async fn check_sms_access(state: &Arc<AppState>, user: &User) -> Resu
         } else if e.contains("subscription") {
             tracing::warn!("User {} has no active subscription", user.id);
             SmsResult::no_subscription()
+        } else if e.contains("Failed to check billing entitlement") {
+            tracing::error!(
+                user_id = user.id,
+                "SMS billing entitlement check failed: {}",
+                e
+            );
+            SmsResult::SystemError { log_msg: e }
         } else {
             tracing::warn!("User {} has insufficient credits: {}", user.id, e);
             SmsResult::insufficient_credits()
