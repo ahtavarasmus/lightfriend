@@ -2108,6 +2108,72 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
             continue;
         }
 
+        // Last-resort recovery for a digest pipeline that has silently missed
+        // every normal slot for a full day. Keep this independent of timezone
+        // and slot parsing: those are useful scheduling preferences, but they
+        // must never strand a real `later` backlog indefinitely.
+        let stale_delivery = state
+            .user_repository
+            .latest_successful_digest_checkpoint(user_id)
+            .ok()
+            .flatten()
+            .map(|checkpoint| now.saturating_sub(checkpoint) >= 86_400)
+            .unwrap_or(true);
+        if stale_delivery {
+            let mut recovery_messages = state
+                .ontology_repository
+                .get_pending_digest_messages(user_id)
+                .unwrap_or_default();
+            recovery_messages.retain(|message| message.category.as_deref() != Some("spam"));
+
+            if let Some(recovery_body) = render_fyi_inline(&recovery_messages) {
+                let message_ids: Vec<i64> =
+                    recovery_messages.iter().map(|message| message.id).collect();
+                let header = format!(
+                    "{} msg{}",
+                    message_ids.len(),
+                    if message_ids.len() == 1 { "" } else { "s" }
+                );
+                let digest_text = crate::utils::sms_sanitizer::clamp_sms_body(&format!(
+                    "{}\n\n{}",
+                    header, recovery_body
+                ));
+
+                tracing::warn!(
+                    user_id,
+                    message_count = message_ids.len(),
+                    "Recovering a digest backlog after 24 hours without a successful delivery"
+                );
+                let delivered = crate::proactive::utils::send_notification(
+                    state,
+                    user_id,
+                    &digest_text,
+                    "digest".to_string(),
+                    None,
+                )
+                .await;
+
+                if delivered {
+                    state.digest_cooldowns.insert(user_id, now);
+                    if let Err(error) = state
+                        .ontology_repository
+                        .mark_digest_delivered(&message_ids, now)
+                    {
+                        error!(
+                            "Failed to mark recovered digest messages as delivered for user {}: {}",
+                            user_id, error
+                        );
+                    }
+                } else {
+                    tracing::warn!(
+                        user_id,
+                        "Digest backlog recovery notification was not delivered"
+                    );
+                }
+                continue;
+            }
+        }
+
         // Get user timezone
         let tz_offset_secs: i32 = match state.user_core.get_user_info(user_id) {
             Ok(info) => {
