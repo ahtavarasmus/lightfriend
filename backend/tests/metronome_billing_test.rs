@@ -3,7 +3,8 @@ use backend::services::metronome_billing::{
     customer_usage_balance_from_response, invoice_contains_usage, legacy_overage_migration_target,
     local_usage_balance_from_total, ordered_payment_method_candidates,
     payment_method_owner_matches, provider_event_status, provider_http_error, select_contract_id,
-    usage_invoice_total_usd, verify_webhook_signature, MetronomeConfig,
+    usage_entitled_from_account_state, usage_invoice_total_usd, verify_webhook_signature,
+    MetronomeConfig,
 };
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -109,6 +110,14 @@ fn waits_for_payment_setup_before_preserving_legacy_opt_in() {
 fn never_reapplies_an_already_migrated_preference() {
     assert_eq!(legacy_overage_migration_target(true, true, true), None);
     assert_eq!(legacy_overage_migration_target(false, true, true), None);
+}
+
+#[test]
+fn ready_overage_consent_survives_a_stale_entitlement_flag() {
+    assert!(usage_entitled_from_account_state(false, true, true));
+    assert!(!usage_entitled_from_account_state(false, true, false));
+    assert!(!usage_entitled_from_account_state(false, false, true));
+    assert!(usage_entitled_from_account_state(true, false, false));
 }
 
 #[test]

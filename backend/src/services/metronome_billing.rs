@@ -1348,11 +1348,26 @@ pub fn abandon_usage_intent(state: &Arc<AppState>, transaction_id: &str) {
     let _ = repository.abandon_usage_intent(transaction_id);
 }
 
+pub fn usage_entitled_from_account_state(
+    usage_entitled: bool,
+    overage_enabled: bool,
+    payment_ready: bool,
+) -> bool {
+    usage_entitled || (overage_enabled && payment_ready)
+}
+
 pub fn has_usage_entitlement(state: &Arc<AppState>, user_id: i32) -> Result<bool> {
     MetronomeConfig::from_env().validate()?;
     let repository = BillingRepository::new(state.pg_pool.clone());
     let account = repository.ensure_account(user_id)?;
-    Ok(account.usage_entitled)
+    // Overage consent plus a reusable payment method is itself a durable
+    // entitlement. Do not let a delayed/exhausted-balance webhook leave the
+    // cached flag false and silently block core SMS features such as digests.
+    Ok(usage_entitled_from_account_state(
+        account.usage_entitled,
+        account.overage_enabled,
+        account.payment_ready,
+    ))
 }
 
 pub async fn customer_reset_date_label(state: &Arc<AppState>, user_id: i32) -> Option<String> {
