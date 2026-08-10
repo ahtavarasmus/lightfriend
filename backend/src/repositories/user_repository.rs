@@ -12,7 +12,7 @@ pub struct UsageDataPoint {
 
 use crate::{
     pg_models::{NewPgBridge, NewPgImapConnection, NewPgUsageLog, PgBridge},
-    pg_schema::{imap_connection, usage_logs},
+    pg_schema::{imap_connection, usage_logs, user_settings},
     PgDbPool,
 };
 
@@ -113,6 +113,17 @@ pub struct UserRepository {
 }
 
 impl UserRepository {
+    /// Read only the opt-in bit required by the digest scheduler's recovery
+    /// path. This deliberately avoids deserializing the full settings row so
+    /// an unrelated legacy/default column cannot suppress digest delivery.
+    pub fn digest_enabled(&self, user_id: i32) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        user_settings::table
+            .filter(user_settings::user_id.eq(user_id))
+            .select(user_settings::digest_enabled)
+            .first(&mut conn)
+    }
+
     pub fn new(pool: PgDbPool) -> Self {
         Self { pool }
     }

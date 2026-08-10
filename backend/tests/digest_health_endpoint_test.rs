@@ -4,6 +4,7 @@ use backend::handlers::health_handlers::{
 };
 use backend::repositories::user_repository::LogUsageParams;
 use backend::test_utils::{create_test_state, create_test_user, TestUserParams};
+use backend::UserCoreOps;
 use serial_test::serial;
 
 #[test]
@@ -74,6 +75,12 @@ fn personal_digest_health_query_uses_the_production_processed_email_timestamp() 
 fn durable_digest_checkpoint_counts_only_successful_deliveries() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    state
+        .user_core
+        .update_digest_enabled(user.id, true)
+        .unwrap();
+    assert!(state.user_repository.digest_enabled(user.id).unwrap());
 
     let log = |activity_type: &str, success: bool| {
         state

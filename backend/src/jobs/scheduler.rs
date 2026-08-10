@@ -2099,12 +2099,17 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
         .as_secs() as i32;
 
     for user_id in users {
-        // Check if user has digests enabled
-        let settings = match state.user_core.get_user_settings(user_id) {
-            Ok(s) => s,
-            Err(_) => continue,
+        // Use a minimal query for the recovery gate. Loading the entire
+        // settings row here used to make every later safeguard unreachable
+        // when any unrelated settings column failed to deserialize.
+        let digest_enabled = match state.user_repository.digest_enabled(user_id) {
+            Ok(enabled) => enabled,
+            Err(error) => {
+                error!(user_id, "Failed to load digest opt-in: {}", error);
+                continue;
+            }
         };
-        if !settings.digest_enabled {
+        if !digest_enabled {
             continue;
         }
 
@@ -2173,6 +2178,16 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
                 continue;
             }
         }
+
+        // Normal scheduled delivery needs the remaining preferences. Recovery
+        // above intentionally does not depend on this wider settings model.
+        let settings = match state.user_core.get_user_settings(user_id) {
+            Ok(settings) => settings,
+            Err(error) => {
+                error!(user_id, "Failed to load digest settings: {}", error);
+                continue;
+            }
+        };
 
         // Get user timezone
         let tz_offset_secs: i32 = match state.user_core.get_user_info(user_id) {
