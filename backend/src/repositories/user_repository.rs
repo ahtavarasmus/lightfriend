@@ -701,6 +701,22 @@ impl UserRepository {
             .get_result(&mut conn)
     }
 
+    /// Latest durable checkpoint for a scheduled digest slot. Successful SMS
+    /// deliveries use `digest`; empty slots use `digest_empty` so a restart
+    /// does not turn newly-arrived messages into an off-schedule catch-up.
+    pub fn latest_successful_digest_checkpoint(
+        &self,
+        user_id: i32,
+    ) -> Result<Option<i32>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        usage_logs::table
+            .filter(usage_logs::user_id.eq(user_id))
+            .filter(usage_logs::activity_type.eq_any(["digest", "digest_empty"]))
+            .filter(usage_logs::success.eq(true))
+            .select(diesel::dsl::max(usage_logs::created_at))
+            .first(&mut conn)
+    }
+
     pub fn latest_system_alert_for_feedback(
         &self,
         user_id: i32,

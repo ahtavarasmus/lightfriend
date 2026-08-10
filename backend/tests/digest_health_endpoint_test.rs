@@ -2,6 +2,9 @@ use axum::http::{HeaderMap, HeaderValue};
 use backend::handlers::health_handlers::{
     user_digest_health_requested, UserDigestHealthRow, USER_DIGEST_HEALTH_QUERY,
 };
+use backend::repositories::user_repository::LogUsageParams;
+use backend::test_utils::{create_test_state, create_test_user, TestUserParams};
+use serial_test::serial;
 
 #[test]
 fn personal_digest_health_requires_exact_explicit_opt_in() {
@@ -64,4 +67,46 @@ fn personal_digest_health_row_serializes_aggregate_fields_only() {
 fn personal_digest_health_query_uses_the_production_processed_email_timestamp() {
     assert!(USER_DIGEST_HEALTH_QUERY.contains("pe.processed_at >= $1"));
     assert!(!USER_DIGEST_HEALTH_QUERY.contains("pe.created_at"));
+}
+
+#[test]
+#[serial]
+fn durable_digest_checkpoint_counts_only_successful_slot_outcomes() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    let log = |activity_type: &str, success: bool| {
+        state
+            .user_repository
+            .log_usage(LogUsageParams {
+                user_id: user.id,
+                sid: None,
+                activity_type: activity_type.to_string(),
+                credits: None,
+                time_consumed: None,
+                success: Some(success),
+                reason: None,
+                status: None,
+                recharge_threshold_timestamp: None,
+                zero_credits_timestamp: None,
+            })
+            .unwrap();
+    };
+
+    log("digest", false);
+    log("noti_msg", true);
+    assert_eq!(
+        state
+            .user_repository
+            .latest_successful_digest_checkpoint(user.id)
+            .unwrap(),
+        None
+    );
+
+    log("digest_empty", true);
+    assert!(state
+        .user_repository
+        .latest_successful_digest_checkpoint(user.id)
+        .unwrap()
+        .is_some());
 }

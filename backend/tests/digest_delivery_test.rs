@@ -8,7 +8,9 @@
 //! These tests exercise the behavior with realistic timezone offsets to make
 //! sure a user in UTC+5 or UTC-5 gets fired at their local 08:00, not server UTC.
 
-use backend::jobs::scheduler::{parse_digest_times, should_deliver_now, AUTO_DIGEST_SLOTS};
+use backend::jobs::scheduler::{
+    latest_due_digest_slot, parse_digest_times, should_deliver_now, AUTO_DIGEST_SLOTS,
+};
 
 /// Helper: compute the local minute-of-day that a scheduler tick would see
 /// given the UTC minute-of-day and the user's offset in minutes.
@@ -115,4 +117,32 @@ fn empty_slots_never_fires() {
     for minute in 0..1440 {
         assert!(!should_deliver_now(&empty, minute));
     }
+}
+
+#[test]
+fn finds_latest_due_slot_after_scheduler_misses_exact_window() {
+    let now = chrono::DateTime::parse_from_rfc3339("2026-08-10T08:30:00Z")
+        .unwrap()
+        .timestamp() as i32;
+    let due = latest_due_digest_slot(&AUTO_DIGEST_SLOTS, now, 3 * 60 * 60).unwrap();
+    assert_eq!(
+        chrono::DateTime::from_timestamp(due as i64, 0)
+            .unwrap()
+            .to_rfc3339(),
+        "2026-08-10T05:00:00+00:00"
+    );
+}
+
+#[test]
+fn finds_previous_local_day_slot_before_first_slot_today() {
+    let now = chrono::DateTime::parse_from_rfc3339("2026-08-10T02:00:00Z")
+        .unwrap()
+        .timestamp() as i32;
+    let due = latest_due_digest_slot(&[8 * 60, 18 * 60], now, 3 * 60 * 60).unwrap();
+    assert_eq!(
+        chrono::DateTime::from_timestamp(due as i64, 0)
+            .unwrap()
+            .to_rfc3339(),
+        "2026-08-09T15:00:00+00:00"
+    );
 }

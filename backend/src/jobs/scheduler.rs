@@ -1439,6 +1439,25 @@ pub fn should_deliver_now(slots: &[u16], local_minute_of_day: u16) -> bool {
     slots.contains(&current_slot)
 }
 
+/// Return the most recent scheduled slot as a UTC timestamp. Persisted
+/// checkpoints are compared against this value so scheduler restarts and short
+/// deploy outages catch up a missed digest instead of silently waiting all day.
+pub fn latest_due_digest_slot(slots: &[u16], now: i32, tz_offset_secs: i32) -> Option<i32> {
+    let latest_slot = slots.iter().copied().max()?;
+    let local_now = now as i64 + tz_offset_secs as i64;
+    let local_day_start = local_now.div_euclid(86_400) * 86_400;
+    let current_minute = local_now.rem_euclid(86_400) / 60;
+    let (slot_day_start, slot_minute) = slots
+        .iter()
+        .copied()
+        .filter(|slot| i64::from(*slot) <= current_minute)
+        .max()
+        .map(|slot| (local_day_start, slot))
+        .unwrap_or((local_day_start - 86_400, latest_slot));
+    let slot_utc = slot_day_start + i64::from(slot_minute) * 60 - tz_offset_secs as i64;
+    i32::try_from(slot_utc).ok()
+}
+
 /// Stable local-time defaults for users who leave digest scheduling on Auto.
 ///
 /// These must not depend on a moving activity estimate: exact scheduler slots
@@ -2078,30 +2097,45 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
             Err(_) => 0,
         };
 
-        let local_ts = now as i64 + tz_offset_secs as i64;
-        let current_minute_of_day = (((local_ts % 86400 + 86400) % 86400) / 60) as u16;
-        // Snap current time to a 10-minute slot — matches the cron's */10 cadence
-        let current_slot = (current_minute_of_day / 10) * 10;
-        // Determine if we're in a delivery window:
-        // - Manual mode: exact 10-min slot match against user's configured times
-        // - Auto mode: stable local slots at 08:00, 13:00, and 18:00
-        let in_target_window = if let Some(ref time_str) = settings.digest_time {
+        // Resolve manual or stable Auto slots, then compare their latest due
+        // occurrence against the durable checkpoint below.
+        let digest_slots = if let Some(ref time_str) = settings.digest_time {
             match parse_digest_times(time_str) {
-                Ok((_, slots)) => should_deliver_now(&slots, current_minute_of_day),
+                Ok((_, slots)) => slots,
                 Err(e) => {
                     debug!(
                         "User {} has malformed digest_time '{}': {} — skipping",
                         user_id, time_str, e
                     );
-                    false
+                    continue;
                 }
             }
         } else {
-            should_deliver_now(&AUTO_DIGEST_SLOTS, current_minute_of_day)
+            AUTO_DIGEST_SLOTS.to_vec()
         };
-        if !in_target_window {
+
+        let Some(due_slot_at) = latest_due_digest_slot(&digest_slots, now, tz_offset_secs) else {
+            continue;
+        };
+        let last_checkpoint = match state
+            .user_repository
+            .latest_successful_digest_checkpoint(user_id)
+        {
+            Ok(checkpoint) => checkpoint,
+            Err(error) => {
+                error!(
+                    "Failed to load digest checkpoint for user {}: {}",
+                    user_id, error
+                );
+                continue;
+            }
+        };
+        if last_checkpoint.is_some_and(|checkpoint| checkpoint >= due_slot_at) {
             continue;
         }
+
+        let due_local_ts = due_slot_at as i64 + tz_offset_secs as i64;
+        let due_minute_of_day = (due_local_ts.rem_euclid(86_400) / 60) as u16;
 
         // Cooldown: don't send more than one digest per N seconds.
         // Manual mode uses 9 min — just under the 10-min cron cadence — so consecutive
@@ -2119,15 +2153,36 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
         let (digest_text, message_ids) =
             match build_digest_for_user(state, user_id, &settings, now, tz_offset_secs).await {
                 Some(d) => d,
-                None => continue, // nothing to send (empty after filters)
+                None => {
+                    if let Err(error) = state.user_repository.log_usage(
+                        crate::repositories::user_repository::LogUsageParams {
+                            user_id,
+                            sid: None,
+                            activity_type: "digest_empty".to_string(),
+                            credits: None,
+                            time_consumed: None,
+                            success: Some(true),
+                            reason: Some("No pending digest items at scheduled slot".to_string()),
+                            status: Some("empty".to_string()),
+                            recharge_threshold_timestamp: None,
+                            zero_credits_timestamp: None,
+                        },
+                    ) {
+                        error!(
+                            "Failed to persist empty digest checkpoint for user {}: {}",
+                            user_id, error
+                        );
+                    }
+                    continue;
+                }
             };
 
         tracing::info!(
             "Built digest for user {} (msgs={}, slot={:02}:{:02})",
             user_id,
             message_ids.len(),
-            current_slot / 60,
-            current_slot % 60
+            due_minute_of_day / 60,
+            due_minute_of_day % 60
         );
 
         let delivered = crate::proactive::utils::send_notification(
@@ -2158,8 +2213,8 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
                 "Delivered digest to user {} (msgs={}, slot={:02}:{:02}, mode={})",
                 user_id,
                 message_ids.len(),
-                current_slot / 60,
-                current_slot % 60,
+                due_minute_of_day / 60,
+                due_minute_of_day % 60,
                 if settings.digest_time.is_some() {
                     "manual"
                 } else {
