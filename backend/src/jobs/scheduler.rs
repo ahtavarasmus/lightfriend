@@ -2127,7 +2127,7 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
         if stale_delivery {
             let mut recovery_messages = state
                 .ontology_repository
-                .get_pending_digest_messages(user_id)
+                .get_pending_messages_by_urgency(user_id, &["later", "medium", "low"], 0, 30)
                 .unwrap_or_default();
             recovery_messages.retain(|message| message.category.as_deref() != Some("spam"));
 
