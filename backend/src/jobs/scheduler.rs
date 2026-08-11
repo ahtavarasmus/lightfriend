@@ -1141,7 +1141,12 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 }
             };
             for event in &due_events {
-                let message = format!("Event reminder: {}", event.description);
+                let description = if event.reminder_delivery_key.is_some() {
+                    crate::proactive::utils::explicit_reminder_description(&event.description)
+                } else {
+                    &event.description
+                };
+                let message = format!("Event reminder: {}", description);
                 let delivered = crate::proactive::utils::send_notification(
                     &state,
                     event.user_id,

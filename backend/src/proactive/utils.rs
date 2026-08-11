@@ -7,6 +7,16 @@ use chrono::{LocalResult, NaiveDate, NaiveDateTime, Offset, TimeZone};
 
 const AUTO_TIMEZONE_MAX_AGE_SECS: i32 = 90 * 24 * 3600;
 
+/// Hide context that the ambient commitment tracker incorrectly appended to
+/// explicit reminders before those reminders were excluded from matching.
+/// The doubled prefix uniquely identifies that buggy call path while leaving
+/// ordinary reminder text untouched.
+pub fn explicit_reminder_description(description: &str) -> &str {
+    description
+        .split_once("\nUpdate: Update: ")
+        .map_or(description, |(original, _)| original)
+}
+
 /// Return a verified stored IANA timezone suitable for scheduling a reminder.
 /// Automatically detected zones must have been refreshed recently; manual
 /// zones remain authoritative until the user changes them.

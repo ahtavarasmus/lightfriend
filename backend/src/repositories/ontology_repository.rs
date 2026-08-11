@@ -2191,6 +2191,25 @@ impl OntologyRepository {
             .load(&mut conn)
     }
 
+    /// Return events that may be matched by ambient commitment tracking.
+    ///
+    /// One-shot reminders are also stored as events, but they are explicit
+    /// user-authored notifications rather than inferred obligations. Exclude
+    /// them so unrelated messages cannot append context to (or complete) a
+    /// reminder merely because it is the closest active event.
+    pub fn get_active_and_proposed_trackable_events(
+        &self,
+        user_id: i32,
+    ) -> Result<Vec<OntEvent>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        ont_events::table
+            .filter(ont_events::user_id.eq(user_id))
+            .filter(ont_events::status.eq_any(&["active", "proposed"]))
+            .filter(ont_events::reminder_delivery_key.is_null())
+            .order(ont_events::created_at.desc())
+            .load(&mut conn)
+    }
+
     pub fn get_recently_created_events(
         &self,
         user_id: i32,
@@ -2303,6 +2322,10 @@ impl OntologyRepository {
         let now = Self::now();
 
         if let Some(append) = append_description {
+            // Callers describe the new context; this repository owns the
+            // presentation prefix. Be tolerant of older callers that already
+            // supplied it so descriptions never become "Update: Update: ...".
+            let append = append.strip_prefix("Update: ").unwrap_or(append);
             let current: OntEvent = ont_events::table
                 .filter(ont_events::id.eq(event_id))
                 .filter(ont_events::user_id.eq(user_id))

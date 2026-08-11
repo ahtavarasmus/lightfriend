@@ -1310,7 +1310,7 @@ pub async fn run_commitment_detection(
     // Fetch existing events for dedup, sorted by similarity to conversation
     let active_events = state
         .ontology_repository
-        .get_active_and_proposed_events(user_id)
+        .get_active_and_proposed_trackable_events(user_id)
         .unwrap_or_default();
 
     let conv_lower = conversation.to_lowercase();
@@ -1736,11 +1736,7 @@ pub async fn run_commitment_detection(
                 routing = match existing_match_id {
                     Some(event_id) if valid_ids.contains(&event_id) => {
                         let old_event = state.ontology_repository.get_event(user_id, event_id).ok();
-                        let update_desc = if description.is_empty() {
-                            None
-                        } else {
-                            Some(format!("Update: {}", description))
-                        };
+                        let update_desc = (!description.is_empty()).then_some(description.as_str());
                         // Safety: if the LLM's new deadline pulls a still-future
                         // user-set deadline meaningfully forward, ignore the
                         // timing change and just append context. Prevents an
@@ -1765,7 +1761,7 @@ pub async fn run_commitment_detection(
                         match state.ontology_repository.update_event(
                             user_id,
                             event_id,
-                            update_desc.as_deref(),
+                            update_desc,
                             None,
                             safe_remind,
                             safe_due,
@@ -1846,7 +1842,7 @@ pub async fn run_commitment_detection(
                         match state.ontology_repository.update_event(
                             user_id,
                             event_id,
-                            Some(&format!("Update: {}", description)),
+                            Some(&description),
                             None,
                             None,
                             None,
@@ -2326,7 +2322,7 @@ pub async fn check_outgoing_event_resolution(
     // Get active events - return early if none (no LLM cost)
     let active_events = match state
         .ontology_repository
-        .get_active_and_proposed_events(user_id)
+        .get_active_and_proposed_trackable_events(user_id)
     {
         Ok(events) if !events.is_empty() => events,
         _ => return,

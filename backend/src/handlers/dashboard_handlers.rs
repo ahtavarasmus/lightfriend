@@ -302,13 +302,20 @@ pub async fn get_dashboard_summary(
         .get_active_events(user_id)
         .unwrap_or_default()
         .into_iter()
-        .map(|e| EventItem {
-            id: e.id,
-            description: e.description,
-            remind_at: e.remind_at,
-            due_at: e.due_at,
-            status: e.status,
-            created_at: e.created_at,
+        .map(|e| {
+            let description = if e.reminder_delivery_key.is_some() {
+                crate::proactive::utils::explicit_reminder_description(&e.description).to_string()
+            } else {
+                e.description
+            };
+            EventItem {
+                id: e.id,
+                description,
+                remind_at: e.remind_at,
+                due_at: e.due_at,
+                status: e.status,
+                created_at: e.created_at,
+            }
         })
         .collect();
 

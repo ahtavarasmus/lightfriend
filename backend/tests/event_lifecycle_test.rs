@@ -175,12 +175,42 @@ async fn update_event_appends_description_and_replaces_timestamps() {
         )
         .unwrap();
 
-    assert!(updated.description.contains("Package delivery from shop"));
-    assert!(updated
-        .description
-        .contains("Update: Carrier says it will arrive Friday"));
+    assert_eq!(
+        updated.description,
+        "Package delivery from shop\nUpdate: Carrier says it will arrive Friday"
+    );
     assert_eq!(updated.remind_at, Some(now + 7200));
     assert_eq!(updated.due_at, Some(now + 14400));
+
+    let updated_again = state
+        .ontology_repository
+        .update_event(
+            user.id,
+            event.id,
+            Some("Update: Carrier delayed it again"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    assert!(updated_again
+        .description
+        .ends_with("\nUpdate: Carrier delayed it again"));
+    assert!(!updated_again.description.contains("Update: Update:"));
+}
+
+#[test]
+fn corrupted_explicit_reminder_description_uses_original_text() {
+    assert_eq!(
+        backend::proactive::utils::explicit_reminder_description(
+            "Longmont SW meeting\nUpdate: Update: RSVP to unrelated invite"
+        ),
+        "Longmont SW meeting"
+    );
+    assert_eq!(
+        backend::proactive::utils::explicit_reminder_description("Review notes\nUpdate: chapter 2"),
+        "Review notes\nUpdate: chapter 2"
+    );
 }
 
 #[tokio::test]
@@ -217,6 +247,50 @@ async fn update_event_preserves_untouched_timestamp_fields() {
 
     assert_eq!(updated.remind_at, Some(now + 7200));
     assert_eq!(updated.due_at, Some(now + 3600));
+}
+
+#[tokio::test]
+#[serial]
+async fn ambient_tracking_candidates_exclude_explicit_reminders() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let now = chrono::Utc::now().timestamp() as i32;
+
+    let reminder = state
+        .ontology_repository
+        .create_reminder(
+            &NewOntEvent {
+                user_id: user.id,
+                description: "Longmont SW meeting".to_string(),
+                remind_at: Some(now + 3600),
+                due_at: Some(now + 3600),
+                status: "active".to_string(),
+                created_at: now,
+                updated_at: now,
+            },
+            "UTC",
+        )
+        .unwrap();
+    let tracked = state
+        .ontology_repository
+        .create_event(&NewOntEvent {
+            user_id: user.id,
+            description: "Send project files".to_string(),
+            remind_at: Some(now + 1800),
+            due_at: Some(now + 7200),
+            status: "active".to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
+
+    let candidates = state
+        .ontology_repository
+        .get_active_and_proposed_trackable_events(user.id)
+        .unwrap();
+
+    assert!(candidates.iter().any(|event| event.id == tracked.id));
+    assert!(!candidates.iter().any(|event| event.id == reminder.id));
 }
 
 #[tokio::test]
