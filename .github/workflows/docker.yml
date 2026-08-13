@@ -1148,6 +1148,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Send email notification
+        # SMTP availability must not turn a successful production deploy red.
+        continue-on-error: true
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: mail.privateemail.com
