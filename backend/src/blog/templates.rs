@@ -249,6 +249,7 @@ pub fn render_blog_post(post: &BlogPost, related: &[BlogPost]) -> String {
 {keywords_meta}
 {ai_summary_meta}
     <link rel="canonical" href="https://lightfriend.ai/blog/{slug}">
+    <link rel="alternate" type="text/markdown" href="https://lightfriend.ai/blog/md/{slug}" title="Markdown version">
     <meta property="og:title" content="{title}">
     <meta property="og:description" content="{description}">
     <meta property="og:url" content="https://lightfriend.ai/blog/{slug}">
@@ -300,6 +301,8 @@ pub fn render_blog_post(post: &BlogPost, related: &[BlogPost]) -> String {
         <div class="footer-links">
             <a href="/">Home</a>
             <a href="/blog">Blog</a>
+            <a href="/compatible-phones">Phone guides</a>
+            <a href="/how-it-works">How it works</a>
             <a href="/#plans">Pricing</a>
             <a href="/terms">Terms</a>
             <a href="/privacy">Privacy</a>
@@ -372,7 +375,8 @@ pub fn render_blog_index(
                 continue;
             }
             let mut section_cards = String::new();
-            // Show hubs first, then recent posts, cap at 6 per cluster on the index
+            // Show hubs first, then recent posts. Keep every article linked from the
+            // index so crawlers and readers can discover the complete archive.
             let mut sorted_slugs = cluster_slugs.clone();
             sorted_slugs.sort_by(|a, b| {
                 let a_hub = posts.get(a).is_some_and(|p| p.frontmatter.cluster_hub);
@@ -383,7 +387,7 @@ pub fn render_blog_index(
                     db.cmp(&da)
                 })
             });
-            for slug in sorted_slugs.iter().take(6) {
+            for slug in &sorted_slugs {
                 if let Some(post) = posts.get(slug) {
                     section_cards.push_str(&format!(
                         r#"<div class="blog-post-preview"><a href="/blog/{}"><h2>{}</h2><p>{}</p><span class="blog-date">{}</span></a></div>
@@ -478,6 +482,8 @@ pub fn render_blog_index(
         <div class="footer-links">
             <a href="/">Home</a>
             <a href="/blog">Blog</a>
+            <a href="/compatible-phones">Phone guides</a>
+            <a href="/how-it-works">How it works</a>
             <a href="/#plans">Pricing</a>
             <a href="/terms">Terms</a>
             <a href="/privacy">Privacy</a>

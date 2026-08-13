@@ -1,5 +1,6 @@
 use crate::profile::stripe::StripePricingTable;
 use crate::utils::api::Api;
+use crate::utils::datafast::track_goal;
 use crate::utils::seo::{use_seo, SeoMeta};
 use crate::Route;
 use serde::Deserialize;
@@ -141,7 +142,7 @@ pub fn landing() -> Html {
             html! {
                 <>
                     <p>{"There are two number routes: a Lightfriend-provided number from the currently available pool, or an eligible Twilio number you already own. Neither route works automatically in every country."}</p>
-                    <p>{"Availability depends on the selected number's current voice and SMS capabilities, destination permissions, provider rules, and local regulations. Start a trial or email support to check the current options for your use case."}</p>
+                    <p>{"Availability depends on the selected number's current voice and SMS capabilities, destination permissions, provider rules, and local regulations. "}<a href="/supported-countries">{"See the current country routes"}</a>{" before starting a trial."}</p>
                 </>
             },
         ),
@@ -201,6 +202,12 @@ pub fn landing() -> Html {
                     if *expanded == i {
                         expanded.set(-1);
                     } else {
+                        if i == 5 {
+                            track_goal(
+                                "supported_country_click",
+                                &[("source_path", "/"), ("interaction", "faq_open")],
+                            );
+                        }
                         expanded.set(i);
                     }
                 })
@@ -365,6 +372,16 @@ pub fn landing() -> Html {
                     </p>
                     <div class="legal-links">
                         <a href="/blog">{"Blog"}</a>
+                        {" · "}
+                        <a href="/how-it-works">{"How it works"}</a>
+                        {" · "}
+                        <a href="/compatible-phones">{"Phones"}</a>
+                        {" · "}
+                        <a href="/supported-countries">{"Countries"}</a>
+                        {" · "}
+                        <a href="/limitations">{"Limitations"}</a>
+                        <span>{" · "}</span>
+                        <a href="/mcp">{"MCP"}</a>
                         {" · "}
                         <Link<Route> to={Route::Terms}>{"Terms"}</Link<Route>>
                         {" · "}

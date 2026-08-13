@@ -24,6 +24,9 @@ faqs:
   - q: "Will an SMS bridge reproduce every WhatsApp feature?"
     a: "No. It is best for reading, sending, filtering, and summarizing messages. Provider-specific features such as status, stickers, live location, and WhatsApp voice or video calls are not reproduced over SMS."
 related_slugs:
+  - "punkt-mp02-whatsapp"
+  - "mudita-kompakt-whatsapp"
+  - "nokia-2780-whatsapp"
   - "whatsapp-without-smartphone"
   - "digital-detox-with-whatsapp"
   - "smartphone-at-home-dumbphone"

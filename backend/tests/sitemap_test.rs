@@ -15,6 +15,15 @@ fn sitemap_contains_indexable_public_routes_and_blog_posts() {
     for url in [
         "https://lightfriend.ai/",
         "https://lightfriend.ai/pricing",
+        "https://lightfriend.ai/supported-countries",
+        "https://lightfriend.ai/compatible-phones",
+        "https://lightfriend.ai/how-it-works",
+        "https://lightfriend.ai/limitations",
+        "https://lightfriend.ai/privacy-architecture",
+        "https://lightfriend.ai/ai-assistant-by-sms",
+        "https://lightfriend.ai/email-on-dumbphone",
+        "https://lightfriend.ai/whatsapp-on-dumbphone",
+        "https://lightfriend.ai/mcp",
         "https://lightfriend.ai/bring-own-number",
         "https://lightfriend.ai/blog",
         "https://lightfriend.ai/blog/ai-assistant-via-sms",
@@ -30,6 +39,10 @@ fn sitemap_contains_indexable_public_routes_and_blog_posts() {
         "https://lightfriend.ai/blog/best-dumbphone-whatsapp-setup-2026",
         "https://lightfriend.ai/blog/digital-detox-with-whatsapp",
         "https://lightfriend.ai/blog/smartphone-at-home-dumbphone",
+        "https://lightfriend.ai/blog/punkt-mp02-whatsapp",
+        "https://lightfriend.ai/blog/mudita-kompakt-whatsapp",
+        "https://lightfriend.ai/blog/sunbeam-f1-pro-whatsapp",
+        "https://lightfriend.ai/blog/nokia-2780-whatsapp",
     ] {
         assert!(
             sitemap.contains(&format!("<loc>{url}</loc>")),
@@ -73,6 +86,10 @@ fn blog_posts_have_index_links_and_page_metadata() {
         "best-dumbphone-whatsapp-setup-2026",
         "digital-detox-with-whatsapp",
         "smartphone-at-home-dumbphone",
+        "punkt-mp02-whatsapp",
+        "mudita-kompakt-whatsapp",
+        "sunbeam-f1-pro-whatsapp",
+        "nokia-2780-whatsapp",
     ];
 
     for slug in maintained_slugs {
@@ -114,12 +131,19 @@ fn blog_posts_have_index_links_and_page_metadata() {
 #[test]
 fn robots_points_to_public_sitemap_and_blocks_private_sections() {
     let robots = include_str!("../static/robots.txt");
+    let production_robots = include_str!("../../frontend/robots.txt");
     assert!(robots.contains("Sitemap: https://lightfriend.ai/sitemap.xml"));
     assert!(robots.contains("User-agent: OAI-SearchBot\nAllow: /"));
+    assert!(production_robots.contains("User-agent: GPTBot\nAllow: /"));
+    assert!(production_robots.contains("User-agent: ClaudeBot\nAllow: /"));
     for route in ["/api/", "/admin", "/billing"] {
         assert!(
             robots.contains(&format!("Disallow: {route}")),
             "robots should disallow {route}"
+        );
+        assert!(
+            production_robots.contains(&format!("Disallow: {route}")),
+            "production robots should disallow {route}"
         );
     }
 }

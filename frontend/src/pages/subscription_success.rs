@@ -1,5 +1,5 @@
 use crate::utils::api::Api;
-use crate::utils::datafast::{attribute_payment, mark_payment_pending};
+use crate::utils::datafast::{attribute_payment, mark_payment_pending, track_goal_once};
 use futures::future::{select, Either};
 use gloo_timers::future::TimeoutFuture;
 use serde::Deserialize;
@@ -34,6 +34,10 @@ pub fn subscription_success() -> Html {
                                 response.json::<DataFastCheckoutAttribution>().await
                             {
                                 attribute_payment(&attribution.email);
+                                let conversion_key = format!("stripe_checkout:{}", session_id);
+                                let metadata = [("checkout_type", "guest")];
+                                track_goal_once("trial_started", &conversion_key, &metadata);
+                                track_goal_once("subscription_started", &conversion_key, &metadata);
                             }
                         }
                     }

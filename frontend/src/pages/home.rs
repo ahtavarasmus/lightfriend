@@ -5,7 +5,9 @@ use crate::pages::landing::Landing;
 use crate::profile::billing_models::UserProfile;
 use crate::profile::stripe::StripePricingTable;
 use crate::utils::api::Api;
-use crate::utils::datafast::{attribute_pending_payment, mark_payment_pending};
+use crate::utils::datafast::{
+    attribute_payment, attribute_pending_payment, mark_payment_pending, track_goal_once,
+};
 use futures::future::{select, Either};
 use gloo_timers::callback::Timeout;
 use gloo_timers::future::TimeoutFuture;
@@ -19,6 +21,11 @@ use yew_router::prelude::*;
 #[derive(Deserialize)]
 struct TotpStatusResponse {
     enabled: bool,
+}
+
+#[derive(Deserialize)]
+struct DataFastCheckoutAttribution {
+    email: String,
 }
 
 #[function_component]
@@ -98,6 +105,38 @@ pub fn Home() -> Html {
                     // Check for subscription success
                     if params.get("subscription").as_deref() == Some("success") {
                         mark_payment_pending();
+                        if let Some(session_id) = params.get("session_id") {
+                            spawn_local(async move {
+                                if let Ok(response) = Api::get(&format!(
+                                    "/api/stripe/datafast-attribution/{}",
+                                    session_id
+                                ))
+                                .send()
+                                .await
+                                {
+                                    if response.ok() {
+                                        if let Ok(attribution) =
+                                            response.json::<DataFastCheckoutAttribution>().await
+                                        {
+                                            attribute_payment(&attribution.email);
+                                            let conversion_key =
+                                                format!("stripe_checkout:{}", session_id);
+                                            let metadata = [("checkout_type", "authenticated")];
+                                            track_goal_once(
+                                                "trial_started",
+                                                &conversion_key,
+                                                &metadata,
+                                            );
+                                            track_goal_once(
+                                                "subscription_started",
+                                                &conversion_key,
+                                                &metadata,
+                                            );
+                                        }
+                                    }
+                                }
+                            });
+                        }
                         post_checkout_success.set(true);
                         success.set(Some("Subscription activated successfully!".to_string()));
                         refresh_trigger.set(*refresh_trigger + 1);

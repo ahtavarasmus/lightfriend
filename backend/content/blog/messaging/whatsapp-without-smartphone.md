@@ -28,6 +28,9 @@ faqs:
     a: "Replies are sent through your connected WhatsApp account. Lightfriend does not add a promotional signature, but delivery and provider behavior remain subject to WhatsApp and the bridge connection."
 related_slugs:
   - "best-dumbphone-whatsapp-setup-2026"
+  - "punkt-mp02-whatsapp"
+  - "mudita-kompakt-whatsapp"
+  - "nokia-2780-whatsapp"
   - "digital-detox-with-whatsapp"
   - "smartphone-at-home-dumbphone"
   - "keep-whatsapp-linked-device-connected"

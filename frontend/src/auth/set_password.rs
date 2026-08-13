@@ -1,4 +1,5 @@
 use crate::config;
+use crate::utils::datafast::track_goal;
 use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
 use web_sys::HtmlInputElement;
@@ -255,6 +256,10 @@ pub fn SetPassword(props: &SetPasswordProps) -> Html {
                 {
                     Ok(response) => {
                         if response.ok() {
+                            track_goal(
+                                "registration_complete",
+                                &[("registration_type", "checkout_magic_link")],
+                            );
                             error.set(None);
                             success.set(Some(
                                 "Password set successfully! Redirecting...".to_string(),

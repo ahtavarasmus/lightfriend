@@ -14,6 +14,8 @@
   const trackerId = "lightfriend-datafast-analytics";
   const bannerHostId = "lightfriend-analytics-consent";
   const settingsButtonId = "lightfriend-analytics-settings";
+  const pendingGoalsKey = "lightfriend_datafast_pending_goals";
+  const completedGoalPrefix = "lightfriend_datafast_goal_completed:";
   let pendingPaymentEmail = null;
 
   function readConsent() {
@@ -69,7 +71,159 @@
     return true;
   }
 
+  function normalizeGoal(name, metadata) {
+    if (typeof name !== "string" || !/^[a-z][a-z0-9_:-]{0,63}$/.test(name)) {
+      return null;
+    }
+
+    const normalizedMetadata = {};
+    if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+      Object.entries(metadata).slice(0, 10).forEach(function ([key, value]) {
+        if (/^[a-z][a-z0-9_]{0,63}$/.test(key) && value != null) {
+          normalizedMetadata[key] = String(value).slice(0, 200);
+        }
+      });
+    }
+
+    return { name: name, metadata: normalizedMetadata };
+  }
+
+  function readPendingGoals() {
+    try {
+      const goals = JSON.parse(window.localStorage.getItem(pendingGoalsKey) || "[]");
+      return Array.isArray(goals) ? goals : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function storePendingGoals(goals) {
+    try {
+      if (goals.length === 0) {
+        window.localStorage.removeItem(pendingGoalsKey);
+      } else {
+        window.localStorage.setItem(pendingGoalsKey, JSON.stringify(goals.slice(-50)));
+      }
+    } catch (_) {
+      // Goal delivery is best effort when storage is unavailable.
+    }
+  }
+
+  function goalWasCompleted(storageKey) {
+    try {
+      return window.localStorage.getItem(storageKey) === "true";
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function markGoalCompleted(storageKey) {
+    try {
+      window.localStorage.setItem(storageKey, "true");
+    } catch (_) {
+      // The current event was still delivered; only refresh deduplication is lost.
+    }
+  }
+
+  function queueGoal(goal) {
+    const pendingGoals = readPendingGoals();
+    if (goal.storageKey && pendingGoals.some(function (pending) {
+      return pending.storageKey === goal.storageKey;
+    })) {
+      return;
+    }
+    pendingGoals.push(goal);
+    storePendingGoals(pendingGoals);
+  }
+
+  function emitGoal(goal) {
+    loadDataFast();
+    window.datafast(goal.name, goal.metadata);
+    if (goal.storageKey) {
+      markGoalCompleted(goal.storageKey);
+    }
+  }
+
+  function trackGoal(name, metadata) {
+    const goal = normalizeGoal(name, metadata);
+    if (!goal) return false;
+
+    const consent = readConsent();
+    if (consent === consentDenied) return false;
+    if (consent !== consentGranted) {
+      queueGoal(goal);
+      return false;
+    }
+
+    emitGoal(goal);
+    return true;
+  }
+
+  function trackGoalOnce(name, dedupeKey, metadata) {
+    const goal = normalizeGoal(name, metadata);
+    if (!goal || typeof dedupeKey !== "string" || dedupeKey.trim() === "") {
+      return false;
+    }
+
+    goal.storageKey = `${completedGoalPrefix}${goal.name}:${dedupeKey.trim()}`;
+    if (goalWasCompleted(goal.storageKey)) return true;
+
+    const consent = readConsent();
+    if (consent === consentDenied) return false;
+    if (consent !== consentGranted) {
+      queueGoal(goal);
+      return false;
+    }
+
+    emitGoal(goal);
+    return true;
+  }
+
+  function flushPendingGoals() {
+    const pendingGoals = readPendingGoals();
+    storePendingGoals([]);
+    pendingGoals.forEach(function (pending) {
+      const goal = normalizeGoal(pending.name, pending.metadata);
+      if (!goal) return;
+      goal.storageKey = typeof pending.storageKey === "string" ? pending.storageKey : null;
+      if (!goal.storageKey || !goalWasCompleted(goal.storageKey)) {
+        emitGoal(goal);
+      }
+    });
+  }
+
+  function trackHighIntentLink(event) {
+    const target = event.target instanceof Element ? event.target : null;
+    const link = target?.closest("a[href]");
+    if (!link) return;
+
+    let destination;
+    try {
+      destination = new URL(link.href, window.location.href);
+    } catch (_) {
+      return;
+    }
+    if (destination.origin !== window.location.origin) return;
+
+    if (destination.hash === "#plans") {
+      trackGoal("plans_click", {
+        source_path: window.location.pathname,
+        target_path: `${destination.pathname}#plans`,
+      });
+    }
+
+    if (destination.pathname === "/supported-countries") {
+      trackGoal("supported_country_click", {
+        source_path: window.location.pathname,
+        interaction: "link_click",
+      });
+    }
+  }
+
   window.lightfriendTrackDataFastPayment = trackPayment;
+  window.lightfriendTrackDataFastGoal = trackGoal;
+  window.lightfriendTrackDataFastGoalOnce = trackGoalOnce;
+  document.addEventListener("click", trackHighIntentLink);
 
   function clearDataFastCookie() {
     const expires = "expires=Thu, 01 Jan 1970 00:00:00 GMT";
@@ -108,6 +262,7 @@
       if (pendingPaymentEmail) {
         trackPayment(pendingPaymentEmail);
       }
+      flushPendingGoals();
       closeBanner();
       return;
     }
@@ -115,6 +270,7 @@
     const trackerWasLoaded = Boolean(document.getElementById(trackerId));
     storeConsent(consentDenied);
     pendingPaymentEmail = null;
+    storePendingGoals([]);
     clearDataFastCookie();
 
     if (trackerWasLoaded) {
@@ -187,6 +343,7 @@
     const consent = readConsent();
     if (consent === consentGranted) {
       loadDataFast();
+      flushPendingGoals();
       showSettingsButton();
     } else if (consent === consentDenied) {
       clearDataFastCookie();

@@ -1,7 +1,34 @@
 User-agent: *
 Allow: /
+Disallow: /api/
+Disallow: /admin
+Disallow: /billing
+Disallow: /set-password
+Disallow: /subscription-success
 
 User-agent: OAI-SearchBot
 Allow: /
 
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
 Sitemap: https://lightfriend.ai/sitemap.xml
+
+# AI-readable product documentation:
+# https://lightfriend.ai/llms.txt
+# https://lightfriend.ai/llms-full.txt

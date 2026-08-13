@@ -43,6 +43,7 @@ mod pages {
     pub mod landing;
     pub mod lightphone3_whatsapp_guide;
     pub mod prompt_injection_safe;
+    pub mod public_guides;
     pub mod signal_on_dumbphone;
     pub mod subscription_success;
     pub mod telegram_on_dumbphone;
@@ -110,6 +111,7 @@ use pages::{
     home::Home,
     lightphone3_whatsapp_guide::LightPhone3WhatsappGuide,
     prompt_injection_safe::PromptInjectionSafe,
+    public_guides::{PublicGuide, PublicGuideKind},
     signal_on_dumbphone::SignalOnDumbphone,
     subscription_success::SubscriptionSuccess,
     telegram_on_dumbphone::TelegramOnDumbphone,
@@ -146,6 +148,24 @@ pub enum Route {
     TrustChain,
     #[at("/pricing")]
     Pricing,
+    #[at("/supported-countries")]
+    SupportedCountries,
+    #[at("/compatible-phones")]
+    CompatiblePhones,
+    #[at("/how-it-works")]
+    HowItWorks,
+    #[at("/limitations")]
+    Limitations,
+    #[at("/privacy-architecture")]
+    PrivacyArchitecture,
+    #[at("/ai-assistant-by-sms")]
+    AiAssistantBySms,
+    #[at("/email-on-dumbphone")]
+    EmailOnDumbphone,
+    #[at("/whatsapp-on-dumbphone")]
+    WhatsappOnDumbphone,
+    #[at("/mcp")]
+    McpIntegrations,
     #[at("/light-phone-3-whatsapp-guide")]
     LightPhone3WhatsappGuide,
     #[at("/how-to-switch-to-dumbphone")]
@@ -218,6 +238,33 @@ fn switch(routes: Route) -> Html {
         Route::Pricing => {
             info!("Rendering Pricing page");
             html! { <PricingWrapper /> }
+        }
+        Route::SupportedCountries => {
+            html! { <PublicGuide kind={PublicGuideKind::SupportedCountries} /> }
+        }
+        Route::CompatiblePhones => {
+            html! { <PublicGuide kind={PublicGuideKind::CompatiblePhones} /> }
+        }
+        Route::HowItWorks => {
+            html! { <PublicGuide kind={PublicGuideKind::HowItWorks} /> }
+        }
+        Route::Limitations => {
+            html! { <PublicGuide kind={PublicGuideKind::Limitations} /> }
+        }
+        Route::PrivacyArchitecture => {
+            html! { <PublicGuide kind={PublicGuideKind::PrivacyArchitecture} /> }
+        }
+        Route::AiAssistantBySms => {
+            html! { <PublicGuide kind={PublicGuideKind::AiAssistantBySms} /> }
+        }
+        Route::EmailOnDumbphone => {
+            html! { <PublicGuide kind={PublicGuideKind::EmailOnDumbphone} /> }
+        }
+        Route::WhatsappOnDumbphone => {
+            html! { <PublicGuide kind={PublicGuideKind::WhatsappOnDumbphone} /> }
+        }
+        Route::McpIntegrations => {
+            html! { <PublicGuide kind={PublicGuideKind::McpIntegrations} /> }
         }
         Route::LightPhone3WhatsappGuide => {
             info!("Rendering LightPhone3WhatsappGuide page");

@@ -133,6 +133,44 @@ The verification chain combines public source code, reproducible builds, hardwar
 - Self-hostable for privacy-conscious users
 - Licensed under GNU AGPLv3
 
+## Product Answer Pages
+
+### How Lightfriend Works
+Lightfriend connects selected WhatsApp, Signal, Telegram, and email accounts through a web dashboard. Users then interact through ordinary SMS or optional voice calls. Focused alerts and scheduled digests reduce constant checking, while supported write actions pass through application controls.
+URL: https://lightfriend.ai/how-it-works
+
+### Compatible Phones
+The carried phone normally needs reliable ordinary SMS and voice calling. It does not need an app store, smartphone operating system, browser, or mobile data. Regional LTE bands, VoLTE, carrier approval, group-message behavior, and manufacturer restrictions still need to be checked for the exact model.
+URL: https://lightfriend.ai/compatible-phones
+
+### Supported Countries
+Local Lightfriend numbers are offered in the United States, Canada, Finland, Netherlands, United Kingdom, and Australia when inventory and capabilities permit. Many other destinations use a notification-only route. An eligible Twilio number can provide another route, with Twilio usage billed separately.
+URL: https://lightfriend.ai/supported-countries
+
+### Lightfriend Limitations
+Lightfriend does not reproduce a full smartphone app. Rich media and provider-specific interfaces remain limited; WhatsApp pairing and recovery require a separate supported device; AI classification can be wrong; external providers and carriers can fail; and the final SMS leg is not end-to-end encrypted.
+URL: https://lightfriend.ai/limitations
+
+### AI Assistant by SMS
+Users can ask compact questions, search connected conversations, check recent messages, request digests, and use supported actions through ordinary SMS. The intentionally limited interface avoids adding another feed or app.
+URL: https://lightfriend.ai/ai-assistant-by-sms
+
+### WhatsApp on a Dumbphone
+Most true feature phones do not run the current native WhatsApp app. Lightfriend can provide selected text-first access over ordinary SMS, but a supported device with the native app remains necessary for pairing, recovery, and periodic linked-session maintenance.
+URL: https://lightfriend.ai/whatsapp-on-dumbphone
+
+### Email on a Dumbphone
+Connected email accounts can be queried through SMS for recent messages, senders, summaries, focused alerts, scheduled digests, and supported replies. Attachments and complex inbox administration remain better suited to a computer or native client.
+URL: https://lightfriend.ai/email-on-dumbphone
+
+### Privacy Architecture
+The architecture combines an AWS Nitro Enclave, encrypted storage, remote attestation, reproducible builds, a public approval registry, independent key release, and verifiable text inference. This makes the reported deployment identity inspectable but does not prove the code has no bugs or eliminate external provider boundaries.
+URL: https://lightfriend.ai/privacy-architecture
+
+### MCP Integrations
+Authenticated users can add compatible Model Context Protocol server URLs, test connections, discover tools, and enable or disable servers. MCP servers are external trust boundaries with their own data handling, authentication, uptime, and security; their tools are not automatically covered by Lightfriend's enclave claims.
+URL: https://lightfriend.ai/mcp
+
 ## Blog Articles
 
 ### How Lightfriend Limits Prompt-Injection Impact
@@ -150,6 +188,22 @@ URL: https://lightfriend.ai/signal-on-dumbphone
 ### Light Phone 3 WhatsApp Guide
 Light Phone III does not currently list a native WhatsApp tool. This guide compares calls and SMS, WhatsApp Web/Desktop, and Lightfriend's selected text access over SMS. Lightfriend does not install WhatsApp on LightOS or reproduce every provider feature; native-app setup and linked-device maintenance still require a separate supported device.
 URL: https://lightfriend.ai/light-phone-3-whatsapp-guide
+
+### WhatsApp on Punkt MP02
+Punkt does not advertise native WhatsApp on the MP02. The phone offers calls, SMS, and the separate Signal-compatible Pigeon service. Lightfriend can provide selected WhatsApp text access over SMS while another supported device handles pairing and recovery.
+URL: https://lightfriend.ai/blog/punkt-mp02-whatsapp
+
+### WhatsApp on Mudita Kompakt
+Mudita positions Kompakt around a custom, distraction-free operating system rather than native WhatsApp. Lightfriend does not modify the phone; it uses ordinary SMS as the interface to a separately connected WhatsApp account.
+URL: https://lightfriend.ai/blog/mudita-kompakt-whatsapp
+
+### WhatsApp on Sunbeam F1 Pro
+Sunbeam F1 Pro models do not offer native WhatsApp. Some models, including the F1 Pro Elm according to its manufacturer page, block calls and texts to AI numbers. Compatibility with Lightfriend must therefore be verified before purchase.
+URL: https://lightfriend.ai/blog/sunbeam-f1-pro-whatsapp
+
+### WhatsApp on Nokia 2780 Flip
+WhatsApp's Help Center says KaiOS support has ended, so the Nokia 2780 no longer has a supported native WhatsApp route. Lightfriend can provide selected text workflows through ordinary SMS with a separate setup device.
+URL: https://lightfriend.ai/blog/nokia-2780-whatsapp
 
 ### How to Switch to a Dumbphone
 Practical switching checklist covering WhatsApp, 2FA and passkeys, banking approval, maps, transport, payments, account recovery, and a reversible trial period.
@@ -177,10 +231,10 @@ URL: https://lightfriend.ai/how-to-read-more-accidentally
 A: Lightfriend bridges the gap between minimalist dumbphones and essential digital services. It gives you access to WhatsApp, Telegram, Signal, email, calendar, web search, GPS directions, and more via simple SMS and voice calls.
 
 **Q: Which countries are supported?**
-A: Full service in US, Canada, UK, Finland, Netherlands, Australia. Notification-only in 30+ European and Asia-Pacific countries. Other countries can use Bring Your Own Twilio number.
+A: Local-number service is offered in the US, Canada, UK, Finland, Netherlands, and Australia when current inventory and capabilities permit. Many other countries have a notification-only route. An eligible Twilio number can provide another route.
 
 **Q: Can I try the service before signing up?**
-A: Yes! The FAQ page at lightfriend.ai/faq includes an interactive demo chat.
+A: Every current subscription plan starts with a 7-day free trial. Review the supported-country, compatible-phone, and limitations pages before checkout.
 
 **Q: How does Lightfriend protect my data?**
 A: Lightfriend's production application runs inside an AWS Nitro Enclave and encrypts stored application data with AES-256-GCM. AWS-signed attestation reports the enclave's code measurement, approved measurements are published to an Arbitrum smart contract, and Marlin KMS evaluates those proofs before releasing keys. Tinfoil publishes attestation evidence for AI inference, and Lightfriend's source code is public.
@@ -202,7 +256,9 @@ A: No. Any phone that can send texts and make calls works with Lightfriend.
 
 - Homepage: https://lightfriend.ai
 - Pricing: https://lightfriend.ai/pricing
-- FAQ: https://lightfriend.ai/faq
+- How It Works: https://lightfriend.ai/how-it-works
+- Compatible Phones: https://lightfriend.ai/compatible-phones
+- Limitations: https://lightfriend.ai/limitations
 - Blog: https://lightfriend.ai/blog
 - Supported Countries: https://lightfriend.ai/supported-countries
 - Privacy Policy: https://lightfriend.ai/privacy
