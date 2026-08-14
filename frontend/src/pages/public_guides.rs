@@ -346,6 +346,11 @@ pub fn public_guide(props: &PublicGuideProps) -> Html {
     }
 
     let (eyebrow, title, introduction) = guide_heading(kind);
+    let onboarding_href = match kind {
+        PublicGuideKind::EmailOnDumbphone => "/get-started?platform=email",
+        PublicGuideKind::WhatsappOnDumbphone => "/get-started?platform=whatsapp",
+        _ => "/get-started",
+    };
     let content = match kind {
         PublicGuideKind::SupportedCountries => country_content(&countries),
         PublicGuideKind::CompatiblePhones => compatible_phones_content(),
@@ -366,7 +371,7 @@ pub fn public_guide(props: &PublicGuideProps) -> Html {
                 <h1>{title}</h1>
                 <p class="guide-intro">{introduction}</p>
                 <div class="guide-actions">
-                    <a class="guide-primary" href="/#plans">{"Start 7-day free trial"}</a>
+                    <a class="guide-primary" href={onboarding_href}>{"Start 7-day free trial"}</a>
                     <a class="guide-secondary" href="/limitations">{"Read the limitations"}</a>
                 </div>
             </header>

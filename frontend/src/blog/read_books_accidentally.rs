@@ -58,7 +58,7 @@ pub fn read_more_accidentally_guide() -> Html {
                 </ol>
                 <div class="blog-cta">
                     <h3>{"Ready to Accidentally Become a Bookworm?"}</h3>
-                    <a href="/#plans" class="forward-link">
+                    <a href="/get-started" class="forward-link">
                         <button class="hero-cta">{"Get Started with Lightfriend"}</button>
                     </a>
                 </div>

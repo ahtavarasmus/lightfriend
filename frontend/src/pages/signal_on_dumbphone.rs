@@ -154,7 +154,7 @@ pub fn signal_on_dumbphone() -> Html {
                         <button class="hero-cta">{"Build Your Plan"}</button>
                     </a>
                     <p>{"Then verify your country route, setup device, privacy tradeoff, and ordinary SMS compatibility."}</p>
-                    <a href="/#plans" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="signal-on-dumbphone" data-fast-goal-content-cluster="messaging">{"See plans and start a trial"}</a>
+                    <a href="/get-started?platform=signal" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="signal-on-dumbphone" data-fast-goal-content-cluster="messaging">{"See how it works and start a trial"}</a>
                 </div>
             </section>
             <style>

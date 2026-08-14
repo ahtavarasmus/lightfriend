@@ -140,7 +140,7 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
                         <button class="hero-cta">{"Build My Exit Plan"}</button>
                     </a>
                     <p>{"Text-first access for phones that can call and send SMS. Initial connected-service setup still uses the provider's supported device."}</p>
-                    <a href="/#plans" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="light-phone-3-whatsapp-guide" data-fast-goal-content-cluster="messaging">{"See plans and start a trial"}</a>
+                    <a href="/get-started?platform=whatsapp" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="light-phone-3-whatsapp-guide" data-fast-goal-content-cluster="messaging">{"See how it works and start a trial"}</a>
                 </div>
             </section>
             <style>

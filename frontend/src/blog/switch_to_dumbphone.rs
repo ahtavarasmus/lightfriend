@@ -89,7 +89,7 @@ pub fn switch_to_dumbphone_guide() -> Html {
                 </ul>
                 <div class="blog-cta">
                     <h3>{"Ready to Switch to a Dumbphone?"}</h3>
-                    <a href="/#plans" class="forward-link" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="how-to-switch-to-dumbphone" data-fast-goal-content-cluster="minimalism">
+                    <a href="/get-started" class="forward-link" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="how-to-switch-to-dumbphone" data-fast-goal-content-cluster="minimalism">
                         <button class="hero-cta">{"See Lightfriend Plans"}</button>
                     </a>
                     <p>{"Use calls and SMS as the small interface to selected messages, email, reminders, and AI assistance."}</p>
