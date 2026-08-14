@@ -179,12 +179,47 @@ impl AiConfig {
     pub fn model(&self, provider: AiProvider, purpose: ModelPurpose) -> &str {
         match (provider, purpose) {
             (AiProvider::OpenRouter, ModelPurpose::Default) => "openai/gpt-4o-2024-11-20",
-            (AiProvider::Tinfoil, ModelPurpose::Default) => "kimi-k2-6",
+            (AiProvider::Tinfoil, ModelPurpose::Default) => "deepseek-v4-flash",
             (AiProvider::Near, ModelPurpose::Default) => &self.near_default_model,
             // Voice: fast non-reasoning model for low-latency responses
             (AiProvider::Tinfoil, ModelPurpose::Voice) => "gemma4-31b",
             (AiProvider::OpenRouter, ModelPurpose::Voice) => "openai/gpt-4o-2024-11-20",
             (AiProvider::Near, ModelPurpose::Voice) => &self.near_fast_model,
+        }
+    }
+
+    /// Select a vision-capable model whenever the request includes an image.
+    /// DeepSeek V4 Flash is text-only, while the existing fast models support images.
+    pub fn model_for_request(
+        &self,
+        provider: AiProvider,
+        purpose: ModelPurpose,
+        request: &chat_completion::ChatCompletionRequest,
+    ) -> &str {
+        if request
+            .messages
+            .iter()
+            .any(|message| match &message.content {
+                chat_completion::Content::ImageUrl(parts) => {
+                    parts.iter().any(|part| part.image_url.is_some())
+                }
+                chat_completion::Content::Text(_) => false,
+            })
+        {
+            return match provider {
+                AiProvider::OpenRouter => "openai/gpt-4o-2024-11-20",
+                AiProvider::Tinfoil => "gemma4-31b",
+                AiProvider::Near => &self.near_fast_model,
+            };
+        }
+
+        self.model(provider, purpose)
+    }
+
+    pub fn reasoning_effort_for_model(model: &str) -> Option<&'static str> {
+        match model {
+            "deepseek-v4-flash" => Some("medium"),
+            _ => None,
         }
     }
 
@@ -364,7 +399,9 @@ impl AiConfig {
         let mut last_error: Option<openai_api_rs::v1::error::APIError> = None;
 
         for (idx, provider) in providers.iter().copied().enumerate() {
-            let model = self.model(provider, purpose).to_string();
+            let model = self
+                .model_for_request(provider, purpose, request_template)
+                .to_string();
             let mut request = request_template.clone();
             request.model = model.clone();
 
@@ -477,11 +514,21 @@ impl AiConfig {
         let model = body
             .get("model")
             .and_then(|m| m.as_str())
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .to_string();
 
         if model == "gemma4-31b" || model == "kimi-k2-6" {
             if let Some(obj) = body.as_object_mut() {
                 obj.insert("enable_thinking".into(), serde_json::json!(false));
+            }
+        }
+
+        if let Some(reasoning_effort) = Self::reasoning_effort_for_model(&model) {
+            if let Some(obj) = body.as_object_mut() {
+                obj.insert(
+                    "reasoning_effort".into(),
+                    serde_json::json!(reasoning_effort),
+                );
             }
         }
     }
