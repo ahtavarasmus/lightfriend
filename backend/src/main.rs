@@ -1747,6 +1747,10 @@ async fn main() {
         .route("/llms.txt", get(blog::handlers::llms_txt_handler))
         .route("/llms-full.txt", get(blog::handlers::llms_full_txt_handler))
         .route(
+            "/can-i-leave-my-smartphone.md",
+            get(blog::handlers::smartphone_exit_plan_md_handler),
+        )
+        .route(
             "/.well-known/llms.txt",
             get(blog::handlers::llms_txt_handler),
         )

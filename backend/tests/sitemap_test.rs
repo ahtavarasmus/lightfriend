@@ -18,6 +18,7 @@ fn sitemap_contains_indexable_public_routes_and_blog_posts() {
         "https://lightfriend.ai/supported-countries",
         "https://lightfriend.ai/compatible-phones",
         "https://lightfriend.ai/how-it-works",
+        "https://lightfriend.ai/can-i-leave-my-smartphone",
         "https://lightfriend.ai/limitations",
         "https://lightfriend.ai/privacy-architecture",
         "https://lightfriend.ai/ai-assistant-by-sms",
@@ -165,4 +166,14 @@ async fn llms_handlers_serve_plain_text_instead_of_the_spa_fallback() {
     let body = std::str::from_utf8(&body).unwrap();
     assert!(body.contains("Lightfriend"));
     assert!(body.contains("digital-detox-with-whatsapp"));
+
+    let response = backend::blog::handlers::smartphone_exit_plan_md_handler().await;
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE).unwrap(),
+        "text/markdown; charset=utf-8"
+    );
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = std::str::from_utf8(&body).unwrap();
+    assert!(body.contains("# Can I Leave My Smartphone?"));
+    assert!(body.contains("The phone is not the platform"));
 }

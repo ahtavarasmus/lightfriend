@@ -42,8 +42,8 @@ fn guide_meta(kind: PublicGuideKind) -> SeoMeta {
             og_type: "website",
         },
         PublicGuideKind::CompatiblePhones => SeoMeta {
-            title: "Compatible Phones: Which Dumbphones Work With Lightfriend?",
-            description: "Lightfriend works with phones that can make calls and receive SMS. Compare Light Phone, Punkt, Mudita, Nokia, and other minimalist phones.",
+            title: "Lightfriend Works With Any Phone That Can Text or Call",
+            description: "Lightfriend runs outside the handset and works through ordinary SMS and calls. No app, mobile data, browser, or particular phone brand is required.",
             canonical: "https://lightfriend.ai/compatible-phones",
             og_type: "article",
         },
@@ -100,9 +100,9 @@ fn guide_heading(kind: PublicGuideKind) -> (&'static str, &'static str, &'static
             "There are three routes: a local Lightfriend number, notification-only service from a shared number, or an eligible Twilio number you bring yourself.",
         ),
         PublicGuideKind::CompatiblePhones => (
-            "Phone compatibility",
-            "If it can call and text, start there.",
-            "Lightfriend runs in the service, not on the handset. The carried phone normally needs voice calls and SMS rather than an app store or mobile browser.",
+            "Any phone",
+            "Choose the phone for how it feels to carry.",
+            "Lightfriend runs in the service, not on the handset. Any phone with ordinary SMS or calls can be the interface; it does not need an app, mobile data, a browser, or a particular operating system.",
         ),
         PublicGuideKind::HowItWorks => (
             "How it works",
@@ -192,20 +192,22 @@ fn compatible_phones_content() -> Html {
     html! {
         <>
             <section class="answer-card answer-card-primary">
-                <h2>{"Minimum handset requirements"}</h2>
+                <h2>{"The universal requirement"}</h2>
                 <ul>
-                    <li>{"A working mobile number that can receive ordinary SMS"}</li>
-                    <li>{"Voice calling if you want to call Lightfriend"}</li>
-                    <li>{"Carrier coverage for the country and number route you choose"}</li>
+                    <li>{"Ordinary SMS for the complete text-first interface and focused alerts"}</li>
+                    <li>{"Voice calling only if you want the optional call interface"}</li>
+                    <li>{"A supported Lightfriend number route for your country and carrier"}</li>
                 </ul>
-                <p>{"The handset does not normally need Wi-Fi, mobile data, a browser, Android, iOS, KaiOS, or an app store."}</p>
+                <p>{"That is the entire handset integration. The phone does not need Wi-Fi, mobile data, a browser, Android, iOS, KaiOS, or an app store."}</p>
+                <p><a href="/can-i-leave-my-smartphone">{"Build a smartphone-exit plan for the services you need →"}</a></p>
             </section>
             <section class="answer-grid">
-                <article class="answer-card"><h2>{"Strong candidates"}</h2><p>{"Light Phone II and III, Punkt MP02, Mudita Kompakt, conventional Nokia feature phones, and other unlocked phones with reliable calls and SMS."}</p></article>
-                <article class="answer-card"><h2>{"Check before buying"}</h2><p>{"Confirm regional LTE bands, VoLTE support, carrier approval, SMS behavior, group-text behavior, and whether the manufacturer blocks calls or texts to assistant services."}</p></article>
-                <article class="answer-card"><h2>{"A separate setup device"}</h2><p>{"Connected services such as WhatsApp can still require their native app on a supported device for pairing, account recovery, and occasional maintenance."}</p></article>
-                <article class="answer-card"><h2>{"Device-specific guides"}</h2><p><a href="/light-phone-3-whatsapp-guide">{"Light Phone III"}</a>{" · "}<a href="/blog/punkt-mp02-whatsapp">{"Punkt MP02"}</a>{" · "}<a href="/blog/mudita-kompakt-whatsapp">{"Mudita Kompakt"}</a>{" · "}<a href="/blog/nokia-2780-whatsapp">{"Nokia 2780 Flip"}</a></p></article>
+                <article class="answer-card"><h2>{"The phone is only the interface"}</h2><p>{"Connected clients, account monitoring, AI processing, and automations stay in Lightfriend. The carried handset sees an ordinary SMS conversation or call."}</p></article>
+                <article class="answer-card"><h2>{"Your carrier still matters"}</h2><p>{"The phone must work on your carrier. Confirm regional bands, VoLTE, ordinary SMS behavior, and whether the manufacturer blocks calls or texts to assistant services."}</p></article>
+                <article class="answer-card"><h2>{"Provider setup is separate"}</h2><p>{"WhatsApp and some other connected services can require their native app on a supported device for pairing, account recovery, and occasional maintenance. That does not change which phone you carry."}</p></article>
+                <article class="answer-card"><h2>{"Why there are phone-specific guides"}</h2><p>{"People search by handset because the native app options differ. Lightfriend's answer remains the same: if the phone can text or call, the brand does not need its own Lightfriend integration."}</p></article>
             </section>
+            <section class="answer-card"><h2>{"Examples—not a compatibility list"}</h2><p>{"Light Phone II and III, Punkt MP02, Mudita Kompakt, conventional Nokia feature phones, flip phones, candy-bar phones, and old smartphones used in a minimal way can all provide the ordinary SMS or call interface."}</p><p><a href="/light-phone-3-whatsapp-guide">{"Light Phone III"}</a>{" · "}<a href="/blog/punkt-mp02-whatsapp">{"Punkt MP02"}</a>{" · "}<a href="/blog/mudita-kompakt-whatsapp">{"Mudita Kompakt"}</a>{" · "}<a href="/blog/nokia-2780-whatsapp">{"Nokia 2780 Flip"}</a></p></section>
         </>
     }
 }
@@ -235,7 +237,7 @@ fn limitations_content() -> Html {
             <article class="answer-card"><h2>{"SMS is not end-to-end encrypted"}</h2><p>{"The final call or SMS leg is processed by your carrier. Connected providers also process their side of each communication."}</p></article>
             <article class="answer-card"><h2>{"Voice has a separate trust boundary"}</h2><p>{"Optional voice calls currently use an external realtime AI service for latency and are not inside the same independently verifiable inference chain."}</p></article>
             <article class="answer-card"><h2>{"Usage varies"}</h2><p>{"AI processing, carrier fees, destinations, message volume, and call duration affect metered usage. Bring-your-own Twilio charges are separate."}</p></article>
-            <article class="answer-card"><h2>{"Phone compatibility varies"}</h2><p>{"A phone may support basic SMS but still have carrier, VoLTE, group-message, shortcode, or assistant-number restrictions."}</p></article>
+            <article class="answer-card"><h2>{"Carrier and number routes still vary"}</h2><p>{"Lightfriend does not require a phone integration, but the handset and number still need working carrier service. VoLTE, SMS routing, shortcodes, and assistant-number restrictions can vary."}</p></article>
         </section>
     }
 }
@@ -374,7 +376,8 @@ pub fn public_guide(props: &PublicGuideProps) -> Html {
                     <h2>{"Keep exploring"}</h2>
                     <div>
                         <a href="/how-it-works">{"How it works"}</a>
-                        <a href="/compatible-phones">{"Compatible phones"}</a>
+                        <a href="/can-i-leave-my-smartphone">{"Plan your switch"}</a>
+                        <a href="/compatible-phones">{"Any phone"}</a>
                         <a href="/supported-countries">{"Supported countries"}</a>
                         <a href="/whatsapp-on-dumbphone">{"WhatsApp on dumbphone"}</a>
                         <a href="/email-on-dumbphone">{"Email on dumbphone"}</a>

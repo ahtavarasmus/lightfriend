@@ -1,8 +1,8 @@
 # Lightfriend - Complete Information
 
-> AI assistant for dumbphones, designed so no one else can see your chats or personal data, including while AI processes them. All code is open source, and cryptographic evidence lets anyone independently verify which code is running in production.
+> The phone-independent communication and AI service for people leaving smartphones. Lightfriend makes selected WhatsApp, Signal, Telegram, email, search, and other tools available through ordinary SMS and calls on any phone. It is designed so no one else can see chats or personal data, including while AI processes them.
 
-Lightfriend is a SaaS AI assistant that makes dumbphones (minimalist phones, flip phones, feature phones) functionally equivalent to smartphones for essential communication and productivity tasks. Users interact entirely through SMS text messages and voice calls - no apps, no internet browser, no smartphone required. The source code is public, and the production architecture combines an AWS Nitro Enclave, hardware-based remote attestation, a public code registry, encrypted storage, and independent key management.
+Lightfriend is not a phone, handset app, or custom operating system. It is a SaaS communication and AI service that runs outside the carried phone and uses ordinary SMS text messages and voice calls as the interface. The phone does not need a Lightfriend integration, mobile data, a browser, an app store, or a particular operating system. The source code is public, and the production architecture combines an AWS Nitro Enclave, hardware-based remote attestation, a public code registry, encrypted storage, and independent key management.
 
 ## The Problem Lightfriend Solves
 
@@ -135,12 +135,16 @@ The verification chain combines public source code, reproducible builds, hardwar
 
 ## Product Answer Pages
 
+### Can I Leave My Smartphone?
+Any phone with an ordinary SMS or call route can be the Lightfriend interface. Users choose which services they need to preserve, retain a separate setup or recovery device where a provider requires one, and verify the available country and number route. The interactive page includes a universal capability matrix; a Markdown version is also available at https://lightfriend.ai/can-i-leave-my-smartphone.md.
+URL: https://lightfriend.ai/can-i-leave-my-smartphone
+
 ### How Lightfriend Works
 Lightfriend connects selected WhatsApp, Signal, Telegram, and email accounts through a web dashboard. Users then interact through ordinary SMS or optional voice calls. Focused alerts and scheduled digests reduce constant checking, while supported write actions pass through application controls.
 URL: https://lightfriend.ai/how-it-works
 
 ### Compatible Phones
-The carried phone normally needs reliable ordinary SMS and voice calling. It does not need an app store, smartphone operating system, browser, or mobile data. Regional LTE bands, VoLTE, carrier approval, group-message behavior, and manufacturer restrictions still need to be checked for the exact model.
+This is not a device compatibility list. Lightfriend runs outside the handset, so any phone with an ordinary SMS or call route can be the interface. The brand does not need a Lightfriend integration. Carrier service, VoLTE, SMS routing, assistant-number restrictions, and the supported Lightfriend number route still need to work.
 URL: https://lightfriend.ai/compatible-phones
 
 ### Supported Countries
@@ -257,7 +261,9 @@ A: No. Any phone that can send texts and make calls works with Lightfriend.
 - Homepage: https://lightfriend.ai
 - Pricing: https://lightfriend.ai/pricing
 - How It Works: https://lightfriend.ai/how-it-works
-- Compatible Phones: https://lightfriend.ai/compatible-phones
+- Can I Leave My Smartphone?: https://lightfriend.ai/can-i-leave-my-smartphone
+- Smartphone Exit Planner Markdown: https://lightfriend.ai/can-i-leave-my-smartphone.md
+- Any Phone Requirements: https://lightfriend.ai/compatible-phones
 - Limitations: https://lightfriend.ai/limitations
 - Blog: https://lightfriend.ai/blog
 - Supported Countries: https://lightfriend.ai/supported-countries

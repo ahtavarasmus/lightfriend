@@ -88,3 +88,13 @@ pub async fn llms_txt_handler() -> Response {
 pub async fn llms_full_txt_handler() -> Response {
     static_text_response(include_str!("../../static/llms-full.txt"))
 }
+
+pub async fn smartphone_exit_plan_md_handler() -> Response {
+    let mut response =
+        static_text_response(include_str!("../../static/can-i-leave-my-smartphone.md"));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        "text/markdown; charset=utf-8".parse().unwrap(),
+    );
+    response
+}

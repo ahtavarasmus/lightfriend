@@ -293,15 +293,17 @@ pub fn render_blog_post(post: &BlogPost, related: &[BlogPost]) -> String {
         {related_html}
         <div class="blog-cta">
             <h3>Works with any phone that can text</h3>
-            <a href="/#plans" class="hero-cta" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="{slug}" data-fast-goal-content-cluster="{cluster}">See Plans</a>
-            <p>Use Lightfriend from the phone you already have. Some connected services require a separate device for initial setup or periodic maintenance.</p>
+            <a href="/can-i-leave-my-smartphone" class="hero-cta">Build your smartphone-exit plan</a>
+            <p>Lightfriend runs outside the handset. Use the phone you already have, then check the country route and connected-service setup you need.</p>
+            <a href="/#plans" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="{slug}" data-fast-goal-content-cluster="{cluster}">See plans and start a trial</a>
         </div>
     </div>
     <footer class="blog-footer">
         <div class="footer-links">
             <a href="/">Home</a>
             <a href="/blog">Blog</a>
-            <a href="/compatible-phones">Phone guides</a>
+            <a href="/can-i-leave-my-smartphone">Plan your switch</a>
+            <a href="/compatible-phones">Any phone</a>
             <a href="/how-it-works">How it works</a>
             <a href="/#plans">Pricing</a>
             <a href="/terms">Terms</a>
@@ -474,15 +476,17 @@ pub fn render_blog_index(
         </section>
         <div class="blog-cta">
             <h3>Works with any phone that can text</h3>
-            <a href="/#plans" class="hero-cta" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="blog-index" data-fast-goal-content-cluster="index">See Plans</a>
-            <p>Use Lightfriend from the phone you already have. Some connected services require a separate device for setup or periodic maintenance.</p>
+            <a href="/can-i-leave-my-smartphone" class="hero-cta">Build your smartphone-exit plan</a>
+            <p>Lightfriend runs outside the handset. Use the phone you already have, then check the country route and connected-service setup you need.</p>
+            <a href="/#plans" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="blog-index" data-fast-goal-content-cluster="index">See plans and start a trial</a>
         </div>
     </div>
     <footer class="blog-footer">
         <div class="footer-links">
             <a href="/">Home</a>
             <a href="/blog">Blog</a>
-            <a href="/compatible-phones">Phone guides</a>
+            <a href="/can-i-leave-my-smartphone">Plan your switch</a>
+            <a href="/compatible-phones">Any phone</a>
             <a href="/how-it-works">How it works</a>
             <a href="/#plans">Pricing</a>
             <a href="/terms">Terms</a>

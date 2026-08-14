@@ -238,7 +238,10 @@ pub fn landing() -> Html {
                     <p class="quiet-hero-subtitle">
                         {"Important people and messages from WhatsApp, Signal, Telegram, and email reach any phone by text or call."}
                     </p>
-                    <a href="#plans" class="quiet-cta">{"Start 7-day free trial"}</a>
+                    <div class="quiet-hero-actions">
+                        <a href="#plans" class="quiet-cta">{"Start 7-day free trial"}</a>
+                        <a href="/can-i-leave-my-smartphone" class="quiet-cta quiet-cta-secondary">{"Plan my switch"}</a>
+                    </div>
                     <p class="quiet-hero-note">{"No apps. No feed. Any phone."}</p>
                 </div>
             </header>
@@ -374,6 +377,8 @@ pub fn landing() -> Html {
                         <a href="/blog">{"Blog"}</a>
                         {" · "}
                         <a href="/how-it-works">{"How it works"}</a>
+                        {" · "}
+                        <a href="/can-i-leave-my-smartphone">{"Plan your switch"}</a>
                         {" · "}
                         <a href="/compatible-phones">{"Phones"}</a>
                         {" · "}
@@ -3376,6 +3381,23 @@ pub fn landing() -> Html {
         text-decoration: none;
         text-shadow: none;
         transition: background 160ms ease, transform 160ms ease;
+    }
+    .quiet-hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 0.75rem;
+        margin-top: 2rem;
+    }
+    .quiet-hero-actions .quiet-cta {
+        margin-top: 0;
+    }
+    .quiet-cta-secondary {
+        background: transparent;
+        color: #fff;
+    }
+    .quiet-cta-secondary:hover {
+        background: rgba(255, 255, 255, 0.1);
     }
     .quiet-cta:hover {
         background: #fff;

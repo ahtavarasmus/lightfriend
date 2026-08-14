@@ -1,24 +1,22 @@
 # Lightfriend
 
 ## What it is
-AI assistant for dumbphone/feature phone users. Access smartphone capabilities via SMS and voice calls without the addictive apps.
+Phone-independent communication and AI service for people leaving smartphones. Lightfriend runs outside the handset and makes selected connected services available through ordinary SMS and voice calls on any phone.
 
 ## Problem it solves
-Dumbphones lack WhatsApp, email, calendar, web search. Lightfriend bridges this gap through text and voice.
+People often keep a smartphone because essential contacts and services remain inside apps. Lightfriend separates selected communication and assistant functions from the handset so users can choose any phone with an ordinary SMS or call route.
 
 ## Integrations
 - WhatsApp (send, receive, monitor)
 - Telegram (send, receive, monitor)
 - Signal (send, receive, monitor)
-- Email (Gmail, Outlook - fetch, send, monitor)
-- Google Calendar (view, create, reminders)
+- Email (supported providers and IMAP-compatible accounts - fetch, send, monitor)
 
 ## Features
 - Voice calling interface
 - SMS chat interface
 - Web search (Perplexity AI)
 - Weather (7-day forecast)
-- Directions (Google Maps)
 - Photo analysis & translation (US, CA, AUS)
 - QR code scanning (US, CA, AUS)
 - Tesla vehicle control
@@ -33,7 +31,11 @@ Also available (choose from US/CA/UK/FI/NL/AU number): Germany, France, Spain, I
 ## Pricing
 See https://lightfriend.ai/pricing
 
+## Smartphone exit planner
+- Interactive planner and universal capability matrix: https://lightfriend.ai/can-i-leave-my-smartphone
+- Machine-readable planner: https://lightfriend.ai/can-i-leave-my-smartphone.md
+
 ## Technical
-- Works with any phone that can call or text
+- Works with any phone that has an ordinary SMS or call route; no handset app or particular operating system is required
 - No internet required on phone
 - Open source: https://github.com/ahtavarasmus/lightfriend

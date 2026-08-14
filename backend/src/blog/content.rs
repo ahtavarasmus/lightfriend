@@ -250,6 +250,7 @@ impl BlogStore {
             ("/supported-countries", "0.9", "weekly"),
             ("/compatible-phones", "0.9", "monthly"),
             ("/how-it-works", "0.9", "monthly"),
+            ("/can-i-leave-my-smartphone", "0.9", "monthly"),
             ("/limitations", "0.8", "monthly"),
             ("/privacy-architecture", "0.8", "monthly"),
             ("/ai-assistant-by-sms", "0.9", "monthly"),

@@ -1,8 +1,8 @@
 # Lightfriend
 
-> AI assistant for dumbphones, designed so no one else can see your chats or personal data, including while AI processes them. All code is open source, and cryptographic evidence lets anyone independently verify which code is running in production.
+> The phone-independent communication and AI service for people leaving smartphones. Lightfriend makes selected WhatsApp, Signal, Telegram, email, search, and other tools available through ordinary SMS and calls on any phone. It is designed so no one else can see chats or personal data, including while AI processes them.
 
-Lightfriend bridges the gap between minimalist dumbphones and essential digital services. Users interact entirely through SMS text messages and voice calls from any phone. It is a practical solution for people overcoming phone addiction: users keep access to essential communication without the addictive apps, infinite feeds, and attention-harvesting algorithms of smartphones.
+Lightfriend is not a phone, handset app, or custom operating system. It runs outside the carried phone and uses ordinary SMS and calls as the interface. The phone does not need mobile data, a browser, an app store, or a Lightfriend integration. Users can choose a phone for how it feels to carry while keeping selected essential communication without addictive apps, infinite feeds, or attention-harvesting algorithms.
 
 ## Verifiable Privacy Architecture
 
@@ -43,11 +43,13 @@ Lightfriend is designed for people who want to break free from phone addiction. 
 ## Docs
 
 - [How It Works](https://lightfriend.ai/how-it-works): How connected services become a compact SMS and call interface
+- [Can I Leave My Smartphone?](https://lightfriend.ai/can-i-leave-my-smartphone): Interactive exit planner and universal capability matrix
+- [Planner Markdown](https://lightfriend.ai/can-i-leave-my-smartphone.md): Machine-readable version of the exit plan and capability matrix
 - [Pricing](https://lightfriend.ai/pricing): Autopilot costs $80/month, $210 every 3 months, or $420/year with a 7-day free trial
 - [Privacy Architecture](https://lightfriend.ai/trustless): Full explanation of the hardware isolation, attestation, and trust chain
 - [Live Trust Chain](https://lightfriend.ai/trust-chain): Real-time verification of the running enclave
 - [Supported Countries](https://lightfriend.ai/supported-countries): Local-number, notification-only, and bring-your-own-number routes
-- [Compatible Phones](https://lightfriend.ai/compatible-phones): Requirements and model-specific compatibility checks
+- [Any Phone](https://lightfriend.ai/compatible-phones): Why the handset only needs an ordinary SMS or call route
 - [Product Limitations](https://lightfriend.ai/limitations): Setup-device, media, delivery, AI, carrier, and privacy limitations
 - [AI Assistant by SMS](https://lightfriend.ai/ai-assistant-by-sms): The SMS and call interface without another app
 - [WhatsApp on a Dumbphone](https://lightfriend.ai/whatsapp-on-dumbphone): Native, separate-device, and Lightfriend options

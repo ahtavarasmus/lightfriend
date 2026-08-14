@@ -45,6 +45,7 @@ mod pages {
     pub mod prompt_injection_safe;
     pub mod public_guides;
     pub mod signal_on_dumbphone;
+    pub mod smartphone_exit_planner;
     pub mod subscription_success;
     pub mod telegram_on_dumbphone;
     pub mod termsprivacy;
@@ -113,6 +114,7 @@ use pages::{
     prompt_injection_safe::PromptInjectionSafe,
     public_guides::{PublicGuide, PublicGuideKind},
     signal_on_dumbphone::SignalOnDumbphone,
+    smartphone_exit_planner::SmartphoneExitPlanner,
     subscription_success::SubscriptionSuccess,
     telegram_on_dumbphone::TelegramOnDumbphone,
     termsprivacy::{PrivacyPolicy, TermsAndConditions},
@@ -166,6 +168,8 @@ pub enum Route {
     WhatsappOnDumbphone,
     #[at("/mcp")]
     McpIntegrations,
+    #[at("/can-i-leave-my-smartphone")]
+    SmartphoneExitPlanner,
     #[at("/light-phone-3-whatsapp-guide")]
     LightPhone3WhatsappGuide,
     #[at("/how-to-switch-to-dumbphone")]
@@ -265,6 +269,9 @@ fn switch(routes: Route) -> Html {
         }
         Route::McpIntegrations => {
             html! { <PublicGuide kind={PublicGuideKind::McpIntegrations} /> }
+        }
+        Route::SmartphoneExitPlanner => {
+            html! { <SmartphoneExitPlanner /> }
         }
         Route::LightPhone3WhatsappGuide => {
             info!("Rendering LightPhone3WhatsappGuide page");
