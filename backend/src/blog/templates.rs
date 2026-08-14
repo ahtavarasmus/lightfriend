@@ -433,11 +433,11 @@ pub fn render_blog_index(
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
-    <title>Blog - Lightfriend Guides</title>
-    <meta name="description" content="Guides and insights on using messaging apps without a smartphone, AI assistants via SMS, digital minimalism, and verifiable privacy.">
+    <title>Dumbphone WhatsApp, Telegram, Signal &amp; AI Guides | Lightfriend</title>
+    <meta name="description" content="Practical guides for using WhatsApp, Telegram, Signal, email, and an AI assistant from a dumbphone or flip phone through SMS and calls.">
     <link rel="canonical" href="https://lightfriend.ai/blog">
-    <meta property="og:title" content="Blog - Lightfriend">
-    <meta property="og:description" content="Guides on messaging without a smartphone, AI via SMS, and digital minimalism.">
+    <meta property="og:title" content="Dumbphone Messaging &amp; AI Guides | Lightfriend">
+    <meta property="og:description" content="Practical WhatsApp, Telegram, Signal, email, and AI assistant guides for dumbphones and flip phones.">
     <meta property="og:url" content="https://lightfriend.ai/blog">
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Lightfriend">
@@ -460,10 +460,20 @@ pub fn render_blog_index(
     </nav>
     <div class="blog-page">
         <header class="blog-hero">
-            <h1>Blog</h1>
-            <p class="blog-meta">Guides, insights, and answers for people who want to stay connected without a smartphone.</p>
+            <h1>Dumbphone messaging and AI guides</h1>
+            <p class="blog-meta">Practical answers for keeping WhatsApp, Telegram, Signal, email, and useful AI features without carrying a smartphone.</p>
         </header>
         <section class="blog-list-section">
+            <div class="cluster-section">
+                <h2>Start with the problem you need to solve</h2>
+                <div class="blog-grid">
+                    <div class="blog-post-preview"><a href="/whatsapp-on-dumbphone"><h2>WhatsApp on a dumbphone</h2><p>Compare native support, linked devices, desktop access, and Lightfriend's text-first SMS bridge.</p></a></div>
+                    <div class="blog-post-preview"><a href="/telegram-on-dumbphone"><h2>Telegram on a dumbphone</h2><p>Use selected Telegram text workflows from any phone that can send SMS.</p></a></div>
+                    <div class="blog-post-preview"><a href="/signal-on-dumbphone"><h2>Signal on a dumbphone</h2><p>Understand the practical bridge and the privacy tradeoff of the final SMS leg.</p></a></div>
+                    <div class="blog-post-preview"><a href="/ai-assistant-by-sms"><h2>AI assistant by SMS</h2><p>Search, check connected messages and email, and receive focused alerts without an app.</p></a></div>
+                    <div class="blog-post-preview"><a href="/can-i-leave-my-smartphone"><h2>Can I leave my smartphone?</h2><p>Select what you still need and build a realistic phone-independent exit plan.</p></a></div>
+                </div>
+            </div>
             <div class="cluster-section">
                 <h2>Latest</h2>
                 {recent_cards}

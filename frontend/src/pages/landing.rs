@@ -388,6 +388,16 @@ pub fn landing() -> Html {
                         <span>{" · "}</span>
                         <a href="/mcp">{"MCP"}</a>
                         {" · "}
+                        <a href="/whatsapp-on-dumbphone">{"WhatsApp"}</a>
+                        {" · "}
+                        <a href="/telegram-on-dumbphone">{"Telegram"}</a>
+                        {" · "}
+                        <a href="/signal-on-dumbphone">{"Signal"}</a>
+                        {" · "}
+                        <a href="/ai-assistant-by-sms">{"AI by SMS"}</a>
+                        {" · "}
+                        <a href="/email-on-dumbphone">{"Email by SMS"}</a>
+                        {" · "}
                         <Link<Route> to={Route::Terms}>{"Terms"}</Link<Route>>
                         {" · "}
                         <Link<Route> to={Route::Privacy}>{"Privacy"}</Link<Route>>

@@ -73,6 +73,21 @@ fn sitemap_excludes_nonexistent_and_private_routes() {
 #[test]
 fn blog_posts_have_index_links_and_page_metadata() {
     let store = load_blog();
+    assert!(store
+        .blog_index_html
+        .contains("Dumbphone WhatsApp, Telegram, Signal &amp; AI Guides"));
+    for path in [
+        "/whatsapp-on-dumbphone",
+        "/telegram-on-dumbphone",
+        "/signal-on-dumbphone",
+        "/ai-assistant-by-sms",
+        "/can-i-leave-my-smartphone",
+    ] {
+        assert!(
+            store.blog_index_html.contains(&format!(r#"href="{path}""#)),
+            "blog index should expose the high-intent crawl path {path}"
+        );
+    }
     let maintained_slugs = [
         "ai-assistant-via-sms",
         "intentional-notifications",

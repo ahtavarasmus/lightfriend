@@ -1843,6 +1843,9 @@ async fn main() {
             HeaderValue::from_static("1; mode=block"),
         ))
         .layer(middleware::from_fn(
+            backend::utils::seo_headers::add_search_engine_headers,
+        ))
+        .layer(middleware::from_fn(
             backend::utils::datafast_bot_tracking::track_bot_traffic,
         ))
         .with_state(state.clone());

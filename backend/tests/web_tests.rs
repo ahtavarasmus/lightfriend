@@ -4,6 +4,8 @@ mod datafast_attribution_test;
 mod datafast_bot_tracking_test;
 #[path = "management_test.rs"]
 mod management_test;
+#[path = "seo_headers_test.rs"]
+mod seo_headers_test;
 #[path = "sitemap_test.rs"]
 mod sitemap_test;
 #[path = "spa_fallback_test.rs"]

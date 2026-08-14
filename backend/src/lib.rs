@@ -67,6 +67,7 @@ pub mod utils {
     pub mod notification_utils;
     pub mod plan_features;
     pub mod resend_contacts;
+    pub mod seo_headers;
     pub mod sms_sanitizer;
     pub mod stripe_webhook;
     pub mod tesla_keys;
