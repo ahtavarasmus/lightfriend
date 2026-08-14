@@ -207,7 +207,7 @@ fn compatible_phones_content() -> Html {
                 <article class="answer-card"><h2>{"Provider setup is separate"}</h2><p>{"WhatsApp and some other connected services can require their native app on a supported device for pairing, account recovery, and occasional maintenance. That does not change which phone you carry."}</p></article>
                 <article class="answer-card"><h2>{"Why there are phone-specific guides"}</h2><p>{"People search by handset because the native app options differ. Lightfriend's answer remains the same: if the phone can text or call, the brand does not need its own Lightfriend integration."}</p></article>
             </section>
-            <section class="answer-card"><h2>{"Examples—not a compatibility list"}</h2><p>{"Light Phone II and III, Punkt MP02, Mudita Kompakt, conventional Nokia feature phones, flip phones, candy-bar phones, and old smartphones used in a minimal way can all provide the ordinary SMS or call interface."}</p><p><a href="/light-phone-3-whatsapp-guide">{"Light Phone III"}</a>{" · "}<a href="/blog/punkt-mp02-whatsapp">{"Punkt MP02"}</a>{" · "}<a href="/blog/mudita-kompakt-whatsapp">{"Mudita Kompakt"}</a>{" · "}<a href="/blog/nokia-2780-whatsapp">{"Nokia 2780 Flip"}</a></p></section>
+            <section class="answer-card"><h2>{"Examples—not a compatibility list"}</h2><p>{"Light Phone II and III, Light Flip, Punkt MP02, Mudita Kompakt, conventional Nokia feature phones, flip phones, candy-bar phones, and old smartphones used in a minimal way can all provide the ordinary SMS or call interface."}</p><p><a href="/light-phone-3-whatsapp-guide">{"Light Phone III"}</a>{" · "}<a href="/blog/light-flip-whatsapp">{"Light Flip"}</a>{" · "}<a href="/blog/punkt-mp02-whatsapp">{"Punkt MP02"}</a>{" · "}<a href="/blog/mudita-kompakt-whatsapp">{"Mudita Kompakt"}</a>{" · "}<a href="/blog/nokia-2780-whatsapp">{"Nokia 2780 Flip"}</a></p></section>
         </>
     }
 }
@@ -298,7 +298,7 @@ fn whatsapp_content() -> Html {
                 <article class="answer-card"><h2>{"Option 3: Lightfriend"}</h2><p>{"Ask about recent messages, receive selected alerts or digests, search context, and request supported text replies over SMS."}</p></article>
                 <article class="answer-card"><h2>{"What you still need"}</h2><p>{"Keep a supported device with the native WhatsApp app for pairing, periodic activity, recovery, and reauthorization. Linked access can expire."}</p></article>
             </section>
-            <section class="answer-card"><h2>{"Compare specific phones"}</h2><p><a href="/light-phone-3-whatsapp-guide">{"Light Phone III"}</a>{" · "}<a href="/blog/punkt-mp02-whatsapp">{"Punkt MP02"}</a>{" · "}<a href="/blog/mudita-kompakt-whatsapp">{"Mudita Kompakt"}</a>{" · "}<a href="/blog/sunbeam-f1-pro-whatsapp">{"Sunbeam F1 Pro"}</a>{" · "}<a href="/blog/nokia-2780-whatsapp">{"Nokia 2780 Flip"}</a></p></section>
+            <section class="answer-card"><h2>{"Compare specific phones"}</h2><p><a href="/light-phone-3-whatsapp-guide">{"Light Phone III"}</a>{" · "}<a href="/blog/light-flip-whatsapp">{"Light Flip"}</a>{" · "}<a href="/blog/punkt-mp02-whatsapp">{"Punkt MP02"}</a>{" · "}<a href="/blog/mudita-kompakt-whatsapp">{"Mudita Kompakt"}</a>{" · "}<a href="/blog/sunbeam-f1-pro-whatsapp">{"Sunbeam F1 Pro"}</a>{" · "}<a href="/blog/nokia-2780-whatsapp">{"Nokia 2780 Flip"}</a></p></section>
         </>
     }
 }

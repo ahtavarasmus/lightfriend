@@ -1,77 +1,81 @@
 ---
-title: "How to Use Signal Without a Smartphone"
+title: "Signal on a Dumbphone or Flip Phone: What Actually Works"
 slug: "signal-without-smartphone"
-description: "Send and receive Signal messages from any basic phone via SMS using Lightfriend's encrypted bridge."
+description: "Signal has no general feature-phone app. Compare a linked desktop, a separate setup device, and Lightfriend's selected Signal workflows over ordinary SMS."
 date: "2026-04-12"
+updated: "2026-08-14"
 cluster: "messaging"
 keywords:
   - "signal without smartphone"
   - "signal on dumbphone"
   - "signal on flip phone"
+  - "dumb phone signal"
   - "signal sms bridge"
 tags:
-  - "signal"
+  - "Signal"
   - "messaging"
   - "dumbphone"
   - "privacy"
-schema_type: "HowTo"
-estimated_time: "PT5M"
+schema_type: "Article"
 faqs:
-  - q: "Can I use Signal on a dumbphone?"
-    a: "Not natively. But Lightfriend bridges Signal to SMS, so you can send and receive Signal messages from any phone."
-  - q: "Is this still encrypted?"
-    a: "The Signal leg uses Signal's encryption, and the bridge processes decrypted content inside Lightfriend's enclave. The final SMS leg uses your carrier and is not end-to-end encrypted."
-  - q: "Do my Signal contacts see my messages normally?"
-    a: "Yes. They see your messages as regular Signal messages."
+  - q: "Can I install Signal on a dumbphone?"
+    a: "Most true feature phones cannot run the official Signal app. Check the exact device and Signal's current supported platforms rather than assuming every minimalist phone is compatible."
+  - q: "Can Lightfriend provide Signal access by SMS?"
+    a: "Lightfriend can provide selected text-first Signal workflows through ordinary SMS after the account is connected separately. It does not install Signal on the carried phone or reproduce every native feature."
+  - q: "Is Signal over SMS still end-to-end encrypted?"
+    a: "No. The Signal leg uses Signal's encrypted transport, but Lightfriend must process the relayed content and the final carrier SMS leg is not Signal end-to-end encryption."
+  - q: "Do I need another device?"
+    a: "Keep a supported setup and recovery device available for registration, account maintenance, and native features. Do not treat an SMS bridge as a replacement for every Signal client function."
 related_slugs:
-  - "whatsapp-without-smartphone"
   - "telegram-without-smartphone"
-hub_slug: "whatsapp-without-smartphone"
-ai_summary: "Lightfriend bridges Signal to SMS. The production bridge runs inside an AWS Nitro Enclave, stored application data is encrypted, and the signed enclave measurement can be compared with the published build."
+  - "whatsapp-without-smartphone"
+  - "messages-without-a-smartphone"
+  - "ai-assistant-on-flip-phone"
+hub_path: "/signal-on-dumbphone"
+hub_label: "Signal on a dumbphone"
+ai_summary: "Most feature phones cannot run Signal natively. Lightfriend can expose selected Signal text workflows through ordinary SMS, but the final SMS leg is not end-to-end encrypted and a separate supported device remains necessary for setup, recovery, and native features."
 ---
 
-## The Problem
+## The current answer
 
-Signal is the gold standard for private messaging. But it only works on smartphones and desktops. If you carry a basic phone, you can't use Signal at all. This forces privacy-conscious people to choose between their values (using a minimal phone) and staying connected (using Signal).
+**Most true dumbphones and flip phones cannot run the official Signal app.** Signal supports a defined set of smartphone and desktop platforms, not a universal SMS fallback or generic feature-phone client. Check [Signal's current platform requirements](https://support.signal.org/hc/en-us/articles/360007320551-Installation-and-Registration) for the device you intend to use.
 
-## Why This Is Hard
+Lightfriend offers selected access through ordinary SMS. It does not install Signal on the handset. A separately connected Signal account supplies text-first workflows while the carried phone remains a basic call-and-text device.
 
-Signal has no SMS fallback. There is no KaiOS app. There is no web-only mode. You need the Signal app on a smartphone, period. The Signal Foundation has no plans to change this.
+## Your practical options
 
-If you switch to a dumbphone, you lose access to Signal entirely. Your contacts either switch to texting you (unencrypted) or you lose touch.
+| Option | Carried phone | Signal interface | Main limitation |
+|---|---|---|---|
+| Supported smartphone | Smartphone | Official Signal app | Keeps the full smartphone interface |
+| Desktop plus phone at home | Any carried phone | Signal Desktop during planned sessions | Not available while away from the computer |
+| Lightfriend by SMS | Any phone with working SMS | Compact requests, alerts, summaries, and supported replies | Final SMS leg is not end-to-end encrypted |
+| Calls and SMS instead | Any phone | Direct cellular contact | Contacts must use a different channel |
 
-## How Lightfriend Solves This
+## How the Lightfriend route works
 
-Lightfriend runs an open-source Signal bridge inside a sealed computing environment. Here's how it works:
+1. Register and maintain Signal on a supported device.
+2. Connect the account through Lightfriend's dashboard.
+3. Save the Lightfriend number on the dumbphone.
+4. Use ordinary texts to ask about recent Signal conversations or a specific contact.
+5. Receive configured alerts or digests and use supported text replies.
 
-1. **Connect your Signal account** through the Lightfriend web dashboard. This registers Lightfriend as a linked device on your Signal account.
-2. **Messages arrive as SMS.** When someone sends you a Signal message, Lightfriend converts it to SMS and sends it to your phone.
-3. **Reply by text.** Your SMS reply goes back through Signal to the person who messaged you.
-4. **Groups work.** You can read and reply to Signal group conversations.
+The exact feature set is narrower than Signal's native client. Voice and video calls, full media handling, safety-number workflows, device administration, and the complete group interface remain native-app tasks.
 
-## What Works
+## The privacy tradeoff
 
-| Feature | Works? |
-|---------|--------|
-| Receive text messages | Yes |
-| Send text messages | Yes |
-| Group messages | Yes |
-| Receive photos (as descriptions) | Yes |
-| Voice/video calls | No |
-| Disappearing messages | Messages are delivered then purged |
+Signal messages are end-to-end encrypted between Signal clients. A bridge must become an endpoint so it can process the message. Lightfriend processes production application data inside an AWS Nitro Enclave, encrypts stored application data, and publishes evidence that allows the reported enclave measurement to be compared with an approved build.
 
-## Privacy Inside the Bridge
+That architecture does not make carrier SMS into Signal. The message is decrypted for the selected workflow, and the final SMS between Lightfriend and the dumbphone travels through cellular providers without Signal's end-to-end encryption.
 
-The obvious question: if Signal messages are end-to-end encrypted, doesn't a bridge break that?
+For a highly sensitive conversation, use the official Signal client directly. For selective reachability where the alternative is abandoning Signal entirely, the SMS route may be an acceptable and explicit tradeoff.
 
-Here's how Lightfriend handles it: the production bridge runs inside an AWS Nitro Enclave. The enclave exposes no SSH login or administrative shell, stored application data is encrypted, and the signed enclave measurement can be compared with Lightfriend's published source build.
+## What to verify before switching
 
-The SMS leg (from Lightfriend to your phone) travels over your carrier's network, which is not end-to-end encrypted. This is a real tradeoff. But for people who would otherwise not use Signal at all, this is strictly better than sending everything as plain SMS.
+- Your Signal account has a supported setup and recovery route.
+- Your dumbphone and carrier allow ordinary two-way SMS to Lightfriend.
+- Your country has an available [Lightfriend number route](/supported-countries).
+- Critical contacts also have a direct call or SMS fallback.
+- Your threat model accepts the final carrier-SMS leg.
+- You have tested group volume, long messages, and failure behavior.
 
-## What You Need
-
-- Any phone with SMS
-- A Lightfriend account
-- A Signal account (requires a smartphone for initial setup)
-
-After linking, the smartphone is no longer needed.
+Use the [smartphone-exit planner](/can-i-leave-my-smartphone) before buying hardware, and review the [complete product limitations](/limitations) before treating the bridge as dependable infrastructure.

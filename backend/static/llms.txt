@@ -69,6 +69,8 @@ For the full explanation: [How Lightfriend Limits Prompt-Injection Impact](https
 - [Telegram on Dumbphone](https://lightfriend.ai/telegram-on-dumbphone): How to use Telegram on any dumbphone or flip phone via SMS
 - [Signal on Dumbphone](https://lightfriend.ai/signal-on-dumbphone): How to use Signal encrypted messaging on any basic phone via SMS
 - [Light Phone 3 WhatsApp Guide](https://lightfriend.ai/light-phone-3-whatsapp-guide): Current WhatsApp options for Light Phone III, including the limitations of text-first SMS access
+- [Light Flip WhatsApp Guide](https://lightfriend.ai/blog/light-flip-whatsapp): Current native-app uncertainty, separate-device option, and selected WhatsApp workflows through SMS
+- [AI Assistant on Any Flip Phone](https://lightfriend.ai/blog/ai-assistant-on-flip-phone): Why the handset needs only ordinary SMS or calls rather than an AI app
 - [Punkt MP02 WhatsApp Guide](https://lightfriend.ai/blog/punkt-mp02-whatsapp): Native-app status, Pigeon, and selected access through SMS
 - [Mudita Kompakt WhatsApp Guide](https://lightfriend.ai/blog/mudita-kompakt-whatsapp): Custom-OS limitations and the separate-device route
 - [Sunbeam F1 Pro WhatsApp Guide](https://lightfriend.ai/blog/sunbeam-f1-pro-whatsapp): Compatibility warning for models that block assistant numbers

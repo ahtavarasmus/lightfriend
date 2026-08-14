@@ -6,8 +6,8 @@ use yew_router::components::Link;
 #[function_component(SignalOnDumbphone)]
 pub fn signal_on_dumbphone() -> Html {
     use_seo(SeoMeta {
-        title: "Signal on Dumbphone - How to Use Signal on Any Flip Phone or Basic Phone",
-        description: "Use Signal encrypted messaging on any dumbphone or flip phone via SMS. Lightfriend monitors your Signal chats and forwards important messages as texts. No apps needed.",
+        title: "Signal on a Dumbphone or Flip Phone: What Works | Lightfriend",
+        description: "Most feature phones cannot run Signal natively. Compare a separate supported device with Lightfriend's selected Signal workflows over ordinary SMS.",
         canonical: "https://lightfriend.ai/signal-on-dumbphone",
         og_type: "article",
     });
@@ -27,13 +27,14 @@ pub fn signal_on_dumbphone() -> Html {
         <div class="blog-page">
             <div class="blog-background"></div>
             <section class="blog-hero">
-                <h1>{"How to Use Signal on a Dumbphone"}</h1>
-                <p>{"Send and receive Signal messages from any basic phone, flip phone, or minimalist phone - without installing anything."}</p>
+                <h1>{"Signal on a Dumbphone or Flip Phone"}</h1>
+                <p>{"What works natively, what stays on a supported Signal device, and how selected text workflows can reach an ordinary SMS phone."}</p>
             </section>
             <section class="blog-content">
-                <h2>{"Signal on a Dumbphone: It's Possible"}</h2>
-                <p>{"Signal has no dumbphone app. The Punkt MP02 used to support it, but that was discontinued. If you've switched to a minimalist phone for privacy or to break phone addiction, you've probably accepted that Signal is off the table. It doesn't have to be."}</p>
-                <p>{"Lightfriend connects to your Signal account and bridges your messages to SMS. You send and receive Signal messages as regular texts from any phone - no apps, no internet on your phone, no workarounds."}</p>
+                <h2>{"The Short Answer"}</h2>
+                <p>{"Most true feature phones cannot run the official Signal app. Lightfriend does not install Signal on the handset. It can provide selected Signal text workflows through ordinary SMS after the account is connected separately."}</p>
+                <p>{"That route is intentionally narrower than the native app, and the final carrier-SMS leg is not Signal end-to-end encryption. Keep a supported setup and recovery device available."}</p>
+                <p><a href="/blog/signal-without-smartphone">{"Read the detailed Signal options and privacy tradeoffs"}</a>{"."}</p>
 
                 <h2>{"How It Works"}</h2>
                 <p>{"Lightfriend acts as a bridge between Signal and your dumbphone's SMS:"}</p>
@@ -68,9 +69,9 @@ pub fn signal_on_dumbphone() -> Html {
                 <p>{"You build custom rules using WHEN/IF/THEN blocks. For example: when your best friend texts something urgent, notify immediately. When a group chat debates lunch plans, batch it into a digest. You control exactly what interrupts you and what waits."}</p>
 
                 <h2>{"Compatible Phones"}</h2>
-                <p>{"Any phone with SMS works:"}</p>
+                <p>{"The intended route works with phones that have unrestricted two-way SMS and a supported Lightfriend number route:"}</p>
                 <ul>
-                    <li>{"Light Phone 2 and Light Phone 3"}</li>
+                    <li>{"Light Phone 2, Light Phone 3, and Light Flip"}</li>
                     <li>{"Nokia flip phones (2780, 2660, 2760)"}</li>
                     <li>{"Punkt MP02 (even though its native Signal client was discontinued)"}</li>
                     <li>{"Mudita Pure"}</li>
@@ -148,11 +149,12 @@ pub fn signal_on_dumbphone() -> Html {
                 </ul>
 
                 <div class="blog-cta">
-                    <h3>{"Get Signal on Your Dumbphone"}</h3>
-                    <a href="/#plans" class="forward-link">
-                        <button class="hero-cta">{"See Plans"}</button>
+                    <h3>{"Check Signal in Your Exit Plan"}</h3>
+                    <a href="/can-i-leave-my-smartphone" class="forward-link" data-fast-goal="exit_planner_click" data-fast-goal-content-slug="signal-on-dumbphone" data-fast-goal-content-cluster="messaging">
+                        <button class="hero-cta">{"Build Your Plan"}</button>
                     </a>
-                    <p>{"Works with any phone that can send a text message."}</p>
+                    <p>{"Then verify your country route, setup device, privacy tradeoff, and ordinary SMS compatibility."}</p>
+                    <a href="/#plans" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="signal-on-dumbphone" data-fast-goal-content-cluster="messaging">{"See plans and start a trial"}</a>
                 </div>
             </section>
             <style>

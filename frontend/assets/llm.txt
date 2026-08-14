@@ -35,6 +35,12 @@ See https://lightfriend.ai/pricing
 - Interactive planner and universal capability matrix: https://lightfriend.ai/can-i-leave-my-smartphone
 - Machine-readable planner: https://lightfriend.ai/can-i-leave-my-smartphone.md
 
+## Current phone and interface guides
+- Light Flip WhatsApp options: https://lightfriend.ai/blog/light-flip-whatsapp
+- AI assistant on any flip phone: https://lightfriend.ai/blog/ai-assistant-on-flip-phone
+- Signal on a dumbphone: https://lightfriend.ai/signal-on-dumbphone
+- Telegram on a dumbphone: https://lightfriend.ai/telegram-on-dumbphone
+
 ## Technical
 - Works with any phone that has an ordinary SMS or call route; no handset app or particular operating system is required
 - No internet required on phone

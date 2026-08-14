@@ -124,7 +124,8 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
 
                 <h2>{"Continue planning your setup"}</h2>
                 <ul>
-                    <li><a href="/can-i-leave-my-smartphone" data-fast-goal="exit_planner_click">{"Build a personalized smartphone-exit plan"}</a></li>
+                    <li><a href="/can-i-leave-my-smartphone" data-fast-goal="exit_planner_click" data-fast-goal-content-slug="light-phone-3-whatsapp-guide" data-fast-goal-content-cluster="messaging">{"Build a personalized smartphone-exit plan"}</a></li>
+                    <li><a href="/blog/light-flip-whatsapp">{"Compare WhatsApp options for the new Light Flip"}</a></li>
                     <li><a href="/whatsapp-on-dumbphone">{"Compare WhatsApp options for any dumbphone or flip phone"}</a></li>
                     <li><a href="/blog/best-dumbphone-whatsapp-setup-2026">{"Compare four dumbphone WhatsApp setups"}</a></li>
                     <li><a href="/how-to-switch-to-dumbphone">{"Use the complete dumbphone switching checklist"}</a></li>
@@ -135,7 +136,7 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
 
                 <div class="blog-cta">
                     <h3>{"Can you leave your smartphone without losing the people who use WhatsApp?"}</h3>
-                    <a href="/can-i-leave-my-smartphone" class="forward-link" data-fast-goal="exit_planner_click">
+                    <a href="/can-i-leave-my-smartphone" class="forward-link" data-fast-goal="exit_planner_click" data-fast-goal-content-slug="light-phone-3-whatsapp-guide" data-fast-goal-content-cluster="messaging">
                         <button class="hero-cta">{"Build My Exit Plan"}</button>
                     </a>
                     <p>{"Text-first access for phones that can call and send SMS. Initial connected-service setup still uses the provider's supported device."}</p>

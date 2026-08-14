@@ -182,16 +182,24 @@ Lightfriend is read-only by default. The default tool policy allows analysis and
 URL: https://lightfriend.ai/prompt-injection-safe
 
 ### Telegram on Dumbphone
-How to use Telegram on any dumbphone, flip phone, or basic phone. Lightfriend bridges Telegram to SMS - send and receive messages, monitor group chats, get AI-filtered notifications. No apps or smartphone required.
+Most true feature phones cannot run Telegram natively. Lightfriend can expose selected text-first Telegram workflows through ordinary SMS, with focused alerts and digests instead of mirroring every channel or group message. A separate supported device remains necessary for setup, recovery, and native features.
 URL: https://lightfriend.ai/telegram-on-dumbphone
 
 ### Signal on Dumbphone
-How to use Signal encrypted messaging on any dumbphone or flip phone. Lightfriend connects to your Signal account and relays messages via SMS. Privacy-focused: runs in a hardware-isolated enclave with cryptographic attestation.
+Most true feature phones cannot run Signal natively. Lightfriend can expose selected Signal text workflows through ordinary SMS, but the final carrier-SMS leg is not Signal end-to-end encryption. A separate supported device remains necessary for setup, recovery, and native features.
 URL: https://lightfriend.ai/signal-on-dumbphone
 
 ### Light Phone 3 WhatsApp Guide
 Light Phone III does not currently list a native WhatsApp tool. This guide compares calls and SMS, WhatsApp Web/Desktop, and Lightfriend's selected text access over SMS. Lightfriend does not install WhatsApp on LightOS or reproduce every provider feature; native-app setup and linked-device maintenance still require a separate supported device.
 URL: https://lightfriend.ai/light-phone-3-whatsapp-guide
+
+### WhatsApp on Light Flip
+Do not assume the Light Flip will ship with the official WhatsApp app unless Light documents support for the exact production software. Lightfriend does not install WhatsApp on LightOS; it can provide selected text-first access through ordinary SMS while a separate supported device handles registration, pairing, recovery, native media, and periodic linked-device maintenance.
+URL: https://lightfriend.ai/blog/light-flip-whatsapp
+
+### AI Assistant on Any Flip Phone
+Any flip phone with ordinary SMS or calls can use Lightfriend as an external AI interface. The handset needs no AI app, browser, mobile data, or particular operating system. Compact search, messages, email, reminders, alerts, and enabled connected tools can be accessed by SMS, subject to the current product and carrier limitations.
+URL: https://lightfriend.ai/blog/ai-assistant-on-flip-phone
 
 ### WhatsApp on Punkt MP02
 Punkt does not advertise native WhatsApp on the MP02. The phone offers calls, SMS, and the separate Signal-compatible Pigeon service. Lightfriend can provide selected WhatsApp text access over SMS while another supported device handles pairing and recovery.

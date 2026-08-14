@@ -6,8 +6,8 @@ use yew_router::components::Link;
 #[function_component(TelegramOnDumbphone)]
 pub fn telegram_on_dumbphone() -> Html {
     use_seo(SeoMeta {
-        title: "Telegram on Dumbphone - How to Use Telegram on Any Flip Phone or Basic Phone",
-        description: "Use Telegram on any dumbphone or flip phone via SMS. Lightfriend monitors your Telegram chats and forwards important messages as texts. No apps, no smartphone needed.",
+        title: "Telegram on a Dumbphone or Flip Phone: Options | Lightfriend",
+        description: "Most feature phones cannot run Telegram natively. Compare a home device or computer with Lightfriend's selected Telegram workflows over ordinary SMS.",
         canonical: "https://lightfriend.ai/telegram-on-dumbphone",
         og_type: "article",
     });
@@ -27,13 +27,14 @@ pub fn telegram_on_dumbphone() -> Html {
         <div class="blog-page">
             <div class="blog-background"></div>
             <section class="blog-hero">
-                <h1>{"How to Use Telegram on a Dumbphone"}</h1>
-                <p>{"Send and receive Telegram messages from any basic phone, flip phone, or minimalist phone - no apps or smartphone required."}</p>
+                <h1>{"Telegram on a Dumbphone or Flip Phone"}</h1>
+                <p>{"Compare a native app-capable device, planned desktop sessions, and selected Telegram workflows through ordinary SMS."}</p>
             </section>
             <section class="blog-content">
-                <h2>{"Yes, You Can Use Telegram on a Dumbphone"}</h2>
-                <p>{"Telegram doesn't work on dumbphones - there's no app for KaiOS, no browser client that runs on a flip phone, and no official way to access your chats without a smartphone. But there's a workaround that gives you full Telegram access from any phone that can send a text message."}</p>
-                <p>{"Lightfriend is an AI assistant that connects to your Telegram account and bridges it to SMS. You send and receive Telegram messages as regular text messages. Your dumbphone never needs to install anything - it just sends and receives texts like it always has."}</p>
+                <h2>{"The Short Answer"}</h2>
+                <p>{"Most true feature phones do not run Telegram's official apps. Some Android-based minimalist phones are a separate category and may run the native app if their software policy permits it."}</p>
+                <p>{"Lightfriend does not install Telegram on the dumbphone. It can provide selected text-first workflows through ordinary SMS after the account is connected separately. Authentication, recovery, rich media, and full account administration stay on a supported device or computer."}</p>
+                <p><a href="/blog/telegram-without-smartphone">{"Read the detailed Telegram options and limitations"}</a>{"."}</p>
 
                 <h2>{"How It Works"}</h2>
                 <p>{"Instead of running Telegram on your phone, Lightfriend runs it for you in the cloud and relays messages via SMS:"}</p>
@@ -63,9 +64,9 @@ pub fn telegram_on_dumbphone() -> Html {
                 <p>{"This is the key difference from just forwarding all notifications - you get a smart filter that respects your minimalist lifestyle while making sure you never miss something important."}</p>
 
                 <h2>{"Compatible Phones"}</h2>
-                <p>{"This works with literally any phone that can send and receive text messages:"}</p>
+                <p>{"The intended route works with phones that have unrestricted two-way SMS and a supported Lightfriend number route:"}</p>
                 <ul>
-                    <li>{"Light Phone 2 and Light Phone 3"}</li>
+                    <li>{"Light Phone 2, Light Phone 3, and Light Flip"}</li>
                     <li>{"Nokia flip phones (2780 Flip, 2660 Flip, 2760 Flip)"}</li>
                     <li>{"Punkt MP02"}</li>
                     <li>{"Mudita Pure"}</li>
@@ -152,11 +153,12 @@ pub fn telegram_on_dumbphone() -> Html {
                 <p>{"Connect all of them and get one unified SMS interface for everything."}</p>
 
                 <div class="blog-cta">
-                    <h3>{"Get Telegram on Your Dumbphone"}</h3>
-                    <a href="/#plans" class="forward-link">
-                        <button class="hero-cta">{"See Plans"}</button>
+                    <h3>{"Check Telegram in Your Exit Plan"}</h3>
+                    <a href="/can-i-leave-my-smartphone" class="forward-link" data-fast-goal="exit_planner_click" data-fast-goal-content-slug="telegram-on-dumbphone" data-fast-goal-content-cluster="messaging">
+                        <button class="hero-cta">{"Build Your Plan"}</button>
                     </a>
-                    <p>{"Works with any phone that can send a text message."}</p>
+                    <p>{"Then verify your country route, setup device, message volume, and ordinary SMS compatibility."}</p>
+                    <a href="/#plans" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="telegram-on-dumbphone" data-fast-goal-content-cluster="messaging">{"See plans and start a trial"}</a>
                 </div>
             </section>
             <style>

@@ -44,6 +44,8 @@ fn sitemap_contains_indexable_public_routes_and_blog_posts() {
         "https://lightfriend.ai/blog/mudita-kompakt-whatsapp",
         "https://lightfriend.ai/blog/sunbeam-f1-pro-whatsapp",
         "https://lightfriend.ai/blog/nokia-2780-whatsapp",
+        "https://lightfriend.ai/blog/light-flip-whatsapp",
+        "https://lightfriend.ai/blog/ai-assistant-on-flip-phone",
     ] {
         assert!(
             sitemap.contains(&format!("<loc>{url}</loc>")),
@@ -82,6 +84,8 @@ fn blog_posts_have_index_links_and_page_metadata() {
         "/signal-on-dumbphone",
         "/ai-assistant-by-sms",
         "/can-i-leave-my-smartphone",
+        "/blog/light-flip-whatsapp",
+        "/blog/ai-assistant-on-flip-phone",
     ] {
         assert!(
             store.blog_index_html.contains(&format!(r#"href="{path}""#)),
@@ -106,6 +110,8 @@ fn blog_posts_have_index_links_and_page_metadata() {
         "mudita-kompakt-whatsapp",
         "sunbeam-f1-pro-whatsapp",
         "nokia-2780-whatsapp",
+        "light-flip-whatsapp",
+        "ai-assistant-on-flip-phone",
     ];
 
     for slug in maintained_slugs {
@@ -124,6 +130,11 @@ fn blog_posts_have_index_links_and_page_metadata() {
             post.full_page_html
                 .contains(r#"data-fast-goal="blog_pricing_click""#),
             "post {slug} should track pricing CTA clicks"
+        );
+        assert!(
+            post.full_page_html
+                .contains(r#"data-fast-goal="exit_planner_click""#),
+            "post {slug} should track smartphone exit planner clicks"
         );
         if matches!(
             slug,
@@ -175,12 +186,16 @@ async fn llms_handlers_serve_plain_text_instead_of_the_spa_fallback() {
     let body = std::str::from_utf8(&body).unwrap();
     assert!(body.contains("Lightfriend"));
     assert!(body.contains("best-dumbphone-whatsapp-setup-2026"));
+    assert!(body.contains("light-flip-whatsapp"));
+    assert!(body.contains("ai-assistant-on-flip-phone"));
 
     let response = backend::blog::handlers::llms_full_txt_handler().await;
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body = std::str::from_utf8(&body).unwrap();
     assert!(body.contains("Lightfriend"));
     assert!(body.contains("digital-detox-with-whatsapp"));
+    assert!(body.contains("WhatsApp on Light Flip"));
+    assert!(body.contains("AI Assistant on Any Flip Phone"));
 
     let response = backend::blog::handlers::smartphone_exit_plan_md_handler().await;
     assert_eq!(

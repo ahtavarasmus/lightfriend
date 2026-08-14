@@ -293,7 +293,7 @@ pub fn render_blog_post(post: &BlogPost, related: &[BlogPost]) -> String {
         {related_html}
         <div class="blog-cta">
             <h3>Works with any phone that can text</h3>
-            <a href="/can-i-leave-my-smartphone" class="hero-cta">Build your smartphone-exit plan</a>
+            <a href="/can-i-leave-my-smartphone" class="hero-cta" data-fast-goal="exit_planner_click" data-fast-goal-content-slug="{slug}" data-fast-goal-content-cluster="{cluster}">Build your smartphone-exit plan</a>
             <p>Lightfriend runs outside the handset. Use the phone you already have, then check the country route and connected-service setup you need.</p>
             <a href="/#plans" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="{slug}" data-fast-goal-content-cluster="{cluster}">See plans and start a trial</a>
         </div>
@@ -350,8 +350,8 @@ pub fn render_blog_index(
     // Existing hand-coded posts (link to their current top-level routes)
     let existing_posts = vec![
         ("/prompt-injection-safe", "Why Lightfriend Can't Be Prompt Injected", "Most AI assistants are powerful enough to be dangerous. Lightfriend is read-only by default.", "April 10, 2026"),
-        ("/telegram-on-dumbphone", "How to Use Telegram on a Dumbphone", "Send and receive Telegram messages from any basic phone via SMS.", "April 10, 2026"),
-        ("/signal-on-dumbphone", "How to Use Signal on a Dumbphone", "Use Signal encrypted messaging on any flip phone or basic phone.", "April 10, 2026"),
+        ("/telegram-on-dumbphone", "Telegram on a Dumbphone or Flip Phone", "Compare native, desktop, home-device, and selected SMS routes.", "April 10, 2026"),
+        ("/signal-on-dumbphone", "Signal on a Dumbphone or Flip Phone", "Compare supported clients with selected SMS workflows and their privacy tradeoffs.", "April 10, 2026"),
         ("/how-to-read-more-accidentally", "How to Read Books Accidentally", "How to Read More Without Willpower", "August 21, 2025"),
         ("/how-to-switch-to-dumbphone", "How to Switch to a Dumbphone", "All the things you need to consider when joining the dumbphone revolution.", "August 19, 2025"),
         ("/light-phone-3-whatsapp-guide", "Light Phone 3 WhatsApp Guide", "Add WhatsApp functionality to your Light Phone 3 without compromising its minimalist design.", "August 13, 2025"),
@@ -468,9 +468,11 @@ pub fn render_blog_index(
                 <h2>Start with the problem you need to solve</h2>
                 <div class="blog-grid">
                     <div class="blog-post-preview"><a href="/whatsapp-on-dumbphone"><h2>WhatsApp on a dumbphone</h2><p>Compare native support, linked devices, desktop access, and Lightfriend's text-first SMS bridge.</p></a></div>
+                    <div class="blog-post-preview"><a href="/blog/light-flip-whatsapp"><h2>Does the Light Flip have WhatsApp?</h2><p>Separate confirmed native tools from the home-device and Lightfriend SMS routes.</p></a></div>
                     <div class="blog-post-preview"><a href="/telegram-on-dumbphone"><h2>Telegram on a dumbphone</h2><p>Use selected Telegram text workflows from any phone that can send SMS.</p></a></div>
                     <div class="blog-post-preview"><a href="/signal-on-dumbphone"><h2>Signal on a dumbphone</h2><p>Understand the practical bridge and the privacy tradeoff of the final SMS leg.</p></a></div>
                     <div class="blog-post-preview"><a href="/ai-assistant-by-sms"><h2>AI assistant by SMS</h2><p>Search, check connected messages and email, and receive focused alerts without an app.</p></a></div>
+                    <div class="blog-post-preview"><a href="/blog/ai-assistant-on-flip-phone"><h2>AI assistant for any flip phone</h2><p>Use SMS and calls instead of installing an AI app on the handset.</p></a></div>
                     <div class="blog-post-preview"><a href="/can-i-leave-my-smartphone"><h2>Can I leave my smartphone?</h2><p>Select what you still need and build a realistic phone-independent exit plan.</p></a></div>
                 </div>
             </div>
@@ -486,7 +488,7 @@ pub fn render_blog_index(
         </section>
         <div class="blog-cta">
             <h3>Works with any phone that can text</h3>
-            <a href="/can-i-leave-my-smartphone" class="hero-cta">Build your smartphone-exit plan</a>
+            <a href="/can-i-leave-my-smartphone" class="hero-cta" data-fast-goal="exit_planner_click" data-fast-goal-content-slug="blog-index" data-fast-goal-content-cluster="index">Build your smartphone-exit plan</a>
             <p>Lightfriend runs outside the handset. Use the phone you already have, then check the country route and connected-service setup you need.</p>
             <a href="/#plans" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="blog-index" data-fast-goal-content-cluster="index">See plans and start a trial</a>
         </div>
