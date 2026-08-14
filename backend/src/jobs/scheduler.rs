@@ -1577,10 +1577,42 @@ fn format_digest_message_with_cap(
     let cleaned = strip_sender_prefix(raw_summary, &msg.sender_name);
     let short: String = cleaned.chars().take(effective_cap).collect();
     let trimmed = short.trim();
+    let sender_label = digest_sender_label(msg);
     if trimmed.is_empty() {
-        format!("- {}", msg.sender_name)
+        format!("- {}", sender_label)
     } else {
-        format!("- {}: {}", msg.sender_name, trimmed)
+        format!("- {}: {}", sender_label, trimmed)
+    }
+}
+
+/// Pick the most specific sender identity available without ever presenting
+/// the user with an "Unknown" label. Bridge sender keys are stable external
+/// identities, so they are more useful than a missing display name. The
+/// platform-specific fallback still tells the user where the message arrived.
+pub fn digest_sender_label(msg: &crate::models::ontology_models::OntMessage) -> String {
+    let sender_name = msg.sender_name.trim();
+    let has_useful_name = !sender_name.is_empty()
+        && !sender_name.eq_ignore_ascii_case("unknown")
+        && !sender_name.eq_ignore_ascii_case("unknown sender");
+    if has_useful_name {
+        return sender_name.to_string();
+    }
+
+    if let Some(sender_key) = msg
+        .sender_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+    {
+        return sender_key.to_string();
+    }
+
+    match msg.platform.to_ascii_lowercase().as_str() {
+        "whatsapp" => "WhatsApp sender".to_string(),
+        "signal" => "Signal sender".to_string(),
+        "telegram" => "Telegram sender".to_string(),
+        "email" => "Email sender".to_string(),
+        _ => "Message sender".to_string(),
     }
 }
 
@@ -1623,7 +1655,7 @@ fn render_high_signal_section(
 /// How many FYI lines (sender groups) to show before collapsing the rest
 /// into a "+N more" tail. With same-sender collapsing each line may cover
 /// multiple messages, so this caps visual rows, not message volume.
-const FYI_CAP: usize = 5;
+const FYI_CAP: usize = 8;
 
 /// Collapse adjacent messages from the same (sender, room) into a single
 /// digest line. Within a group, summaries are joined chronologically with
@@ -1639,6 +1671,7 @@ fn format_digest_group(group: &[&crate::models::ontology_models::OntMessage]) ->
     sorted.sort_by_key(|m| m.created_at);
 
     let sender_name = &sorted[0].sender_name;
+    let sender_label = digest_sender_label(sorted[0]);
     let teasers: Vec<String> = sorted
         .iter()
         .take(FYI_GROUP_MESSAGE_CAP)
@@ -1655,9 +1688,9 @@ fn format_digest_group(group: &[&crate::models::ontology_models::OntMessage]) ->
         .collect();
 
     if teasers.is_empty() {
-        format!("- {}", sender_name)
+        format!("- {}", sender_label)
     } else {
-        let mut line = format!("- {}: {}", sender_name, teasers.join("; "));
+        let mut line = format!("- {}: {}", sender_label, teasers.join("; "));
         if sorted.len() > FYI_GROUP_MESSAGE_CAP {
             line.push_str(&format!(
                 "; + {} more",
@@ -1884,29 +1917,6 @@ pub async fn build_digest_for_user(
     drop_spam(&mut now_msgs);
     drop_spam(&mut later_msgs);
 
-    // -------- Filter: separate non-contact messages --------
-    // Non-contact = person_id is None AND platform is not email.
-    // Emails always shown since they inherently come from outside the
-    // contacts list. Non-contact bridge messages are collapsed into a
-    // count at the end to reduce noise from unknown senders.
-    let partition_contacts =
-        |msgs: &mut Vec<crate::models::ontology_models::OntMessage>| -> Vec<crate::models::ontology_models::OntMessage> {
-            let mut non_contact = Vec::new();
-            let mut contact = Vec::new();
-            for m in msgs.drain(..) {
-                if m.person_id.is_some() || m.platform == "email" {
-                    contact.push(m);
-                } else {
-                    non_contact.push(m);
-                }
-            }
-            *msgs = contact;
-            non_contact
-        };
-    let nc_now = partition_contacts(&mut now_msgs);
-    let nc_later = partition_contacts(&mut later_msgs);
-    let non_contact_count = nc_now.len() + nc_later.len();
-
     // -------- Sort each section by category score, then recency --------
     let sort_section = |msgs: &mut Vec<crate::models::ontology_models::OntMessage>| {
         msgs.sort_by(|a, b| {
@@ -1974,11 +1984,6 @@ pub async fn build_digest_for_user(
         digest_parts.push(line);
     }
 
-    // Unknown senders: collapsed count only
-    if non_contact_count > 0 {
-        digest_parts.push(format!("+{} from unknown senders", non_contact_count));
-    }
-
     // Recently added tracked items: inline list, no per-item due dates (teaser)
     if !recent_events.is_empty() {
         let total = recent_events.len();
@@ -2023,35 +2028,11 @@ pub async fn build_digest_for_user(
     for m in later_msgs.iter() {
         message_ids.push(m.id);
     }
-    // Non-contact messages must also be marked delivered to prevent
-    // reappearing in the next digest cycle.
-    for m in nc_now.iter() {
-        message_ids.push(m.id);
-    }
-    for m in nc_later.iter() {
-        message_ids.push(m.id);
-    }
-
-    // Header wording: disambiguate "msgs" (unread/pending messages from
-    // the last 24h) from "events today" (ontology events with a due_at
-    // timestamp inside the user's local day). Previously the header
-    // said just "1 today" which users read as "1 new thing today" and
-    // got confused about what was being counted.
-    let total_messages = now_msgs.len() + later_msgs.len() + non_contact_count;
-    let total_today = today_events.len();
-    let header = match (total_messages, total_today) {
-        (0, t) => format!("{} event{} today", t, if t == 1 { "" } else { "s" }),
-        (m, 0) => format!("{} msg{}", m, if m == 1 { "" } else { "s" }),
-        (m, t) => format!(
-            "{} msg{}, {} event{} today",
-            m,
-            if m == 1 { "" } else { "s" },
-            t,
-            if t == 1 { "" } else { "s" }
-        ),
-    };
-
-    let digest_text = format!("{}\n\n{}", header, digest_parts.join("\n\n"));
+    // Counts without context are frustrating (and used to be the entire
+    // digest when every bridge message came from a non-contact). The sections
+    // below already identify each visible sender and topic, so use a stable
+    // label instead of a vague "N msgs" headline.
+    let digest_text = format!("Your digest\n\n{}", digest_parts.join("\n\n"));
     let digest_text = crate::utils::sms_sanitizer::clamp_sms_body(&digest_text);
     Some((digest_text, message_ids))
 }
@@ -2139,14 +2120,9 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
             if let Some(recovery_body) = render_fyi_inline(&recovery_messages) {
                 let message_ids: Vec<i64> =
                     recovery_messages.iter().map(|message| message.id).collect();
-                let header = format!(
-                    "{} msg{}",
-                    message_ids.len(),
-                    if message_ids.len() == 1 { "" } else { "s" }
-                );
                 let digest_text = crate::utils::sms_sanitizer::clamp_sms_body(&format!(
-                    "{}\n\n{}",
-                    header, recovery_body
+                    "Your digest\n\n{}",
+                    recovery_body
                 ));
 
                 tracing::warn!(

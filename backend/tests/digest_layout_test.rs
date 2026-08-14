@@ -5,8 +5,8 @@
 //! (events due today, messages by urgency, with the seen/replied filters).
 
 use backend::jobs::scheduler::{
-    build_digest_for_user, category_score, render_fyi_inline, strip_sender_prefix,
-    truncate_digest_piece,
+    build_digest_for_user, category_score, digest_sender_label, render_fyi_inline,
+    strip_sender_prefix, truncate_digest_piece,
 };
 use backend::models::ontology_models::{NewOntEvent, NewOntMessage, OntMessage};
 use backend::test_utils::{create_test_state, create_test_user, TestUserParams};
@@ -837,12 +837,8 @@ async fn full_digest_renders_all_sections() {
     assert!(digest_text.contains("Buy birthday gift"));
     assert!(digest_text.contains("Reply to John about Friday"));
 
-    // Header counts: 6 messages + 2 today
-    assert!(
-        digest_text.contains("6 msgs") && digest_text.contains("2 events today"),
-        "header should mention 6 msgs and 2 events today, got: {}",
-        digest_text.lines().next().unwrap_or("")
-    );
+    assert_eq!(digest_text.lines().next(), Some("Your digest"));
+    assert!(!digest_text.contains(" msgs"));
 
     // The full set of msg IDs (6) gets marked delivered, even if some overflowed
     // the visible count, so they don't reappear next cycle.
@@ -1047,11 +1043,11 @@ async fn digest_stays_compact_on_busy_day() {
         "5 crit + 8 high = 13 → 3 shown + '+10 more'"
     );
 
-    // FYI shows per-item summaries capped at 5
+    // FYI shows per-item summaries capped at 8
     assert!(digest_text.contains("FYI:"));
     assert!(
-        digest_text.contains("+ 20 more"),
-        "25 fyi → 5 shown + '+20 more'"
+        digest_text.contains("+ 17 more"),
+        "25 fyi → 8 shown + '+17 more'"
     );
 
     // With per-item FYI summaries the digest is larger, but should still
@@ -1105,12 +1101,12 @@ async fn digest_returns_none_when_everything_is_filtered() {
 }
 
 // =============================================================================
-// Non-contact filtering
+// Sender identity in digests
 // =============================================================================
 
 #[tokio::test(flavor = "current_thread")]
 #[serial]
-async fn digest_filters_non_contact_messages() {
+async fn digest_describes_non_contact_messages() {
     let state = create_test_state();
     let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
     state
@@ -1197,17 +1193,11 @@ async fn digest_filters_non_contact_messages() {
     // Email shown individually (exempt from non-contact filter)
     assert!(digest_text.contains("- newsletter@co.com:"));
 
-    // Non-contacts NOT shown individually
-    assert!(!digest_text.contains("Unknown0"));
-    assert!(!digest_text.contains("Unknown1"));
-    assert!(!digest_text.contains("Unknown2"));
-
-    // Collapsed count present
-    assert!(
-        digest_text.contains("+3 from unknown senders"),
-        "expected '+3 from unknown senders' in digest, got:\n{}",
-        digest_text
-    );
+    // A missing Person link must not hide the sender or message topic.
+    assert!(digest_text.contains("- Unknown0: sent something"));
+    assert!(digest_text.contains("- Unknown1: sent something"));
+    assert!(digest_text.contains("- Unknown2: sent something"));
+    assert!(!digest_text.contains("unknown senders"));
 
     // ALL 6 messages marked delivered (contacts + non-contacts + email)
     assert_eq!(message_ids.len(), 6);
@@ -1306,10 +1296,28 @@ async fn digest_handles_only_non_contacts() {
         digest_text
     );
 
-    // Should have the collapsed count
-    assert!(digest_text.contains("+4 from unknown senders"));
-    // No individual stranger messages
-    assert!(!digest_text.contains("Stranger0"));
+    // Every sender and topic is visible even without a linked Person record.
+    for i in 0..4 {
+        assert!(digest_text.contains(&format!("- Stranger{}: msg", i)));
+    }
+    assert!(!digest_text.contains("unknown senders"));
+    assert!(!digest_text.contains(" msgs"));
     // All marked delivered
     assert_eq!(message_ids.len(), 4);
+}
+
+#[test]
+fn digest_sender_label_uses_stable_identity_instead_of_unknown() {
+    let mut message = digest_test_message(1, "Unknown", "!room", "status update", 100);
+    message.sender_key = Some("@_telegram_12345:matrix.example".to_string());
+    message.person_id = None;
+
+    assert_eq!(
+        digest_sender_label(&message),
+        "@_telegram_12345:matrix.example"
+    );
+
+    message.sender_key = None;
+    message.platform = "telegram".to_string();
+    assert_eq!(digest_sender_label(&message), "Telegram sender");
 }
