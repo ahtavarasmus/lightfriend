@@ -135,10 +135,6 @@ The verification chain combines public source code, reproducible builds, hardwar
 
 ## Product Answer Pages
 
-### Can I Leave My Smartphone?
-Any phone with an ordinary SMS or call route can be the Lightfriend interface. Users choose which services they need to preserve, retain a separate setup or recovery device where a provider requires one, and verify the available country and number route. The interactive page includes a universal capability matrix; a Markdown version is also available at https://lightfriend.ai/can-i-leave-my-smartphone.md.
-URL: https://lightfriend.ai/can-i-leave-my-smartphone
-
 ### How Lightfriend Works
 Lightfriend connects selected WhatsApp, Signal, Telegram, and email accounts through a web dashboard. Users then interact through ordinary SMS or optional voice calls. Focused alerts and scheduled digests reduce constant checking, while supported write actions pass through application controls.
 URL: https://lightfriend.ai/how-it-works
@@ -269,8 +265,6 @@ A: No. Any phone that can send texts and make calls works with Lightfriend.
 - Homepage: https://lightfriend.ai
 - Pricing: https://lightfriend.ai/pricing
 - How It Works: https://lightfriend.ai/how-it-works
-- Can I Leave My Smartphone?: https://lightfriend.ai/can-i-leave-my-smartphone
-- Smartphone Exit Planner Markdown: https://lightfriend.ai/can-i-leave-my-smartphone.md
 - Any Phone Requirements: https://lightfriend.ai/compatible-phones
 - Limitations: https://lightfriend.ai/limitations
 - Blog: https://lightfriend.ai/blog

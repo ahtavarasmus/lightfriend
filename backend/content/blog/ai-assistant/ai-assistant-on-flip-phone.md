@@ -70,7 +70,7 @@ Lightfriend is not a way to turn a flip phone into an Android or iPhone. It pres
 5. Carry any spare SMS-capable phone for a reversible trial.
 6. Record what still forces you back to the smartphone.
 
-Use the [smartphone-exit planner](/can-i-leave-my-smartphone) to check communication, navigation, banking, authentication, transport, payments, and recovery as separate requirements.
+Check communication, navigation, banking, authentication, transport, payments, and recovery as separate requirements.
 
 ## Example requests
 

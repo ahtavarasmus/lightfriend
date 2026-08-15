@@ -43,8 +43,6 @@ Lightfriend is designed for people who want to break free from phone addiction. 
 ## Docs
 
 - [How It Works](https://lightfriend.ai/how-it-works): How connected services become a compact SMS and call interface
-- [Can I Leave My Smartphone?](https://lightfriend.ai/can-i-leave-my-smartphone): Interactive exit planner and universal capability matrix
-- [Planner Markdown](https://lightfriend.ai/can-i-leave-my-smartphone.md): Machine-readable version of the exit plan and capability matrix
 - [Pricing](https://lightfriend.ai/pricing): Autopilot costs $80/month, $210 every 3 months, or $420/year with a 7-day free trial
 - [Privacy Architecture](https://lightfriend.ai/trustless): Full explanation of the hardware isolation, attestation, and trust chain
 - [Live Trust Chain](https://lightfriend.ai/trust-chain): Real-time verification of the running enclave

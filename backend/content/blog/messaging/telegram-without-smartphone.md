@@ -82,4 +82,4 @@ Lightfriend is not a screen-scraped Telegram clone. It is a narrower communicati
 - You have tested long messages, busy groups, and provider outages.
 - You accept that the final carrier SMS leg has different privacy properties from Telegram.
 
-Use the [smartphone-exit planner](/can-i-leave-my-smartphone) to test Telegram alongside WhatsApp, Signal, email, banking, authentication, and maps before changing phones.
+Test Telegram alongside WhatsApp, Signal, email, banking, authentication, and maps before changing phones.

@@ -199,7 +199,6 @@ fn compatible_phones_content() -> Html {
                     <li>{"A supported Lightfriend number route for your country and carrier"}</li>
                 </ul>
                 <p>{"That is the entire handset integration. The phone does not need Wi-Fi, mobile data, a browser, Android, iOS, KaiOS, or an app store."}</p>
-                <p><a href="/can-i-leave-my-smartphone">{"Build a smartphone-exit plan for the services you need →"}</a></p>
             </section>
             <section class="answer-grid">
                 <article class="answer-card"><h2>{"The phone is only the interface"}</h2><p>{"Connected clients, account monitoring, AI processing, and automations stay in Lightfriend. The carried handset sees an ordinary SMS conversation or call."}</p></article>
@@ -376,7 +375,6 @@ pub fn public_guide(props: &PublicGuideProps) -> Html {
                     <h2>{"Keep exploring"}</h2>
                     <div>
                         <a href="/how-it-works">{"How it works"}</a>
-                        <a href="/can-i-leave-my-smartphone">{"Plan your switch"}</a>
                         <a href="/compatible-phones">{"Any phone"}</a>
                         <a href="/supported-countries">{"Supported countries"}</a>
                         <a href="/whatsapp-on-dumbphone">{"WhatsApp on dumbphone"}</a>

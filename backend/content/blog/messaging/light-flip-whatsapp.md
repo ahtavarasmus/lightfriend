@@ -81,4 +81,4 @@ The Light Flip is designed to make the phone less compelling to stare at. Lightf
 
 That makes Lightfriend a useful option for someone whose requirement is not "run every WhatsApp feature on the flip phone," but rather "remain reachable for the few conversations that matter without carrying the full smartphone interface."
 
-Use the [smartphone-exit planner](/can-i-leave-my-smartphone) to test WhatsApp alongside banking, authentication, maps, email, and other requirements before changing phones.
+Test WhatsApp alongside banking, authentication, maps, email, and other requirements before changing phones.

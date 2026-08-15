@@ -18,7 +18,6 @@ fn sitemap_contains_indexable_public_routes_and_blog_posts() {
         "https://lightfriend.ai/supported-countries",
         "https://lightfriend.ai/compatible-phones",
         "https://lightfriend.ai/how-it-works",
-        "https://lightfriend.ai/can-i-leave-my-smartphone",
         "https://lightfriend.ai/limitations",
         "https://lightfriend.ai/privacy-architecture",
         "https://lightfriend.ai/ai-assistant-by-sms",
@@ -83,7 +82,6 @@ fn blog_posts_have_index_links_and_page_metadata() {
         "/telegram-on-dumbphone",
         "/signal-on-dumbphone",
         "/ai-assistant-by-sms",
-        "/can-i-leave-my-smartphone",
         "/blog/light-flip-whatsapp",
         "/blog/ai-assistant-on-flip-phone",
     ] {
@@ -130,11 +128,6 @@ fn blog_posts_have_index_links_and_page_metadata() {
             post.full_page_html
                 .contains(r#"data-fast-goal="blog_pricing_click""#),
             "post {slug} should track pricing CTA clicks"
-        );
-        assert!(
-            post.full_page_html
-                .contains(r#"data-fast-goal="exit_planner_click""#),
-            "post {slug} should track smartphone exit planner clicks"
         );
         if matches!(
             slug,

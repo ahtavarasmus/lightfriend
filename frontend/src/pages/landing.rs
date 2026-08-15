@@ -239,7 +239,7 @@ pub fn landing() -> Html {
                         {"Important people and messages from WhatsApp, Signal, Telegram, and email reach any phone by text or call."}
                     </p>
                     <div class="quiet-hero-actions">
-                        <a href="/can-i-leave-my-smartphone" class="quiet-cta quiet-cta-secondary">{"Plan my switch"}</a>
+                        <a href="#plans" class="quiet-cta">{"Start 7-day free trial"}</a>
                     </div>
                     <p class="quiet-hero-note">{"No apps. No feed. Any phone."}</p>
                 </div>
@@ -376,8 +376,6 @@ pub fn landing() -> Html {
                         <a href="/blog">{"Blog"}</a>
                         {" · "}
                         <a href="/how-it-works">{"How it works"}</a>
-                        {" · "}
-                        <a href="/can-i-leave-my-smartphone">{"Plan your switch"}</a>
                         {" · "}
                         <a href="/compatible-phones">{"Phones"}</a>
                         {" · "}

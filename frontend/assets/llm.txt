@@ -31,10 +31,6 @@ Also available (choose from US/CA/UK/FI/NL/AU number): Germany, France, Spain, I
 ## Pricing
 See https://lightfriend.ai/pricing
 
-## Smartphone exit planner
-- Interactive planner and universal capability matrix: https://lightfriend.ai/can-i-leave-my-smartphone
-- Machine-readable planner: https://lightfriend.ai/can-i-leave-my-smartphone.md
-
 ## Current phone and interface guides
 - Light Flip WhatsApp options: https://lightfriend.ai/blog/light-flip-whatsapp
 - AI assistant on any flip phone: https://lightfriend.ai/blog/ai-assistant-on-flip-phone

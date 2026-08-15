@@ -78,4 +78,4 @@ For a highly sensitive conversation, use the official Signal client directly. Fo
 - Your threat model accepts the final carrier-SMS leg.
 - You have tested group volume, long messages, and failure behavior.
 
-Use the [smartphone-exit planner](/can-i-leave-my-smartphone) before buying hardware, and review the [complete product limitations](/limitations) before treating the bridge as dependable infrastructure.
+Test the setup before buying hardware, and review the [complete product limitations](/limitations) before treating the bridge as dependable infrastructure.

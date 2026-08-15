@@ -149,10 +149,7 @@ pub fn signal_on_dumbphone() -> Html {
                 </ul>
 
                 <div class="blog-cta">
-                    <h3>{"Check Signal in Your Exit Plan"}</h3>
-                    <a href="/can-i-leave-my-smartphone" class="forward-link" data-fast-goal="exit_planner_click" data-fast-goal-content-slug="signal-on-dumbphone" data-fast-goal-content-cluster="messaging">
-                        <button class="hero-cta">{"Build Your Plan"}</button>
-                    </a>
+                    <h3>{"Use Signal without carrying a smartphone"}</h3>
                     <p>{"Then verify your country route, setup device, privacy tradeoff, and ordinary SMS compatibility."}</p>
                     <a href="/#plans" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="signal-on-dumbphone" data-fast-goal-content-cluster="messaging">{"See plans and start a trial"}</a>
                 </div>

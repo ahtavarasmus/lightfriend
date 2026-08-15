@@ -293,7 +293,6 @@ pub fn render_blog_post(post: &BlogPost, related: &[BlogPost]) -> String {
         {related_html}
         <div class="blog-cta">
             <h3>Works with any phone that can text</h3>
-            <a href="/can-i-leave-my-smartphone" class="hero-cta" data-fast-goal="exit_planner_click" data-fast-goal-content-slug="{slug}" data-fast-goal-content-cluster="{cluster}">Build your smartphone-exit plan</a>
             <p>Lightfriend runs outside the handset. Use the phone you already have, then check the country route and connected-service setup you need.</p>
             <a href="/#plans" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="{slug}" data-fast-goal-content-cluster="{cluster}">See plans and start a trial</a>
         </div>
@@ -302,7 +301,6 @@ pub fn render_blog_post(post: &BlogPost, related: &[BlogPost]) -> String {
         <div class="footer-links">
             <a href="/">Home</a>
             <a href="/blog">Blog</a>
-            <a href="/can-i-leave-my-smartphone">Plan your switch</a>
             <a href="/compatible-phones">Any phone</a>
             <a href="/how-it-works">How it works</a>
             <a href="/#plans">Pricing</a>
@@ -473,7 +471,6 @@ pub fn render_blog_index(
                     <div class="blog-post-preview"><a href="/signal-on-dumbphone"><h2>Signal on a dumbphone</h2><p>Understand the practical bridge and the privacy tradeoff of the final SMS leg.</p></a></div>
                     <div class="blog-post-preview"><a href="/ai-assistant-by-sms"><h2>AI assistant by SMS</h2><p>Search, check connected messages and email, and receive focused alerts without an app.</p></a></div>
                     <div class="blog-post-preview"><a href="/blog/ai-assistant-on-flip-phone"><h2>AI assistant for any flip phone</h2><p>Use SMS and calls instead of installing an AI app on the handset.</p></a></div>
-                    <div class="blog-post-preview"><a href="/can-i-leave-my-smartphone"><h2>Can I leave my smartphone?</h2><p>Select what you still need and build a realistic phone-independent exit plan.</p></a></div>
                 </div>
             </div>
             <div class="cluster-section">
@@ -488,7 +485,6 @@ pub fn render_blog_index(
         </section>
         <div class="blog-cta">
             <h3>Works with any phone that can text</h3>
-            <a href="/can-i-leave-my-smartphone" class="hero-cta" data-fast-goal="exit_planner_click" data-fast-goal-content-slug="blog-index" data-fast-goal-content-cluster="index">Build your smartphone-exit plan</a>
             <p>Lightfriend runs outside the handset. Use the phone you already have, then check the country route and connected-service setup you need.</p>
             <a href="/#plans" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="blog-index" data-fast-goal-content-cluster="index">See plans and start a trial</a>
         </div>
@@ -497,7 +493,6 @@ pub fn render_blog_index(
         <div class="footer-links">
             <a href="/">Home</a>
             <a href="/blog">Blog</a>
-            <a href="/can-i-leave-my-smartphone">Plan your switch</a>
             <a href="/compatible-phones">Any phone</a>
             <a href="/how-it-works">How it works</a>
             <a href="/#plans">Pricing</a>

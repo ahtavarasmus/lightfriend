@@ -153,10 +153,7 @@ pub fn telegram_on_dumbphone() -> Html {
                 <p>{"Connect all of them and get one unified SMS interface for everything."}</p>
 
                 <div class="blog-cta">
-                    <h3>{"Check Telegram in Your Exit Plan"}</h3>
-                    <a href="/can-i-leave-my-smartphone" class="forward-link" data-fast-goal="exit_planner_click" data-fast-goal-content-slug="telegram-on-dumbphone" data-fast-goal-content-cluster="messaging">
-                        <button class="hero-cta">{"Build Your Plan"}</button>
-                    </a>
+                    <h3>{"Use Telegram without carrying a smartphone"}</h3>
                     <p>{"Then verify your country route, setup device, message volume, and ordinary SMS compatibility."}</p>
                     <a href="/#plans" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="telegram-on-dumbphone" data-fast-goal-content-cluster="messaging">{"See plans and start a trial"}</a>
                 </div>

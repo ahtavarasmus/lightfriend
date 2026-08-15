@@ -219,12 +219,6 @@
       });
     }
 
-    if (destination.pathname === "/can-i-leave-my-smartphone") {
-      trackGoal("exit_planner_click", {
-        source_path: window.location.pathname,
-        interaction: "link_click",
-      });
-    }
   }
 
   window.lightfriendTrackDataFastPayment = trackPayment;
