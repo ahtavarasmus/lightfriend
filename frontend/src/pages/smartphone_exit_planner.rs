@@ -279,7 +279,7 @@ pub fn smartphone_exit_planner() -> Html {
 
                         <div class="result-actions">
                             <a class="primary-action" href="/supported-countries">{"Check my country and number route"}</a>
-                            <a class="secondary-action" href="/get-started">{"See how it works and start a trial"}</a>
+                            <a class="secondary-action" href="/#plans">{"See plans and start a trial"}</a>
                         </div>
                         <p class="result-footnote">{"Availability still depends on number inventory, carrier capabilities, destination permissions, provider rules, and local regulation."}</p>
                     </section>

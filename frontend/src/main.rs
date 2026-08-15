@@ -42,7 +42,6 @@ mod pages {
     pub mod home;
     pub mod landing;
     pub mod lightphone3_whatsapp_guide;
-    pub mod onboarding;
     pub mod prompt_injection_safe;
     pub mod public_guides;
     pub mod signal_on_dumbphone;
@@ -112,7 +111,6 @@ use pages::{
     bring_own_number::TwilioHostedInstructions,
     home::Home,
     lightphone3_whatsapp_guide::LightPhone3WhatsappGuide,
-    onboarding::Onboarding,
     prompt_injection_safe::PromptInjectionSafe,
     public_guides::{PublicGuide, PublicGuideKind},
     signal_on_dumbphone::SignalOnDumbphone,
@@ -138,8 +136,6 @@ pub enum Route {
     Home,
     #[at("/login")]
     Login,
-    #[at("/get-started")]
-    GetStarted,
     #[at("/admin")]
     Admin,
     #[at("/billing")]
@@ -218,10 +214,6 @@ fn switch(routes: Route) -> Html {
         Route::Login => {
             info!("Rendering Login page");
             html! { <Login /> }
-        }
-        Route::GetStarted => {
-            info!("Rendering onboarding page");
-            html! { <Onboarding /> }
         }
         Route::Admin => {
             info!("Rendering Admin page");
