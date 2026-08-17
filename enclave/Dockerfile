@@ -4,11 +4,11 @@
 # Runs PostgreSQL, Tuwunel, mautrix bridges, and Lightfriend backend
 # all under supervisord in one container.
 
-ARG VEHICLE_COMMAND_COMMIT=49977a18fd68567501d59e16a6c9e4a8b9348544
-ARG TUWUNEL_IMAGE=jevolk/tuwunel@sha256:67bce2714e38637d8d1e8227a0a78cd80eeff6a8484160b328cd2e168983cdd9
-ARG MAUTRIX_WHATSAPP_IMAGE=dock.mau.dev/mautrix/whatsapp@sha256:9f28c04c746af9fe8e93163489dae0f4191626e2ca02a9302df62afbeefc9eba
-ARG MAUTRIX_SIGNAL_IMAGE=dock.mau.dev/mautrix/signal@sha256:aa3891001893be88ef6f7c692d254a1ed11dbcaf29d3c02e8ed4ddf9df259244
-ARG CLOUDFLARED_VERSION=2026.3.0
+ARG VEHICLE_COMMAND_COMMIT=f97fa1e4bf617a364c72b85cb5d859528abeda67
+ARG TUWUNEL_IMAGE=jevolk/tuwunel@sha256:699fa9971c174e01c884abad8d1a3cfb2fe518e1a71f1fa16ea9dedf11873d74
+ARG MAUTRIX_WHATSAPP_IMAGE=dock.mau.dev/mautrix/whatsapp@sha256:86237c4d0d33a1e08910b1f820e6c561f9b8e21dc26943caf266e01021087002
+ARG MAUTRIX_SIGNAL_IMAGE=dock.mau.dev/mautrix/signal@sha256:edafbdfa23366715a5ca9e4c3a5d08efd01e1ff86212d683e1e5c16b681fa2f3
+ARG CLOUDFLARED_VERSION=2026.8.2
 ARG MAUTRIX_TELEGRAM_VERSION=0.15.3
 
 # ── Stage 1: Build Lightfriend backend ──────────────────────────────────────
