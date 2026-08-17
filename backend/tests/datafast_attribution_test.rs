@@ -89,3 +89,11 @@ fn uses_the_latest_datafast_cookie_value_across_headers() {
         Some("session-new")
     );
 }
+
+#[test]
+fn subscription_success_surfaces_missing_pricing_table_session_ids() {
+    let subscription_success = include_str!("../../frontend/src/pages/subscription_success.rs");
+
+    assert!(subscription_success.contains("checkout_attribution_missing_session_id"));
+    assert!(subscription_success.contains("missing_session_id"));
+}

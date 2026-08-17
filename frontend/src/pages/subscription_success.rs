@@ -1,5 +1,7 @@
 use crate::utils::api::Api;
-use crate::utils::datafast::{attribute_payment, mark_payment_pending, track_goal_once};
+use crate::utils::datafast::{
+    attribute_payment, mark_payment_pending, track_goal, track_goal_once,
+};
 use futures::future::{select, Either};
 use gloo_timers::future::TimeoutFuture;
 use serde::Deserialize;
@@ -41,6 +43,15 @@ pub fn subscription_success() -> Html {
                             }
                         }
                     }
+                } else {
+                    // Stripe Pricing Tables configure their success URL outside this
+                    // repository. Surface a measurable regression if that dashboard
+                    // setting ever drops {CHECKOUT_SESSION_ID} again.
+                    let metadata = [
+                        ("checkout_type", "pricing_table"),
+                        ("reason", "missing_session_id"),
+                    ];
+                    track_goal("checkout_attribution_missing_session_id", &metadata);
                 }
 
                 let auth_check = Api::get("/api/auth/status").send();

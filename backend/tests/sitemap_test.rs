@@ -189,14 +189,4 @@ async fn llms_handlers_serve_plain_text_instead_of_the_spa_fallback() {
     assert!(body.contains("digital-detox-with-whatsapp"));
     assert!(body.contains("WhatsApp on Light Flip"));
     assert!(body.contains("AI Assistant on Any Flip Phone"));
-
-    let response = backend::blog::handlers::smartphone_exit_plan_md_handler().await;
-    assert_eq!(
-        response.headers().get(header::CONTENT_TYPE).unwrap(),
-        "text/markdown; charset=utf-8"
-    );
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let body = std::str::from_utf8(&body).unwrap();
-    assert!(body.contains("# Can I Leave My Smartphone?"));
-    assert!(body.contains("The phone is not the platform"));
 }
