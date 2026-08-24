@@ -1,36 +1,31 @@
 (function () {
   "use strict";
 
-  const loaderScript = document.currentScript;
-  if (!loaderScript) return;
-
-  const websiteId = loaderScript.dataset.websiteId;
-  const domain = loaderScript.dataset.domain;
-  if (!websiteId || !domain) return;
-
-  const consentKey = "lightfriend_analytics_consent";
-  const consentGranted = "granted";
-  const consentDenied = "denied";
+  const websiteId = "dfid_ICHRky5CwoxQQSthciEQz";
+  const domain = "lightfriend.ai";
   const trackerId = "lightfriend-datafast-analytics";
-  const bannerHostId = "lightfriend-analytics-consent";
+  const optOutKey = "lightfriend_analytics_optout";
   const settingsButtonId = "lightfriend-analytics-settings";
-  const pendingGoalsKey = "lightfriend_datafast_pending_goals";
+  const panelHostId = "lightfriend-analytics-panel";
   const completedGoalPrefix = "lightfriend_datafast_goal_completed:";
-  let pendingPaymentEmail = null;
 
-  function readConsent() {
+  function isOptedOut() {
     try {
-      return window.localStorage.getItem(consentKey);
+      return window.localStorage.getItem(optOutKey) === "true";
     } catch (_) {
-      return null;
+      return false;
     }
   }
 
-  function storeConsent(value) {
+  function setOptOut(value) {
     try {
-      window.localStorage.setItem(consentKey, value);
+      if (value) {
+        window.localStorage.setItem(optOutKey, "true");
+      } else {
+        window.localStorage.removeItem(optOutKey);
+      }
     } catch (_) {
-      // If storage is unavailable, the choice applies to this page only.
+      // Best effort; the choice applies to this page only when storage is unavailable.
     }
   }
 
@@ -42,6 +37,7 @@
   }
 
   function loadDataFast() {
+    if (isOptedOut()) return;
     ensureDataFastQueue();
     if (document.getElementById(trackerId)) return;
 
@@ -50,24 +46,31 @@
     tracker.defer = true;
     tracker.dataset.websiteId = websiteId;
     tracker.dataset.domain = domain;
+    // Server-side Stripe metadata attribution is used; disable automatic
+    // URL-parameter payment detection to avoid duplicate payment events.
     tracker.dataset.disablePayments = "true";
     tracker.src = "https://datafa.st/js/script.js";
     document.head.appendChild(tracker);
+  }
+
+  function clearDataFastCookie() {
+    const expires = "expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    ["datafast_visitor_id", "datafast_session_id"].forEach(function (name) {
+      document.cookie = `${name}=; ${expires}; path=/; SameSite=Lax`;
+      document.cookie = `${name}=; ${expires}; path=/; domain=${domain}; SameSite=Lax`;
+      document.cookie = `${name}=; ${expires}; path=/; domain=.${domain}; SameSite=Lax`;
+    });
   }
 
   function trackPayment(email) {
     if (typeof email !== "string" || email.trim() === "") {
       return false;
     }
-
-    if (readConsent() !== consentGranted) {
-      pendingPaymentEmail = readConsent() === consentDenied ? null : email.trim();
+    if (isOptedOut()) {
       return false;
     }
-
     loadDataFast();
     window.datafast("payment", { email: email.trim() });
-    pendingPaymentEmail = null;
     return true;
   }
 
@@ -88,27 +91,6 @@
     return { name: name, metadata: normalizedMetadata };
   }
 
-  function readPendingGoals() {
-    try {
-      const goals = JSON.parse(window.localStorage.getItem(pendingGoalsKey) || "[]");
-      return Array.isArray(goals) ? goals : [];
-    } catch (_) {
-      return [];
-    }
-  }
-
-  function storePendingGoals(goals) {
-    try {
-      if (goals.length === 0) {
-        window.localStorage.removeItem(pendingGoalsKey);
-      } else {
-        window.localStorage.setItem(pendingGoalsKey, JSON.stringify(goals.slice(-50)));
-      }
-    } catch (_) {
-      // Goal delivery is best effort when storage is unavailable.
-    }
-  }
-
   function goalWasCompleted(storageKey) {
     try {
       return window.localStorage.getItem(storageKey) === "true";
@@ -125,17 +107,6 @@
     }
   }
 
-  function queueGoal(goal) {
-    const pendingGoals = readPendingGoals();
-    if (goal.storageKey && pendingGoals.some(function (pending) {
-      return pending.storageKey === goal.storageKey;
-    })) {
-      return;
-    }
-    pendingGoals.push(goal);
-    storePendingGoals(pendingGoals);
-  }
-
   function emitGoal(goal) {
     loadDataFast();
     window.datafast(goal.name, goal.metadata);
@@ -146,50 +117,26 @@
 
   function trackGoal(name, metadata) {
     const goal = normalizeGoal(name, metadata);
-    if (!goal) return false;
-
-    const consent = readConsent();
-    if (consent === consentDenied) return false;
-    if (consent !== consentGranted) {
-      queueGoal(goal);
+    if (!goal || isOptedOut()) {
       return false;
     }
-
     emitGoal(goal);
     return true;
   }
 
   function trackGoalOnce(name, dedupeKey, metadata) {
     const goal = normalizeGoal(name, metadata);
-    if (!goal || typeof dedupeKey !== "string" || dedupeKey.trim() === "") {
+    if (!goal || typeof dedupeKey !== "string" || dedupeKey.trim() === "" || isOptedOut()) {
       return false;
     }
 
     goal.storageKey = `${completedGoalPrefix}${goal.name}:${dedupeKey.trim()}`;
-    if (goalWasCompleted(goal.storageKey)) return true;
-
-    const consent = readConsent();
-    if (consent === consentDenied) return false;
-    if (consent !== consentGranted) {
-      queueGoal(goal);
-      return false;
+    if (goalWasCompleted(goal.storageKey)) {
+      return true;
     }
 
     emitGoal(goal);
     return true;
-  }
-
-  function flushPendingGoals() {
-    const pendingGoals = readPendingGoals();
-    storePendingGoals([]);
-    pendingGoals.forEach(function (pending) {
-      const goal = normalizeGoal(pending.name, pending.metadata);
-      if (!goal) return;
-      goal.storageKey = typeof pending.storageKey === "string" ? pending.storageKey : null;
-      if (!goal.storageKey || !goalWasCompleted(goal.storageKey)) {
-        emitGoal(goal);
-      }
-    });
   }
 
   function trackHighIntentLink(event) {
@@ -218,7 +165,6 @@
         interaction: "link_click",
       });
     }
-
   }
 
   window.lightfriendTrackDataFastPayment = trackPayment;
@@ -226,17 +172,10 @@
   window.lightfriendTrackDataFastGoalOnce = trackGoalOnce;
   document.addEventListener("click", trackHighIntentLink);
 
-  function clearDataFastCookie() {
-    const expires = "expires=Thu, 01 Jan 1970 00:00:00 GMT";
-    ["datafast_visitor_id", "datafast_session_id"].forEach(function (name) {
-      document.cookie = `${name}=; ${expires}; path=/; SameSite=Lax`;
-      document.cookie = `${name}=; ${expires}; path=/; domain=${domain}; SameSite=Lax`;
-      document.cookie = `${name}=; ${expires}; path=/; domain=.${domain}; SameSite=Lax`;
-    });
-  }
+  // --- Quiet opt-out control ("Privacy choices" button + small panel) ---
 
-  function removeBanner() {
-    document.getElementById(bannerHostId)?.remove();
+  function removePanel() {
+    document.getElementById(panelHostId)?.remove();
   }
 
   function showSettingsButton() {
@@ -247,112 +186,75 @@
     button.className = "lf-analytics-settings";
     button.type = "button";
     button.textContent = "Privacy choices";
-    button.addEventListener("click", showBanner);
+    button.addEventListener("click", showPanel);
     document.body.appendChild(button);
   }
 
-  function closeBanner() {
-    removeBanner();
-    showSettingsButton();
-  }
-
-  function chooseAnalytics(allowed) {
-    if (allowed) {
-      storeConsent(consentGranted);
-      loadDataFast();
-      if (pendingPaymentEmail) {
-        trackPayment(pendingPaymentEmail);
-      }
-      flushPendingGoals();
-      closeBanner();
-      return;
-    }
-
-    const trackerWasLoaded = Boolean(document.getElementById(trackerId));
-    storeConsent(consentDenied);
-    pendingPaymentEmail = null;
-    storePendingGoals([]);
-    clearDataFastCookie();
-
-    if (trackerWasLoaded) {
-      window.location.reload();
-    } else {
-      closeBanner();
-    }
-  }
-
-  function createButton(label, className, onClick) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = className;
-    button.textContent = label;
-    button.addEventListener("click", onClick);
-    return button;
-  }
-
-  function showBanner() {
-    if (document.getElementById(bannerHostId)) return;
-
-    document.getElementById(settingsButtonId)?.remove();
+  function showPanel() {
+    if (document.getElementById(panelHostId)) return;
 
     const host = document.createElement("div");
-    host.id = bannerHostId;
-    host.className = "lf-consent-host";
+    host.id = panelHostId;
+    host.className = "lf-optout-host";
 
-    const banner = document.createElement("section");
-    banner.className = "lf-consent-banner";
-    banner.setAttribute("role", "region");
-    banner.setAttribute("aria-labelledby", "lf-consent-title");
-
-    const copy = document.createElement("div");
-    copy.className = "lf-consent-copy";
+    const panel = document.createElement("section");
+    panel.className = "lf-optout-panel";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-labelledby", "lf-optout-title");
 
     const title = document.createElement("h2");
-    title.id = "lf-consent-title";
-    title.textContent = "Optional analytics";
+    title.id = "lf-optout-title";
+    title.textContent = "Privacy choices";
 
-    const description = document.createElement("p");
-    description.append("Help us understand which pages are useful. DataFast only loads if you allow analytics. ");
-
-    const privacyLink = document.createElement("a");
-    privacyLink.href = "/privacy#cookies";
-    privacyLink.textContent = "Learn more";
-    description.appendChild(privacyLink);
+    const copy = document.createElement("p");
+    copy.textContent =
+      "We use privacy-friendly analytics to understand which pages are useful and how visitors reach us. You can disable this at any time.";
 
     const actions = document.createElement("div");
     actions.className = "lf-consent-actions";
-    actions.appendChild(
-      createButton("Reject", "lf-consent-button lf-consent-reject", function () {
-        chooseAnalytics(false);
-      })
-    );
-    actions.appendChild(
-      createButton("Allow analytics", "lf-consent-button lf-consent-accept", function () {
-        chooseAnalytics(true);
-      })
-    );
 
-    copy.appendChild(title);
-    copy.appendChild(description);
-    banner.appendChild(copy);
-    banner.appendChild(actions);
-    host.appendChild(banner);
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "lf-consent-button lf-consent-reject";
+    closeBtn.textContent = "Close";
+    closeBtn.addEventListener("click", removePanel);
+
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "lf-consent-button lf-consent-accept";
+    if (isOptedOut()) {
+      toggleBtn.textContent = "Enable analytics";
+      toggleBtn.addEventListener("click", function () {
+        setOptOut(false);
+        removePanel();
+        window.location.reload();
+      });
+    } else {
+      toggleBtn.textContent = "Disable analytics";
+      toggleBtn.addEventListener("click", function () {
+        setOptOut(true);
+        clearDataFastCookie();
+        removePanel();
+        window.location.reload();
+      });
+    }
+
+    actions.appendChild(closeBtn);
+    actions.appendChild(toggleBtn);
+    panel.appendChild(title);
+    panel.appendChild(copy);
+    panel.appendChild(actions);
+    host.appendChild(panel);
     document.body.appendChild(host);
   }
 
   function initialize() {
-    const consent = readConsent();
-    if (consent === consentGranted) {
-      loadDataFast();
-      flushPendingGoals();
-      showSettingsButton();
-    } else if (consent === consentDenied) {
+    if (isOptedOut()) {
       clearDataFastCookie();
-      showSettingsButton();
     } else {
-      clearDataFastCookie();
-      showBanner();
+      loadDataFast();
     }
+    showSettingsButton();
   }
 
   if (document.readyState === "loading") {

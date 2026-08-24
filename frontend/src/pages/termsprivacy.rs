@@ -192,9 +192,9 @@ pub fn privacy_policy() -> Html {
                     <a href="https://www.simpleanalytics.com/gdpr-compliance" target="_blank" rel="noopener noreferrer">{"Simple Analytics privacy information"}</a>
                     {" for details."}
                 </p>
-                <p>{"With your consent, we use DataFast analytics to understand website visits, traffic sources, and how our pages are used. DataFast may process information including your IP address, browser and device details, pages visited, and analytics events, and it uses an analytics cookie to recognise returning visitors. We do not load DataFast until you allow analytics, and we do not use advertising cookies."}</p>
+                <p>{"We use DataFast analytics to understand website visits, traffic sources, and how our pages are used. DataFast may process information including your IP address, browser and device details, pages visited, and analytics events, and it uses an analytics cookie to recognise returning visitors. We process this data on the basis of our legitimate interest in understanding and improving how our website is used, and we do not use advertising cookies."}</p>
                 <p>
-                    {"You can accept, reject, or change this choice at any time using the “Privacy choices” control on the website. Withdrawing consent stops future analytics collection and removes the DataFast visitor cookie from your browser. See the "}
+                    {"You can disable analytics at any time using the “Privacy choices” control on the website. Disabling analytics stops future analytics collection and removes the DataFast visitor cookie from your browser. See the "}
                     <a href="https://datafa.st/privacy-policy" target="_blank" rel="noopener noreferrer">{"DataFast privacy policy"}</a>
                     {" for more information about its processing."}
                 </p>
