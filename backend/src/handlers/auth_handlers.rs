@@ -408,7 +408,7 @@ pub async fn register(
         tracing::error!("Database error while checking email: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("Database error") })),
+            Json(json!({ "error": "Database error".to_string() })),
         )
     })? {
         tracing::debug!("Email {} already exists", reg_req.email);
@@ -441,7 +441,7 @@ pub async fn register(
             tracing::error!("Database error while checking phone number: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("Database error") })),
+                Json(json!({ "error": "Database error".to_string() })),
             )
         })?
     {
@@ -458,7 +458,7 @@ pub async fn register(
         tracing::error!("Password hashing failed: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("Password hashing failed") })),
+            Json(json!({ "error": "Password hashing failed".to_string() })),
         )
     })?;
     tracing::debug!("Password hashed successfully");
@@ -485,7 +485,7 @@ pub async fn register(
         tracing::error!("User creation failed: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("User creation failed") })),
+            Json(json!({ "error": "User creation failed".to_string() })),
         )
     })?;
     tracing::info!("User registered successfully, setting preferred number");
@@ -503,7 +503,7 @@ pub async fn register(
         .map_err(|_e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to retrieve user")})),
+                Json(json!({"error": "Failed to retrieve user".to_string()})),
             )
         })?
         .ok_or_else(|| {

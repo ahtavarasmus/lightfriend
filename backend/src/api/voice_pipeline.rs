@@ -827,8 +827,10 @@ async fn handle_web_ws(state: Arc<AppState>, socket: WebSocket, user_id: i32) {
                 }
 
                 let pcm_16k: Vec<i16> = data
-                    .chunks_exact(2)
-                    .map(|c| i16::from_le_bytes([c[0], c[1]]))
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|c| i16::from_le_bytes(*c))
                     .collect();
 
                 let rms = compute_rms(&pcm_16k);
@@ -1062,8 +1064,10 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
                                             return;
                                         }
                                         let pcm_samples: Vec<i16> = pcm_bytes
-                                            .chunks_exact(2)
-                                            .map(|c| i16::from_le_bytes([c[0], c[1]]))
+                                            .as_chunks::<2>()
+                                            .0
+                                            .iter()
+                                            .map(|c| i16::from_le_bytes(*c))
                                             .collect();
                                         let pcm_8k = resample(&pcm_samples, 24000, 8000);
                                         let mulaw_bytes: Vec<u8> =
@@ -2096,8 +2100,10 @@ async fn handle_openai_web_ws(state: Arc<AppState>, socket: WebSocket, user_id: 
         match msg {
             Message::Binary(data) => {
                 let pcm_16k: Vec<i16> = data
-                    .chunks_exact(2)
-                    .map(|c| i16::from_le_bytes([c[0], c[1]]))
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|c| i16::from_le_bytes(*c))
                     .collect();
                 let pcm_24k = resample(&pcm_16k, 16000, 24000);
                 let bytes: Vec<u8> = pcm_24k.iter().flat_map(|&s| s.to_le_bytes()).collect();
@@ -2245,8 +2251,10 @@ async fn send_twilio_tinfoil_tts(
     }
 
     let pcm_samples: Vec<i16> = pcm_bytes
-        .chunks_exact(2)
-        .map(|c| i16::from_le_bytes([c[0], c[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| i16::from_le_bytes(*c))
         .collect();
     let pcm_8k = resample(&pcm_samples, 24000, 8000);
     let mulaw_bytes: Vec<u8> = pcm_8k.iter().map(|&s| mulaw_encode(s)).collect();
@@ -2502,8 +2510,10 @@ async fn send_tts_response(
 
     // Parse as i16 PCM (little-endian)
     let pcm_samples: Vec<i16> = pcm_bytes
-        .chunks_exact(2)
-        .map(|c| i16::from_le_bytes([c[0], c[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| i16::from_le_bytes(*c))
         .collect();
 
     match session.transport {
