@@ -76,6 +76,12 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
                     <li>{"Receive scheduled summaries instead of a live notification feed"}</li>
                 </ul>
 
+                <div class="blog-cta blog-cta-inline">
+                    <h3>{"Stay reachable on Light Phone III"}</h3>
+                    <p>{"Text-first access to your WhatsApp account through ordinary SMS and calls — no smartphone required."}</p>
+                    <a href="/#plans" class="hero-cta" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="light-phone-3-whatsapp-guide" data-fast-goal-content-cluster="messaging">{"See plans and start a trial"}</a>
+                </div>
+
                 <h2>{"Setup: what you still need"}</h2>
                 <ol>
                     <li>{"Keep a supported device with the native WhatsApp app available for account setup and recovery"}</li>
@@ -122,6 +128,12 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
                 <p>{"Lightfriend's production application runs in a hardware-isolated enclave. Stored application data is encrypted, the codebase is open source, and the running enclave exposes a signed code measurement that can be checked against the published build."}</p>
                 <p>{"The final SMS leg still passes through your cellular carrier and is not end-to-end encrypted. Delivery also depends on WhatsApp, the bridge connection, Lightfriend, and your carrier. Use a direct call or SMS fallback for emergencies."}</p>
 
+                <div class="blog-cta">
+                    <h3>{"Can you leave your smartphone without losing the people who use WhatsApp?"}</h3>
+                    <p>{"Text-first access for phones that can call and send SMS. Initial connected-service setup still uses the provider's supported device."}</p>
+                    <a href="/#plans" class="hero-cta" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="light-phone-3-whatsapp-guide" data-fast-goal-content-cluster="messaging">{"See plans and start a trial"}</a>
+                </div>
+
                 <h2>{"Continue planning your setup"}</h2>
                 <ul>
                     <li><a href="/blog/light-flip-whatsapp">{"Compare WhatsApp options for the new Light Flip"}</a></li>
@@ -132,12 +144,6 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
                     <li><Link<Route> to={Route::TelegramOnDumbphone}>{"Telegram on dumbphone"}</Link<Route>></li>
                     <li><Link<Route> to={Route::SignalOnDumbphone}>{"Signal on dumbphone"}</Link<Route>></li>
                 </ul>
-
-                <div class="blog-cta">
-                    <h3>{"Can you leave your smartphone without losing the people who use WhatsApp?"}</h3>
-                    <p>{"Text-first access for phones that can call and send SMS. Initial connected-service setup still uses the provider's supported device."}</p>
-                    <a href="/#plans" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="light-phone-3-whatsapp-guide" data-fast-goal-content-cluster="messaging">{"See plans and start a trial"}</a>
-                </div>
             </section>
             <style>
                 {r#"
@@ -263,6 +269,8 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
                     margin-top: 1rem;
                 }
                 .hero-cta {
+                    display: inline-block;
+                    text-decoration: none;
                     background: linear-gradient(45deg, #7EB2FF, #4169E1);
                     color: white;
                     border: none;
@@ -275,6 +283,9 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
                 .hero-cta:hover {
                     transform: translateY(-2px);
                     box-shadow: 0 4px 20px rgba(126, 178, 255, 0.4);
+                }
+                .blog-cta-inline {
+                    margin: 3rem 0;
                 }
                 @media (max-width: 768px) {
                     .blog-hero {
