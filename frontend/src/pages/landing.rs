@@ -17,8 +17,8 @@ struct SmartphoneFreeDaysResponse {
 #[function_component(Landing)]
 pub fn landing() -> Html {
     use_seo(SeoMeta {
-        title: "Lightfriend — Leave your smartphone, keep your people.",
-        description: "The communication layer that lets you leave your smartphone. Important WhatsApp, Telegram, Signal, and email messages reach any phone by SMS or call.",
+        title: "Lightfriend — Your group chats, on a Nokia.",
+        description: "Your group chats, on a Nokia. Important WhatsApp, Telegram, Signal, and email messages reach any phone by SMS or call.",
         canonical: "https://lightfriend.ai",
         og_type: "website",
     });
@@ -234,7 +234,7 @@ pub fn landing() -> Html {
             <header class="quiet-hero">
                 <div class="quiet-hero-inner">
                     <p class="quiet-kicker">{"Lightfriend"}</p>
-                    <h1>{"The communication layer that lets you leave your smartphone."}</h1>
+                    <h1>{"Your group chats, on a Nokia."}</h1>
                     <p class="quiet-hero-subtitle">
                         {"Important people and messages from WhatsApp, Signal, Telegram, and email reach any phone by text or call."}
                     </p>
