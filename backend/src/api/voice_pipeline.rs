@@ -1842,10 +1842,7 @@ async fn handle_openai_reader(
                 // the session keeps running. Don't tell the user voice is down for
                 // those; only surface server/connection-level errors.
                 if error_type == "invalid_request_error" {
-                    tracing::warn!(
-                        "Recoverable OpenAI Realtime error, continuing: {}",
-                        event
-                    );
+                    tracing::warn!("Recoverable OpenAI Realtime error, continuing: {}", event);
                 } else {
                     let message = event
                         .get("error")

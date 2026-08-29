@@ -110,7 +110,9 @@ async fn voice_incoming_registered_caller_speaks_before_streaming() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), 4096).await.unwrap();
     let twiml = String::from_utf8(body.to_vec()).unwrap();
-    assert!(twiml.contains("<Say>Connecting Lightfriend.</Say>"));
+    // The Twilio <Say> greeting was removed: the AI greeting via the stream is
+    // the first thing the caller hears, so no TwiML voice playback is expected.
+    assert!(!twiml.contains("<Say>"));
     assert!(twiml.contains(r#"<Connect>"#));
     assert!(twiml.contains(r#"<Stream url="wss://lightfriend.ai/api/voice/ws""#));
     assert!(twiml.contains(&format!(
