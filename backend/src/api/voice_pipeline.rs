@@ -461,8 +461,7 @@ pub async fn voice_incoming(State(state): State<Arc<AppState>>, body: String) ->
     </Stream>
   </Connect>
 </Response>"#,
-        ws_url,
-        user.id
+        ws_url, user.id
     );
 
     tracing::info!("Voice incoming TwiML returned for user {}", user.id);
