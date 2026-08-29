@@ -111,6 +111,19 @@ pub fn build_system_prompt(ctx: &AgentContext, mode: ChannelMode) -> String {
         Each request is independent. If the user says 'send X to Y', call send_chat_message. Every time. No exceptions. \
         Responding with text like 'Sending to...' or 'Message queued' without actually calling the tool is the worst possible failure mode.";
 
+    // Text channels need [id=N] markers in the reply so follow-up actions can
+    // reference the exact item. Voice must never speak those markers aloud.
+    let id_ref_rule = match mode {
+        ChannelMode::Voice => {
+            "### Output format:\nWhen you mention a specific message, event, or person from a tool result, never read out IDs, codes, or internal markers aloud. Use them silently when calling tools."
+                .to_string()
+        }
+        _ => {
+            "### Output format — [id=N] references:\nWhen you mention a specific message, event, or person from a tool result, include its `[id=N]` from the tool output on the same line. This keeps your answers grounded in real data. One item per line.\n- Format: `[id=N]` — square brackets, lowercase `id`, equals sign, digits. Copy the number exactly as the tool returned it.\n- If you don't have an id for something, don't mention it.\nExample:\n  `2 msgs today:`\n  `1. Alice — quarterly review [id=7821]`\n  `2. Bob — sounds good [id=7820]`"
+                .to_string()
+        }
+    };
+
     format!(
         r#"You are lightfriend, a concise AI assistant.
 
@@ -153,14 +166,7 @@ When the user asks for a "digest", "summary", "recap", "what's new", "what did I
 5. Never include a sender, subject, or company name the user hasn't seen before WITHOUT it being literally in the tool output. If in doubt, say "nothing new".
 6. Do not describe a "typical" digest or "what a digest would look like". If there's no data, say so.
 
-### Output format — [id=N] references:
-When you mention a specific message, event, or person from a tool result, include its `[id=N]` from the tool output on the same line. This keeps your answers grounded in real data. One item per line.
-- Format: `[id=N]` — square brackets, lowercase `id`, equals sign, digits. Copy the number exactly as the tool returned it.
-- If you don't have an id for something, don't mention it.
-Example:
-  `2 msgs today:`
-  `1. Alice — quarterly review [id=7821]`
-  `2. Bob — sounds good [id=7820]`
+{id_ref_rule}
 
 ### Hidden email references:
 Conversation history may contain hidden markers like `[email_ref account_id=12 account=user@example.com mailbox=INBOX uid=33066 ont_message_id=98765]`.

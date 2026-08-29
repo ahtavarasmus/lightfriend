@@ -450,17 +450,17 @@ pub async fn voice_incoming(State(state): State<Arc<AppState>>, body: String) ->
         .replace("https://", "wss://")
         .replace("http://", "ws://");
 
+    // No <Say> here: the AI greeting is the first thing the caller hears, so
+    // the voice is consistent (no Twilio default voice -> AI voice switch).
     let twiml = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say>{}</Say>
   <Connect>
     <Stream url="{}/api/voice/ws" track="inbound_track">
       <Parameter name="user_id" value="{}" />
     </Stream>
   </Connect>
 </Response>"#,
-        xml_escape("Connecting Lightfriend."),
         ws_url,
         user.id
     );
@@ -1406,9 +1406,11 @@ fn openai_session_update(
     mode: OpenAiRealtimeAudioMode,
 ) -> serde_json::Value {
     let (input_format, output_format) = match mode {
+        // GA requires `rate` alongside the format type; audio/pcmu is 8000 Hz.
+        // Without it OpenAI returns a recoverable error event on session.update.
         OpenAiRealtimeAudioMode::TwilioPcmu => (
-            serde_json::json!({"type": "audio/pcmu"}),
-            serde_json::json!({"type": "audio/pcmu"}),
+            serde_json::json!({"type": "audio/pcmu", "rate": 8000}),
+            serde_json::json!({"type": "audio/pcmu", "rate": 8000}),
         ),
         OpenAiRealtimeAudioMode::WebPcm24 => (
             serde_json::json!({"type": "audio/pcm", "rate": 24000}),
@@ -1831,12 +1833,28 @@ async fn handle_openai_reader(
             }
             "error" => {
                 tracing::error!("OpenAI Realtime error event: {}", event);
-                let message = event
+                let error_type = event
                     .get("error")
-                    .and_then(|e| e.get("message"))
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("OpenAI Realtime error");
-                send_openai_realtime_failure_notice(&mut session, &state, &send_tx, message).await;
+                    .and_then(|e| e.get("type"))
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("");
+                // Client-side event errors (invalid_request_error) are recoverable —
+                // the session keeps running. Don't tell the user voice is down for
+                // those; only surface server/connection-level errors.
+                if error_type == "invalid_request_error" {
+                    tracing::warn!(
+                        "Recoverable OpenAI Realtime error, continuing: {}",
+                        event
+                    );
+                } else {
+                    let message = event
+                        .get("error")
+                        .and_then(|e| e.get("message"))
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("OpenAI Realtime error");
+                    send_openai_realtime_failure_notice(&mut session, &state, &send_tx, message)
+                        .await;
+                }
             }
             "session.updated" => {
                 if let Some(greeting) = session.greeting.take() {
@@ -2244,7 +2262,9 @@ async fn send_twilio_tinfoil_tts(
 ) -> Result<(), String> {
     let tinfoil = TinfoilVoiceClient::new(&state.ai_config);
     tracing::info!("Fallback TTS requesting ({} chars)", text.len());
-    let tts_wav = tinfoil.text_to_speech(text, "aiden").await?;
+    // Female voice to match the OpenAI Realtime voice the user hears in the
+    // premium pipeline, so a fallback notice doesn't switch genders mid-call.
+    let tts_wav = tinfoil.text_to_speech(text, "serena").await?;
     let pcm_bytes = strip_wav_header(&tts_wav);
     if pcm_bytes.is_empty() {
         return Err("fallback TTS returned empty audio".to_string());
