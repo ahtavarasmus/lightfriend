@@ -1,0 +1,96 @@
+name: Digest Freshness Watchdog
+
+# Detects silent digest starvation. Digest builds return None (empty) when a
+# user has no pending messages, which is exactly what happens when message
+# ingestion dies (e.g. mautrix-whatsapp rejected with a 405 "client outdated"
+# by WhatsApp until its image is updated) — the user just stops receiving
+# digests with no error anywhere. This probe alerts when:
+#   - the digest scheduler has not ticked in 25+ minutes (cron runs every 10),
+#   - a user who has received digests before has had no successful delivery
+#     checkpoint in 20+ hours (slots are 3x daily; the in-enclave 24h
+#     recovery path only fires after a full day of silence, and it relies on
+#     pending content, so it masks nothing here — a frozen checkpoint means
+#     either no content is arriving or sends are failing).
+
+on:
+  schedule:
+    - cron: '41 * * * *'  # hourly at :41 (offset from the :07 external watchdog)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe digest freshness
+        env:
+          SITE_URL: ${{ secrets.LIGHTFRIEND_URL }}
+          MAINTENANCE_SECRET: ${{ secrets.MAINTENANCE_SECRET }}
+          NOTIFY_SERVER_URL: ${{ secrets.NOTIFY_SERVER_URL }}
+          NOTIFY_SERVER_TOKEN: ${{ secrets.NOTIFY_SERVER_TOKEN }}
+        run: |
+          set -uo pipefail
+
+          SITE_URL="${SITE_URL:-https://lightfriend.ai}"
+          FAILURES=""
+          NOW=$(date +%s)
+
+          RESPONSE=$(curl -s --max-time 30 \
+            -H "X-Maintenance-Secret: $MAINTENANCE_SECRET" \
+            -H "X-Period-Hours: 48" \
+            -H "X-Include-User-Digest-Health: true" \
+            "$SITE_URL/api/internal/admin-alerts/digest") || RESPONSE=""
+
+          if [ -z "$RESPONSE" ]; then
+            FAILURES="digest-health: no response from /api/internal/admin-alerts/digest\n"
+          else
+            # 1) Scheduler liveness: cron ticks every 10 minutes.
+            SCHED_STARTED=$(echo "$RESPONSE" | jq -r '.user_digest_health.scheduler.last_started_at // 0')
+            SCHED_AGE=$(( NOW - SCHED_STARTED ))
+            if [ "$SCHED_AGE" -gt 1500 ]; then
+              FAILURES="${FAILURES}digest scheduler: last tick $((SCHED_AGE / 60)) min ago (expected <= 15)\n"
+            fi
+
+            # 2) Per-user checkpoint staleness. Only users who have received at
+            # least one digest before are monitored — a user with no attempts
+            # yet has no baseline. 72000s = 20h.
+            STALE=$(echo "$RESPONSE" | jq -r --argjson now "$NOW" '
+              .user_digest_health.users[]
+              | select(.digest_enabled == true)
+              | select(.last_digest_attempt_at != null)
+              | select(($now - .last_digest_attempt_at) > 72000)
+              | "user \(.user_id): no successful digest in \((($now - .last_digest_attempt_at) / 3600 | floor))h (ingestion or scheduling may be dead)"')
+            if [ -n "$STALE" ]; then
+              FAILURES="${FAILURES}${STALE}\n"
+            fi
+          fi
+
+          if [ -z "$FAILURES" ]; then
+            echo "OK: digests fresh"
+            exit 0
+          fi
+
+          echo -e "FAILURES:\n${FAILURES}"
+
+          DEDUP_KEY="digest-freshness-$(echo -e "$FAILURES" | sort -u | sha256sum | awk '{print $1}' | cut -c1-12)"
+          BODY="Digest freshness watchdog on $SITE_URL:\n\n$(echo -e "$FAILURES")\nProbed at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+          if [ -n "$NOTIFY_SERVER_URL" ] && [ -n "$NOTIFY_SERVER_TOKEN" ]; then
+            curl -sS -X POST "${NOTIFY_SERVER_URL%/}/alert" \
+              -H "Authorization: Bearer $NOTIFY_SERVER_TOKEN" \
+              -H "Content-Type: application/json" \
+              --max-time 15 \
+              --data "$(jq -n \
+                --arg severity "critical" \
+                --arg title "Lightfriend digests stalled" \
+                --arg body "$BODY" \
+                --arg dedup_key "$DEDUP_KEY" \
+                '{severity:$severity, title:$title, body:$body, dedup_key:$dedup_key}')" \
+              || echo "WARN: notify-server push failed"
+          else
+            echo "WARN: NOTIFY_SERVER_URL/TOKEN unset; cannot push SMS alert"
+          fi
+
+          exit 1

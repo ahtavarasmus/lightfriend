@@ -64,7 +64,7 @@ jobs:
             --timeout-seconds 120 \
             ${S3_BUCKET:+--output-s3-bucket-name "$S3_BUCKET"} \
             ${S3_BUCKET:+--output-s3-key-prefix crash-diag} \
-            --parameters 'commands=["timeout 60 socat - VSOCK-CONNECT:16:9008 2>&1 | grep -E \"panicked at|thread .+panicked|Out of memory:|oom-kill|oom-killer|Killed process |exit status [0-9]+; not expected|entered FATAL state|terminated by SIG(KILL|SEGV|ABRT|BUS)|\\(core dumped\\)\" | head -40"]' \
+            --parameters 'commands=["timeout 60 socat - VSOCK-CONNECT:16:9008 2>&1 | grep -E \"panicked at|thread .+panicked|Out of memory:|oom-kill|oom-killer|Killed process |exit status [0-9]+; not expected|entered FATAL state|terminated by SIG(KILL|SEGV|ABRT|BUS)|\\(core dumped\\)|Client outdated|Logged out|connect failure \\(4[0-9]{2}\\)\" | head -40"]' \
             --query 'Command.CommandId' --output text 2>/dev/null || echo "")
 
           if [ -z "$CMD_ID" ]; then

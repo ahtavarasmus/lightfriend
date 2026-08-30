@@ -21,6 +21,7 @@ jobs:
         run: python3 scripts/update_enclave_dependency_pins.py
 
       - name: Create pull request
+        id: create-pr
         uses: peter-evans/create-pull-request@v6
         with:
           branch: automation/enclave-dependency-updates
@@ -40,3 +41,43 @@ jobs:
             - Tesla vehicle-command commit
 
             CI and the Docker Build & Deploy workflow should prove the combined image before merge.
+
+      - name: Notify admin that an update PR is waiting
+        env:
+          NOTIFY_SERVER_URL: ${{ secrets.NOTIFY_SERVER_URL }}
+          NOTIFY_SERVER_TOKEN: ${{ secrets.NOTIFY_SERVER_TOKEN }}
+          PR_URL: ${{ steps.create-pr.outputs.pull-request-url }}
+          PR_CHANGES: ${{ steps.create-pr.outputs.has-changes }}
+        run: |
+          # WhatsApp periodically bumps its protocol version and rejects old
+          # whatsmeow clients with a 405 connect failure, which silently kills
+          # message ingestion until this PR is merged. An unmerged update PR is
+          # therefore time-critical, not routine mail — page the admin.
+          if [ "$PR_CHANGES" = "true" ] && [ -n "$PR_URL" ] && [ -n "$NOTIFY_SERVER_URL" ] && [ -n "$NOTIFY_SERVER_TOKEN" ]; then
+            curl -sS -X POST "${NOTIFY_SERVER_URL%/}/alert" \
+              -H "Authorization: Bearer $NOTIFY_SERVER_TOKEN" \
+              -H "Content-Type: application/json" \
+              --max-time 15 \
+              --data "$(jq -n \
+                --arg severity "important" \
+                --arg title "Enclave dependency update PR ready" \
+                --arg body "Approve+merge to deploy: $PR_URL" \
+                --arg dedup_key "dependency-pr-$PR_URL" \
+                '{severity:$severity, title:$title, body:$body, dedup_key:$dedup_key}')" \
+              || echo "WARN: notify-server push failed"
+          fi
+
+      - name: Enable auto-merge on the update PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+          PR_CHANGES: ${{ steps.create-pr.outputs.has-changes }}
+        run: |
+          # One approval from the owner is still required by branch protection,
+          # but after that the merge (and the deploy it triggers) happens
+          # automatically once CI is green.
+          if [ "$PR_CHANGES" = "true" ] && [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "false" ]; then
+            gh pr merge --auto --squash "$PR_NUMBER" \
+              --repo "${{ github.repository }}" \
+              || echo "WARN: could not enable auto-merge on PR $PR_NUMBER"
+          fi

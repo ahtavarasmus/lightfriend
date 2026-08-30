@@ -95,6 +95,15 @@ grep -HnE "panicked at|thread '[^']*' panicked|stack backtrace:|fatal runtime er
     2>/dev/null | tail -80 | sanitize_backend_log || echo "  none found"
 echo ""
 
+echo "--- fatal bridge connection failures (whatsapp/signal/telegram) ---"
+# Upstream protocol rejections (e.g. WhatsApp 405 "Client outdated") silently
+# kill message ingestion while every process stays "running" — surface them.
+grep -HnE "Client outdated|Logged out|logged out|connect failure \(4[0-9]{2}\)" \
+    /var/log/supervisor/whatsapp-err.log /var/log/supervisor/whatsapp.log \
+    /var/log/supervisor/signal-err.log /var/log/supervisor/telegram-err.log \
+    2>/dev/null | tail -30 | sanitize_bridge_log || echo "  none found"
+echo ""
+
 echo "--- Tuwunel purge and historical audit instrumentation across backend logs ---"
 echo "Tuwunel server version:"
 curl -sf http://localhost:8008/_synapse/admin/v1/server_version 2>/dev/null || echo "  unavailable"
