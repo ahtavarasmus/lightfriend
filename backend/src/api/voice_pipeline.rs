@@ -1300,6 +1300,10 @@ struct OpenAiReaderSession {
     stream_sid: Option<String>,
     greeting: Option<String>,
     sent_error_notice: bool,
+    /// True once OpenAI accepted our session.update ("session.updated").
+    /// invalid_request_error before this means the session NEVER configured —
+    /// that is fatal, not recoverable.
+    session_configured: bool,
 }
 
 fn openai_realtime_model() -> String {
@@ -1405,11 +1409,15 @@ fn openai_session_update(
     mode: OpenAiRealtimeAudioMode,
 ) -> serde_json::Value {
     let (input_format, output_format) = match mode {
-        // GA requires `rate` alongside the format type; audio/pcmu is 8000 Hz.
-        // Without it OpenAI returns a recoverable error event on session.update.
+        // GA schema: `rate` is ONLY valid on `audio/pcm` (fixed 24000).
+        // `audio/pcmu` / `audio/pcma` take just `type` — their 8000 Hz rate is
+        // implied. Adding `rate` here makes OpenAI reject the ENTIRE
+        // session.update with invalid_request_error, which silently leaves the
+        // session on default pcm16/24k formats: Twilio's 8k PCMU then decodes
+        // as noise and nothing is ever spoken.
         OpenAiRealtimeAudioMode::TwilioPcmu => (
-            serde_json::json!({"type": "audio/pcmu", "rate": 8000}),
-            serde_json::json!({"type": "audio/pcmu", "rate": 8000}),
+            serde_json::json!({"type": "audio/pcmu"}),
+            serde_json::json!({"type": "audio/pcmu"}),
         ),
         OpenAiRealtimeAudioMode::WebPcm24 => (
             serde_json::json!({"type": "audio/pcm", "rate": 24000}),
@@ -1839,8 +1847,12 @@ async fn handle_openai_reader(
                     .unwrap_or("");
                 // Client-side event errors (invalid_request_error) are recoverable —
                 // the session keeps running. Don't tell the user voice is down for
-                // those; only surface server/connection-level errors.
-                if error_type == "invalid_request_error" {
+                // those; only surface server/connection-level errors. EXCEPTION:
+                // an invalid_request_error before session.updated means our
+                // session.update was rejected outright — the session runs on
+                // defaults, no audio will ever work, and the greeting never
+                // fires. That must be surfaced, not swallowed.
+                if error_type == "invalid_request_error" && session.session_configured {
                     tracing::warn!("Recoverable OpenAI Realtime error, continuing: {}", event);
                 } else {
                     let message = event
@@ -1853,6 +1865,7 @@ async fn handle_openai_reader(
                 }
             }
             "session.updated" => {
+                session.session_configured = true;
                 if let Some(greeting) = session.greeting.take() {
                     let _ = openai_tx.send(openai_greeting_response(&greeting)).await;
                 }
@@ -1936,6 +1949,7 @@ async fn start_openai_realtime_session(
             stream_sid,
             greeting,
             sent_error_notice: false,
+            session_configured: false,
         },
     ));
 
