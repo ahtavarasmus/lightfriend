@@ -50,9 +50,20 @@ jobs:
           #   - Kernel OOM / killed process
           #   - Supervisord non-graceful exits (SIGTERM = graceful, excluded)
           #   - Segfault core dumps
+          #
+          # The deploy role lacks ssm:ListCommandInvocations, so command output
+          # cannot be read back through the SSM API. Instead the command writes
+          # its output to S3 (the role has bucket access), and we fetch it from
+          # there after a fixed wait. Without this, every run silently reports
+          # "no crash signatures" because the AccessDenied is swallowed below.
+          S3_BUCKET=$(aws ssm get-parameter --name /lightfriend/s3-bucket \
+            --query 'Parameter.Value' --output text 2>/dev/null || echo "")
           CMD_ID=$(aws ssm send-command \
             --instance-ids "$ACTIVE" \
             --document-name AWS-RunShellScript \
+            --timeout-seconds 120 \
+            ${S3_BUCKET:+--output-s3-bucket-name "$S3_BUCKET"} \
+            ${S3_BUCKET:+--output-s3-key-prefix crash-diag} \
             --parameters 'commands=["timeout 60 socat - VSOCK-CONNECT:16:9008 2>&1 | grep -E \"panicked at|thread .+panicked|Out of memory:|oom-kill|oom-killer|Killed process |exit status [0-9]+; not expected|entered FATAL state|terminated by SIG(KILL|SEGV|ABRT|BUS)|\\(core dumped\\)\" | head -40"]' \
             --query 'Command.CommandId' --output text 2>/dev/null || echo "")
 
@@ -61,33 +72,29 @@ jobs:
             exit 0
           fi
 
-          echo "Sent SSM command $CMD_ID; waiting for completion..."
+          echo "Sent SSM command $CMD_ID; waiting for S3 output..."
 
-          # ── Wait up to 90s for completion ──
-          STATUS="Pending"
-          for i in $(seq 1 30); do
-            STATUS=$(aws ssm list-command-invocations --command-id "$CMD_ID" \
-              --query 'CommandInvocations[0].Status' --output text 2>/dev/null || echo "Pending")
-            [ "$STATUS" = "None" ] && STATUS="Pending"
-            case "$STATUS" in
-              Success) break ;;
-              Failed|Cancelled|TimedOut)
-                echo "SSM command ended with status $STATUS; skipping"
-                exit 0
-                ;;
-            esac
-            sleep 3
+          # ── Wait for the command, then fetch output from S3 ──
+          # The diag script takes ~30-60s; poll the S3 prefix for the object.
+          FINDINGS=""
+          for i in $(seq 1 40); do
+            sleep 5
+            if [ -n "$S3_BUCKET" ]; then
+              S3_KEY=$(aws s3api list-objects-v2 --bucket "$S3_BUCKET" \
+                --prefix "crash-diag/$CMD_ID/" \
+                --query 'Contents[?ends_with(Key, `stdout`)].Key' --output text 2>/dev/null || echo "")
+              if [ -n "$S3_KEY" ] && [ "$S3_KEY" != "None" ]; then
+                FINDINGS=$(aws s3 cp "s3://$S3_BUCKET/$S3_KEY" - 2>/dev/null || echo "")
+                [ -n "$FINDINGS" ] && break
+              fi
+            fi
           done
 
-          if [ "$STATUS" != "Success" ]; then
-            echo "SSM command did not complete within 90s (last status: $STATUS); skipping"
+          if [ -z "$FINDINGS" ]; then
+            echo "OK: no crash signatures on $ACTIVE (no S3 output after wait)"
             exit 0
           fi
 
-          FINDINGS=$(aws ssm list-command-invocations --command-id "$CMD_ID" --details \
-            --query 'CommandInvocations[0].CommandPlugins[0].Output' --output text 2>/dev/null || echo "")
-
-          # Strip trailing whitespace/newlines for clean comparison
           FINDINGS=$(echo "$FINDINGS" | sed -e 's/[[:space:]]*$//')
 
           if [ -z "$FINDINGS" ]; then
