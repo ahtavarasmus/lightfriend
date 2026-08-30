@@ -55,12 +55,16 @@ jobs:
 
             # 2) Per-user checkpoint staleness. Only users who have received at
             # least one digest before are monitored — a user with no attempts
-            # yet has no baseline. 72000s = 20h.
+            # yet has no baseline. Window is 20h–40h: below 20h is normal
+            # (slots are 3x daily), above 40h means a long-churned account
+            # that shouldn't page anyone. A freshly broken ingestion shows up
+            # as a checkpoint frozen in exactly this window.
             STALE=$(echo "$RESPONSE" | jq -r --argjson now "$NOW" '
               .user_digest_health.users[]
               | select(.digest_enabled == true)
               | select(.last_digest_attempt_at != null)
               | select(($now - .last_digest_attempt_at) > 72000)
+              | select(($now - .last_digest_attempt_at) <= 144000)
               | "user \(.user_id): no successful digest in \((($now - .last_digest_attempt_at) / 3600 | floor))h (ingestion or scheduling may be dead)"')
             if [ -n "$STALE" ]; then
               FAILURES="${FAILURES}${STALE}\n"
