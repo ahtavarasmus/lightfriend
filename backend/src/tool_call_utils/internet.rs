@@ -131,7 +131,6 @@ pub fn get_firecrawl_search_tool() -> openai_api_rs::v1::chat_completion::Tool {
 }
 
 use quircs;
-use reqwest;
 use std::error::Error;
 use tracing;
 use url::Url;
@@ -176,11 +175,16 @@ pub async fn handle_qr_scan(image_url: Option<&str>) -> String {
 }
 
 pub async fn scan_qr_code(image_url: &str) -> Result<MenuContent, Box<dyn Error>> {
-    tracing::info!("Starting QR code scan for URL: {}", image_url);
+    tracing::info!("Starting QR code scan");
+
+    crate::utils::ssrf::validate_public_http_target(image_url)
+        .map_err(|error| -> Box<dyn Error> { error.into() })?;
+    let client = crate::utils::ssrf::build_public_http_client(std::time::Duration::from_secs(30))
+        .map_err(|error| -> Box<dyn Error> { error.into() })?;
 
     // Download the image
     tracing::info!("Downloading image...");
-    let response = match reqwest::get(image_url).await {
+    let response = match client.get(image_url).send().await {
         Ok(resp) => {
             if !resp.status().is_success() {
                 tracing::error!("Failed to download image. Status: {}", resp.status());
@@ -189,7 +193,7 @@ pub async fn scan_qr_code(image_url: &str) -> Result<MenuContent, Box<dyn Error>
             resp
         }
         Err(e) => {
-            tracing::error!("Failed to make request: {}", e);
+            tracing::error!("Failed to make QR image request");
             return Err(Box::new(e));
         }
     };

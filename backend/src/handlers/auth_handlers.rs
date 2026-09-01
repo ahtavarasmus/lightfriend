@@ -922,24 +922,24 @@ pub async fn set_password_from_magic_link(
 
 /// Get magic token from Stripe session ID (for redirect flow)
 /// GET /api/auth/session-token/:session_id
+pub fn consume_session_token(
+    session_to_token: &dashmap::DashMap<String, String>,
+    session_id: &str,
+) -> Option<String> {
+    session_to_token.remove(session_id).map(|(_, token)| token)
+}
+
 pub async fn get_token_from_session(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Look up the token from the session_to_token map
-    let token = state
-        .session_to_token
-        .get(&session_id)
-        .map(|v| v.clone())
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "Session not found or expired"})),
-            )
-        })?;
-
-    // Remove the mapping (single use)
-    state.session_to_token.remove(&session_id);
+    // Atomically consume the mapping so concurrent requests cannot both use it.
+    let token = consume_session_token(&state.session_to_token, &session_id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Session not found or expired"})),
+        )
+    })?;
 
     // Check if this is an existing user checkout (should redirect to login instead of auto-login)
     if token == "EXISTING_USER" {

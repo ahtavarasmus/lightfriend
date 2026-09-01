@@ -5,6 +5,7 @@
 //!
 //! MCP uses JSON-RPC 2.0 over HTTP with Server-Sent Events for responses.
 
+use crate::utils::ssrf::{build_public_http_client, validate_public_http_target};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -89,10 +90,8 @@ pub struct McpClientService {
 
 impl McpClientService {
     pub fn new() -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .expect("Failed to create HTTP client");
+        let client = build_public_http_client(Duration::from_secs(30))
+            .expect("Failed to create secure HTTP client");
 
         Self { client }
     }
@@ -259,6 +258,7 @@ impl McpClientService {
         auth_token: Option<&str>,
         request: &JsonRpcRequest,
     ) -> Result<JsonRpcResponse, String> {
+        validate_public_http_target(url)?;
         let mut req = self.client.post(url).json(request);
 
         if let Some(token) = auth_token {
@@ -334,6 +334,7 @@ impl McpClientService {
         auth_token: Option<&str>,
         method: &str,
     ) -> Result<(), String> {
+        validate_public_http_target(url)?;
         let notification = serde_json::json!({
             "jsonrpc": "2.0",
             "method": method
@@ -345,7 +346,9 @@ impl McpClientService {
             req = req.bearer_auth(token);
         }
 
-        let _ = req.send().await;
+        req.send()
+            .await
+            .map_err(|e| format!("Failed to connect to MCP server: {}", e))?;
         Ok(())
     }
 }
