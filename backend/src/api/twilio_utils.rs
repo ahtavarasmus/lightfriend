@@ -170,10 +170,7 @@ pub async fn validate_twilio_signature(
     // own Twilio account. Fall back to the caller lookup only after the master
     // token has failed.
     let from_phone = match params.get("From") {
-        Some(phone) => {
-            tracing::info!("✅ Found From phone number: {}", phone);
-            phone
-        }
+        Some(phone) => phone,
         None => {
             tracing::error!("❌ No From phone number found in payload");
             return Err(StatusCode::BAD_REQUEST);
@@ -181,15 +178,15 @@ pub async fn validate_twilio_signature(
     };
     let user = match state.user_core.find_by_phone_number(from_phone) {
         Ok(Some(user)) => {
-            tracing::info!("✅ Found user {} for phone {}", user.id, from_phone);
+            tracing::info!("Found user {} for Twilio callback", user.id);
             user
         }
         Ok(None) => {
-            tracing::warn!("No user found for Twilio From phone {}", from_phone);
+            tracing::warn!("No user found for Twilio callback sender");
             return Err(StatusCode::UNAUTHORIZED);
         }
         Err(e) => {
-            tracing::error!("❌ Failed to query user by phone {}: {}", from_phone, e);
+            tracing::error!("Failed to query user for Twilio callback: {}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };

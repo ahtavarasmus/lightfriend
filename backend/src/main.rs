@@ -231,7 +231,7 @@ async fn bootstrap_admin_if_needed(
 
     match user_core.create_user(new_user) {
         Ok(()) => {
-            tracing::info!("✓ Bootstrap admin created: {} (phone={})", email, phone);
+            tracing::info!("✓ Bootstrap admin created");
             Ok(())
         }
         Err(e) => {
@@ -275,9 +275,8 @@ async fn main() {
     });
     use tracing_subscriber::{fmt, EnvFilter};
 
-    // Create filter that sets Matrix SDK logs to WARN and keeps our app at DEBUG
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        EnvFilter::new("info,lightfriend=debug")
+        EnvFilter::new("info")
             .add_directive("matrix_sdk=error".parse().unwrap()) // Changed from warn to error
             .add_directive("tokio-runtime-worker=off".parse().unwrap())
             .add_directive("ruma=warn".parse().unwrap())
@@ -304,7 +303,7 @@ async fn main() {
     if admin_list.is_empty() {
         panic!("ADMIN_EMAILS must contain at least one email address");
     }
-    tracing::info!("Admin emails configured: {:?}", admin_list);
+    tracing::info!("{} admin email(s) configured", admin_list.len());
 
     let pg_database_url =
         std::env::var("PG_DATABASE_URL").expect("PG_DATABASE_URL must be set in environment");

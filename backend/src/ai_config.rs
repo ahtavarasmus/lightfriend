@@ -618,8 +618,8 @@ impl AiConfig {
 
                 match Self::assemble_sse_response(&sse_text) {
                     Ok(chat_response) => return Ok(chat_response),
-                    Err(e) => {
-                        last_error = format!("SSE assembly error: {}", e);
+                    Err(_e) => {
+                        last_error = "SSE assembly error".to_string();
                         if attempt < max_attempts {
                             tracing::warn!(
                                 "chat_completion streaming attempt {}/{} failed: {}",
@@ -644,7 +644,7 @@ impl AiConfig {
             let text = response.text().await.unwrap_or_default();
 
             if !status.is_success() {
-                last_error = format!("{}: {}", status, text);
+                last_error = format!("Provider returned HTTP status {}", status);
                 if attempt < max_attempts {
                     tracing::warn!(
                         "chat_completion attempt {}/{} failed: {}",
@@ -664,21 +664,17 @@ impl AiConfig {
             // Some providers (Tinfoil) return HTTP 200 but with an error body
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
                 if let Some(err_obj) = parsed.get("error").and_then(|e| e.as_object()) {
-                    let msg = err_obj
-                        .get("message")
-                        .and_then(|m| m.as_str())
-                        .unwrap_or("unknown error");
                     let err_type = err_obj
                         .get("type")
                         .and_then(|t| t.as_str())
                         .unwrap_or("unknown");
-                    last_error = format!("Provider error ({}): {}", err_type, msg);
+                    last_error = format!("Provider error ({})", err_type);
                     if attempt < max_attempts {
                         tracing::warn!(
-                            "chat_completion attempt {}/{} got error body: {}",
+                            "chat_completion attempt {}/{} returned provider error type={}",
                             attempt,
                             max_attempts,
-                            last_error
+                            err_type
                         );
                         tokio::time::sleep(tokio::time::Duration::from_millis(
                             500 * attempt as u64,
@@ -695,7 +691,7 @@ impl AiConfig {
             // Success - parse the non-streaming response
             let mut json: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
                 openai_api_rs::v1::error::APIError::CustomError {
-                    message: format!("Failed to parse JSON: {} / response {}", e, text),
+                    message: format!("Failed to parse provider JSON response: {}", e),
                 }
             })?;
 
@@ -787,7 +783,7 @@ impl AiConfig {
 
             // Check for error in chunk
             if chunk.get("error").is_some() {
-                return Err(format!("Streaming error: {}", data));
+                return Err("Streaming provider error".to_string());
             }
 
             if response_id.is_empty() {
@@ -1014,8 +1010,7 @@ impl AiConfig {
 
             let status = response.status();
             if !status.is_success() {
-                let text = response.text().await.unwrap_or_default();
-                last_error = format!("{}: {}", status, text);
+                last_error = format!("Provider returned HTTP status {}", status);
                 if attempt < max_attempts {
                     tracing::warn!(
                         "chat_completion_streaming attempt {}/{} failed: {}",
@@ -1091,7 +1086,7 @@ impl AiConfig {
                     }
 
                     if chunk.get("error").is_some() {
-                        stream_error = Some(format!("Streaming error: {}", data));
+                        stream_error = Some("Streaming provider error".to_string());
                         break;
                     }
 
@@ -1281,13 +1276,10 @@ impl AiConfig {
 
             Self::inject_missing_fields(&mut json);
 
-            // Log full reasoning for prompt improvement analysis
             if !reasoning.is_empty() {
                 tracing::info!(
                     reasoning_chars = reasoning.len(),
-                    "\n=== MODEL REASONING ({} chars) ===\n{}\n=== END REASONING ===",
-                    reasoning.len(),
-                    reasoning
+                    "Model reasoning received"
                 );
             }
 

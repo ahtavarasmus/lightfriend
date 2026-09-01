@@ -92,10 +92,7 @@ pub async fn send_magic_link_email_with_options(
     let (resend, from_email, reply_to) = match get_resend_config() {
         Some(config) => config,
         None => {
-            tracing::warn!(
-                "Magic link email NOT sent to {} (RESEND_API_KEY not configured)",
-                to_email
-            );
+            tracing::warn!("Magic link email not sent (RESEND_API_KEY not configured)");
             return Ok(());
         }
     };
@@ -149,7 +146,7 @@ pub async fn send_magic_link_email_with_options(
 
     resend.emails.send(email).await?;
 
-    tracing::info!("Magic link email sent to {}", to_email);
+    tracing::info!("Magic link email sent");
 
     Ok(())
 }
@@ -173,10 +170,7 @@ pub async fn send_password_reset_email(
     let (resend, from_email, reply_to) = match get_resend_config() {
         Some(config) => config,
         None => {
-            tracing::warn!(
-                "Password reset email NOT sent to {} (RESEND_API_KEY not configured)",
-                to_email
-            );
+            tracing::warn!("Password reset email not sent (RESEND_API_KEY not configured)");
             return Ok(());
         }
     };
@@ -217,7 +211,7 @@ pub async fn send_password_reset_email(
 
     resend.emails.send(email).await?;
 
-    tracing::info!("Password reset email sent to {}", to_email);
+    tracing::info!("Password reset email sent");
 
     Ok(())
 }
@@ -232,10 +226,7 @@ pub async fn send_subscription_activated_email(
     let (resend, from_email, reply_to) = match get_resend_config() {
         Some(config) => config,
         None => {
-            tracing::warn!(
-                "Subscription activated email NOT sent to {} (RESEND_API_KEY not configured)",
-                to_email
-            );
+            tracing::warn!("Subscription activated email not sent (RESEND_API_KEY not configured)");
             return Ok(());
         }
     };
@@ -284,7 +275,7 @@ pub async fn send_subscription_activated_email(
 
     resend.emails.send(email).await?;
 
-    tracing::info!("Subscription activated email sent to {}", to_email);
+    tracing::info!("Subscription activated email sent");
 
     Ok(())
 }
@@ -323,7 +314,7 @@ pub async fn send_broadcast_email(
 
     resend.emails.send(email).await?;
 
-    tracing::info!("Broadcast email sent to {}", to_email);
+    tracing::info!("Broadcast email sent");
 
     Ok(())
 }

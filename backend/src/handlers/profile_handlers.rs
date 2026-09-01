@@ -1284,7 +1284,7 @@ pub async fn update_profile(
     use regex::Regex;
     let email_regex = Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();
     if !email_regex.is_match(&update_req.email) {
-        tracing::debug!("Invalid email format: {}", update_req.email);
+        tracing::debug!("Profile update rejected: invalid email format");
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "Invalid email format"})),
@@ -1293,7 +1293,7 @@ pub async fn update_profile(
 
     let phone_regex = Regex::new(r"^\+[1-9]\d{1,14}$").unwrap();
     if !phone_regex.is_match(&update_req.phone_number) {
-        tracing::debug!("Invalid phone number format: {}", update_req.phone_number);
+        tracing::debug!("Profile update rejected: invalid phone number format");
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "Phone number must be in E.164 format (e.g., +1234567890)"})),
@@ -1992,13 +1992,9 @@ pub async fn web_chat(
         let mut message = response.message.clone();
         let mut media: Option<Vec<MediaResult>> = None;
 
-        // Debug: Log response to check for media tags
         tracing::debug!(
-            "web_chat response message (first 500 chars): {}",
-            &message.chars().take(500).collect::<String>()
-        );
-        tracing::debug!(
-            "web_chat response contains [MEDIA_RESULTS]: {}",
+            "web_chat response metadata: chars={}, contains_media_results={}",
+            message.chars().count(),
             message.contains("[MEDIA_RESULTS]")
         );
 

@@ -1015,7 +1015,11 @@ pub async fn tesla_command(
     )
     .await;
 
-    info!("Tesla command result: {}", result);
+    info!(
+        "Tesla command completed for user {} (response_chars={})",
+        auth_user.user_id,
+        result.chars().count()
+    );
 
     Ok(Json(json!({
         "success": true,

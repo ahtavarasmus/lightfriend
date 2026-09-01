@@ -41,8 +41,8 @@ pub async fn try_handle_reply(state: &Arc<AppState>, user: &User, body: &str) ->
         Ok(Some(p)) => p,
         Ok(None) => {
             info!(
-                "commitment_reply user={} got '{}' but no pending prompt - ignoring as agent input",
-                user.id, body
+                "commitment_reply user={} had no pending prompt - ignoring as agent input",
+                user.id
             );
             return None;
         }
@@ -261,8 +261,8 @@ async fn apply_always(
     seed_label_embedding(state, prompt, LABEL_TRACK, now).await;
 
     info!(
-        "commitment_reply user={} reply=2 created event={:?} always_track_sender={} prompt={}",
-        prompt.user_id, created_id, prompt.sender_key, prompt.id
+        "commitment_reply user={} reply=2 created event={:?} prompt={}",
+        prompt.user_id, created_id, prompt.id
     );
 
     format!(
@@ -293,8 +293,8 @@ fn apply_mute(
     }
 
     info!(
-        "commitment_reply user={} reply=3 muted sender={} prompt={}",
-        prompt.user_id, prompt.sender_key, prompt.id
+        "commitment_reply user={} reply=3 muted sender for prompt={}",
+        prompt.user_id, prompt.id
     );
 
     format!(

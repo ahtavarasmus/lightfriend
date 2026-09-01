@@ -596,7 +596,7 @@ pub async fn send_admin_alert(
     .await
     {
         Ok(_) => {
-            tracing::info!("Successfully sent admin alert email: {}", subject);
+            tracing::info!("Successfully sent admin alert email");
 
             // Log this alert in usage_logs for cooldown tracking
             if let Err(e) = state.user_repository.log_usage(LogUsageParams {

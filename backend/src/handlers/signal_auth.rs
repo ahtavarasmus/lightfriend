@@ -1171,9 +1171,8 @@ pub async fn check_signal_health(
 
     let combined = responses.join("\n");
     tracing::info!(
-        "📨 Signal list-logins response for user {}: {:?}",
-        auth_user.user_id,
-        combined
+        "Signal list-logins response received for user {}",
+        auth_user.user_id
     );
 
     if crate::utils::bridge_responses::any_connected(&combined) {

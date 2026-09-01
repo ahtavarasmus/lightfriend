@@ -136,7 +136,7 @@ pub async fn sinch_inbound(
     let user = match state.user_core.find_by_phone_number(&from) {
         Ok(Some(u)) => u,
         Ok(None) => {
-            tracing::warn!("Sinch inbound: no user found for phone {}", from);
+            tracing::warn!("Sinch inbound: no user found for sender");
             return StatusCode::OK;
         }
         Err(e) => {
@@ -225,11 +225,11 @@ pub async fn sinch_status(
         Some(phone) => match state.user_core.find_by_phone_number(phone) {
             Ok(Some(u)) => Some(u.id),
             Ok(None) => {
-                tracing::warn!("Sinch status: no user found for to={}", phone);
+                tracing::warn!("Sinch status: no user found for destination");
                 None
             }
             Err(e) => {
-                tracing::error!("Sinch status: db error looking up to={}: {}", phone, e);
+                tracing::error!("Sinch status: destination lookup failed: {}", e);
                 None
             }
         },

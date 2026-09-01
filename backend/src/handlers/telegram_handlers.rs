@@ -71,13 +71,16 @@ pub async fn send_message(
     {
         Ok(message) => {
             tracing::info!(
-                "Successfully sent Telegram message to {}",
-                request.chat_name
+                "Successfully sent Telegram message for user {}",
+                auth_user.user_id
             );
             Ok(Json(SendTelegramMessageResponse { message }))
         }
         Err(e) => {
-            tracing::error!("Failed to send Telegram message: {}", e);
+            tracing::error!(
+                "Failed to send Telegram message for user {}",
+                auth_user.user_id
+            );
             Err(format!("Failed to send Telegram message: {}", e))
         }
     }

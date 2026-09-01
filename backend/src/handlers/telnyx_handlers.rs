@@ -153,7 +153,7 @@ pub async fn telnyx_inbound(
     let user = match state.user_core.find_by_phone_number(&from) {
         Ok(Some(u)) => u,
         Ok(None) => {
-            tracing::warn!("Telnyx inbound: no user found for phone {}", from);
+            tracing::warn!("Telnyx inbound: no user found for sender");
             return StatusCode::OK;
         }
         Err(e) => {
@@ -256,11 +256,11 @@ pub async fn telnyx_status(
     let user_id = match state.user_core.find_by_phone_number(&to_phone) {
         Ok(Some(u)) => Some(u.id),
         Ok(None) => {
-            tracing::warn!("Telnyx status: no user found for to={}", to_phone);
+            tracing::warn!("Telnyx status: no user found for destination");
             None
         }
         Err(e) => {
-            tracing::error!("Telnyx status: db error looking up to={}: {}", to_phone, e);
+            tracing::error!("Telnyx status: destination lookup failed: {}", e);
             None
         }
     };

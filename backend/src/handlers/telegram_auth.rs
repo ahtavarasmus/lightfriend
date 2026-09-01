@@ -261,25 +261,19 @@ async fn preflight_homeserver_reachability(user_id: i32, homeserver: &str) {
     match client.get(&versions_url).send().await {
         Ok(resp) => {
             let status = resp.status();
-            let body_snippet = match resp.text().await {
-                Ok(t) => truncate_for_log(&t, 200),
-                Err(e) => format!("<body read failed: {}>", format_std_err_chain(&e)),
-            };
             if status.is_success() {
                 tracing::info!(
-                    "[TG-CONNECT user={}] PHASE=preflight OK status={} elapsed_ms={} body={:?}",
+                    "[TG-CONNECT user={}] PHASE=preflight OK status={} elapsed_ms={}",
                     user_id,
                     status,
-                    t0.elapsed().as_millis(),
-                    body_snippet
+                    t0.elapsed().as_millis()
                 );
             } else {
                 tracing::warn!(
-                    "[TG-CONNECT user={}] PHASE=preflight HTTP non-2xx status={} elapsed_ms={} body={:?} (homeserver REACHABLE but returned error status)",
+                    "[TG-CONNECT user={}] PHASE=preflight HTTP non-2xx status={} elapsed_ms={} (homeserver reachable but returned error status)",
                     user_id,
                     status,
-                    t0.elapsed().as_millis(),
-                    body_snippet
+                    t0.elapsed().as_millis()
                 );
             }
         }
@@ -683,7 +677,6 @@ async fn connect_telegram(
     let t_poll = Instant::now();
     let mut login_url: Option<String> = None;
     let mut bot_message_count = 0usize;
-    let mut last_bot_body: Option<String> = None;
     // Track polls where sync_once returned Ok() but we saw no bot messages
     // at all. If this stays high, either the network is flaky (requests
     // returning quickly with no payload) or the bridge bot just hasn't
@@ -816,15 +809,13 @@ async fn connect_telegram(
                 };
 
                 bot_message_count += 1;
-                let body_for_log = truncate_for_log(&message_body, 500);
                 tracing::info!(
-                    "[TG-CONNECT user={}] SUBPHASE=url_poll attempt={}/60 bot_msg#{} body={:?}",
+                    "[TG-CONNECT user={}] SUBPHASE=url_poll attempt={}/60 bot_msg#{} chars={}",
                     user_id,
                     attempt,
                     bot_message_count,
-                    body_for_log
+                    message_body.chars().count()
                 );
-                last_bot_body = Some(message_body.clone());
 
                 if let Some(url) = extract_login_url(&message_body) {
                     tracing::info!(
@@ -860,14 +851,10 @@ async fn connect_telegram(
         Some(u) => u,
         None => {
             tracing::error!(
-                "[TG-CONNECT user={}] SUBPHASE=url_poll TIMEOUT no login URL after 60 attempts poll_elapsed_ms={} bot_msgs_seen={} last_bot_body={:?}",
+                "[TG-CONNECT user={}] SUBPHASE=url_poll TIMEOUT no login URL after 60 attempts poll_elapsed_ms={} bot_msgs_seen={}",
                 user_id,
                 t_poll.elapsed().as_millis(),
-                bot_message_count,
-                last_bot_body
-                    .as_deref()
-                    .map(|b| truncate_for_log(b, 800))
-                    .unwrap_or_else(|| "<none>".to_string())
+                bot_message_count
             );
             return Err(anyhow!(
                 "Telegram login url not received within 30 seconds ({} bot messages seen). Please try again.",
@@ -1272,7 +1259,6 @@ async fn monitor_telegram_connection(
     const FIRST_PING_AT: u32 = 6;
 
     let mut total_bot_msgs_seen = 0usize;
-    let mut last_bot_body: Option<String> = None;
     let mut quiet_polls: u32 = 0;
 
     for attempt in 1..=120 {
@@ -1408,15 +1394,13 @@ async fn monitor_telegram_connection(
                             };
 
                             total_bot_msgs_seen += 1;
-                            let body_for_log = truncate_for_log(&content, 500);
                             tracing::info!(
-                                "[TG-MONITOR user={}] attempt={}/120 bot_msg#{} body={:?}",
+                                "[TG-MONITOR user={}] attempt={}/120 bot_msg#{} chars={}",
                                 user_id,
                                 attempt,
                                 total_bot_msgs_seen,
-                                body_for_log
+                                content.chars().count()
                             );
-                            last_bot_body = Some(content.clone());
 
                             // Exact-match classifier against the verified
                             // `!tg ping` healthy response: body starts with
@@ -1546,13 +1530,14 @@ async fn monitor_telegram_connection(
                                 .any(|&pattern| content.to_lowercase().contains(pattern))
                             {
                                 tracing::error!(
-                                    "[TG-MONITOR user={}] FATAL pattern matched body={:?} elapsed_ms={}",
+                                    "[TG-MONITOR user={}] fatal authentication pattern matched elapsed_ms={}",
                                     user_id,
-                                    truncate_for_log(&content, 500),
                                     monitor_start.elapsed().as_millis()
                                 );
                                 state.user_repository.delete_bridge(user_id, "telegram")?;
-                                return Err(anyhow!("Telegram connection failed: {}", content));
+                                return Err(anyhow!(
+                                    "Telegram connection failed during authentication"
+                                ));
                             }
                         }
                     }
@@ -1571,14 +1556,10 @@ async fn monitor_telegram_connection(
     }
 
     tracing::error!(
-        "[TG-MONITOR user={}] TIMEOUT after 10min elapsed_ms={} total_bot_msgs_seen={} last_bot_body={:?}",
+        "[TG-MONITOR user={}] TIMEOUT after 10min elapsed_ms={} total_bot_msgs_seen={}",
         user_id,
         monitor_start.elapsed().as_millis(),
-        total_bot_msgs_seen,
-        last_bot_body
-            .as_deref()
-            .map(|b| truncate_for_log(b, 800))
-            .unwrap_or_else(|| "<none>".to_string())
+        total_bot_msgs_seen
     );
     state.user_repository.delete_bridge(user_id, "telegram")?;
     Err(anyhow!("Telegram connection timed out after 10 minutes"))
@@ -2004,9 +1985,8 @@ pub async fn check_telegram_health(
 
     let combined = responses.join("\n");
     tracing::info!(
-        "📨 Telegram ping response for user {}: {:?}",
-        auth_user.user_id,
-        combined
+        "Telegram ping response received for user {}",
+        auth_user.user_id
     );
 
     // Exact-match classifier against verified strings. Only accepts:
@@ -2021,9 +2001,8 @@ pub async fn check_telegram_health(
     match classify_telegram_ping(first) {
         Some(TelegramPingStatus::LoggedIn { username }) => {
             tracing::info!(
-                "✅ Telegram health check passed for user {} (@{})",
-                auth_user.user_id,
-                username
+                "Telegram health check passed for user {}",
+                auth_user.user_id
             );
             if let Err(e) =
                 state
@@ -2054,9 +2033,8 @@ pub async fn check_telegram_health(
             // format may have changed; re-probe manually before updating the
             // verified constants.
             tracing::info!(
-                "ℹ️ Telegram health check: unrecognized response for user {}: {:?}",
-                auth_user.user_id,
-                combined
+                "Telegram health check received unrecognized response for user {}",
+                auth_user.user_id
             );
             Ok(AxumJson(json!({
                 "healthy": false,

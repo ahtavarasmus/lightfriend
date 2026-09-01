@@ -14,7 +14,7 @@ pub fn privacy_policy() -> Html {
     html! {
         <div class="legal-content privacy-policy">
             <h1>{"Privacy Policy"}</h1>
-            <p class="last-updated">{"Last updated: June 23, 2026"}</p>
+            <p class="last-updated">{"Last updated: September 1, 2026"}</p>
 
             <section>
                 <h2>{"1. Overview"}</h2>
@@ -42,15 +42,16 @@ pub fn privacy_policy() -> Html {
                     <li>{"AI-generated attention items (summaries, suggested actions)"}</li>
                     <li>{"MCP server configuration data if you set it up"}</li>
                 </ul>
-                <p>{"Lightfriend's production application processes this data inside an AWS Nitro Enclave. Application data persisted outside the enclave is encrypted with AES-256-GCM. Some requested features send necessary data to the sub-processors listed below."}</p>
+                <p>{"Lightfriend's production backend and live database process this data inside an AWS Nitro Enclave. Public web traffic passes through Cloudflare before reaching the enclave. Exported database backups are encrypted with AES-256 before leaving the enclave. Features you request may also transmit the necessary data to the third-party services described below."}</p>
             </section>
 
             <section>
                 <h2>{"4. How the System is Designed"}</h2>
-                <p>{"Lightfriend runs inside an AWS Nitro Enclave - an isolated environment designed to prevent anyone, including us, from accessing data inside it. The system is designed so that:"}</p>
+                <p>{"Lightfriend runs inside an AWS Nitro Enclave - an isolated environment designed to limit direct access to data while it is being processed. The system is designed so that:"}</p>
                 <ul>
                     <li>{"The enclave exposes no SSH login or administrative shell, and its memory is isolated from the parent EC2 instance."}</li>
-                    <li>{"The application requests encryption keys from an independently operated Marlin key service using enclave attestation."}</li>
+                    <li>{"The key used to encrypt exported database backups is derived inside the enclave through an independently operated Marlin key service using enclave attestation."}</li>
+                    <li>{"The live PostgreSQL database is reachable only from inside the enclave; it is not exposed through a host TCP port or PostgreSQL socket."}</li>
                     <li>{"Marlin's release policy checks the reported enclave measurement against the public approval registry."}</li>
                     <li>{"All source code is open source on GitHub with reproducible builds."}</li>
                 </ul>
@@ -75,15 +76,22 @@ pub fn privacy_policy() -> Html {
             <section>
                 <h2>{"7. Third-Party Services and Sub-processors"}</h2>
                 <p><strong>{"No mobile information will be shared with third parties or affiliates for marketing or promotional purposes. All categories of personal information described in this policy exclude text messaging originator opt-in data and consent; this information will not be shared with any third parties or affiliates."}</strong></p>
-                <p>{"The system depends on third-party infrastructure. Where required by GDPR Article 28, we maintain Data Processing Agreements with our sub-processors or rely on the processor's standard data protection terms. Sub-processors receive only the minimum data necessary to deliver the Service on our behalf and are not permitted to use that data for their own purposes. We do not control these services and are not responsible for their behavior."}</p>
+                <p>{"The system depends on third-party infrastructure. Where required by GDPR Article 28, we maintain Data Processing Agreements with processors or rely on their standard data protection terms. We limit disclosures to data needed for the requested feature. Some providers, including payment and telecommunications providers, may also act as independent controllers for fraud prevention, legal compliance, network operation, or other purposes described in their own terms. Their systems are outside Lightfriend's independently verifiable enclave boundary."}</p>
                 <ul>
                     <li><strong>{"AWS (Amazon Web Services, Inc. - US): "}</strong>{"Provides the Nitro Enclave sealed environment and hosting infrastructure. Isolation depends on Amazon's hardware and software."}</li>
+                    <li><strong>{"Cloudflare (Cloudflare, Inc. - US): "}</strong>{"Provides DNS, network protection, and the tunnel through which public web and API traffic reaches the enclave. Cloudflare processes connection and request data such as IP addresses, headers, hostnames and URLs, timing, security signals, and request or response content as technically necessary to proxy and protect traffic. Cloudflare is outside the enclave trust boundary."}</li>
                     <li><strong>{"Marlin (Marlin Protocol - decentralized): "}</strong>{"Key custody. Runs inside its own enclave. Open source."}</li>
                     <li><strong>{"Tinfoil (Tinfoil, Inc. - US): "}</strong>{"AI inference inside sealed environments with cryptographic attestation."}</li>
                     <li><strong>{"NEAR AI (Jasnah Inc., d/b/a NEAR AI - US): "}</strong>{"Backup AI inference provider used when Tinfoil is unavailable or fails, so the Service can continue responding."}</li>
                     <li><strong>{"OpenAI: "}</strong>{"Optional voice calls currently use the OpenAI Realtime API. Call audio and transcripts are processed outside Lightfriend's independently verifiable trust chain. "}<a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener noreferrer">{"OpenAI's published API data controls"}</a>{" state that API data is not used for model training unless the customer opts in, but Realtime customer content may be retained in abuse-monitoring logs for up to 30 days by default. OpenAI controls that environment and access to retained logs; Lightfriend cannot independently verify or technically prevent access there."}</li>
-                    <li><strong>{"Twilio (Twilio, Inc. - US) and Sinch (Sinch AB - Sweden): "}</strong>{"SMS and voice delivery to your registered phone number. Message content is designed to be deleted from these providers after delivery. These providers act solely as carriers to transmit messages between you and the Service."}</li>
-                    <li><strong>{"Stripe (Stripe, Inc. - US): "}</strong>{"Payment processing. We do not store credit card numbers. All payment data is handled by Stripe in accordance with PCI DSS standards."}</li>
+                    <li><strong>{"OpenRouter: "}</strong>{"Processes prompts and responses for features that explicitly use models available through OpenRouter, including Perplexity-powered research and, if configured, embeddings. OpenRouter and the model provider it routes to are outside the sealed trust chain. OpenRouter states that prompt retention by OpenRouter is opt-in, but downstream model-provider controls may differ. See "}<a href="https://openrouter.ai/docs/guides/privacy/data-collection" target="_blank" rel="noopener noreferrer">{"OpenRouter's data-collection documentation"}</a>{"."}</li>
+                    <li><strong>{"Firecrawl: "}</strong>{"Processes search queries, URLs, and webpage extraction requests when you use internet search or scraping features."}</li>
+                    <li><strong>{"Geoapify and Pirate Weather: "}</strong>{"Process location searches, coordinates, nearby-place queries, and weather requests when you use location-dependent features."}</li>
+                    <li><strong>{"Twilio, Sinch, and Telnyx: "}</strong>{"Provide SMS, MMS, phone-number, and voice delivery. Depending on the feature, they receive phone numbers, complete message bodies, media URLs or attachments, delivery and call metadata, and voice audio. Lightfriend attempts to delete Twilio message and media records after processing where supported. The current Sinch and Telnyx integrations do not perform an equivalent post-delivery deletion, and provider or downstream carrier retention is governed by their systems, contracts, and legal obligations. Carrier processing cannot be independently verified by Lightfriend."}</li>
+                    <li><strong>{"Resend: "}</strong>{"Delivers account, security, billing, service, and administrative email. It receives recipient email addresses and the content of emails sent through it."}</li>
+                    <li><strong>{"Stripe (Stripe, Inc. - US): "}</strong>{"Processes checkout, subscriptions, payments, fraud signals, and related customer and transaction metadata. Lightfriend does not store complete payment-card numbers."}</li>
+                    <li><strong>{"Metronome: "}</strong>{"When usage-based billing is enabled, processes account identifiers and product-usage or billing-meter events used to calculate entitlements and charges."}</li>
+                    <li><strong>{"Simple Analytics and DataFast: "}</strong>{"Provide website analytics as described in Section 18. DataFast may receive IP address, device and browser data, visited pages, referrers, and analytics events when analytics is enabled."}</li>
                 </ul>
                 <p>{"A current list of sub-processors is available upon request at rasmus@lightfriend.ai."}</p>
             </section>
@@ -93,7 +101,7 @@ pub fn privacy_policy() -> Html {
                 <p>{"Some of our sub-processors are based in the United States. Data transferred outside the EU/EEA is protected by the following safeguards:"}</p>
                 <ul>
                     <li>{"Where applicable, our sub-processors participate in the EU-US Data Privacy Framework or provide Standard Contractual Clauses (SCCs) approved by the European Commission."}</li>
-                    <li>{"As a supplementary measure, protected application data stored outside the enclave is stored as ciphertext, with key release governed by enclave attestation."}</li>
+                    <li>{"As a supplementary measure, exported database backups are ciphertext encrypted with a backup key derived through enclave attestation. This statement does not apply to data that must be processed by a third-party provider to perform a requested feature."}</li>
                 </ul>
             </section>
 
@@ -102,6 +110,8 @@ pub fn privacy_policy() -> Html {
                 <p>{"Lightfriend uses artificial intelligence systems to process your messages and generate responses, summaries, and suggested actions. In accordance with the EU AI Act:"}</p>
                 <ul>
                     <li>{"AI processing is performed by third-party large language models. Tinfoil is our primary AI inference provider. If Tinfoil is unavailable or fails, requests may be processed by NEAR AI as a backup provider to keep the Service available."}</li>
+                    <li>{"OpenRouter is used for specific features such as Perplexity-powered research and may be used for embeddings when configured. It is not the automatic fallback for ordinary Tinfoil chat requests."}</li>
+                    <li>{"Voice calls use OpenAI Realtime by default unless the separately configured Tinfoil voice path is enabled."}</li>
                     <li>{"AI-generated content is produced automatically. It may be inaccurate, incomplete, or inappropriate."}</li>
                     <li>{"No automated decision with legal or similarly significant effects is made without your involvement. All AI outputs are recommendations - you decide whether and how to act on them."}</li>
                     <li>{"Lightfriend does not review or endorse AI-generated content."}</li>
@@ -110,7 +120,8 @@ pub fn privacy_policy() -> Html {
 
             <section>
                 <h2>{"10. Messaging Integrations"}</h2>
-                <p>{"Messages from your connected platforms enter the enclave for processing. Connection data and messages are stored encrypted inside the enclave. You are solely responsible for message content. Lightfriend acts as a technical intermediary."}</p>
+                <p>{"Messages from your connected platforms enter the enclave for processing and may be stored in its live PostgreSQL database. This includes recent message content, conversation history, person and event information, and profile or location information used for AI recall and personalization. The live database is confined to the enclave, sensitive application fields receive additional encryption where appropriate, and exported database backups are encrypted before leaving the enclave."}</p>
+                <p>{"You are responsible for message content. Lightfriend acts as a technical intermediary, and the connected platform, bridge software, telecommunications carrier, and any requested AI or tool provider may process the data needed to deliver the feature."}</p>
                 <p>{"Connections to messaging platforms such as WhatsApp, Signal, and Telegram use open-source bridge software that is not an official client of those platforms. Using these integrations may carry risks including account restrictions by the platform provider. See our Terms and Conditions for full details."}</p>
             </section>
 
@@ -134,6 +145,7 @@ pub fn privacy_policy() -> Html {
             <section>
                 <h2>{"13. Email, MCP, and Other Integrations"}</h2>
                 <p>{"All integration credentials are stored encrypted inside the enclave. You connect services at your own risk and are responsible for your accounts with third-party services. We are not liable for third-party service behavior."}</p>
+                <p>{"Internet search and scraping can send your query and requested URLs to Firecrawl or OpenRouter-hosted Perplexity models. Location and weather tools can send search text, coordinates, or nearby-place requests to Geoapify and Pirate Weather. Email delivery can send recipient addresses and email content to Resend. These services operate outside the enclave boundary."}</p>
                 <p><strong>{"IMPORTANT: "}</strong>{"When you configure MCP (Model Context Protocol) servers, data processed by those servers leaves the sealed enclave environment and is sent to your configured external servers. Lightfriend's enclave architecture does not cover processing performed by external MCP servers. You assume full responsibility for any MCP servers you configure."}</p>
             </section>
 
@@ -158,12 +170,16 @@ pub fn privacy_policy() -> Html {
             <section>
                 <h2>{"15. Data Retention"}</h2>
                 <ul>
-                    <li><strong>{"Messages and integration data: "}</strong>{"Retained until you disconnect the integration or delete your account."}</li>
+                    <li><strong>{"Ontology message memory: "}</strong>{"Recent ingested message content used for AI recall is normally purged after 30 days by a scheduled job."}</li>
+                    <li><strong>{"Events and personal memory: "}</strong>{"Dismissed, expired, or notified events are normally purged after 30 days. Active events, person edits, profile information, locations, and other AI memory can remain until changed or the account is deleted."}</li>
+                    <li><strong>{"Other messages and integration data: "}</strong>{"Conversation history, bridge data, and other service records may remain while the account or integration is active, unless a shorter feature-specific retention period applies."}</li>
                     <li><strong>{"Authentication tokens: "}</strong>{"Deleted when you disconnect an integration."}</li>
+                    <li><strong>{"Operational logs: "}</strong>{"The application records operational metadata such as user or record IDs, event types, status codes, counts, and payload lengths. Application logs are designed not to contain authentication tokens, raw message bodies, email addresses, phone numbers, AI prompts or responses, or event descriptions, and are rotated by size. Third-party providers maintain their own logs under their policies."}</li>
+                    <li><strong>{"Third-party data: "}</strong>{"Deletion from Lightfriend does not necessarily cause immediate deletion from telecommunications carriers, payment providers, AI providers, connected platforms, or other third parties. Their retention periods and legal obligations apply separately."}</li>
                     <li><strong>{"Billing records: "}</strong>{"Retained for 6 years as required by Finnish accounting law (Kirjanpitolaki)."}</li>
                     <li><strong>{"Account data: "}</strong>{"Deleted within 30 days of account deletion, except where retention is required by law."}</li>
                 </ul>
-                <p>{"All stored data is encrypted with keys that exist only inside the enclave."}</p>
+                <p>{"Exported database backups are encrypted before leaving the enclave. Data sent to third-party services is protected and retained according to those providers' systems and terms."}</p>
             </section>
 
             <section>

@@ -729,11 +729,9 @@ pub async fn insert_email_into_ontology(
                 }
                 if notified {
                     tracing::info!(
-                        "REPLY_WATCH fired+cleared email watch id={} user={} account={} sender={}",
+                        "REPLY_WATCH fired+cleared email watch id={} user={}",
                         watch.id,
-                        user_id,
-                        conn_id,
-                        key
+                        user_id
                     );
                 } else if let Err(e) = state.pending_reply_watches_repository.restore(&watch) {
                     tracing::warn!(
@@ -744,13 +742,9 @@ pub async fn insert_email_into_ontology(
                 }
             }
             Ok(None) => {}
-            Err(e) => tracing::warn!(
-                "REPLY_WATCH email lookup failed user={} account={} sender={}: {}",
-                user_id,
-                conn_id,
-                key,
-                e
-            ),
+            Err(e) => {
+                tracing::warn!("REPLY_WATCH email lookup failed user={}: {}", user_id, e)
+            }
         }
     }
     let msg = crate::models::ontology_models::NewOntMessage {
@@ -1252,15 +1246,15 @@ pub async fn respond_to_email(
         .credentials(creds)
         .build();
     // Create email message
-    let sender_mailbox = email.parse().map_err(|error| {
-        tracing::error!("Stored sender address is invalid: {}", error);
+    let sender_mailbox = email.parse().map_err(|_error| {
+        tracing::error!("Stored sender address is invalid");
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             AxumJson(json!({ "error": "The connected inbox has an invalid sender address" })),
         )
     })?;
-    let reply_mailbox = reply_to_address.parse().map_err(|error| {
-        tracing::warn!("Original email has an invalid reply address: {}", error);
+    let reply_mailbox = reply_to_address.parse().map_err(|_error| {
+        tracing::warn!("Original email has an invalid reply address");
         (
             StatusCode::BAD_GATEWAY,
             AxumJson(

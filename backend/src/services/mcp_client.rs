@@ -234,8 +234,8 @@ impl McpClientService {
 
         // Try to initialize - some servers require this, others don't
         match self.send_request(url, auth_token, &init_request).await {
-            Ok(response) => {
-                debug!("MCP initialize response: {:?}", response.result);
+            Ok(_response) => {
+                debug!("MCP initialize succeeded");
                 // Send initialized notification (some servers require this)
                 let _ = self
                     .send_notification(url, auth_token, "notifications/initialized")

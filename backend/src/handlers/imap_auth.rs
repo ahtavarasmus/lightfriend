@@ -465,12 +465,7 @@ async fn connect_imap(
     let server = imap_server.unwrap_or(detected_server);
     let port = imap_port.unwrap_or(detected_port);
 
-    tracing::debug!(
-        "Connecting to IMAP server {} on port {} for email {}",
-        server,
-        port,
-        email
-    );
+    tracing::debug!("Connecting to IMAP server {} on port {}", server, port);
 
     crate::handlers::imap_handlers::open_imap_session(server, port, email, password).await
 }

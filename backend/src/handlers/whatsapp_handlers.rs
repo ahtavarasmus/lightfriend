@@ -72,13 +72,16 @@ pub async fn send_message(
     {
         Ok(message) => {
             tracing::info!(
-                "Successfully sent WhatsApp message to {}",
-                request.chat_name
+                "Successfully sent WhatsApp message for user {}",
+                auth_user.user_id
             );
             Ok(Json(SendWhatsAppMessageResponse { message }))
         }
         Err(e) => {
-            tracing::error!("Failed to send WhatsApp message: {}", e);
+            tracing::error!(
+                "Failed to send WhatsApp message for user {}",
+                auth_user.user_id
+            );
             Err(format!("Failed to send WhatsApp message: {}", e))
         }
     }
@@ -123,10 +126,8 @@ pub async fn test_fetch_messages(
 
             for msg in messages.iter() {
                 tracing::debug!(
-                    "Message: room={}, type={}, sender={}, timestamp={}, content_len={}",
-                    msg.room_name,
+                    "WhatsApp message metadata: type={}, timestamp={}, content_len={}",
                     msg.message_type,
-                    msg.sender_display_name,
                     msg.formatted_timestamp,
                     msg.content.len()
                 );
@@ -134,15 +135,9 @@ pub async fn test_fetch_messages(
 
             tracing::debug!("Total messages: {}", messages.len());
 
-            // Also keep the debug logging for the first 5 messages
+            // Keep limited metadata for the first five messages.
             for (i, msg) in messages.iter().enumerate().take(5) {
-                tracing::info!(
-                    "Message {}: room={}, sender={}, content=({} chars)",
-                    i,
-                    msg.room_name,
-                    msg.sender,
-                    msg.content.len()
-                );
+                tracing::info!("Message {} metadata: content_len={}", i, msg.content.len());
             }
 
             Ok(Json(WhatsAppMessagesResponse { messages }))

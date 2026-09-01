@@ -398,7 +398,7 @@ pub async fn broadcast_email(
         for user in users {
             let normalized_user_email = user.email.trim().to_lowercase();
             if excluded_emails.contains(&normalized_user_email) {
-                tracing::info!("Skipping excluded broadcast recipient {}", user.email);
+                tracing::info!("Skipping excluded broadcast recipient");
                 continue;
             }
 
@@ -435,7 +435,7 @@ pub async fn broadcast_email(
 
             // Skip users with invalid or empty email addresses
             if user.email.is_empty() || !user.email.contains('@') || !user.email.contains('.') {
-                tracing::warn!("Skipping invalid email address: {}", user.email);
+                tracing::warn!("Skipping invalid broadcast email address");
                 continue;
             }
 
@@ -496,7 +496,7 @@ pub async fn broadcast_email(
             {
                 Ok(_) => {
                     success_count += 1;
-                    tracing::info!("Successfully sent email to {}", user.email);
+                    tracing::info!("Successfully sent broadcast email");
                 }
                 Err(e) => {
                     failed_count += 1;
@@ -540,7 +540,7 @@ pub async fn broadcast_email(
 
             // Skip invalid email addresses
             if entry.email.is_empty() || !entry.email.contains('@') || !entry.email.contains('.') {
-                tracing::warn!("Skipping invalid waitlist email address: {}", entry.email);
+                tracing::warn!("Skipping invalid waitlist email address");
                 continue;
             }
 
@@ -598,7 +598,7 @@ pub async fn broadcast_email(
             {
                 Ok(_) => {
                     success_count += 1;
-                    tracing::info!("Successfully sent email to waitlist entry {}", entry.email);
+                    tracing::info!("Successfully sent email to waitlist entry");
                 }
                 Err(e) => {
                     failed_count += 1;
@@ -810,7 +810,7 @@ pub async fn send_password_reset_link(
     let email = user.email.clone();
     tokio::spawn(async move {
         if let Err(e) = crate::utils::email::send_password_reset_email(&email, &reset_link).await {
-            tracing::error!("Failed to send password reset email to {}: {}", email, e);
+            tracing::error!("Failed to send password reset email: {}", e);
         }
     });
 
@@ -1730,7 +1730,7 @@ pub async fn recover_users_from_external(
         match state.user_core.create_user(new_user) {
             Ok(_) => {
                 created += 1;
-                tracing::info!("Recovery: created user {}", email);
+                tracing::info!("Recovery: created user");
 
                 // Set plan_type and stripe_customer_id on the newly created user
                 if let Some(info) = stripe_info {
@@ -1807,7 +1807,7 @@ pub async fn recover_users_from_external(
             if let Err(e) =
                 crate::utils::email::send_password_reset_email(&email, &reset_link).await
             {
-                tracing::error!("Failed to send recovery email to {}: {}", email, e);
+                tracing::error!("Failed to send recovery email: {}", e);
             }
         });
         reset_sent += 1;
@@ -2055,10 +2055,9 @@ pub async fn probe_bridge_command(
 
     let full_cmd = format!("{} {}", prefix, cmd);
     tracing::info!(
-        "[BRIDGE-PROBE] user={} sending {:?} to {} ts_ms={}",
+        "[BRIDGE-PROBE] user={} command_len={} ts_ms={}",
         auth_user.user_id,
-        full_cmd,
-        room_id_str,
+        full_cmd.chars().count(),
         cmd_sent_ts_ms
     );
 
@@ -3144,16 +3143,7 @@ pub async fn repair_telegram_doublepuppet(
     })))
 }
 
-/// Tail of supervisord-managed program's stdout + stderr logs, optionally
-/// filtered by regex. Lets us read the bridge's own auth-attempt errors
-/// (AutologinError, "Failed to verify access token", _login_with_shared_secret
-/// debug output, etc) without needing to ssh into the enclave or deploy
-/// another diag endpoint.
-///
 /// GET /api/admin/supervisor-log/{program}?lines=200&pattern=...
-///
-/// Whitelisted programs match the supervisord.conf entries that are safe
-/// to expose via admin auth: bridge processes + lightfriend + tuwunel.
 /// `lines` defaults to 200 and is capped at 2000 (logs rotate at 2MB).
 /// `pattern` is treated as a substring match (not regex) for simplicity
 /// and to avoid catastrophic-backtracking risk; case-sensitive.
@@ -3171,20 +3161,13 @@ pub async fn supervisor_log(
     axum::extract::Path(program): axum::extract::Path<String>,
     axum::extract::Query(q): axum::extract::Query<SupervisorLogQuery>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Whitelist of safe programs. Maps the supervisor program name to its
-    // logfile basename (some programs are named differently from their
-    // logfile, e.g. mautrix-telegram → telegram.log).
     let logfile_base = match program.as_str() {
-        "telegram" | "mautrix-telegram" => "telegram",
-        "whatsapp" | "mautrix-whatsapp" => "whatsapp",
-        "signal" | "mautrix-signal" => "signal",
         "lightfriend" => "lightfriend",
-        "tuwunel" => "tuwunel",
         _ => {
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(json!({
-                    "error": "invalid program (allowed: telegram, whatsapp, signal, lightfriend, tuwunel)"
+                    "error": "invalid program (allowed: lightfriend)"
                 })),
             ));
         }

@@ -230,7 +230,7 @@ impl TeslaClient {
         let status = response.status();
         let response_text = response.text().await?;
 
-        tracing::info!("Registration response ({}): {}", status, response_text);
+        tracing::info!("Tesla registration response status={}", status);
 
         if status.is_success() {
             tracing::info!("Successfully registered app in region");
@@ -239,8 +239,8 @@ impl TeslaClient {
             tracing::info!("App already registered in region");
             Ok(true)
         } else {
-            tracing::error!("Failed to register app: {}", response_text);
-            Err(format!("Registration failed: {}", response_text).into())
+            tracing::error!("Failed to register Tesla app: status={}", status);
+            Err(format!("Tesla registration failed with status {}", status).into())
         }
     }
 
@@ -622,11 +622,7 @@ impl TeslaClient {
         let (client, base_url) = if let (Some(proxy_client), Some(proxy_url)) =
             (&self.proxy_client, &self.proxy_url)
         {
-            tracing::info!(
-                "Sending signed command '{}' via proxy to vehicle {}",
-                command,
-                vehicle_id
-            );
+            tracing::info!("Sending signed Tesla command '{}' via proxy", command);
             (proxy_client, proxy_url.as_str())
         } else {
             tracing::warn!("Proxy not available - attempting direct command (will likely fail with Protocol error)");
@@ -641,8 +637,12 @@ impl TeslaClient {
         let response = client.post(&url).bearer_auth(access_token).send().await?;
 
         if !response.status().is_success() {
-            let error_text = response.text().await?;
-            return Err(format!("Tesla API error for command {}: {}", command, error_text).into());
+            return Err(format!(
+                "Tesla API error for command {}: status {}",
+                command,
+                response.status()
+            )
+            .into());
         }
 
         let command_response: CommandResponse = response.json().await?;
@@ -669,11 +669,7 @@ impl TeslaClient {
         let (client, base_url) = if let (Some(proxy_client), Some(proxy_url)) =
             (&self.proxy_client, &self.proxy_url)
         {
-            tracing::info!(
-                "Sending signed command '{}' via proxy to vehicle {}",
-                command,
-                vehicle_id
-            );
+            tracing::info!("Sending signed Tesla command '{}' via proxy", command);
             (proxy_client, proxy_url.as_str())
         } else {
             tracing::warn!("Proxy not available - attempting direct command (will likely fail with Protocol error)");
@@ -693,8 +689,12 @@ impl TeslaClient {
             .await?;
 
         if !response.status().is_success() {
-            let error_text = response.text().await?;
-            return Err(format!("Tesla API error for command {}: {}", command, error_text).into());
+            return Err(format!(
+                "Tesla API error for command {}: status {}",
+                command,
+                response.status()
+            )
+            .into());
         }
 
         let command_response: CommandResponse = response.json().await?;
@@ -725,9 +725,8 @@ impl TeslaClient {
         );
 
         tracing::info!(
-            "Sending direct API command '{}' to vehicle {} (bypassing proxy)",
-            command,
-            vehicle_id
+            "Sending direct Tesla API command '{}' (bypassing proxy)",
+            command
         );
 
         let response = self
@@ -739,8 +738,12 @@ impl TeslaClient {
             .await?;
 
         if !response.status().is_success() {
-            let error_text = response.text().await?;
-            return Err(format!("Tesla API error for command {}: {}", command, error_text).into());
+            return Err(format!(
+                "Tesla API error for command {}: status {}",
+                command,
+                response.status()
+            )
+            .into());
         }
 
         let command_response: CommandResponse = response.json().await?;
@@ -768,10 +771,7 @@ impl TeslaClient {
 
         // Check if vehicle is already being woken
         if let Some(sender) = waking_vehicles.get(&vin) {
-            tracing::info!(
-                "Vehicle {} is already being woken by another request, waiting...",
-                vin
-            );
+            tracing::info!("Vehicle is already being woken by another request; waiting");
             let mut receiver = sender.subscribe();
             drop(sender); // Release the read lock
 
@@ -820,7 +820,7 @@ impl TeslaClient {
         const POLL_INTERVAL_SECS: u64 = 2;
         const MAX_ATTEMPTS: u32 = 23;
 
-        tracing::info!("Waking up vehicle {}", vehicle_id);
+        tracing::info!("Waking up Tesla vehicle");
 
         let (client, base_url) =
             if let (Some(proxy_client), Some(proxy_url)) = (&self.proxy_client, &self.proxy_url) {
@@ -836,13 +836,15 @@ impl TeslaClient {
         let status = response.status();
 
         if !status.is_success() {
-            let error_text = response.text().await?;
-            tracing::error!("Wake-up failed with status {}: {}", status, error_text);
-            return Err(format!("Failed to wake vehicle: {}", error_text).into());
+            tracing::error!("Tesla wake-up failed with status {}", status);
+            return Err(format!("Failed to wake vehicle: status {}", status).into());
         }
 
         let response_text = response.text().await?;
-        tracing::debug!("Wake-up response: {}", response_text);
+        tracing::debug!(
+            "Tesla wake-up response received ({} bytes)",
+            response_text.len()
+        );
 
         let response_json: serde_json::Value = serde_json::from_str(&response_text)
             .map_err(|e| format!("Failed to parse wake-up response: {}", e))?;
@@ -944,10 +946,7 @@ impl TeslaClient {
                         let temp_diff = target_temp - inside_temp;
 
                         tracing::debug!(
-                            "Climate check: inside={}°C, target={}°C, diff={}°C, runtime={}min",
-                            inside_temp,
-                            target_temp,
-                            temp_diff,
+                            "Tesla climate readiness check runtime={}min",
                             elapsed_mins
                         );
 
@@ -956,8 +955,10 @@ impl TeslaClient {
                         let runtime_is_ready = elapsed >= MIN_RUNTIME_SECS;
 
                         if temp_is_ready && runtime_is_ready {
-                            tracing::info!("Vehicle is ready to drive: temp={}°C (target={}°C) after {} minutes",
-                                inside_temp, target_temp, elapsed_mins);
+                            tracing::info!(
+                                "Vehicle is ready to drive after {} minutes",
+                                elapsed_mins
+                            );
                             return Ok(Some(inside_temp));
                         }
                     } else {

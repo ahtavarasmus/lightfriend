@@ -298,18 +298,13 @@ pub async fn handle_textbee_sms(
     [(axum::http::HeaderName, &'static str); 1],
     axum::Json<TwilioResponse>,
 ) {
-    tracing::debug!(
-        "Received TextBee SMS from: {} to: {} via device: {}",
-        payload.sender,
-        payload.recipient,
-        payload.device_id
-    );
+    tracing::debug!("Received TextBee SMS webhook");
 
     // Step 1: Find user by sender phone (from)
     let user = match state.user_core.find_by_phone_number(&payload.sender) {
         Ok(Some(u)) => u,
         Ok(None) => {
-            tracing::error!("No user found for phone: {}", payload.sender);
+            tracing::error!("No user found for TextBee SMS sender");
             return SmsResult::user_not_found().into_response();
         }
         Err(e) => {

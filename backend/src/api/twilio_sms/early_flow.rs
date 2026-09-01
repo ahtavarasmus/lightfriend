@@ -9,7 +9,7 @@ pub(super) fn resolve_sms_user(state: &Arc<AppState>, from: &str) -> Result<User
     match state.user_core.find_by_phone_number(from) {
         Ok(Some(user)) => Ok(user),
         Ok(None) => {
-            tracing::error!("No user found for phone number: {}", from);
+            tracing::error!("No user found for incoming SMS sender");
             Err(SmsResult::user_not_found())
         }
         Err(e) => {

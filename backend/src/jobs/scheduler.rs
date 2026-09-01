@@ -468,11 +468,10 @@ async fn probe_bridge_login_health(
     let combined = responses.join("\n");
     let health = classify_bridgev2_list_logins(&combined);
     tracing::info!(
-        "Bridge health: user {} {} -> {:?} (body: {:?})",
+        "Bridge health: user {} {} -> {:?}",
         user_id,
         bridge.bridge_type,
-        health,
-        combined
+        health
     );
 
     match health {

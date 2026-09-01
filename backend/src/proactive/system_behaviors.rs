@@ -1153,13 +1153,12 @@ pub async fn run_commitment_detection(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let content_preview: String = content.chars().take(80).collect();
 
     let settings = state.user_core.get_user_settings(user_id)?;
     if !settings.auto_track_items_system {
         info!(
-            "commitment_detection skip user={} reason=setting_off platform={} sender={}",
-            user_id, platform, sender_name
+            "commitment_detection skip user={} reason=setting_off platform={}",
+            user_id, platform
         );
         return Ok(());
     }
@@ -1179,8 +1178,12 @@ pub async fn run_commitment_detection(
     }
 
     info!(
-        "commitment_detection start user={} platform={} sender={} room={} msg_id={:?} preview={:?}",
-        user_id, platform, sender_name, room_id, message_id, content_preview
+        "commitment_detection start user={} platform={} room={} msg_id={:?} content_len={}",
+        user_id,
+        platform,
+        room_id,
+        message_id,
+        content.chars().count()
     );
 
     if exceeds_daily_token_budget(state, user_id, "commitment_detection") {
@@ -1220,11 +1223,10 @@ pub async fn run_commitment_detection(
         };
 
     info!(
-        "commitment_detection user={} pass1={} platform={} sender={}",
+        "commitment_detection user={} pass1={} platform={}",
         user_id,
         if gate_relevant { "relevant" } else { "skip" },
-        platform,
-        sender_name
+        platform
     );
 
     // Persist gate decision on the message immediately, so the activity feed
@@ -1622,8 +1624,8 @@ pub async fn run_commitment_detection(
 
         if !has_commitment {
             info!(
-                "commitment_detection user={} llm said no commitment (platform={} sender={} preview={:?})",
-                user_id, platform, sender_name, content_preview
+                "commitment_detection user={} llm said no commitment (platform={})",
+                user_id, platform
             );
             routing = serde_json::json!({"action": "skipped", "reason": "has_commitment_false"});
             break;
@@ -1932,8 +1934,8 @@ async fn handle_new_commitment(
                 if rule.rule_type == crate::repositories::commitment_repository::RULE_MUTE =>
             {
                 info!(
-                    "commitment_detection user={} skip sender_muted sender={} rule={}",
-                    user_id, sender_key, rule.id
+                    "commitment_detection user={} skip sender_muted rule={}",
+                    user_id, rule.id
                 );
                 return serde_json::json!({
                     "action": "skipped",
@@ -1946,8 +1948,8 @@ async fn handle_new_commitment(
                     == crate::repositories::commitment_repository::RULE_ALWAYS_TRACK =>
             {
                 info!(
-                    "commitment_detection user={} auto-tracking via always_track sender={} rule={}",
-                    user_id, sender_key, rule.id
+                    "commitment_detection user={} auto-tracking via always_track rule={}",
+                    user_id, rule.id
                 );
                 // Fall through to auto-create below.
             }
@@ -2118,10 +2120,7 @@ async fn handle_new_commitment(
                     None,
                 );
             }
-            info!(
-                "Auto-created event {} for user {}: {}",
-                created.id, user_id, created.description
-            );
+            info!("Auto-created event {} for user {}", created.id, user_id);
             serde_json::json!({
                 "action": "created",
                 "event_id": created.id,
@@ -2492,14 +2491,9 @@ pub async fn check_outgoing_event_resolution(
                     "resolve_message",
                     None,
                 );
-                let desc = active_events
-                    .iter()
-                    .find(|e| e.id == event_id)
-                    .map(|e| e.description.as_str())
-                    .unwrap_or("unknown");
                 info!(
-                    "Auto-completed event {} for user {} via outgoing message: {}",
-                    event_id, user_id, desc
+                    "Auto-completed event {} for user {} via outgoing message",
+                    event_id, user_id
                 );
             }
         }

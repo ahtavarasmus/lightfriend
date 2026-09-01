@@ -706,7 +706,7 @@ fn register_handlers(client: &MatrixClient, state: &Arc<AppState>, user_id: i32)
     client.add_event_handler(move |ev: OriginalSyncRoomMessageEvent, room: Room, c| {
         let state = Arc::clone(&state_for_handler);
         async move {
-            tracing::debug!("📨 Received message in room {}: {:?}", room.room_id(), ev);
+            tracing::debug!("Received Matrix message in room {}", room.room_id());
             crate::utils::bridge::handle_bridge_message(ev, room, c, state).await;
         }
     });

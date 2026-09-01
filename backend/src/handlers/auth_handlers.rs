@@ -98,7 +98,7 @@ pub async fn login(
     State(state): State<Arc<AppState>>,
     Json(login_req): Json<LoginRequest>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    tracing::debug!("Login attempt for email: {}", login_req.email);
+    tracing::debug!("Login attempt received");
 
     // Define rate limit: 5 attempts per minute
     let quota = Quota::per_minute(NonZeroU32::new(5).unwrap());
@@ -380,11 +380,11 @@ pub async fn register(
     State(state): State<Arc<AppState>>,
     Json(reg_req): Json<RegisterRequest>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    tracing::debug!("Registration attempt for email: {}", reg_req.email);
+    tracing::debug!("Registration attempt received");
     use regex::Regex;
     let email_regex = Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();
     if !email_regex.is_match(&reg_req.email) {
-        tracing::debug!("Invalid email format: {}", reg_req.email);
+        tracing::debug!("Registration rejected: invalid email format");
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "Invalid email format"})),
@@ -399,7 +399,7 @@ pub async fn register(
             Json(json!({ "error": "Database error".to_string() })),
         )
     })? {
-        tracing::debug!("Email {} already exists", reg_req.email);
+        tracing::debug!("Registration rejected: email already exists");
         return Err((
             StatusCode::CONFLICT,
             Json(json!({ "error": "Email already exists" })),
@@ -408,7 +408,7 @@ pub async fn register(
     tracing::debug!("Email is available");
     let phone_regex = Regex::new(r"^\+[1-9]\d{1,14}$").unwrap();
     if !phone_regex.is_match(&reg_req.phone_number) {
-        tracing::debug!("Invalid phone number format: {}", reg_req.phone_number);
+        tracing::debug!("Registration rejected: invalid phone number format");
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "Phone number must be in E.164 format (e.g., +1234567890)"})),
@@ -433,7 +433,7 @@ pub async fn register(
             )
         })?
     {
-        tracing::debug!("Phone number {} already exists", reg_req.phone_number);
+        tracing::debug!("Registration rejected: phone number already exists");
         return Err((
             StatusCode::CONFLICT,
             Json(json!({ "error": "Phone number already registered" })),
@@ -1021,7 +1021,7 @@ pub async fn add_to_waitlist(
             )
         })?;
 
-    tracing::info!("Added {} to waitlist", email);
+    tracing::info!("Added waitlist entry");
 
     Ok(Json(json!({
         "message": "Successfully added to waitlist",

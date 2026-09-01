@@ -209,12 +209,7 @@ fn find_person_room(
         let name = person.display_name().to_lowercase();
         if name == search_lower {
             if let Some(ch) = person.channels.iter().find(|c| c.platform == platform) {
-                tracing::info!(
-                    "SEND_FLOW find_person_room: exact Person match '{}', handle={:?}, room_id={:?}",
-                    person.display_name(),
-                    ch.handle,
-                    ch.room_id
-                );
+                tracing::info!("SEND_FLOW find_person_room: exact Person match found");
                 return Some(ResolvedChat {
                     display_name: person.display_name().to_string(),
                     chat_id: ch.handle.clone(),
@@ -227,12 +222,7 @@ fn find_person_room(
     // Substring matches (search_persons already filtered these).
     for person in &persons {
         if let Some(ch) = person.channels.iter().find(|c| c.platform == platform) {
-            tracing::info!(
-                "SEND_FLOW find_person_room: substring Person match '{}', handle={:?}, room_id={:?}",
-                person.display_name(),
-                ch.handle,
-                ch.room_id
-            );
+            tracing::info!("SEND_FLOW find_person_room: substring Person match found");
             return Some(ResolvedChat {
                 display_name: person.display_name().to_string(),
                 chat_id: ch.handle.clone(),
@@ -268,11 +258,8 @@ fn find_person_room(
 
     if let Some((score, person, ch)) = best {
         tracing::info!(
-            "SEND_FLOW find_person_room: fuzzy Person match '{}' (score={}), handle={:?}, room_id={:?}",
-            person.display_name(),
-            score,
-            ch.handle,
-            ch.room_id
+            "SEND_FLOW find_person_room: fuzzy Person match found (score={})",
+            score
         );
         return Some(ResolvedChat {
             display_name: person.display_name().to_string(),
@@ -281,10 +268,7 @@ fn find_person_room(
         });
     }
 
-    tracing::info!(
-        "SEND_FLOW find_person_room: no Person match for '{}'",
-        search_term
-    );
+    tracing::info!("SEND_FLOW find_person_room: no Person match");
     None
 }
 
@@ -400,11 +384,8 @@ async fn search_whatsapp_chat_candidate(
 
     let (score, cand) = best?;
     tracing::info!(
-        "SEND_FLOW search_whatsapp_chat_candidate: best match '{}' (score={}), chat_id={}, mxid={:?}, is_group={}",
-        cand.display_name,
+        "SEND_FLOW search_whatsapp_chat_candidate: best match found (score={}, is_group={})",
         score,
-        cand.chat_id,
-        cand.mxid,
         cand.is_group
     );
     Some(ResolvedChat {
@@ -532,11 +513,8 @@ async fn search_telegram_chat_candidate(
 
     let (score, cand) = best?;
     tracing::info!(
-        "SEND_FLOW search_telegram_chat_candidate: best match '{}' (score={}), tgid={}, mxid={:?}, is_group={}, is_self_chat={}",
-        cand.display_name,
+        "SEND_FLOW search_telegram_chat_candidate: best match found (score={}, is_group={}, is_self_chat={})",
         score,
-        cand.tgid,
-        cand.mxid,
         cand.is_group,
         cand.is_self_chat
     );
@@ -562,16 +540,11 @@ pub async fn handle_send_chat_message(
     ),
     Box<dyn std::error::Error>,
 > {
-    tracing::info!(
-        "SEND_FLOW handle_send_chat_message ENTER: user={}, raw_args={}",
-        user_id,
-        args
-    );
+    tracing::info!("SEND_FLOW handle_send_chat_message ENTER: user={}", user_id);
     let args: SendChatMessageArgs = serde_json::from_str(args)?;
     tracing::info!(
-        "SEND_FLOW Parsed args: platform={}, chat_name={}, message_len={}, has_image={}",
+        "SEND_FLOW Parsed args: platform={}, message_len={}, has_image={}",
         args.platform,
-        args.chat_name,
         args.message.len(),
         image_url.is_some()
     );
@@ -656,8 +629,7 @@ pub async fn handle_send_chat_message(
 
     // Step 1: If the shared index has no route, try an ontology Person.
     tracing::info!(
-        "SEND_FLOW Step 1: Fuzzy searching Persons for '{}' on {} for user={}",
-        args.chat_name,
+        "SEND_FLOW Step 1: fuzzy searching Persons on {} for user={}",
         args.platform,
         user_id
     );
@@ -680,52 +652,34 @@ pub async fn handle_send_chat_message(
     let best_match = if let Some(mut resolved) = best_match {
         if args.platform == "whatsapp" && resolved.chat_id.is_none() {
             tracing::info!(
-                "SEND_FLOW Step 1.5: Ontology match '{}' has no chat_id; backfilling from WA bridge DB",
-                resolved.display_name
+                "SEND_FLOW Step 1.5: ontology match has no chat_id; backfilling from WA bridge DB"
             );
             if let Some(candidate) =
                 search_whatsapp_chat_candidate(state, user_id, &resolved.display_name).await
             {
-                tracing::info!(
-                    "SEND_FLOW Backfilled chat_id={:?} (bridge_mxid={:?}) for '{}'",
-                    candidate.chat_id,
-                    candidate.room_id,
-                    resolved.display_name
-                );
+                tracing::info!("SEND_FLOW backfilled WhatsApp chat routing identifiers");
                 resolved.chat_id = candidate.chat_id;
                 // Prefer the bridge DB's mxid over a potentially stale ontology one
                 if candidate.room_id.is_some() {
                     resolved.room_id = candidate.room_id;
                 }
             } else {
-                tracing::warn!(
-                    "SEND_FLOW WA backfill: no bridge DB match for '{}'",
-                    resolved.display_name
-                );
+                tracing::warn!("SEND_FLOW WA backfill: no bridge DB match");
             }
         } else if args.platform == "telegram" && resolved.chat_id.is_none() {
             tracing::info!(
-                "SEND_FLOW Step 1.5: Ontology match '{}' has no chat_id; backfilling from TG bridge DB",
-                resolved.display_name
+                "SEND_FLOW Step 1.5: ontology match has no chat_id; backfilling from TG bridge DB"
             );
             if let Some(candidate) =
                 search_telegram_chat_candidate(state, user_id, &resolved.display_name).await
             {
-                tracing::info!(
-                    "SEND_FLOW Backfilled tg chat_id={:?} (bridge_mxid={:?}) for '{}'",
-                    candidate.chat_id,
-                    candidate.room_id,
-                    resolved.display_name
-                );
+                tracing::info!("SEND_FLOW backfilled Telegram chat routing identifiers");
                 resolved.chat_id = candidate.chat_id;
                 if candidate.room_id.is_some() {
                     resolved.room_id = candidate.room_id;
                 }
             } else {
-                tracing::warn!(
-                    "SEND_FLOW TG backfill: no bridge DB match for '{}'",
-                    resolved.display_name
-                );
+                tracing::warn!("SEND_FLOW TG backfill: no bridge DB match");
             }
         }
         Some(resolved)
@@ -801,11 +755,8 @@ pub async fn handle_send_chat_message(
         }
     };
     tracing::info!(
-        "SEND_FLOW best_match result: found={}, display_name={:?}, chat_id={:?}, room_id={:?}",
-        best_match.is_some(),
-        best_match.as_ref().map(|r| &r.display_name),
-        best_match.as_ref().map(|r| &r.chat_id),
-        best_match.as_ref().map(|r| &r.room_id)
+        "SEND_FLOW best_match result: found={}",
+        best_match.is_some()
     );
     let best_match = match best_match {
         Some(resolved) => resolved,
@@ -841,13 +792,7 @@ pub async fn handle_send_chat_message(
         }
     };
     let exact_name = crate::utils::bridge::remove_bridge_suffix(&best_match.display_name);
-    tracing::info!(
-        "SEND_FLOW Matched: display_name='{}', exact_name='{}', chat_id={:?}, room_id={:?}",
-        best_match.display_name,
-        exact_name,
-        best_match.chat_id,
-        best_match.room_id
-    );
+    tracing::info!("SEND_FLOW resolved message recipient");
     // Format the queued message with the found contact name and image if present
     let queued_msg = if image_url.is_some() {
         format!(
@@ -905,35 +850,30 @@ pub async fn handle_send_chat_message(
     let cloned_skip_sms = skip_sms;
     let cloned_notify_on_reply = args.notify_on_reply;
     tracing::info!(
-        "SEND_FLOW About to tokio::spawn delayed send task for user={}, room_id={:?}, chat_id={:?}",
-        user_id,
-        cloned_room_id,
-        cloned_chat_id
+        "SEND_FLOW about to spawn delayed send task for user={}",
+        user_id
     );
     tokio::spawn(async move {
         tracing::info!(
-            "SEND_FLOW_TASK Delayed task STARTED for user={}, waiting 60s or cancel. platform={}, recipient={}, room_id={:?}, chat_id={:?}",
-            cloned_user_id, cloned_platform, cloned_exact_name, cloned_room_id, cloned_chat_id
+            "SEND_FLOW_TASK delayed task started for user={}, waiting 60s or cancel; platform={}",
+            cloned_user_id,
+            cloned_platform
         );
         let reason = tokio::select! {
             _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => "timeout",
             _ = cancel_rx => "cancel",
         };
         tracing::info!(
-            "SEND_FLOW_TASK Select resolved: reason={}, user={}, platform={}, recipient={}",
+            "SEND_FLOW_TASK select resolved: reason={}, user={}, platform={}",
             reason,
             cloned_user_id,
-            cloned_platform,
-            cloned_exact_name
+            cloned_platform
         );
         if reason == "timeout" {
             tracing::info!(
-                "SEND_FLOW_TASK Calling send_bridge_message: service={}, user={}, chat_name={}, room_id={:?}, chat_id={:?}",
+                "SEND_FLOW_TASK calling send_bridge_message: service={}, user={}",
                 cloned_platform,
-                cloned_user_id,
-                cloned_exact_name,
-                cloned_room_id,
-                cloned_chat_id
+                cloned_user_id
             );
             match crate::utils::bridge::send_bridge_message(
                 &cloned_platform,
@@ -949,11 +889,9 @@ pub async fn handle_send_chat_message(
             {
                 Ok(msg) => {
                     tracing::info!(
-                        "SEND_FLOW_TASK SUCCESS: Sent {} message to '{}' for user {} (room={:?})",
+                        "SEND_FLOW_TASK success: sent {} message for user {}",
                         cloned_capitalized_platform,
-                        cloned_exact_name,
-                        cloned_user_id,
-                        msg.room_id
+                        cloned_user_id
                     );
                     if cloned_notify_on_reply {
                         let watch_room = msg.room_id.clone().or_else(|| cloned_room_id.clone());
@@ -970,9 +908,9 @@ pub async fn handle_send_chat_message(
                                 ) {
                                     Ok(_) => {
                                         tracing::info!(
-                                        "REPLY_WATCH armed bridge watch user={} room={} contact={}",
-                                        cloned_user_id, room, cloned_exact_name
-                                    )
+                                            "REPLY_WATCH armed bridge watch user={}",
+                                            cloned_user_id
+                                        )
                                     }
                                     Err(e) => tracing::warn!(
                                         "REPLY_WATCH failed to arm bridge watch user={}: {}",
@@ -990,9 +928,8 @@ pub async fn handle_send_chat_message(
                 }
                 Err(e) => {
                     tracing::error!(
-                        "SEND_FLOW_TASK FAILED: send_bridge_message error for user={}: {}",
-                        cloned_user_id,
-                        e
+                        "SEND_FLOW_TASK send_bridge_message failed for user={}",
+                        cloned_user_id
                     );
                     let error_msg = format!(
                         "Failed to send {} message: {}",
@@ -1010,10 +947,7 @@ pub async fn handle_send_chat_message(
                 }
             }
         } else {
-            tracing::info!(
-                "SEND_FLOW_TASK Message to '{}' was CANCELLED by user",
-                cloned_exact_name
-            );
+            tracing::info!("SEND_FLOW_TASK message was cancelled by user");
         }
         // Remove from map
         tracing::info!(

@@ -1006,10 +1006,10 @@ async fn monitor_whatsapp_connection(
         let combined = responses.join("\n");
         if attempt <= 3 || attempt.is_multiple_of(10) {
             tracing::info!(
-                "🔄 WA monitor #{}/{} list-logins reply: {:?}",
+                "WA monitor #{}/{} received {} bridge response(s)",
                 attempt,
                 MAX_POLLS,
-                combined
+                responses.len()
             );
         }
 
@@ -1539,9 +1539,8 @@ pub async fn check_whatsapp_health(
 
     let combined = responses.join("\n");
     tracing::info!(
-        "📨 WhatsApp list-logins response for user {}: {:?}",
-        auth_user.user_id,
-        combined
+        "WhatsApp list-logins response received for user {}",
+        auth_user.user_id
     );
 
     if crate::utils::bridge_responses::any_connected(&combined) {

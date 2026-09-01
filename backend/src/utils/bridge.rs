@@ -1247,15 +1247,11 @@ async fn resolve_whatsapp_room(
 
     let mxid_opt = match portal_mxid {
         Some(mxid) => {
-            tracing::info!(
-                "SEND_FLOW_BRIDGE portal table hit: chat_id={} mxid={}",
-                chat_id,
-                mxid
-            );
+            tracing::info!("SEND_FLOW_BRIDGE portal table hit");
             Some(mxid)
         }
         None => {
-            tracing::info!("SEND_FLOW_BRIDGE portal table miss for chat_id={}", chat_id);
+            tracing::info!("SEND_FLOW_BRIDGE portal table miss");
             None
         }
     };
@@ -1489,11 +1485,9 @@ async fn start_chat_telegram(
     // reply contains the verbatim error which is what we need to iterate.
     let cmd = format!("!tg pm {}", pm_handle);
     tracing::info!(
-        "SEND_FLOW_BRIDGE start_chat_telegram user={} sending {:?} (handle_kind={}, tgid={})",
+        "SEND_FLOW_BRIDGE start_chat_telegram user={} handle_kind={}",
         user_id,
-        cmd,
-        handle_kind,
-        contact_tgid
+        handle_kind
     );
     let bot_replies =
         match probe_bridge_room(&client, &room, &bot_user_id, &cmd, Duration::from_secs(8)).await {
@@ -1612,9 +1606,9 @@ pub async fn send_bridge_message(
     //      path, still used by non-WA bridges and by web callers that don't
     //      have a chat_id).
     let room = if let Some(rid) = target_room_id {
-        tracing::info!("SEND_FLOW_BRIDGE Using target_room_id directly: {}", rid);
+        tracing::info!("SEND_FLOW_BRIDGE using target room directly");
         let room_id = matrix_sdk::ruma::OwnedRoomId::try_from(rid).map_err(|e| {
-            tracing::error!("SEND_FLOW_BRIDGE Invalid room ID '{}': {}", rid, e);
+            tracing::error!("SEND_FLOW_BRIDGE invalid target room ID: {}", e);
             anyhow!("Invalid room ID '{}': {}", rid, e)
         })?;
         if client.get_room(&room_id).is_none() {
@@ -1711,15 +1705,12 @@ pub async fn send_bridge_message(
                         suggestions.join("\n")
                     )
                 };
-                tracing::error!("SEND_FLOW_BRIDGE No room found: {}", error_msg);
+                tracing::error!("SEND_FLOW_BRIDGE no matching room found");
                 return Err(anyhow!(error_msg));
             }
         }
     };
-    tracing::info!(
-        "SEND_FLOW_BRIDGE Got Matrix room object: room_id={}, display_name will be fetched after send",
-        room.room_id()
-    );
+    tracing::info!("SEND_FLOW_BRIDGE resolved Matrix room");
     use matrix_sdk::ruma::events::room::message::{
         ImageMessageEventContent, MessageType, RoomMessageEventContent,
     };
@@ -2153,11 +2144,7 @@ pub async fn handle_bridge_message(
 
         // Check if sender is the bridge bot
         if event.sender != bot_user_id {
-            tracing::info!(
-                "📤 Message not from bridge bot (sender: {}, expected: {}), skipping",
-                event.sender,
-                bot_user_id
-            );
+            tracing::info!("Message not from bridge bot; skipping management event");
             return;
         }
         tracing::info!("✅ Message IS from bridge bot");
@@ -2171,11 +2158,10 @@ pub async fn handle_bridge_message(
                 return;
             }
         };
-        // Log bridge bot management room messages for debugging
-        tracing::info!(
-            "Bridge bot ({}) management room message: {:?}",
+        tracing::debug!(
+            "Bridge bot management message received for {} ({} chars)",
             bridge.bridge_type,
-            content
+            content.chars().count()
         );
 
         // Skip health check related messages - these are handled by the health check endpoint
@@ -2208,10 +2194,9 @@ pub async fn handle_bridge_message(
         // auto-delete or evict the Matrix client here.
         if is_disconnection_message(&content) {
             tracing::warn!(
-                "🚨 Detected disconnection signal in {} bridge for user {} (NOT auto-deleting; content={:?})",
+                "Detected disconnection signal in {} bridge for user {} (not auto-deleting)",
                 bridge.bridge_type,
-                user_id,
-                content
+                user_id
             );
 
             let current_time = std::time::SystemTime::now()
@@ -2751,7 +2736,7 @@ pub async fn handle_bridge_message(
                     Some(&current_room_id),
                 ) {
                     Ok(person) => {
-                        tracing::info!("Created person '{}' (id={})", person.name, person.id);
+                        tracing::info!("Created person id={} for user {}", person.id, user_id);
                         // Fetch the full PersonWithChannels for consistency
                         state
                             .ontology_repository
@@ -2759,7 +2744,7 @@ pub async fn handle_bridge_message(
                             .ok()
                     }
                     Err(e) => {
-                        tracing::warn!("Failed to auto-create person '{}': {}", chat_name, e);
+                        tracing::warn!("Failed to auto-create person for user {}: {}", user_id, e);
                         None
                     }
                 }
@@ -3099,11 +3084,7 @@ async fn fetch_bridge_contacts(
         _ => return Err(anyhow!("Unknown service: {}", service)),
     };
 
-    tracing::info!(
-        "BRIDGE_CONTACTS: Sending '{}' to mgmt room {}",
-        cmd,
-        mgmt_room_id
-    );
+    tracing::info!("BRIDGE_CONTACTS: querying {} management room", service);
     room.send(RoomMessageEventContent::text_plain(&cmd)).await?;
 
     // Get bridge bot user ID
@@ -3648,11 +3629,7 @@ pub async fn logout_all_bridgev2_logins(
         .collect();
 
     if connected.is_empty() {
-        tracing::debug!(
-            "{} logout: no CONNECTED logins (list-logins body: {:?}), skipping",
-            cmd_prefix,
-            combined
-        );
+        tracing::debug!("{} logout: no connected logins; skipping", cmd_prefix);
         return Ok(0);
     }
 
@@ -3690,13 +3667,11 @@ pub async fn logout_all_bridgev2_logins(
             logged_out += 1;
             tracing::info!("{} logout ok for login_id={}", cmd_prefix, entry.login_id);
         } else {
-            // Divergence: log the full body so we can update classifiers if
-            // the bridge changes wire format.
             tracing::warn!(
-                "{} logout unexpected reply for login_id={} body={:?}",
+                "{} logout received unexpected reply for login_id={} ({} chars)",
                 cmd_prefix,
                 entry.login_id,
-                body
+                body.chars().count()
             );
         }
     }
@@ -3783,18 +3758,11 @@ pub async fn start_chat_whatsapp(
         .map_err(|e| anyhow!("invalid WHATSAPP_BRIDGE_BOT user id: {}", e))?;
 
     let cmd = format!("!wa start-chat +{}", phone);
-    tracing::info!(
-        "SEND_FLOW_BRIDGE start_chat_whatsapp user={} sending {:?}",
-        user_id,
-        cmd
-    );
+    tracing::info!("SEND_FLOW_BRIDGE start_chat_whatsapp user={}", user_id);
     let responses =
         probe_bridge_room(&client, &room, &bot_user_id, &cmd, Duration::from_secs(10)).await?;
     if responses.is_empty() {
-        return Err(anyhow!(
-            "WA start-chat bot did not reply within timeout (phone=+{})",
-            phone
-        ));
+        return Err(anyhow!("WA start-chat bot did not reply within timeout"));
     }
 
     // Scan all responses and take the first one that matches either shape.

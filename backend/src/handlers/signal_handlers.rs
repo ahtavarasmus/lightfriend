@@ -61,11 +61,17 @@ pub async fn send_message(
     .await
     {
         Ok(message) => {
-            tracing::info!("Successfully sent Signal message to {}", request.chat_name);
+            tracing::info!(
+                "Successfully sent Signal message for user {}",
+                auth_user.user_id
+            );
             Ok(Json(SendSignalMessageResponse { message }))
         }
         Err(e) => {
-            tracing::error!("Failed to send Signal message: {}", e);
+            tracing::error!(
+                "Failed to send Signal message for user {}",
+                auth_user.user_id
+            );
             Err(format!("Failed to send Signal message: {}", e))
         }
     }

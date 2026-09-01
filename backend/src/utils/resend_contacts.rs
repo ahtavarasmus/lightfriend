@@ -60,15 +60,14 @@ pub async fn sync_contact(email: &str) {
     {
         Ok(resp) => {
             if resp.status().is_success() {
-                tracing::debug!("Synced contact to Resend: {}", email);
+                tracing::debug!("Synced contact to Resend");
             } else {
                 let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
                 // 409 = already exists, which is fine
                 if status.as_u16() == 409 {
-                    tracing::debug!("Contact already exists in Resend: {}", email);
+                    tracing::debug!("Contact already exists in Resend");
                 } else {
-                    tracing::warn!("Failed to sync contact to Resend ({}): {}", status, body);
+                    tracing::warn!("Failed to sync contact to Resend: status={}", status);
                 }
             }
         }

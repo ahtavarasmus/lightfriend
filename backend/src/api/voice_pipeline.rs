@@ -1730,7 +1730,7 @@ async fn handle_openai_reader(
         let event: serde_json::Value = match serde_json::from_str(&text) {
             Ok(v) => v,
             Err(e) => {
-                tracing::warn!("Failed to parse OpenAI Realtime event: {} / {}", e, text);
+                tracing::warn!("Failed to parse OpenAI Realtime event: {}", e);
                 continue;
             }
         };
@@ -1889,7 +1889,7 @@ async fn handle_openai_reader(
                 }
             }
             "error" => {
-                tracing::error!("OpenAI Realtime error event: {}", event);
+                tracing::error!("OpenAI Realtime returned an error event");
                 let error_type = event
                     .get("error")
                     .and_then(|e| e.get("type"))
@@ -1903,7 +1903,7 @@ async fn handle_openai_reader(
                 // defaults, no audio will ever work, and the greeting never
                 // fires. That must be surfaced, not swallowed.
                 if error_type == "invalid_request_error" && session.session_configured {
-                    tracing::warn!("Recoverable OpenAI Realtime error, continuing: {}", event);
+                    tracing::warn!("Recoverable OpenAI Realtime error; continuing");
                 } else {
                     let message = event
                         .get("error")
@@ -1922,7 +1922,7 @@ async fn handle_openai_reader(
             }
             "session.created" | "response.created" | "rate_limits.updated" => {}
             other => {
-                tracing::debug!("OpenAI Realtime event: {}", other);
+                tracing::debug!("Unhandled OpenAI Realtime event type={}", other);
             }
         }
     }

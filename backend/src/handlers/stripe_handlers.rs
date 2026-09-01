@@ -971,12 +971,7 @@ pub async fn create_pricing_table_customer_session(
         })?;
     if !customer_session_response.status().is_success() {
         let status = customer_session_response.status();
-        let body = customer_session_response.text().await.unwrap_or_default();
-        tracing::error!(
-            "Stripe customer session request failed: status={}, body={}",
-            status,
-            body
-        );
+        tracing::error!("Stripe customer session request failed: status={}", status);
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "Failed to create Stripe customer session"})),
@@ -1788,12 +1783,10 @@ pub async fn stripe_webhook(
                                 }
                                 Ok(response) => {
                                     let status = response.status();
-                                    let body = response.text().await.unwrap_or_default();
                                     tracing::error!(
-                                        "Failed to cancel replaced subscription {}: status={}, body={}",
+                                        "Failed to cancel replaced subscription {}: status={}",
                                         sub_id_string,
-                                        status,
-                                        body
+                                        status
                                     );
                                 }
                                 Err(e) => {

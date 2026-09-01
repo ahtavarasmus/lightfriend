@@ -32,8 +32,8 @@ pub async fn try_handle_reply(state: &Arc<AppState>, user: &User, body: &str) ->
         Ok(Some(alert)) => alert,
         Ok(None) => {
             info!(
-                "alert_feedback user={} got '{}' but no recent important alert - ignoring as agent input",
-                user.id, body
+                "alert_feedback user={} had no recent important alert - ignoring as agent input",
+                user.id
             );
             return None;
         }
