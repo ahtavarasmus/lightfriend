@@ -16,6 +16,19 @@ use serial_test::serial;
 use std::collections::BTreeMap;
 use tower::ServiceExt;
 
+fn twiml_parameter<'a>(twiml: &'a str, name: &str) -> &'a str {
+    let prefix = format!(r#"<Parameter name="{}" value=""#, name);
+    let value_start = twiml
+        .find(&prefix)
+        .map(|index| index + prefix.len())
+        .expect("TwiML parameter should exist");
+    let value_end = twiml[value_start..]
+        .find('"')
+        .map(|index| value_start + index)
+        .expect("TwiML parameter value should be quoted");
+    &twiml[value_start..value_end]
+}
+
 #[tokio::test]
 async fn voice_incoming_unknown_caller_rejects_without_answering() {
     std::env::set_var("SERVER_URL", "https://lightfriend.ai");
@@ -92,7 +105,7 @@ async fn voice_incoming_registered_caller_speaks_before_streaming() {
             state.clone(),
             validate_twilio_signature,
         ))
-        .with_state(state);
+        .with_state(state.clone());
 
     let response = app
         .oneshot(
@@ -115,10 +128,53 @@ async fn voice_incoming_registered_caller_speaks_before_streaming() {
     assert!(!twiml.contains("<Say>"));
     assert!(twiml.contains(r#"<Connect>"#));
     assert!(twiml.contains(r#"<Stream url="wss://lightfriend.ai/api/voice/ws""#));
-    assert!(twiml.contains(&format!(
-        r#"<Parameter name="user_id" value="{}" />"#,
-        user.id
-    )));
+    assert!(!twiml.contains(r#"<Parameter name="user_id""#));
+
+    let token = twiml_parameter(&twiml, "token");
+    assert_eq!(
+        voice_pipeline::authenticate_twilio_stream(
+            &state,
+            Some(&serde_json::json!({"token": token, "user_id": "999999"})),
+        ),
+        Ok(user.id)
+    );
+    assert_eq!(
+        voice_pipeline::authenticate_twilio_stream(
+            &state,
+            Some(&serde_json::json!({"token": token})),
+        ),
+        Err(voice_pipeline::WebVoiceTicketError::Invalid)
+    );
+}
+
+#[test]
+fn twilio_stream_rejects_client_supplied_user_id_without_ticket() {
+    let state = create_test_state();
+
+    assert_eq!(
+        voice_pipeline::authenticate_twilio_stream(
+            &state,
+            Some(&serde_json::json!({"user_id": "123"})),
+        ),
+        Err(voice_pipeline::WebVoiceTicketError::Invalid)
+    );
+
+    let expired_token = voice_pipeline::issue_twilio_voice_ticket(&state, 123);
+    let expired_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+        - 1;
+    state
+        .pending_totp_logins
+        .insert(format!("twilio_voice_{}", expired_token), (123, expired_at));
+    assert_eq!(
+        voice_pipeline::authenticate_twilio_stream(
+            &state,
+            Some(&serde_json::json!({"token": expired_token})),
+        ),
+        Err(voice_pipeline::WebVoiceTicketError::Expired)
+    );
 }
 
 #[test]

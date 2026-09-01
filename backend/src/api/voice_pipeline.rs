@@ -15,6 +15,10 @@ use std::time::Instant;
 use tokio::sync::mpsc;
 
 pub const WEB_VOICE_TICKET_TTL_SECONDS: i64 = 30;
+pub const TWILIO_VOICE_TICKET_TTL_SECONDS: i64 = 300;
+
+const WEB_VOICE_TICKET_PREFIX: &str = "voice_";
+const TWILIO_VOICE_TICKET_PREFIX: &str = "twilio_voice_";
 
 pub struct WebVoiceTicket {
     pub ws_url: String,
@@ -25,6 +29,37 @@ pub struct WebVoiceTicket {
 pub enum WebVoiceTicketError {
     Expired,
     Invalid,
+}
+
+/// Issues a short-lived, single-use credential for one Twilio media stream.
+/// The token is opaque: the user identity stays server-side and is recovered
+/// only when Twilio sends the token back in the stream's `start` event.
+pub fn issue_twilio_voice_ticket(state: &AppState, user_id: i32) -> String {
+    let token = uuid::Uuid::new_v4().to_string();
+    let expiry = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+        + TWILIO_VOICE_TICKET_TTL_SECONDS;
+    state.pending_totp_logins.insert(
+        format!("{}{}", TWILIO_VOICE_TICKET_PREFIX, token),
+        (user_id, expiry),
+    );
+    token
+}
+
+/// Authenticates and atomically consumes the token from a Twilio `start`
+/// event. Client-supplied `user_id` parameters are deliberately ignored.
+pub fn authenticate_twilio_stream(
+    state: &AppState,
+    custom_parameters: Option<&serde_json::Value>,
+) -> Result<i32, WebVoiceTicketError> {
+    let token = custom_parameters
+        .and_then(|parameters| parameters.get("token"))
+        .and_then(|token| token.as_str())
+        .ok_or(WebVoiceTicketError::Invalid)?;
+
+    consume_voice_ticket(state, TWILIO_VOICE_TICKET_PREFIX, token)
 }
 
 // ---------------------------------------------------------------------------
@@ -450,6 +485,8 @@ pub async fn voice_incoming(State(state): State<Arc<AppState>>, body: String) ->
         .replace("https://", "wss://")
         .replace("http://", "ws://");
 
+    let token = issue_twilio_voice_ticket(&state, user.id);
+
     // No <Say> here: the AI greeting is the first thing the caller hears, so
     // the voice is consistent (no Twilio default voice -> AI voice switch).
     let twiml = format!(
@@ -457,11 +494,11 @@ pub async fn voice_incoming(State(state): State<Arc<AppState>>, body: String) ->
 <Response>
   <Connect>
     <Stream url="{}/api/voice/ws" track="inbound_track">
-      <Parameter name="user_id" value="{}" />
+      <Parameter name="token" value="{}" />
     </Stream>
   </Connect>
 </Response>"#,
-        ws_url, user.id
+        ws_url, token
     );
 
     tracing::info!("Voice incoming TwiML returned for user {}", user.id);
@@ -541,6 +578,8 @@ pub async fn make_notification_call_with_from(
         .replace("https://", "wss://")
         .replace("http://", "ws://");
 
+    let token = issue_twilio_voice_ticket(state, user.id);
+
     // XML-escape then URL-encode the greeting for safe TwiML inclusion
     let greeting_escaped = xml_escape(notification_message);
     let greeting_encoded = urlencoding::encode(&greeting_escaped);
@@ -550,12 +589,12 @@ pub async fn make_notification_call_with_from(
 <Response>
   <Connect>
     <Stream url="{}/api/voice/ws" track="inbound_track">
-      <Parameter name="user_id" value="{}" />
+      <Parameter name="token" value="{}" />
       <Parameter name="greeting" value="{}" />
     </Stream>
   </Connect>
 </Response>"#,
-        ws_url, user.id, greeting_encoded
+        ws_url, token, greeting_encoded
     );
 
     // Get credentials and from number
@@ -700,9 +739,10 @@ pub async fn issue_web_voice_ticket(
         .unwrap()
         .as_secs() as i64
         + WEB_VOICE_TICKET_TTL_SECONDS;
-    state
-        .pending_totp_logins
-        .insert(format!("voice_{}", token), (user_id, expiry));
+    state.pending_totp_logins.insert(
+        format!("{}{}", WEB_VOICE_TICKET_PREFIX, token),
+        (user_id, expiry),
+    );
 
     Ok(WebVoiceTicket {
         ws_url: format!("/api/voice/web-ws?token={}", token),
@@ -741,7 +781,15 @@ pub async fn voice_web_ws(
 
 /// Atomically consumes a voice ticket so it cannot be replayed.
 pub fn consume_web_voice_ticket(state: &AppState, token: &str) -> Result<i32, WebVoiceTicketError> {
-    let key = format!("voice_{}", token);
+    consume_voice_ticket(state, WEB_VOICE_TICKET_PREFIX, token)
+}
+
+fn consume_voice_ticket(
+    state: &AppState,
+    prefix: &str,
+    token: &str,
+) -> Result<i32, WebVoiceTicketError> {
+    let key = format!("{}{}", prefix, token);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -994,18 +1042,20 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
                         start.call_sid
                     );
 
-                    let user_id = start
-                        .custom_parameters
-                        .as_ref()
-                        .and_then(|p| p.get("user_id"))
-                        .and_then(|v| v.as_str())
-                        .and_then(|s| s.parse::<i32>().ok())
-                        .unwrap_or(0);
-
-                    if user_id == 0 {
-                        tracing::error!("No valid user_id in stream start parameters");
-                        break;
-                    }
+                    let user_id = match authenticate_twilio_stream(
+                        &state,
+                        start.custom_parameters.as_ref(),
+                    ) {
+                        Ok(user_id) => user_id,
+                        Err(WebVoiceTicketError::Expired) => {
+                            tracing::warn!("Rejected Twilio media stream with expired token");
+                            break;
+                        }
+                        Err(WebVoiceTicketError::Invalid) => {
+                            tracing::warn!("Rejected Twilio media stream with invalid token");
+                            break;
+                        }
+                    };
 
                     // Check for custom greeting (outbound notification calls)
                     let custom_greeting = start

@@ -739,7 +739,7 @@ async fn main() {
             state.clone(),
             api::twilio_utils::validate_twilio_signature,
         ));
-    // Voice pipeline: WebSocket + debug endpoints (no auth - WS handshake)
+    // Voice pipeline: WebSockets authenticate with short-lived, single-use tickets.
     let voice_ws_routes = Router::new()
         .route("/api/voice/ws", get(voice_pipeline::voice_ws))
         .route("/api/voice/web-ws", get(voice_pipeline::voice_web_ws));
