@@ -5,8 +5,33 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::{HtmlInputElement, HtmlSelectElement};
 use yew::prelude::*;
 
-use super::rule_builder::{score_contact, Contact};
 use crate::utils::api::Api;
+
+#[derive(Clone, PartialEq, Deserialize, Debug)]
+struct Contact {
+    id: String,
+    display_name: String,
+    #[serde(default)]
+    subtitle: Option<String>,
+    #[serde(default)]
+    platform: Option<String>,
+    #[serde(default)]
+    is_group: bool,
+    source: String,
+}
+
+fn score_contact(query_lower: &str, contact: &Contact) -> Option<i32> {
+    let name = contact.display_name.to_lowercase();
+    if name == query_lower {
+        Some(3)
+    } else if name.starts_with(query_lower) {
+        Some(2)
+    } else if name.contains(query_lower) {
+        Some(1)
+    } else {
+        None
+    }
+}
 
 const ALWAYS_SHOW_STYLES: &str = r#"
 .always-show-page {

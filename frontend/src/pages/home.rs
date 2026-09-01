@@ -1,4 +1,3 @@
-use crate::dashboard::dashboard_view::DashboardView;
 use crate::dashboard::focused_dashboard::FocusedDashboardView;
 use crate::dashboard::settings_panel::{SettingsPanel, SettingsTab};
 use crate::pages::landing::Landing;
@@ -19,11 +18,6 @@ use yew::prelude::*;
 use yew_router::prelude::*;
 
 #[derive(Deserialize)]
-struct TotpStatusResponse {
-    enabled: bool,
-}
-
-#[derive(Deserialize)]
 struct DataFastCheckoutAttribution {
     email: String,
 }
@@ -35,23 +29,10 @@ pub fn Home() -> Html {
     let user_verified = use_state(|| true);
     let error = use_state(|| None::<String>);
     let location = use_location().unwrap();
-    let show_legacy_dashboard = web_sys::UrlSearchParams::new_with_str(location.query_str())
-        .ok()
-        .and_then(|params| params.get("dashboard"))
-        .as_deref()
-        == Some("legacy");
     let success = use_state(|| None::<String>);
     let post_checkout_success = use_state(|| false);
-    let totp_enabled = use_state(|| None::<bool>);
     let settings_open = use_state(|| false);
     let settings_initial_tab = use_state(|| SettingsTab::Account);
-    let banner_dismissed = use_state(|| {
-        window()
-            .and_then(|w| w.local_storage().ok().flatten())
-            .and_then(|s| s.get_item("twofa_banner_dismissed").ok().flatten())
-            .map(|v| v == "true")
-            .unwrap_or(false)
-    });
 
     // Trigger to force profile refresh (increments when subscription changes)
     let refresh_trigger = use_state(|| 0u32);
@@ -258,30 +239,6 @@ pub fn Home() -> Html {
         );
     }
 
-    // Fetch TOTP status when authenticated
-    {
-        let totp_enabled = totp_enabled.clone();
-        let auth_status_dep = (*auth_status).clone();
-        use_effect_with_deps(
-            move |auth: &Option<bool>| {
-                if *auth == Some(true) && show_legacy_dashboard {
-                    let totp_enabled = totp_enabled.clone();
-                    spawn_local(async move {
-                        if let Ok(resp) = Api::get("/api/totp/status").send().await {
-                            if resp.ok() {
-                                if let Ok(status) = resp.json::<TotpStatusResponse>().await {
-                                    totp_enabled.set(Some(status.enabled));
-                                }
-                            }
-                        }
-                    });
-                }
-                || ()
-            },
-            auth_status_dep,
-        );
-    }
-
     // Render based on authentication status
     match *auth_status {
         None => {
@@ -312,18 +269,6 @@ pub fn Home() -> Html {
         }
         Some(true) => {
             // Authenticated - show dashboard
-            let on_dismiss_banner = {
-                let banner_dismissed = banner_dismissed.clone();
-                Callback::from(move |_: MouseEvent| {
-                    banner_dismissed.set(true);
-                    if let Some(w) = window() {
-                        if let Ok(Some(storage)) = w.local_storage() {
-                            let _ = storage.set_item("twofa_banner_dismissed", "true");
-                        }
-                    }
-                })
-            };
-
             let on_profile_update = {
                 let profile_data = profile_data.clone();
                 Callback::from(move |updated_profile: UserProfile| {
@@ -363,63 +308,10 @@ pub fn Home() -> Html {
                             .panel-title {
                                 display: none;
                             }
-                            .twofa-banner {
-                                display: flex;
-                                align-items: center;
-                                justify-content: space-between;
-                                background: rgba(30, 144, 255, 0.1);
-                                border: 1px solid rgba(30, 144, 255, 0.2);
-                                border-radius: 8px;
-                                padding: 0.75rem 1rem;
-                                margin-bottom: 1rem;
-                            }
-                            .twofa-banner-content {
-                                flex: 1;
-                            }
-                            .twofa-banner-text {
-                                color: rgba(255, 255, 255, 0.8);
-                                font-size: 0.9rem;
-                            }
-                            .twofa-banner-dismiss {
-                                background: transparent;
-                                border: none;
-                                color: rgba(255, 255, 255, 0.5);
-                                cursor: pointer;
-                                font-size: 1.2rem;
-                                padding: 0.25rem 0.5rem;
-                            }
-                            .twofa-banner-dismiss:hover {
-                                color: rgba(255, 255, 255, 0.8);
-                            }
                         "#}
                     </style>
                     <div class="dashboard-container">
                         <h1 class="panel-title">{"Dashboard"}</h1>
-                        // 2FA banner
-                        {
-                            if show_legacy_dashboard
-                                && *totp_enabled == Some(false)
-                                && !*banner_dismissed
-                            {
-                                html! {
-                                    <div class="twofa-banner">
-                                        <div class="twofa-banner-content">
-                                            <span class="twofa-banner-text">
-                                                {"Secure your account with two-factor authentication. "}
-                                                <a style="color: #1E90FF; cursor: pointer;" onclick={Callback::from(|_| {
-                                                    // Will be handled by settings panel
-                                                })}>{"Set up 2FA"}</a>
-                                            </span>
-                                        </div>
-                                        <button class="twofa-banner-dismiss" onclick={on_dismiss_banner}>
-                                            {"x"}
-                                        </button>
-                                    </div>
-                                }
-                            } else {
-                                html! {}
-                            }
-                        }
                         // Success message
                         {
                             if let Some(success_msg) = (*success).as_ref() {
@@ -440,20 +332,11 @@ pub fn Home() -> Html {
                         {
                             if let Some(profile) = (*profile_data).as_ref() {
                                 if profile.sub_tier.is_some() {
-                                    if show_legacy_dashboard {
-                                        html! {
-                                            <DashboardView
-                                                user_profile={profile.clone()}
-                                                on_profile_update={on_profile_update}
-                                            />
-                                        }
-                                    } else {
-                                        html! {
-                                            <FocusedDashboardView
-                                                user_profile={profile.clone()}
-                                                on_profile_update={on_profile_update}
-                                            />
-                                        }
+                                    html! {
+                                        <FocusedDashboardView
+                                            user_profile={profile.clone()}
+                                            on_profile_update={on_profile_update}
+                                        />
                                     }
                                 } else {
                                     // Non-subscribed user - show the pricing table directly.

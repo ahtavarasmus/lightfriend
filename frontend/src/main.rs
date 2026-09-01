@@ -58,18 +58,12 @@ mod dashboard {
     pub mod activity_feed;
     pub mod agent_panel;
     pub mod always_show;
-    pub mod chat_box;
-    pub mod dashboard_view;
-    pub mod emoji_utils;
     pub mod focused_dashboard;
     pub mod light_phone_panel;
     pub mod media_panel;
     pub mod phone_device_panel;
-    pub mod rule_builder;
-    pub mod rules_section;
     pub mod settings_panel;
     pub mod tesla_quick_panel;
-    pub mod timeline_view;
     pub mod webhooks_panel;
     pub mod youtube_quick_panel;
 }

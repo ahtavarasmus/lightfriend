@@ -8,6 +8,7 @@ use axum::{
 };
 use serde_json::json;
 use std::sync::{atomic::Ordering, Arc};
+use subtle::ConstantTimeEq;
 
 use crate::AppState;
 
@@ -23,7 +24,7 @@ pub fn check_secret(headers: &HeaderMap) -> bool {
     headers
         .get("X-Maintenance-Secret")
         .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v == expected)
+        .is_some_and(|v| v.as_bytes().ct_eq(expected.as_bytes()).into())
 }
 
 pub async fn enable_maintenance(

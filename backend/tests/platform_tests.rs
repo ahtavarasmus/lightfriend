@@ -4,6 +4,8 @@ mod digest_health_endpoint_test;
 mod event_lifecycle_test;
 #[path = "kani_signature_proofs.rs"]
 mod kani_signature_proofs;
+#[path = "maintenance_secret_test.rs"]
+mod maintenance_secret_test;
 #[path = "ssrf_protection_test.rs"]
 mod ssrf_protection_test;
 #[path = "storage_health_endpoint_test.rs"]
