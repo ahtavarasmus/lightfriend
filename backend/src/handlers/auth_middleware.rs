@@ -102,7 +102,7 @@ pub async fn check_subscription_access(
     // Get user from database
     let user = match state.user_core.find_by_id(user_id) {
         Ok(Some(user)) => {
-            debug!("Found user: {}", user.email);
+            debug!(user_id = user.id, "Found user");
             user
         }
         Ok(None) => {
@@ -284,8 +284,6 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
                     message: "No authorization token provided".to_string(),
                 }
             })?;
-
-        tracing::debug!("Cookie header: {}", cookie_header);
 
         // Parse cookies to find access_token
         let token = cookie_header
