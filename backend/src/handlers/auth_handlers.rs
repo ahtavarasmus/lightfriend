@@ -30,6 +30,13 @@ pub struct PasswordResetResponse {
     message: String,
 }
 
+fn phone_verify_request_response() -> Json<PasswordResetResponse> {
+    Json(PasswordResetResponse {
+        message: "If an account exists for this phone number, a verification code has been sent."
+            .to_string(),
+    })
+}
+
 fn hash_token(token: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(token.as_bytes());
@@ -236,12 +243,7 @@ pub async fn request_phone_verify(
         .find_by_phone_number(&reset_req.phone_number)
     {
         Ok(Some(user)) => user,
-        Ok(None) => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "No user found with this phone number"})),
-            ));
-        }
+        Ok(None) => return Ok(phone_verify_request_response()),
         Err(_) => {
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -268,9 +270,7 @@ pub async fn request_phone_verify(
         .phone_verify_otps
         .insert(reset_req.phone_number.clone(), (otp.clone(), expiration));
     tracing::debug!(
-        "Stored OTP {} for phone {} with expiration {}",
-        otp,
-        reset_req.phone_number,
+        "Stored phone verification OTP with expiration {}",
         expiration
     );
     let message = format!(
@@ -283,14 +283,10 @@ pub async fn request_phone_verify(
         .await
         .is_err()
     {
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to send OTP"})),
-        ));
+        state.phone_verify_otps.remove(&reset_req.phone_number);
+        tracing::error!("Failed to deliver phone verification OTP");
     }
-    Ok(Json(PasswordResetResponse {
-        message: "Verification code sent to your phone".to_string(),
-    }))
+    Ok(phone_verify_request_response())
 }
 
 pub async fn verify_phone_verify(
@@ -316,11 +312,7 @@ pub async fn verify_phone_verify(
             Json(json!({"error": "Too many verification attempts. Please try again later."})),
         ));
     }
-    tracing::debug!(
-        "Verifying OTP {} for phone {}",
-        verify_req.otp,
-        verify_req.phone_number
-    );
+    tracing::debug!("Verifying phone OTP for [redacted phone]");
 
     // Remove the OTP data immediately to prevent any hanging references
     let otp_data = match state.phone_verify_otps.remove(&verify_req.phone_number) {
@@ -349,11 +341,7 @@ pub async fn verify_phone_verify(
         ));
     }
     if verify_req.otp != stored_otp {
-        tracing::debug!(
-            "OTP mismatch: provided {} != stored {}",
-            verify_req.otp,
-            stored_otp
-        );
+        tracing::debug!("Phone OTP mismatch");
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "Invalid OTP"})),

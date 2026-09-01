@@ -1,10 +1,12 @@
 use crate::UserCoreOps;
 use axum::{extract::State, http::StatusCode, Json};
 use diesel::prelude::*;
+use hmac::{Hmac, Mac};
 use rand::Rng;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::Sha256;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -132,6 +134,50 @@ fn normalize_email(raw: &str) -> Option<String> {
     Some(email)
 }
 
+const UNSUBSCRIBE_TOKEN_CONTEXT: &[u8] = b"lightfriend:unsubscribe:v1:";
+const UNSUBSCRIBE_SUCCESS_HTML: &str = "<h1>You have been unsubscribed!</h1>";
+
+/// Generates an opaque authenticator bound to one normalized email address.
+pub fn generate_unsubscribe_token(email: &str, secret: &str) -> String {
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC accepts keys of any size");
+    mac.update(UNSUBSCRIBE_TOKEN_CONTEXT);
+    mac.update(email.trim().to_lowercase().as_bytes());
+    hex::encode(mac.finalize().into_bytes())
+}
+
+/// Verifies an unsubscribe token using HMAC's constant-time comparison.
+pub fn verify_unsubscribe_token(email: &str, token: &str, secret: &str) -> bool {
+    let signature = match hex::decode(token) {
+        Ok(signature) => signature,
+        Err(_) => return false,
+    };
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC accepts keys of any size");
+    mac.update(UNSUBSCRIBE_TOKEN_CONTEXT);
+    mac.update(email.trim().to_lowercase().as_bytes());
+    mac.verify_slice(&signature).is_ok()
+}
+
+fn build_unsubscribe_link(server_url: &str, email: &str, secret: &str) -> String {
+    let encoded_email = urlencoding::encode(email);
+    let token = generate_unsubscribe_token(email, secret);
+    format!(
+        "{}/api/unsubscribe?email={}&token={}",
+        server_url, encoded_email, token
+    )
+}
+
+fn unsubscribe_secret() -> Option<String> {
+    std::env::var("JWT_SECRET_KEY")
+        .ok()
+        .filter(|secret| !secret.trim().is_empty())
+}
+
+fn unsubscribe_success() -> Html<String> {
+    Html(UNSUBSCRIBE_SUCCESS_HTML.to_string())
+}
+
 #[derive(Serialize)]
 pub struct UsageLogResponse {
     id: i32,
@@ -190,6 +236,7 @@ pub async fn update_preferred_number_admin(
 #[derive(Debug, Deserialize)]
 pub struct UnsubscribeParams {
     pub email: String,
+    pub token: String,
 }
 
 use axum::extract::Query;
@@ -199,37 +246,41 @@ pub async fn unsubscribe(
     State(state): State<Arc<AppState>>,
     Query(params): Query<UnsubscribeParams>,
 ) -> Result<Html<String>, (StatusCode, String)> {
-    tracing::info!(
-        "Unsubscribe request received for raw email param: {}",
-        params.email
-    );
+    let secret = unsubscribe_secret().ok_or_else(|| {
+        tracing::error!("JWT_SECRET_KEY unavailable while processing unsubscribe request");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to process request.".to_string(),
+        )
+    })?;
+
+    if !verify_unsubscribe_token(&params.email, &params.token, &secret) {
+        tracing::warn!("Rejected unsubscribe request with invalid token");
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Invalid unsubscribe link.".to_string(),
+        ));
+    }
+
+    let normalized_email = params.email.trim().to_lowercase();
 
     // First try to find a registered user
-    match state.user_core.find_by_email(&params.email) {
-        Ok(Some(user)) => {
-            tracing::info!("Found user {} for email: {}", user.id, params.email);
-            match state.user_core.update_notify(user.id, false) {
-                Ok(_) => {
-                    tracing::info!("User {} unsubscribed from notifications", user.id);
-                    Ok(Html("<h1>You have been unsubscribed!</h1>".to_string()))
-                }
-                Err(e) => {
-                    tracing::error!("Failed to update notify for user {}: {}", user.id, e);
-                    Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Failed to unsubscribe. Sorry about this, send email to rasmus@lightfriend.ai"
-                            .to_string(),
-                    ))
-                }
+    match state.user_core.find_by_email(&normalized_email) {
+        Ok(Some(user)) => match state.user_core.update_notify(user.id, false) {
+            Ok(_) => {
+                tracing::info!("User {} unsubscribed from notifications", user.id);
+                Ok(unsubscribe_success())
             }
-        }
+            Err(e) => {
+                tracing::error!("Failed to update notify for user {}: {}", user.id, e);
+                Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to unsubscribe. Sorry about this, send email to rasmus@lightfriend.ai"
+                        .to_string(),
+                ))
+            }
+        },
         Ok(None) => {
-            // No registered user found, check waitlist
-            tracing::info!(
-                "No registered user found for email: {}, checking waitlist",
-                params.email
-            );
-
             let mut pg_conn = state.pg_pool.get().map_err(|e| {
                 tracing::error!("Failed to get PG connection: {}", e);
                 (
@@ -239,31 +290,26 @@ pub async fn unsubscribe(
             })?;
 
             // Try to delete from waitlist
-            let deleted = diesel::delete(
-                waitlist::table.filter(waitlist::email.eq(&params.email.to_lowercase())),
-            )
-            .execute(&mut pg_conn)
-            .map_err(|e| {
-                tracing::error!("Failed to delete from waitlist: {}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to process request.".to_string(),
-                )
-            })?;
+            let deleted =
+                diesel::delete(waitlist::table.filter(waitlist::email.eq(&normalized_email)))
+                    .execute(&mut pg_conn)
+                    .map_err(|e| {
+                        tracing::error!("Failed to delete from waitlist: {}", e);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to process request.".to_string(),
+                        )
+                    })?;
 
             if deleted > 0 {
-                tracing::info!("Removed {} from waitlist", params.email);
-                Ok(Html("<h1>You have been unsubscribed!</h1>".to_string()))
+                tracing::info!("Processed waitlist unsubscribe request");
             } else {
-                tracing::warn!(
-                    "No user or waitlist entry found for email: {}",
-                    params.email
-                );
-                Err((StatusCode::BAD_REQUEST, "Invalid email.".to_string()))
+                tracing::info!("Unsubscribe request had no active recipient");
             }
+            Ok(unsubscribe_success())
         }
         Err(e) => {
-            tracing::error!("Failed to find user by email {}: {}", params.email, e);
+            tracing::error!("Failed to look up unsubscribe recipient: {}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to process request.".to_string(),
@@ -283,6 +329,21 @@ pub async fn broadcast_email(
             Json(json!({"error": "Subject and message cannot be empty"})),
         ));
     }
+
+    let server_url = std::env::var("SERVER_URL").map_err(|_| {
+        tracing::error!("SERVER_URL unavailable while preparing broadcast email");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Email configuration error"})),
+        )
+    })?;
+    let unsubscribe_secret = unsubscribe_secret().ok_or_else(|| {
+        tracing::error!("JWT_SECRET_KEY unavailable while preparing broadcast email");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Email configuration error"})),
+        )
+    })?;
 
     // Fetch users outside the spawn to avoid DB issues, then move into task
     let users = state.user_core.get_all_users().map_err(|e| {
@@ -382,10 +443,8 @@ pub async fn broadcast_email(
             sent_emails.insert(user.email.to_lowercase());
 
             // Prepare the unsubscribe link
-            let encoded_email = urlencoding::encode(&user.email);
-            let server_url = std::env::var("SERVER_URL").expect("SERVER_URL not set");
             let unsubscribe_link =
-                format!("{}/api/unsubscribe?email={}", server_url, encoded_email);
+                build_unsubscribe_link(&server_url, &user.email, &unsubscribe_secret);
 
             // Convert message newlines to HTML paragraphs
             let html_message = request_clone
@@ -486,10 +545,8 @@ pub async fn broadcast_email(
             }
 
             // Prepare the unsubscribe link
-            let encoded_email = urlencoding::encode(&entry.email);
-            let server_url = std::env::var("SERVER_URL").expect("SERVER_URL not set");
             let unsubscribe_link =
-                format!("{}/api/unsubscribe?email={}", server_url, encoded_email);
+                build_unsubscribe_link(&server_url, &entry.email, &unsubscribe_secret);
 
             // Convert message newlines to HTML paragraphs
             let html_message = request_clone
