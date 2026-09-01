@@ -1,9 +1,97 @@
 use std::sync::{Arc, Barrier};
 
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use backend::handlers::auth_middleware::AuthUser;
+use backend::handlers::billing_handlers;
 use backend::repositories::billing_repository::{BillingRepository, BillingWebhookClaim};
 use backend::services::metronome_billing::cost_to_microusd;
 use backend::test_utils::{create_test_state, create_test_user, TestUserParams};
+use backend::UserCoreOps;
 use serial_test::serial;
+
+#[tokio::test]
+#[serial]
+async fn only_admins_can_use_the_manual_credit_grant() {
+    std::env::set_var("METRONOME_BILLING_ENABLED", "false");
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    let denied = billing_handlers::increase_credits(
+        State(state.clone()),
+        AuthUser {
+            user_id: user.id,
+            is_admin: false,
+        },
+        Path(user.id),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(denied.0, StatusCode::FORBIDDEN);
+    assert_eq!(
+        state
+            .user_core
+            .find_by_id(user.id)
+            .unwrap()
+            .unwrap()
+            .credits,
+        user.credits
+    );
+
+    let granted = billing_handlers::increase_credits(
+        State(state.clone()),
+        AuthUser {
+            user_id: user.id,
+            is_admin: true,
+        },
+        Path(user.id),
+    )
+    .await
+    .unwrap();
+    assert_eq!(granted.0["message"], "credits increased successfully");
+    assert_eq!(
+        state
+            .user_core
+            .find_by_id(user.id)
+            .unwrap()
+            .unwrap()
+            .credits,
+        user.credits + 1.0
+    );
+}
+
+#[test]
+#[serial]
+fn credit_increments_are_atomic_under_concurrency() {
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let user_id = user.id;
+    let worker_count = 8;
+    let barrier = Arc::new(Barrier::new(worker_count + 1));
+    let mut workers = Vec::new();
+
+    for _ in 0..worker_count {
+        let repository = Arc::clone(&state.user_repository);
+        let barrier = Arc::clone(&barrier);
+        workers.push(std::thread::spawn(move || {
+            barrier.wait();
+            repository.increase_credits(user_id, 1.0).unwrap();
+        }));
+    }
+
+    barrier.wait();
+    for worker in workers {
+        worker.join().unwrap();
+    }
+
+    let credits = state
+        .user_core
+        .find_by_id(user.id)
+        .unwrap()
+        .unwrap()
+        .credits;
+    assert_eq!(credits, user.credits + worker_count as f32);
+}
 
 #[test]
 #[serial]

@@ -557,19 +557,19 @@ pub async fn increase_credits(
     auth_user: AuthUser,
     axum::extract::Path(user_id): axum::extract::Path<i32>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if !auth_user.is_admin {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Only admins can increase credits"})),
+        ));
+    }
+
     if crate::services::metronome_billing::metronome_enabled() {
         return Err((
             StatusCode::GONE,
             Json(
                 json!({"error": "Credit purchases have been replaced by optional overage billing"}),
             ),
-        ));
-    }
-    // Check if user is modifying their own credits or is an admin
-    if auth_user.user_id != user_id && !auth_user.is_admin {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "You can only modify your own credits unless you're an admin"})),
         ));
     }
 

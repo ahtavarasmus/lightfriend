@@ -930,6 +930,10 @@ async fn main() {
             post(billing_handlers::reset_credits),
         )
         .route(
+            "/api/billing/increase-credits/{user_id}",
+            post(billing_handlers::increase_credits),
+        )
+        .route(
             "/api/admin/monthly-credits/{user_id}/{amount}",
             post(admin_handlers::update_monthly_credits),
         )
@@ -1215,10 +1219,6 @@ async fn main() {
         .route(
             "/api/chat/web-with-image",
             post(profile_handlers::web_chat_with_image),
-        )
-        .route(
-            "/api/billing/increase-credits/{user_id}",
-            post(billing_handlers::increase_credits),
         )
         .route("/api/billing/usage", post(billing_handlers::get_usage_data))
         .route(
