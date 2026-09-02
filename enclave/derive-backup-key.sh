@@ -4,11 +4,10 @@ set -euo pipefail
 # Derive the backup encryption key without persisting it to disk.
 #
 # Production path:
-#   Configure MARLIN_ROOT_SERVER_ENDPOINT, MARLIN_ROOT_SERVER_X25519_PUBKEY,
-#   MARLIN_KMS_CONTRACT_ADDRESS and MARLIN_BACKUP_KEY_PATH. The enclave starts
-#   a local Marlin derive sidecar and derives the key from localhost.
+#   The entrypoint loads the PCR-measured Marlin trust anchors. The enclave
+#   starts a local derive sidecar and derives the key from localhost.
 #
-# Alternate production override:
+# Local/test command override:
 #   MARLIN_BACKUP_KEY_COMMAND=/usr/local/bin/marlin-backup-key
 #   The command must print the base64 key to stdout.
 #

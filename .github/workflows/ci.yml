@@ -199,8 +199,11 @@ jobs:
           shellcheck -s bash .github/scripts/install-host-log-maintenance.sh
           shellcheck -s bash terraform/modules/compute/host-log-maintenance.sh
           shellcheck -s bash enclave/tests/backup-artifact-lock-test.sh
+          shellcheck -s bash enclave/kms-trust-anchors.sh
+          shellcheck -s bash enclave/tests/kms-trust-anchors-test.sh
           shellcheck -s bash enclave/tests/tuwunel-rocksdb-diagnostics-test.sh
           bash enclave/tests/backup-artifact-lock-test.sh
+          bash enclave/tests/kms-trust-anchors-test.sh
           bash enclave/tests/tuwunel-rocksdb-diagnostics-test.sh
 
       - name: Validate Dockerfile builds

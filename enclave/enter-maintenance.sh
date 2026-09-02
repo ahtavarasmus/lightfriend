@@ -5,10 +5,12 @@
 
 # Load env for MAINTENANCE_SECRET
 if [ -f /etc/lightfriend/env ]; then
-    set -a
-    # shellcheck source=/dev/null
-    source /etc/lightfriend/env
-    set +a
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -z "$line" || "$line" == \#* ]] && continue
+        if [[ "$line" =~ ^[A-Za-z_][A-Za-z_0-9]*= ]]; then
+            export "${line?}"
+        fi
+    done < /etc/lightfriend/env
 fi
 
 if [ -z "${MAINTENANCE_SECRET:-}" ]; then

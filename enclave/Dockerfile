@@ -248,9 +248,13 @@ RUN mkdir -p \
     /var/lib/tuwunel \
     /var/lib/tuwunel-backup \
     /var/lib/lightfriend-reserve \
+    /etc/lightfriend \
     /etc/tuwunel \
+    /usr/local/lib/lightfriend \
     /var/log/supervisor \
     /run/postgresql
+
+RUN printf '%s\n' "$BUILD_MODE" > /etc/lightfriend/build-mode
 
 # Set PostgreSQL data dir ownership and log dir permissions
 RUN chown -R postgres:postgres /run/postgresql && \
@@ -260,6 +264,8 @@ RUN chown -R postgres:postgres /run/postgresql && \
 COPY enclave/configs/ /etc/enclave-configs/
 COPY enclave/supervisord.conf /etc/supervisor/conf.d/lightfriend.conf
 COPY enclave/entrypoint.sh /entrypoint.sh
+COPY enclave/kms-trust-anchors.env /etc/lightfriend/kms-trust-anchors.env
+COPY enclave/kms-trust-anchors.sh /usr/local/lib/lightfriend/kms-trust-anchors.sh
 COPY enclave/derive-backup-key.sh /usr/local/bin/derive-backup-key.sh
 COPY enclave/start-marlin-kms.sh /usr/local/bin/start-marlin-kms.sh
 COPY enclave/export.sh /app/export.sh
@@ -280,7 +286,8 @@ COPY enclave/compact-tuwunel-after-backup.sh /app/compact-tuwunel-after-backup.s
 # so we can't modify it here. Store a template and copy at container start.
 RUN echo "nameserver 127.0.0.1" > /etc/resolv.conf.enclave
 
-RUN chmod +x /entrypoint.sh /usr/local/bin/derive-backup-key.sh /usr/local/bin/start-marlin-kms.sh /app/export.sh /app/export-watcher.sh /app/storage-health.sh /app/memory-health.sh /app/health-upload.sh /app/verify.sh /app/post-boot-verify.sh /app/cloudflared-wrapper.sh /app/cloudflared-monitor.sh /app/enter-maintenance.sh /app/service-watchdog.sh /app/diagnose-enclave.sh /app/release-reserve.sh /app/compact-tuwunel-after-backup.sh
+RUN chmod 0444 /etc/lightfriend/build-mode /etc/lightfriend/kms-trust-anchors.env /usr/local/lib/lightfriend/kms-trust-anchors.sh && \
+    chmod +x /entrypoint.sh /usr/local/bin/derive-backup-key.sh /usr/local/bin/start-marlin-kms.sh /app/export.sh /app/export-watcher.sh /app/storage-health.sh /app/memory-health.sh /app/health-upload.sh /app/verify.sh /app/post-boot-verify.sh /app/cloudflared-wrapper.sh /app/cloudflared-monitor.sh /app/enter-maintenance.sh /app/service-watchdog.sh /app/diagnose-enclave.sh /app/release-reserve.sh /app/compact-tuwunel-after-backup.sh
 
 # Copy bridge bot registration script
 COPY enclave/register-bridge-bots.sh /app/register-bridge-bots.sh

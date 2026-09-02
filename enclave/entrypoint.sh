@@ -41,6 +41,15 @@ fi
 rm -f /etc/resolv.conf 2>/dev/null || true
 echo "nameserver 127.0.0.1" > /etc/resolv.conf 2>/dev/null && echo "/etc/resolv.conf: created" || echo "WARNING: could not create /etc/resolv.conf"
 
+BUILD_MODE="local"
+if [ -r /etc/lightfriend/build-mode ]; then
+    IFS= read -r BUILD_MODE < /etc/lightfriend/build-mode
+fi
+if [ "$BUILD_MODE" != "production" ] && [ "$BUILD_MODE" != "local" ]; then
+    echo "FATAL: invalid measured build mode"
+    exit 1
+fi
+readonly BUILD_MODE
 
 # ── 0a. Fetch environment from host via VSOCK ────────────────────────────────
 ENV_LOADED=false
@@ -71,6 +80,15 @@ if [ -e /dev/vsock ]; then
             while IFS= read -r line || [[ -n "$line" ]]; do
                 [[ -z "$line" || "$line" == \#* ]] && continue
                 if [[ "$line" =~ ^[A-Za-z_][A-Za-z_0-9]*= ]]; then
+                    ENV_NAME="${line%%=*}"
+                    case "$ENV_NAME" in
+                        BUILD_MODE|BASH_ENV|ENV|SHELLOPTS|BASHOPTS|CDPATH|GLOBIGNORE|IFS|PATH|LD_PRELOAD|LD_LIBRARY_PATH|PS4|PROMPT_COMMAND|BASH_XTRACEFD)
+                            continue
+                            ;;
+                        MARLIN_ROOT_SERVER_ENDPOINT|MARLIN_ROOT_SERVER_X25519_PUBKEY|MARLIN_KMS_CONTRACT_ADDRESS|MARLIN_BACKUP_KEY_PATH)
+                            [ "$BUILD_MODE" = "production" ] && continue
+                            ;;
+                    esac
                     export "${line?}"
                     ENV_COUNT=$((ENV_COUNT + 1))
                 fi
@@ -86,7 +104,7 @@ if [ -e /dev/vsock ]; then
 
             # Persist non-secret env for supervisord-managed processes.
             mkdir -p /etc/lightfriend
-            grep -v '^BACKUP_ENCRYPTION_KEY=' /tmp/host_env > /etc/lightfriend/env || true
+            grep -Ev '^(BACKUP_ENCRYPTION_KEY|BUILD_MODE|BASH_ENV|ENV|SHELLOPTS|BASHOPTS|CDPATH|GLOBIGNORE|IFS|PATH|LD_PRELOAD|LD_LIBRARY_PATH|PS4|PROMPT_COMMAND|BASH_XTRACEFD|MARLIN_ROOT_SERVER_ENDPOINT|MARLIN_ROOT_SERVER_X25519_PUBKEY|MARLIN_KMS_CONTRACT_ADDRESS|MARLIN_BACKUP_KEY_PATH)=' /tmp/host_env > /etc/lightfriend/env || true
             chmod 600 /etc/lightfriend/env
             rm -f /tmp/host_env
             ENV_LOADED=true
@@ -102,6 +120,20 @@ if [ -e /dev/vsock ]; then
         echo "  Check: is vsock-config-server running on host? Does /opt/lightfriend/host-env exist?"
         exit 1
     fi
+fi
+
+# ── 0a1. Load PCR-measured production KMS trust anchors ─────────────────────
+if [ "$BUILD_MODE" = "production" ]; then
+    # shellcheck disable=SC1091
+    source /usr/local/lib/lightfriend/kms-trust-anchors.sh
+    load_measured_kms_trust_anchors "/etc/lightfriend/kms-trust-anchors.env"
+    KMS_ANCHOR_FINGERPRINT=$(printf '%s\n' \
+        "$MARLIN_ROOT_SERVER_ENDPOINT" \
+        "$MARLIN_ROOT_SERVER_X25519_PUBKEY" \
+        "$MARLIN_KMS_CONTRACT_ADDRESS" \
+        "$MARLIN_BACKUP_KEY_PATH" | sha256sum | awk '{print $1}' | cut -c1-16)
+    echo "KMS_ANCHOR_SOURCE: ${KMS_ANCHOR_SOURCE}"
+    echo "KMS_ANCHOR_FINGERPRINT: ${KMS_ANCHOR_FINGERPRINT}"
 fi
 
 # ── 0b. Set internal defaults ────────────────────────────────────────────────
