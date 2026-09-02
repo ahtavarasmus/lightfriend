@@ -8,6 +8,7 @@ use backend::api::twilio_client::{
     MessagePrice, MessagingPricingResult, SendMessageOptions, TwilioClient, TwilioCredentials,
     VoicePricingResult,
 };
+use serial_test::serial;
 
 // =========================================================================
 // Send Message Tests
@@ -387,6 +388,7 @@ fn test_credentials_new() {
 }
 
 #[test]
+#[serial]
 fn test_credentials_from_env_missing() {
     // Ensure env vars are not set
     std::env::remove_var("TWILIO_ACCOUNT_SID");

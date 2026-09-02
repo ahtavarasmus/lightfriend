@@ -30,6 +30,7 @@ fn twiml_parameter<'a>(twiml: &'a str, name: &str) -> &'a str {
 }
 
 #[tokio::test]
+#[serial]
 async fn voice_incoming_unknown_caller_rejects_without_answering() {
     std::env::set_var("SERVER_URL", "https://lightfriend.ai");
     std::env::set_var("TWILIO_AUTH_TOKEN", "test_twilio_auth_token");
