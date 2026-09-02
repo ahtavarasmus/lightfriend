@@ -13,6 +13,17 @@ pub struct BillingRepository {
     pool: PgDbPool,
 }
 
+pub struct CappedUsageRequest<'a> {
+    pub user_id: i32,
+    pub event_type: &'a str,
+    pub requested_cost_microusd: i64,
+    pub occurred_at: i32,
+    pub period_start: i32,
+    pub period_end: i32,
+    pub period_cap_microusd: i64,
+    pub transaction_id: Option<String>,
+}
+
 pub fn capped_usage_microusd(requested: i64, current_total: i64, period_cap: i64) -> i64 {
     requested
         .max(0)
@@ -220,15 +231,18 @@ impl BillingRepository {
     /// Locking the account row serializes concurrent channels for one user.
     pub fn enqueue_usage_capped(
         &self,
-        user_id: i32,
-        event_type: &str,
-        requested_cost_microusd: i64,
-        occurred_at: i32,
-        period_start: i32,
-        period_end: i32,
-        period_cap_microusd: i64,
-        transaction_id: Option<String>,
+        request: CappedUsageRequest<'_>,
     ) -> Result<(String, i64), DieselError> {
+        let CappedUsageRequest {
+            user_id,
+            event_type,
+            requested_cost_microusd,
+            occurred_at,
+            period_start,
+            period_end,
+            period_cap_microusd,
+            transaction_id,
+        } = request;
         let transaction_id = transaction_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let now = chrono::Utc::now().timestamp() as i32;
         let mut conn = self.pool.get().expect("Failed to get PG connection");

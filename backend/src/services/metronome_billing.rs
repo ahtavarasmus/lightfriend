@@ -1,6 +1,7 @@
 use crate::api::twilio_client::{CallDetails, TwilioClient, TwilioCredentials};
 use crate::models::user_models::User;
 use crate::pg_models::{BillingAccount, BillingUsageEvent};
+use crate::repositories::billing_repository::CappedUsageRequest;
 use crate::{AppState, BillingRepository, UserCoreOps};
 use anyhow::{anyhow, Context, Result};
 use reqwest::Client as HttpClient;
@@ -1318,16 +1319,16 @@ pub fn enqueue_usage(
     let (period_start, period_end) =
         billing_period_from_anchor(account.created_at, chrono::Utc::now())
             .ok_or_else(|| anyhow!("Billing account has an invalid period anchor"))?;
-    let (transaction_id, billed) = repository.enqueue_usage_capped(
+    let (transaction_id, billed) = repository.enqueue_usage_capped(CappedUsageRequest {
         user_id,
         event_type,
-        cost_microusd,
+        requested_cost_microusd: cost_microusd,
         occurred_at,
-        period_start.timestamp() as i32,
-        period_end.timestamp() as i32,
-        cost_to_microusd(MONTHLY_INCLUDED_USAGE_USD)?,
+        period_start: period_start.timestamp() as i32,
+        period_end: period_end.timestamp() as i32,
+        period_cap_microusd: cost_to_microusd(MONTHLY_INCLUDED_USAGE_USD)?,
         transaction_id,
-    )?;
+    })?;
     if billed < cost_microusd {
         tracing::info!(
             user_id,
