@@ -540,7 +540,7 @@ async fn test_process_sms_cancel_message() {
 
 #[tokio::test]
 #[serial]
-async fn test_process_sms_byot_user_skips_credit_check() {
+async fn test_process_sms_byot_user_requires_ai_usage_balance() {
     let state = create_test_state();
     // User with NO credits at all
     let params = TestUserParams::us_user(0.0, 0.0);
@@ -564,10 +564,10 @@ async fn test_process_sms_byot_user_skips_credit_check() {
 
     let (status, _headers, _response) = process_sms(&state, payload, options).await;
 
-    // Should succeed despite zero credits (BYOT skips credit check)
-    assert_eq!(status, StatusCode::OK);
+    // BYOT covers Twilio carrier charges, but hosted AI usage still requires balance.
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED);
 
-    // Credits still zero (no deduction happened, but also no rejection)
+    // A rejected request does not change either balance.
     let updated = state.user_core.find_by_id(user.id).unwrap().unwrap();
     assert_eq!(updated.credits_left, 0.0);
     assert_eq!(updated.credits, 0.0);
