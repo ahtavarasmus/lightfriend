@@ -53,6 +53,16 @@ pub struct MessagePrice {
     pub price_unit: Option<String>,
 }
 
+/// Final pricing details for a Programmable Voice call. Twilio may leave
+/// `price` empty briefly after a call reaches a terminal status.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CallDetails {
+    pub status: String,
+    pub price: Option<String>,
+    pub price_unit: Option<String>,
+    pub duration_seconds: Option<u32>,
+}
+
 /// Messaging pricing information for a country.
 #[derive(Debug, Clone, Default)]
 pub struct MessagingPricingResult {
@@ -171,6 +181,13 @@ pub trait TwilioClient: Send + Sync {
         message_sid: &str,
     ) -> Result<Option<MessagePrice>, TwilioClientError>;
 
+    /// Fetch the final status and account-specific price of a voice call.
+    async fn fetch_call_details(
+        &self,
+        credentials: &TwilioCredentials,
+        call_sid: &str,
+    ) -> Result<CallDetails, TwilioClientError>;
+
     /// Configure the SMS and voice webhook URLs for a phone number.
     /// `voice_url` is optional - if None, the voice webhook is left untouched.
     /// Returns the phone number SID on success.
@@ -253,6 +270,15 @@ struct TwilioMessageResponse {
 struct TwilioMessageDetails {
     price: Option<String>,
     price_unit: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct TwilioCallDetails {
+    #[serde(default)]
+    status: String,
+    price: Option<String>,
+    price_unit: Option<String>,
+    duration: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -499,6 +525,42 @@ impl TwilioClient for RealTwilioClient {
             price: details.price,
             price_unit: details.price_unit,
         }))
+    }
+
+    async fn fetch_call_details(
+        &self,
+        credentials: &TwilioCredentials,
+        call_sid: &str,
+    ) -> Result<CallDetails, TwilioClientError> {
+        let response = self
+            .http_client
+            .get(format!(
+                "https://api.twilio.com/2010-04-01/Accounts/{}/Calls/{}.json",
+                credentials.account_sid, call_sid
+            ))
+            .basic_auth(&credentials.account_sid, Some(&credentials.auth_token))
+            .send()
+            .await?;
+        let status = response.status();
+        if !status.is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(TwilioClientError::ApiError {
+                status: status.as_u16(),
+                message: text,
+            });
+        }
+        let details: TwilioCallDetails = response
+            .json()
+            .await
+            .map_err(|error| TwilioClientError::ParseError(error.to_string()))?;
+        Ok(CallDetails {
+            status: details.status,
+            price: details.price,
+            price_unit: details.price_unit,
+            duration_seconds: details
+                .duration
+                .and_then(|duration| duration.parse::<u32>().ok()),
+        })
     }
 
     async fn configure_webhook(
@@ -1066,6 +1128,14 @@ pub mod mock {
                 .unwrap()
                 .clone()
                 .map_err(TwilioClientError::Other)
+        }
+
+        async fn fetch_call_details(
+            &self,
+            _credentials: &TwilioCredentials,
+            _call_sid: &str,
+        ) -> Result<CallDetails, TwilioClientError> {
+            Ok(CallDetails::default())
         }
 
         async fn configure_webhook(

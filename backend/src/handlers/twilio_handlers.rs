@@ -491,6 +491,15 @@ impl crate::api::twilio_client::TwilioClient for NoOpTwilioClient {
         Ok(None)
     }
 
+    async fn fetch_call_details(
+        &self,
+        _credentials: &crate::api::twilio_client::TwilioCredentials,
+        _call_sid: &str,
+    ) -> Result<crate::api::twilio_client::CallDetails, crate::api::twilio_client::TwilioClientError>
+    {
+        Ok(crate::api::twilio_client::CallDetails::default())
+    }
+
     async fn configure_webhook(
         &self,
         _credentials: &crate::api::twilio_client::TwilioCredentials,

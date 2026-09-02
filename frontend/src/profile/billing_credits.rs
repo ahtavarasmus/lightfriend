@@ -740,10 +740,10 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                     </div>
 
                     {
-                        if uses_own_twilio {
+                        if uses_own_twilio && !(has_plan && uses_metronome) {
                             html! {
                                 <div class="billing-summary-note">
-                                    {"Own Twilio is enabled. You pay Twilio directly for phone usage."}
+                                    {"Own Twilio is enabled. You pay Twilio directly for carrier usage; AI usage still uses your Lightfriend allowance."}
                                 </div>
                             }
                         } else if has_plan && uses_metronome {
@@ -921,7 +921,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                     }
                 </details>
 
-                if uses_metronome && has_plan && !uses_own_twilio {
+                if uses_metronome && has_plan {
                     <div class="usage-projection-card overage-billing-card" style="margin-bottom: 16px;">
                         <div class="usage-header">
                             <h3>{"Overage billing"}</h3>
@@ -945,6 +945,9 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                 overage_status.as_ref().map(|status| status.invoice_cadence.as_str()).unwrap_or("weekly")
                             )}
                         </p>
+                        if uses_own_twilio {
+                            <div class="billing-note">{"Own Twilio carrier charges are paid directly to Twilio. This setting covers Lightfriend AI and other metered usage."}</div>
+                        }
                         {
                             if let Some(status) = overage_status.as_ref() {
                                 html! {
@@ -982,7 +985,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                 }
 
                 // Legacy credits UI remains available only until the Metronome cutover flag is enabled.
-                <div class="usage-projection-card" style={format!("margin-bottom: 16px;{}{}", if uses_own_twilio { " opacity: 0.6;" } else { "" }, if uses_metronome { " display: none;" } else { "" })}>
+                <div class="usage-projection-card" style={format!("margin-bottom: 16px;{}", if uses_metronome { " display: none;" } else { "" })}>
                     <div class="usage-header">
                         <h3>{"Overage credits"}</h3>
                         <span class="usage-percentage" style="font-size: 1.2rem;">{format!("${:.2}", one_time_credits)}</span>
@@ -993,25 +996,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
 
                     <div class="auto-topup-container" style="margin-top: 12px; padding: 0;">
                     {
-                        if uses_own_twilio {
-                            html! {
-                                <>
-                                    <div class="buy-credits-disabled">
-                                        <button
-                                            class="buy-credits-button disabled"
-                                            title="Not needed with own Twilio enabled"
-                                            disabled=true
-                                            style="opacity: 0.5; cursor: not-allowed;"
-                                        >
-                                            {"Buy credits"}
-                                        </button>
-                                    </div>
-                                    <div class="tooltip" style="color: #888; font-size: 0.85rem;">
-                                        {"With own Twilio enabled, you pay Twilio directly for phone usage."}
-                                    </div>
-                                </>
-                            }
-                        } else if user_profile.sub_tier.is_some() || user_profile.discount {
+                        if user_profile.sub_tier.is_some() || user_profile.discount {
                             html! {
                                 <>
                                     if user_profile.stripe_payment_method_id.is_some() {

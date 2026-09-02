@@ -609,6 +609,10 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 .await;
             crate::services::metronome_billing::flush_usage_outbox(Arc::clone(&billing_state))
                 .await;
+            crate::services::metronome_billing::reconcile_twilio_voice_intents(Arc::clone(
+                &billing_state,
+            ))
+            .await;
             crate::services::metronome_billing::reconcile_usage_outbox(billing_state).await;
         });
     }
@@ -632,6 +636,19 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         .add(metronome_usage_job)
         .await
         .expect("Failed to add Metronome usage job");
+
+    let state_clone = Arc::clone(&state);
+    let twilio_voice_reconciliation_job = Job::new_async("5,35 * * * * *", move |_, _| {
+        let state = Arc::clone(&state_clone);
+        Box::pin(async move {
+            crate::services::metronome_billing::reconcile_twilio_voice_intents(state).await;
+        })
+    })
+    .expect("Failed to create Twilio voice reconciliation job");
+    sched
+        .add(twilio_voice_reconciliation_job)
+        .await
+        .expect("Failed to add Twilio voice reconciliation job");
 
     let state_clone = Arc::clone(&state);
     let metronome_provisioning_job = Job::new_async("15 */5 * * * *", move |_, _| {

@@ -49,6 +49,35 @@ impl crate::repositories::user_repository::UserRepository {
         Ok(())
     }
 
+    /// Atomically deduct a billable amount from included usage first and then
+    /// from purchased credits. Returns false when the combined balance is too
+    /// small, leaving both balances unchanged.
+    pub fn deduct_usage_credits(&self, user_id: i32, cost: f32) -> Result<bool, DieselError> {
+        let mut pg_conn = self.pool.get().expect("Failed to get PG connection");
+        pg_conn.transaction(|conn| {
+            let (credits_left, credits) = users::table
+                .find(user_id)
+                .select((users::credits_left, users::credits))
+                .for_update()
+                .first::<(f32, f32)>(conn)?;
+            if cost <= 0.0 {
+                return Ok(true);
+            }
+            if credits_left + credits < cost {
+                return Ok(false);
+            }
+            let included_deduction = credits_left.min(cost);
+            let purchased_deduction = cost - included_deduction;
+            diesel::update(users::table.find(user_id))
+                .set((
+                    users::credits_left.eq(credits_left - included_deduction),
+                    users::credits.eq(credits - purchased_deduction),
+                ))
+                .execute(conn)?;
+            Ok(true)
+        })
+    }
+
     pub fn reset_included_usage_window(
         &self,
         user_id: i32,

@@ -11,9 +11,10 @@ Create these objects in the Metronome sandbox first:
 
 1. Connect the existing Stripe account.
 2. Create the `lightfriend_usage` billable metric. It must sum the numeric
-   `cost_usd` event property.
+   `cost_usd` event property. Export its ID as `METRONOME_BILLABLE_METRIC_ID`.
 3. Create a usage product priced at $1 per unit of that metric. One event with
-   `cost_usd: 0.013` must therefore rate to $0.013.
+   `cost_usd: 0.013` must therefore rate to $0.013. Export its ID as
+   `METRONOME_USAGE_PRODUCT_ID`.
 4. Create a package with alias `lightfriend-monthly` containing:
    - a non-rollover $25 recurring credit every month;
    - weekly usage statements;
@@ -45,7 +46,9 @@ remainder first.
    environment variable is missing.
 6. Set `METRONOME_BILLING_ENABLED=true` and deploy.
 
-On activation, the background migration provisions all hosted subscribers. It
+On activation, the background migration provisions all subscribers, including
+users who supply their own Twilio account. Own-Twilio users pay carrier charges
+directly but still consume Lightfriend AI usage. It
 uses `lightfriend-user-<id>` as an idempotent ingest alias, links the existing
 Stripe customer, creates the package contract, and imports the old purchased
 balance once. For users with an active legacy allowance window, it also emits a
@@ -110,7 +113,9 @@ every new dashboard or Light Tool message disproportionately expensive.
 
 OpenAI Realtime is calculated from detailed usage, not call duration: text
 input $4/M, audio input $32/M, cached input $0.40/M, text output $24/M, and
-audio output $64/M. The `response.id` is used as the idempotent transaction ID.
+audio output $64/M for `gpt-realtime-2`. A different model requires all five
+`OPENAI_REALTIME_*_USD_PER_MILLION` overrides. The `response.id` is used as the
+idempotent transaction ID.
 
 - `web_chat`: all Tinfoil/NEAR/OpenRouter model rounds used by one dashboard
   interaction, including verifier retries and SMS-length condensation.
@@ -120,8 +125,9 @@ audio output $64/M. The `response.id` is used as the idempotent transaction ID.
   `response.done`; there is no Twilio leg.
 - `phone_voice_ai`: the same OpenAI Realtime token calculation for hosted phone
   calls.
-- `twilio_voice`: the hosted inbound/outbound Twilio phone leg. BYOT users pay
-  Twilio directly and do not receive this event.
+- `twilio_voice`: the hosted inbound/outbound phone leg, reconciled from the
+  completed Twilio Call price plus rounded Media Streams minutes. BYOT users
+  pay Twilio directly and do not receive this event.
 - `twilio_sms`, `telnyx_sms`, and `sinch_sms`: actual carrier cost from the
   provider delivery callback.
 - `rule_test`: the explicit rule-test action.

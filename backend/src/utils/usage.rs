@@ -43,7 +43,7 @@ pub fn ensure_current_included_usage_window(
     if crate::services::metronome_billing::metronome_enabled() {
         return Ok(user.clone());
     }
-    if user.sub_tier.as_deref() != Some("tier 2") || state.user_core.is_byot_user(user.id) {
+    if user.sub_tier.as_deref() != Some("tier 2") {
         if user.credits_left > 0.0
             || user.included_usage_window_start_timestamp.is_some()
             || user.included_usage_window_end_timestamp.is_some()
@@ -113,11 +113,6 @@ pub async fn check_user_credits(
         );
     }
 
-    // BYOT users pay Twilio directly - no credit check
-    if state.user_core.is_byot_user(user.id) {
-        return Ok(());
-    }
-
     if crate::services::metronome_billing::metronome_enabled() {
         if crate::services::metronome_billing::has_usage_entitlement(state, user.id)
             .await
@@ -168,8 +163,15 @@ pub async fn check_user_credits(
         // SMS events: just check > 0 (actual cost deducted at Twilio callback)
         "message" | "noti_msg" | "digest" => 0.01,
         // Voice events: estimate upfront cost (these commit resources)
-        "voice" | "noti_call" => {
-            get_voice_cost_estimate(state, &user.phone_number, event_type, amount).await
+        "voice" | "noti_call" | "web_voice" => {
+            get_voice_cost_estimate(
+                state,
+                &user.phone_number,
+                event_type,
+                amount,
+                !state.user_core.is_byot_user(user.id),
+            )
+            .await
         }
         _ => return Err("Invalid event type".to_string()),
     };
@@ -237,7 +239,8 @@ pub async fn check_user_credits(
 
 /// Tinfoil inference cost per minute (STT + LLM + TTS).
 /// This covers whisper transcription, gemma4-31b inference, and qwen3-tts.
-const TINFOIL_COST_PER_MIN: f32 = 0.05;
+const TINFOIL_COST_PER_MIN: f32 =
+    0.05 * crate::services::usage_pricing::CUSTOMER_USAGE_MARGIN as f32;
 
 /// Estimate voice call cost for pre-send credit check.
 /// Cost = Twilio phone leg (country-specific, inbound vs outbound) + Tinfoil inference.
@@ -246,6 +249,7 @@ async fn get_voice_cost_estimate(
     phone_number: &str,
     event_type: &str,
     amount: Option<i32>,
+    include_carrier: bool,
 ) -> f32 {
     let country_code = get_country_code_from_phone(phone_number);
     let pricing = if let Some(code) = country_code {
@@ -264,7 +268,7 @@ async fn get_voice_cost_estimate(
                 None => 0.03, // fallback inbound
             };
             let minutes = (amount.unwrap_or(60) as f32 / 60.0).ceil().max(1.0);
-            minutes * (twilio_price + TINFOIL_COST_PER_MIN)
+            minutes * (if include_carrier { twilio_price } else { 0.0 } + TINFOIL_COST_PER_MIN)
         }
         "noti_call" => {
             // Outbound notification call: we call user (terminating price, more expensive)
@@ -273,7 +277,11 @@ async fn get_voice_cost_estimate(
                 None => 0.13, // fallback outbound
             };
             let minutes = (amount.unwrap_or(60) as f32 / 60.0).ceil().max(1.0);
-            minutes * (twilio_price + TINFOIL_COST_PER_MIN)
+            minutes * (if include_carrier { twilio_price } else { 0.0 } + TINFOIL_COST_PER_MIN)
+        }
+        "web_voice" => {
+            let minutes = (amount.unwrap_or(60) as f32 / 60.0).ceil().max(1.0);
+            minutes * TINFOIL_COST_PER_MIN
         }
         _ => 0.0,
     }
@@ -300,13 +308,14 @@ pub fn deduct_user_credits(
         }
     };
 
-    // BYOT users pay Twilio directly - no credit deduction
-    if state.user_core.is_byot_user(user_id) {
-        return Ok(());
-    }
-
     // Calculate deduction for voice/web events
-    let cost = get_activity_cost(state, &user.phone_number, event_type, amount);
+    let cost = get_activity_cost(
+        state,
+        &user.phone_number,
+        event_type,
+        amount,
+        !state.user_core.is_byot_user(user_id),
+    );
     if cost <= 0.0 {
         return Ok(());
     }
@@ -319,8 +328,7 @@ pub fn deduct_user_credits(
         return Ok(());
     }
 
-    // Verify sufficient balance
-    if user.credits_left < cost && user.credits < cost {
+    if user.credits_left + user.credits < cost {
         eprintln!(
             "Insufficient credits at deduction time for user {}: credits_left={}, credits={}, needed={}",
             user_id, user.credits_left, user.credits, cost
@@ -328,33 +336,19 @@ pub fn deduct_user_credits(
         return Err("Insufficient credits".to_string());
     }
 
-    // Deduct credits: prefer credits_left, fall back to credits
-    if user.credits_left >= cost {
-        let new_credits_left = user.credits_left - cost;
-        if let Err(e) = state
-            .user_repository
-            .update_user_credits_left(user_id, new_credits_left)
-        {
-            eprintln!("Failed to update user credits_left: {}", e);
-            return Err("Failed to process credits".to_string());
-        }
-    } else if user.credits >= cost {
-        let new_credits = user.credits - cost;
-        if let Err(e) = state
-            .user_repository
-            .update_user_credits(user_id, new_credits)
-        {
-            eprintln!("Failed to update user credits: {}", e);
-            return Err("Failed to process credits".to_string());
-        }
+    if !state
+        .user_repository
+        .deduct_usage_credits(user_id, cost)
+        .map_err(|error| format!("Failed to process credits: {error}"))?
+    {
+        return Err("Insufficient credits".to_string());
     }
 
     Ok(())
 }
 
-/// Queues only the hosted Twilio phone leg for an OpenAI Realtime call.
-/// The AI portion is metered independently from each `response.done` usage payload.
-pub fn deduct_hosted_voice_phone_leg(
+/// Legacy-credit equivalent of `deduct_hosted_voice_phone_leg`.
+pub fn deduct_hosted_voice_phone_leg_legacy(
     state: &Arc<AppState>,
     user_id: i32,
     event_type: &str,
@@ -368,7 +362,6 @@ pub fn deduct_hosted_voice_phone_leg(
     if state.user_core.is_byot_user(user_id) {
         return Ok(());
     }
-
     let country_code = get_country_code_from_phone(&user.phone_number);
     let pricing = country_code.and_then(|code| {
         crate::api::twilio_pricing::get_cached_notification_pricing_sync(state, &code)
@@ -383,10 +376,8 @@ pub fn deduct_hosted_voice_phone_leg(
         _ => return Err("Invalid voice event type".to_string()),
     };
     let minutes = (duration_secs.max(1) as f32 / 60.0).ceil();
-    let cost = minutes * per_minute * TWILIO_COST_MARGIN;
-    crate::services::metronome_billing::enqueue_usage(state, user_id, "twilio_voice", cost, None)
-        .map_err(|error| format!("Failed to queue phone usage: {error}"))?;
-    Ok(())
+    // Cached notification pricing already includes the customer margin.
+    deduct_exact_usage_cost(state, user_id, minutes * per_minute)
 }
 
 /// Calculate cost for voice events using cached pricing.
@@ -396,6 +387,7 @@ fn get_activity_cost(
     phone_number: &str,
     event_type: &str,
     amount: Option<i32>,
+    include_carrier: bool,
 ) -> f32 {
     let country_code = get_country_code_from_phone(phone_number);
     let pricing = country_code.and_then(|code| {
@@ -410,7 +402,7 @@ fn get_activity_cost(
                 None => 0.03,
             };
             let minutes = (amount.unwrap_or(60) as f32 / 60.0).ceil().max(1.0);
-            minutes * (twilio_price + TINFOIL_COST_PER_MIN)
+            minutes * (if include_carrier { twilio_price } else { 0.0 } + TINFOIL_COST_PER_MIN)
         }
         "noti_call" => {
             // Outbound: terminating price
@@ -419,10 +411,40 @@ fn get_activity_cost(
                 None => 0.13,
             };
             let minutes = (amount.unwrap_or(60) as f32 / 60.0).ceil().max(1.0);
-            minutes * (twilio_price + TINFOIL_COST_PER_MIN)
+            minutes * (if include_carrier { twilio_price } else { 0.0 } + TINFOIL_COST_PER_MIN)
+        }
+        "web_voice" => {
+            let minutes = (amount.unwrap_or(60) as f32 / 60.0).ceil().max(1.0);
+            minutes * TINFOIL_COST_PER_MIN
         }
         _ => 0.0,
     }
+}
+
+/// Deduct an already-calculated customer price. Unlike carrier-only helpers,
+/// this always applies to BYOT users because they still consume AI services.
+pub fn deduct_exact_usage_cost(
+    state: &Arc<AppState>,
+    user_id: i32,
+    cost: f32,
+) -> Result<(), String> {
+    if !cost.is_finite() || cost <= 0.0 {
+        return Ok(());
+    }
+    let user = state
+        .user_core
+        .find_by_id(user_id)
+        .map_err(|error| format!("Database error: {error}"))?
+        .ok_or_else(|| "User not found".to_string())?;
+    let _user = ensure_current_included_usage_window(state, &user)?;
+    if !state
+        .user_repository
+        .deduct_usage_credits(user_id, cost)
+        .map_err(|error| format!("Failed to process credits: {error}"))?
+    {
+        return Err("Insufficient credits".to_string());
+    }
+    Ok(())
 }
 
 /// Deduct credits based on actual Twilio price from StatusCallback.

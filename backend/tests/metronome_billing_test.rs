@@ -1,10 +1,12 @@
+use backend::api::twilio_client::CallDetails;
+use backend::repositories::billing_repository::capped_usage_microusd;
 use backend::services::metronome_billing::{
     billing_period_from_anchor, contract_starting_at, cost_to_microusd,
     customer_usage_balance_from_response, invoice_contains_usage, legacy_overage_migration_target,
     local_usage_balance_from_total, ordered_payment_method_candidates,
     payment_method_owner_matches, provider_event_status, provider_http_error, select_contract_id,
-    usage_entitled_from_account_state, usage_invoice_total_usd, verify_webhook_signature,
-    MetronomeConfig,
+    twilio_call_customer_cost_with_stream_rate, usage_entitled_from_account_state,
+    usage_invoice_total_usd, verify_webhook_signature, MetronomeConfig,
 };
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -50,6 +52,46 @@ fn converts_fractional_dollar_costs_without_float_ledger_values() {
     assert_eq!(cost_to_microusd(25.0).unwrap(), 25_000_000);
     assert!(cost_to_microusd(0.0).is_err());
     assert!(cost_to_microusd(f64::NAN).is_err());
+}
+
+#[test]
+fn non_overage_usage_is_capped_at_the_monthly_allowance() {
+    assert_eq!(
+        capped_usage_microusd(500_000, 24_800_000, 25_000_000),
+        200_000
+    );
+    assert_eq!(capped_usage_microusd(500_000, 25_000_000, 25_000_000), 0);
+    assert_eq!(
+        capped_usage_microusd(500_000, 20_000_000, 25_000_000),
+        500_000
+    );
+}
+
+#[test]
+fn twilio_voice_cost_uses_actual_call_price_and_media_stream_minutes_once() {
+    let details = CallDetails {
+        status: "completed".to_string(),
+        price: Some("-0.021".to_string()),
+        price_unit: Some("USD".to_string()),
+        duration_seconds: Some(61),
+    };
+    let billed = twilio_call_customer_cost_with_stream_rate(&details, 0.0044)
+        .unwrap()
+        .unwrap();
+    assert!((billed - ((0.021 + 0.0088) * 1.30)).abs() < 0.0000001);
+}
+
+#[test]
+fn twilio_voice_cost_waits_for_completed_call_price() {
+    let details = CallDetails {
+        status: "completed".to_string(),
+        duration_seconds: Some(60),
+        ..Default::default()
+    };
+    assert_eq!(
+        twilio_call_customer_cost_with_stream_rate(&details, 0.0044).unwrap(),
+        None
+    );
 }
 
 #[test]

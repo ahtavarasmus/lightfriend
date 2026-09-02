@@ -1,6 +1,6 @@
 use backend::services::usage_pricing::{
-    billable_customer_cost_usd, openai_realtime_cost_usd, openai_realtime_usage_from_event,
-    text_llm_cost_usd, RealtimeTokenUsage,
+    billable_customer_cost_usd, openai_realtime_cost_usd, openai_realtime_cost_usd_for_model,
+    openai_realtime_usage_from_event, text_llm_cost_usd, RealtimeTokenUsage,
 };
 use backend::AiProvider;
 
@@ -9,6 +9,18 @@ fn tinfoil_kimi_cost_uses_input_and_output_rates() {
     let cost = text_llm_cost_usd(AiProvider::Tinfoil, "kimi-k2-6", 38_532, 1_235);
     assert!((cost - 0.06428175).abs() < 0.00000001);
     assert!((billable_customer_cost_usd(cost) - 0.083566275).abs() < 0.00000001);
+}
+
+#[test]
+fn realtime_model_pricing_uses_the_selected_model() {
+    let usage = RealtimeTokenUsage {
+        output_audio_tokens: 1_000_000,
+        ..Default::default()
+    };
+    assert_eq!(
+        openai_realtime_cost_usd_for_model("gpt-realtime-2", usage).unwrap(),
+        64.0
+    );
 }
 
 #[test]

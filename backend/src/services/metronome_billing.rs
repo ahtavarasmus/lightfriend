@@ -1,3 +1,4 @@
+use crate::api::twilio_client::{CallDetails, TwilioClient, TwilioCredentials};
 use crate::models::user_models::User;
 use crate::pg_models::{BillingAccount, BillingUsageEvent};
 use crate::{AppState, BillingRepository, UserCoreOps};
@@ -1143,9 +1144,6 @@ pub async fn provision_subscribers(state: Arc<AppState>) {
     };
     let repository = BillingRepository::new(state.pg_pool.clone());
     for user in users {
-        if state.user_core.is_byot_user(user.id) {
-            continue;
-        }
         if let Err(error) = provision_user(&state, &user).await {
             let error_code = billing_error_code(&error);
             let _ = repository.ensure_account(user.id);
@@ -1305,15 +1303,40 @@ pub fn enqueue_usage(
 ) -> Result<String> {
     MetronomeConfig::from_env().validate()?;
     let repository = BillingRepository::new(state.pg_pool.clone());
-    repository.ensure_account(user_id)?;
+    let account = repository.ensure_account(user_id)?;
     let cost_microusd = cost_to_microusd(cost_usd as f64)?;
-    Ok(repository.enqueue_usage(
+    let occurred_at = chrono::Utc::now().timestamp() as i32;
+    if account.overage_enabled && account.payment_ready {
+        return Ok(repository.enqueue_usage(
+            user_id,
+            event_type,
+            cost_microusd,
+            occurred_at,
+            transaction_id,
+        )?);
+    }
+    let (period_start, period_end) =
+        billing_period_from_anchor(account.created_at, chrono::Utc::now())
+            .ok_or_else(|| anyhow!("Billing account has an invalid period anchor"))?;
+    let (transaction_id, billed) = repository.enqueue_usage_capped(
         user_id,
         event_type,
         cost_microusd,
-        chrono::Utc::now().timestamp() as i32,
+        occurred_at,
+        period_start.timestamp() as i32,
+        period_end.timestamp() as i32,
+        cost_to_microusd(MONTHLY_INCLUDED_USAGE_USD)?,
         transaction_id,
-    )?)
+    )?;
+    if billed < cost_microusd {
+        tracing::info!(
+            user_id,
+            requested_microusd = cost_microusd,
+            billed_microusd = billed,
+            "Capped usage at the non-overage monthly allowance"
+        );
+    }
+    Ok(transaction_id)
 }
 
 pub fn begin_usage_intent(state: &Arc<AppState>, user_id: i32, event_type: &str) -> Result<String> {
@@ -1323,6 +1346,127 @@ pub fn begin_usage_intent(state: &Arc<AppState>, user_id: i32, event_type: &str)
     repository.ensure_account(user_id)?;
     repository.begin_usage_intent(user_id, event_type, &transaction_id)?;
     Ok(transaction_id)
+}
+
+pub fn begin_twilio_voice_intent(
+    state: &Arc<AppState>,
+    user_id: i32,
+    call_sid: &str,
+) -> Result<Option<String>> {
+    if !metronome_enabled() || state.user_core.is_byot_user(user_id) {
+        return Ok(None);
+    }
+    MetronomeConfig::from_env().validate()?;
+    let transaction_id = format!("twilio-voice-{call_sid}");
+    let repository = BillingRepository::new(state.pg_pool.clone());
+    repository.ensure_account(user_id)?;
+    repository.begin_usage_intent(user_id, "twilio_voice", &transaction_id)?;
+    Ok(Some(transaction_id))
+}
+
+pub fn twilio_call_customer_cost(details: &CallDetails) -> Result<Option<f64>> {
+    let stream_price_per_minute = std::env::var("TWILIO_MEDIA_STREAM_USD_PER_MIN")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .unwrap_or(0.0044);
+    twilio_call_customer_cost_with_stream_rate(details, stream_price_per_minute)
+}
+
+pub fn twilio_call_customer_cost_with_stream_rate(
+    details: &CallDetails,
+    stream_price_per_minute: f64,
+) -> Result<Option<f64>> {
+    let terminal = matches!(
+        details.status.as_str(),
+        "completed" | "busy" | "failed" | "no-answer" | "canceled"
+    );
+    if !terminal {
+        return Ok(None);
+    }
+    let call_cost = match details.price.as_deref() {
+        Some(price) => price
+            .parse::<f64>()
+            .context("Twilio returned a non-numeric Call price")?
+            .abs(),
+        None if details.status == "completed" => return Ok(None),
+        None => 0.0,
+    };
+    if let Some(unit) = details.price_unit.as_deref() {
+        if !unit.eq_ignore_ascii_case("usd") {
+            return Err(anyhow!(
+                "Twilio Call price currency is {unit}, expected USD"
+            ));
+        }
+    }
+    if !stream_price_per_minute.is_finite() || stream_price_per_minute < 0.0 {
+        return Err(anyhow!("Twilio Media Streams price must be non-negative"));
+    }
+    let stream_minutes = details
+        .duration_seconds
+        .filter(|duration| *duration > 0)
+        .map(|duration| (duration as f64 / 60.0).ceil())
+        .unwrap_or(0.0);
+    Ok(Some(
+        (call_cost + stream_minutes * stream_price_per_minute)
+            * crate::services::usage_pricing::CUSTOMER_USAGE_MARGIN,
+    ))
+}
+
+pub async fn reconcile_twilio_voice_intents(state: Arc<AppState>) {
+    if !metronome_enabled() {
+        return;
+    }
+    let credentials = match TwilioCredentials::from_env() {
+        Ok(credentials) => credentials,
+        Err(error) => {
+            tracing::error!("Cannot reconcile Twilio voice usage: {error}");
+            return;
+        }
+    };
+    let repository = BillingRepository::new(state.pg_pool.clone());
+    let intents = match repository.open_usage_intents("twilio_voice", 100) {
+        Ok(intents) => intents,
+        Err(error) => {
+            tracing::error!("Failed to load Twilio voice billing intents: {error}");
+            return;
+        }
+    };
+    for intent in intents {
+        let Some(call_sid) = intent.transaction_id.strip_prefix("twilio-voice-") else {
+            tracing::error!(
+                transaction_id = intent.transaction_id,
+                "Invalid Twilio voice intent ID"
+            );
+            continue;
+        };
+        match state
+            .twilio_client
+            .fetch_call_details(&credentials, call_sid)
+            .await
+        {
+            Ok(details) => match twilio_call_customer_cost(&details) {
+                Ok(Some(cost)) => {
+                    if let Err(error) = finalize_usage_intent(&state, &intent.transaction_id, cost)
+                    {
+                        tracing::error!(
+                            transaction_id = intent.transaction_id,
+                            "Failed to finalize Twilio voice usage: {error}"
+                        );
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => tracing::error!(
+                    transaction_id = intent.transaction_id,
+                    "Invalid Twilio voice pricing response: {error}"
+                ),
+            },
+            Err(error) => tracing::warn!(
+                transaction_id = intent.transaction_id,
+                "Twilio voice price is not available yet: {error}"
+            ),
+        }
+    }
 }
 
 pub fn finalize_usage_intent(
@@ -1335,10 +1479,26 @@ pub fn finalize_usage_intent(
         repository.abandon_usage_intent(transaction_id)?;
         return Ok(());
     }
-    repository.finalize_usage_intent(
+    let requested = cost_to_microusd(cost_usd)?;
+    let intent = repository
+        .get_usage_intent(transaction_id)?
+        .ok_or_else(|| anyhow!("Billing usage intent not found"))?;
+    let account = repository.ensure_account(intent.user_id)?;
+    if account.overage_enabled && account.payment_ready {
+        repository.finalize_usage_intent(transaction_id, requested, intent.created_at)?;
+        return Ok(());
+    }
+    let occurred_at = chrono::DateTime::from_timestamp(intent.created_at as i64, 0)
+        .ok_or_else(|| anyhow!("Billing usage intent has an invalid timestamp"))?;
+    let (period_start, period_end) = billing_period_from_anchor(account.created_at, occurred_at)
+        .ok_or_else(|| anyhow!("Billing account has an invalid period anchor"))?;
+    repository.finalize_usage_intent_capped(
         transaction_id,
-        cost_to_microusd(cost_usd)?,
-        chrono::Utc::now().timestamp() as i32,
+        requested,
+        intent.created_at,
+        period_start.timestamp() as i32,
+        period_end.timestamp() as i32,
+        cost_to_microusd(MONTHLY_INCLUDED_USAGE_USD)?,
     )?;
     Ok(())
 }
@@ -1363,34 +1523,42 @@ pub async fn has_usage_entitlement(state: &Arc<AppState>, user_id: i32) -> Resul
     MetronomeConfig::from_env().validate()?;
     let repository = BillingRepository::new(state.pg_pool.clone());
     let account = repository.ensure_account(user_id)?;
-    let available_usage_usd = if account.usage_entitled {
+    let available_usage_usd = if account.overage_enabled && account.payment_ready {
         None
     } else {
-        // Metronome is authoritative for the active credit grant and its
-        // billing-period boundaries. The local usage outbox can span a
-        // different period after a contract change, so it must not decide
-        // access when a webhook has cached a false entitlement flag.
-        Some(
-            MetronomeClient::from_env()?
-                .customer_usage_balance(&account)
-                .await?
-                .available_usage_usd,
-        )
+        // Use the stricter of provider and local durable-ledger balances. This
+        // prevents ingestion/webhook lag from briefly restoring access after
+        // the local non-overage cap has been reached.
+        let provider_available = MetronomeClient::from_env()?
+            .customer_usage_balance(&account)
+            .await?
+            .available_usage_usd;
+        let local_available =
+            local_usage_balance(&repository, &account, chrono::Utc::now())?.available_usage_usd;
+        Some(provider_available.min(local_available))
     };
     let entitled = usage_entitled_from_account_state(
-        account.usage_entitled,
+        account.usage_entitled && available_usage_usd.is_none(),
         account.overage_enabled,
         account.payment_ready,
         available_usage_usd,
     );
-    if entitled && !account.usage_entitled {
-        repository.set_usage_entitled(user_id, true)?;
-        let _ = state.user_core.clear_last_credits_notification(user_id);
-        tracing::info!(
-            user_id,
-            available_usage_usd,
-            "Restored usage entitlement from the live Metronome balance"
-        );
+    if entitled != account.usage_entitled {
+        repository.set_usage_entitled(user_id, entitled)?;
+        if entitled {
+            let _ = state.user_core.clear_last_credits_notification(user_id);
+            tracing::info!(
+                user_id,
+                available_usage_usd,
+                "Restored usage entitlement from the live Metronome balance"
+            );
+        } else {
+            tracing::info!(
+                user_id,
+                available_usage_usd,
+                "Revoked usage entitlement from the live Metronome balance"
+            );
+        }
     }
     Ok(entitled)
 }

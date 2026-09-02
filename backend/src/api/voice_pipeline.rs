@@ -16,6 +16,8 @@ use tokio::sync::mpsc;
 
 pub const WEB_VOICE_TICKET_TTL_SECONDS: i64 = 30;
 pub const TWILIO_VOICE_TICKET_TTL_SECONDS: i64 = 300;
+pub const MAX_VOICE_CALL_DURATION_SECONDS: u64 = 600;
+const VOICE_ENTITLEMENT_CHECK_SECONDS: u64 = 15;
 
 const WEB_VOICE_TICKET_PREFIX: &str = "voice_";
 const TWILIO_VOICE_TICKET_PREFIX: &str = "twilio_voice_";
@@ -407,6 +409,36 @@ fn openai_realtime_available() -> bool {
         .unwrap_or(false)
 }
 
+async fn active_voice_usage_entitled(state: &Arc<AppState>, user_id: i32) -> bool {
+    if crate::services::metronome_billing::metronome_enabled() {
+        return match crate::services::metronome_billing::has_usage_entitlement(state, user_id).await
+        {
+            Ok(entitled) => entitled,
+            Err(error) => {
+                // Match the documented provider-outage policy: durable usage
+                // continues to queue, but an outage alone does not end a call.
+                tracing::warn!(user_id, "Active voice entitlement check failed: {error}");
+                true
+            }
+        };
+    }
+    let user = match state.user_core.find_by_id(user_id) {
+        Ok(Some(user)) => user,
+        Ok(None) => return false,
+        Err(error) => {
+            tracing::warn!(user_id, "Active voice credit check failed: {error}");
+            return true;
+        }
+    };
+    match crate::utils::usage::ensure_current_included_usage_window(state, &user) {
+        Ok(user) => user.credits_left + user.credits > 0.0,
+        Err(error) => {
+            tracing::warn!(user_id, "Active voice usage-window check failed: {error}");
+            true
+        }
+    }
+}
+
 struct CallSession {
     state: CallState,
     transport: TransportMode,
@@ -432,6 +464,7 @@ struct CallSession {
     mark_counter: u32,
     is_outbound: bool,
     media_count: u32,
+    last_entitlement_check: Instant,
 }
 
 // ---------------------------------------------------------------------------
@@ -716,8 +749,8 @@ pub async fn issue_web_voice_ticket(
             )
         })?;
 
-    // Check credits (web calls use voice pricing - no Twilio leg)
-    if let Err(e) = crate::utils::usage::check_user_credits(state, &user, "voice", None).await {
+    // Browser calls consume AI usage but have no Twilio carrier leg.
+    if let Err(e) = crate::utils::usage::check_user_credits(state, &user, "web_voice", None).await {
         return Err((StatusCode::FORBIDDEN, Json(serde_json::json!({"error": e}))));
     }
 
@@ -849,7 +882,8 @@ async fn handle_web_ws(state: Arc<AppState>, socket: WebSocket, user_id: i32) {
     let ready = serde_json::json!({"type": "ready", "user_id": user_id});
     let _ = send_tx.send(Message::Text(ready.to_string().into())).await;
 
-    const MAX_CALL_DURATION: std::time::Duration = std::time::Duration::from_secs(600); // 10 min
+    const MAX_CALL_DURATION: std::time::Duration =
+        std::time::Duration::from_secs(MAX_VOICE_CALL_DURATION_SECONDS);
 
     while let Some(msg) = tokio::select! {
         msg = ws_rx.next() => msg,
@@ -869,6 +903,18 @@ async fn handle_web_ws(state: Arc<AppState>, socket: WebSocket, user_id: i32) {
 
         match msg {
             Message::Binary(data) => {
+                if session.last_entitlement_check.elapsed().as_secs()
+                    >= VOICE_ENTITLEMENT_CHECK_SECONDS
+                {
+                    session.last_entitlement_check = Instant::now();
+                    if !active_voice_usage_entitled(&state, user_id).await {
+                        tracing::info!(
+                            user_id,
+                            "Ending web call because usage allowance is depleted"
+                        );
+                        break;
+                    }
+                }
                 if session.state != CallState::Listening {
                     continue;
                 }
@@ -968,7 +1014,7 @@ async fn handle_web_ws(state: Arc<AppState>, socket: WebSocket, user_id: i32) {
         duration_secs
     );
     if let Err(e) =
-        crate::utils::usage::deduct_user_credits(&state, user_id, "voice", Some(duration_secs))
+        crate::utils::usage::deduct_user_credits(&state, user_id, "web_voice", Some(duration_secs))
     {
         tracing::error!(
             "Failed to deduct credits for web call user {}: {}",
@@ -1067,6 +1113,21 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
 
                     let is_outbound = custom_greeting.is_some();
 
+                    if let Err(error) =
+                        crate::services::metronome_billing::begin_twilio_voice_intent(
+                            &state,
+                            user_id,
+                            &start.call_sid,
+                        )
+                    {
+                        tracing::error!(
+                            user_id,
+                            call_sid = start.call_sid,
+                            "Failed to persist Twilio voice billing intent: {error}"
+                        );
+                        break;
+                    }
+
                     if voice_provider_for_user(&state, user_id) == VoiceProvider::OpenAiRealtime {
                         handle_openai_twilio_session(
                             state.clone(),
@@ -1154,6 +1215,25 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
 
             "media" => {
                 if let (Some(ref mut sess), Some(media)) = (&mut session, twilio_msg.media) {
+                    if sess.call_start.elapsed().as_secs() >= MAX_VOICE_CALL_DURATION_SECONDS {
+                        tracing::info!(
+                            user_id = sess.user_id,
+                            "Phone voice call time limit reached"
+                        );
+                        break;
+                    }
+                    if sess.last_entitlement_check.elapsed().as_secs()
+                        >= VOICE_ENTITLEMENT_CHECK_SECONDS
+                    {
+                        sess.last_entitlement_check = Instant::now();
+                        if !active_voice_usage_entitled(&state, sess.user_id).await {
+                            tracing::info!(
+                                user_id = sess.user_id,
+                                "Ending phone voice call because usage allowance is depleted"
+                            );
+                            break;
+                        }
+                    }
                     if sess.state == CallState::Processing {
                         continue;
                     }
@@ -1270,40 +1350,45 @@ async fn handle_voice_ws(state: Arc<AppState>, socket: WebSocket) {
 
             "stop" => {
                 tracing::info!("Stream stopped");
-                if let Some(ref sess) = session {
-                    let duration_secs = sess.call_start.elapsed().as_secs() as i32;
-                    let event_type = if sess.is_outbound {
-                        "noti_call"
-                    } else {
-                        "voice"
-                    };
-                    tracing::info!(
-                        "Call ended for user {}. Duration: {}s, type: {}",
-                        sess.user_id,
-                        duration_secs,
-                        event_type
-                    );
-
-                    // Deduct credits (uses outbound vs inbound pricing)
-                    if let Err(e) = crate::utils::usage::deduct_user_credits(
-                        &state,
-                        sess.user_id,
-                        event_type,
-                        Some(duration_secs),
-                    ) {
-                        tracing::error!(
-                            "Failed to deduct credits for user {}: {}",
-                            sess.user_id,
-                            e
-                        );
-                    }
-                }
                 break;
             }
 
             other => {
                 tracing::debug!("Unhandled Twilio event: {}", other);
             }
+        }
+    }
+
+    if let Some(sess) = session {
+        let duration_secs = sess.call_start.elapsed().as_secs() as i32;
+        let event_type = if sess.is_outbound {
+            "noti_call"
+        } else {
+            "voice"
+        };
+        tracing::info!(
+            "Call ended for user {}. Duration: {}s, type: {}",
+            sess.user_id,
+            duration_secs,
+            event_type
+        );
+        let billing_event = if crate::services::metronome_billing::metronome_enabled() {
+            // The carrier leg is reconciled from Twilio's Call Resource.
+            "web_voice"
+        } else {
+            event_type
+        };
+        if let Err(error) = crate::utils::usage::deduct_user_credits(
+            &state,
+            sess.user_id,
+            billing_event,
+            Some(duration_secs),
+        ) {
+            tracing::error!(
+                "Failed to bill Tinfoil voice usage for user {}: {}",
+                sess.user_id,
+                error
+            );
         }
     }
 
@@ -1335,6 +1420,33 @@ type OpenAiWsStream =
 enum OpenAiRealtimeAudioMode {
     TwilioPcmu,
     WebPcm24,
+}
+
+struct OpenAiRealtimeSession {
+    tx: mpsc::Sender<serde_json::Value>,
+    close_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    reader_task: tokio::task::JoinHandle<()>,
+    writer_task: tokio::task::JoinHandle<()>,
+}
+
+impl OpenAiRealtimeSession {
+    async fn shutdown(mut self) {
+        if let Some(close_tx) = self.close_tx.take() {
+            let _ = close_tx.send(());
+        }
+        if tokio::time::timeout(std::time::Duration::from_secs(2), &mut self.reader_task)
+            .await
+            .is_err()
+        {
+            self.reader_task.abort();
+        }
+        if tokio::time::timeout(std::time::Duration::from_secs(2), &mut self.writer_task)
+            .await
+            .is_err()
+        {
+            self.writer_task.abort();
+        }
+    }
 }
 
 struct OpenAiRealtimeInit {
@@ -1419,6 +1531,10 @@ async fn init_openai_realtime(
     state: &Arc<AppState>,
     user_id: i32,
 ) -> Result<OpenAiRealtimeInit, String> {
+    crate::services::usage_pricing::openai_realtime_cost_usd_for_model(
+        &openai_realtime_model(),
+        Default::default(),
+    )?;
     let ctx = ContextBuilder::for_user(state, user_id)
         .with_user_context()
         .build()
@@ -1534,6 +1650,8 @@ async fn connect_openai_realtime(
     (
         mpsc::Sender<serde_json::Value>,
         futures_util::stream::SplitStream<OpenAiWsStream>,
+        tokio::sync::oneshot::Sender<()>,
+        tokio::task::JoinHandle<()>,
     ),
     String,
 > {
@@ -1572,21 +1690,33 @@ async fn connect_openai_realtime(
         .map_err(|e| format!("OpenAI Realtime connect failed: {}", e))?;
     let (mut openai_ws_tx, openai_ws_rx) = stream.split();
     let (openai_tx, mut openai_rx) = mpsc::channel::<serde_json::Value>(128);
+    let (close_tx, mut close_rx) = tokio::sync::oneshot::channel::<()>();
 
-    tokio::spawn(async move {
-        while let Some(event) = openai_rx.recv().await {
-            let text = event.to_string();
-            if openai_ws_tx
-                .send(TungsteniteMessage::Text(text.into()))
-                .await
-                .is_err()
-            {
-                break;
+    let writer_task = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = &mut close_rx => {
+                    let _ = openai_ws_tx.close().await;
+                    break;
+                }
+                event = openai_rx.recv() => {
+                    let Some(event) = event else {
+                        let _ = openai_ws_tx.close().await;
+                        break;
+                    };
+                    if openai_ws_tx
+                        .send(TungsteniteMessage::Text(event.to_string().into()))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
             }
         }
     });
 
-    Ok((openai_tx, openai_ws_rx))
+    Ok((openai_tx, openai_ws_rx, close_tx, writer_task))
 }
 
 fn tool_answer_from_dispatch(result: crate::agent_core::ToolDispatchResult) -> String {
@@ -1847,34 +1977,52 @@ async fn handle_openai_reader(
                 if let Some((response_id, usage)) =
                     crate::services::usage_pricing::openai_realtime_usage_from_event(&event)
                 {
-                    if !state.user_core.is_byot_user(init.user.id) {
-                        let provider_cost =
-                            crate::services::usage_pricing::openai_realtime_cost_usd(usage);
-                        let billed_cost =
-                            crate::services::usage_pricing::billable_customer_cost_usd(
-                                provider_cost,
-                            );
-                        if crate::services::metronome_billing::metronome_enabled()
-                            && billed_cost > 0.0
-                        {
-                            let source = match session.mode {
-                                OpenAiRealtimeAudioMode::TwilioPcmu => "phone_voice_ai",
-                                OpenAiRealtimeAudioMode::WebPcm24 => "web_voice_ai",
+                    match crate::services::usage_pricing::openai_realtime_cost_usd_for_model(
+                        &openai_realtime_model(),
+                        usage,
+                    ) {
+                        Ok(provider_cost) => {
+                            let billed_cost =
+                                crate::services::usage_pricing::billable_customer_cost_usd(
+                                    provider_cost,
+                                );
+                            let result = if crate::services::metronome_billing::metronome_enabled()
+                            {
+                                let source = match session.mode {
+                                    OpenAiRealtimeAudioMode::TwilioPcmu => "phone_voice_ai",
+                                    OpenAiRealtimeAudioMode::WebPcm24 => "web_voice_ai",
+                                };
+                                crate::services::metronome_billing::enqueue_usage(
+                                    &state,
+                                    init.user.id,
+                                    source,
+                                    billed_cost as f32,
+                                    Some(format!("openai-realtime-{response_id}")),
+                                )
+                                .map(|_| ())
+                                .map_err(|error| error.to_string())
+                            } else {
+                                crate::utils::usage::deduct_exact_usage_cost(
+                                    &state,
+                                    init.user.id,
+                                    billed_cost as f32,
+                                )
                             };
-                            if let Err(error) = crate::services::metronome_billing::enqueue_usage(
-                                &state,
-                                init.user.id,
-                                source,
-                                billed_cost as f32,
-                                Some(format!("openai-realtime-{response_id}")),
-                            ) {
+                            if let Err(error) = result {
                                 tracing::error!(
                                     user_id = init.user.id,
                                     response_id,
                                     billed_cost,
-                                    "Failed to queue OpenAI Realtime usage: {error}"
+                                    "Failed to bill OpenAI Realtime usage: {error}"
                                 );
                             }
+                        }
+                        Err(error) => {
+                            tracing::error!(
+                                user_id = init.user.id,
+                                response_id,
+                                "OpenAI Realtime usage has no configured price: {error}"
+                            );
                         }
                     }
                 }
@@ -1979,16 +2127,16 @@ async fn start_openai_realtime_session(
     send_tx: mpsc::Sender<Message>,
     stream_sid: Option<String>,
     greeting: Option<String>,
-) -> Result<mpsc::Sender<serde_json::Value>, String> {
+) -> Result<OpenAiRealtimeSession, String> {
     let init = init_openai_realtime(&state, user_id).await?;
-    let (openai_tx, openai_rx) = connect_openai_realtime(user_id).await?;
+    let (openai_tx, openai_rx, close_tx, writer_task) = connect_openai_realtime(user_id).await?;
     openai_tx
         .send(openai_session_update(&init, mode))
         .await
         .map_err(|_| "OpenAI Realtime writer closed".to_string())?;
 
     let reader_openai_tx = openai_tx.clone();
-    tokio::spawn(handle_openai_reader(
+    let reader_task = tokio::spawn(handle_openai_reader(
         openai_rx,
         send_tx,
         reader_openai_tx,
@@ -2003,7 +2151,12 @@ async fn start_openai_realtime_session(
         },
     ));
 
-    Ok(openai_tx)
+    Ok(OpenAiRealtimeSession {
+        tx: openai_tx,
+        close_tx: Some(close_tx),
+        reader_task,
+        writer_task,
+    })
 }
 
 async fn handle_openai_twilio_session(
@@ -2018,7 +2171,7 @@ async fn handle_openai_twilio_session(
     use futures::stream::StreamExt;
 
     let greeting = custom_greeting.unwrap_or_else(|| build_greeting(&state, user_id));
-    let openai_tx = match start_openai_realtime_session(
+    let openai_session = match start_openai_realtime_session(
         state.clone(),
         user_id,
         OpenAiRealtimeAudioMode::TwilioPcmu,
@@ -2028,7 +2181,7 @@ async fn handle_openai_twilio_session(
     )
     .await
     {
-        Ok(tx) => tx,
+        Ok(session) => session,
         Err(e) => {
             tracing::error!("Failed to start OpenAI Realtime Twilio session: {}", e);
             if let Err(tts_err) = send_twilio_tinfoil_tts(
@@ -2049,6 +2202,7 @@ async fn handle_openai_twilio_session(
     };
 
     let call_start = Instant::now();
+    let mut last_entitlement_check = Instant::now();
 
     while let Some(msg) = ws_rx.next().await {
         let msg = match msg {
@@ -2079,7 +2233,23 @@ async fn handle_openai_twilio_session(
         match twilio_msg.event.as_str() {
             "media" => {
                 if let Some(media) = twilio_msg.media {
-                    let _ = openai_tx
+                    if call_start.elapsed().as_secs() >= MAX_VOICE_CALL_DURATION_SECONDS {
+                        tracing::info!(user_id, "OpenAI phone voice call time limit reached");
+                        break;
+                    }
+                    if last_entitlement_check.elapsed().as_secs() >= VOICE_ENTITLEMENT_CHECK_SECONDS
+                    {
+                        last_entitlement_check = Instant::now();
+                        if !active_voice_usage_entitled(&state, user_id).await {
+                            tracing::info!(
+                                user_id,
+                                "Ending OpenAI phone call because usage allowance is depleted"
+                            );
+                            break;
+                        }
+                    }
+                    let _ = openai_session
+                        .tx
                         .send(serde_json::json!({
                             "type": "input_audio_buffer.append",
                             "audio": media.payload
@@ -2096,33 +2266,31 @@ async fn handle_openai_twilio_session(
                     duration_secs,
                     event_type
                 );
-                let deduction = if crate::services::metronome_billing::metronome_enabled() {
-                    crate::utils::usage::deduct_hosted_voice_phone_leg(
-                        &state,
-                        user_id,
-                        event_type,
-                        duration_secs,
-                    )
-                } else {
-                    crate::utils::usage::deduct_user_credits(
-                        &state,
-                        user_id,
-                        event_type,
-                        Some(duration_secs),
-                    )
-                };
-                if let Err(e) = deduction {
-                    tracing::error!(
-                        "Failed to deduct credits for OpenAI Realtime call user {}: {}",
-                        user_id,
-                        e
-                    );
-                }
                 break;
             }
             _ => {}
         }
     }
+
+    if !crate::services::metronome_billing::metronome_enabled()
+        && !state.user_core.is_byot_user(user_id)
+    {
+        let event_type = if is_outbound { "noti_call" } else { "voice" };
+        if let Err(error) = crate::utils::usage::deduct_hosted_voice_phone_leg_legacy(
+            &state,
+            user_id,
+            event_type,
+            call_start.elapsed().as_secs() as i32,
+        ) {
+            tracing::error!(
+                "Failed to bill OpenAI Realtime carrier usage for user {}: {}",
+                user_id,
+                error
+            );
+        }
+    }
+
+    openai_session.shutdown().await;
 
     tracing::info!("OpenAI Realtime Twilio session closed for user {}", user_id);
 }
@@ -2135,7 +2303,7 @@ async fn handle_openai_web_ws(state: Arc<AppState>, socket: WebSocket, user_id: 
     tokio::spawn(sender_loop(ws_tx, send_rx));
 
     let greeting = build_greeting(&state, user_id);
-    let openai_tx = match start_openai_realtime_session(
+    let openai_session = match start_openai_realtime_session(
         state.clone(),
         user_id,
         OpenAiRealtimeAudioMode::WebPcm24,
@@ -2145,7 +2313,7 @@ async fn handle_openai_web_ws(state: Arc<AppState>, socket: WebSocket, user_id: 
     )
     .await
     {
-        Ok(tx) => tx,
+        Ok(session) => session,
         Err(e) => {
             tracing::error!("Failed to start OpenAI Realtime web session: {}", e);
             let err = serde_json::json!({"type": "error", "message": e});
@@ -2158,7 +2326,9 @@ async fn handle_openai_web_ws(state: Arc<AppState>, socket: WebSocket, user_id: 
     let _ = send_tx.send(Message::Text(ready.to_string().into())).await;
 
     let call_start = Instant::now();
-    const MAX_CALL_DURATION: std::time::Duration = std::time::Duration::from_secs(600);
+    const MAX_CALL_DURATION: std::time::Duration =
+        std::time::Duration::from_secs(MAX_VOICE_CALL_DURATION_SECONDS);
+    let mut last_entitlement_check = Instant::now();
 
     while let Some(msg) = tokio::select! {
         msg = ws_rx.next() => msg,
@@ -2177,6 +2347,16 @@ async fn handle_openai_web_ws(state: Arc<AppState>, socket: WebSocket, user_id: 
 
         match msg {
             Message::Binary(data) => {
+                if last_entitlement_check.elapsed().as_secs() >= VOICE_ENTITLEMENT_CHECK_SECONDS {
+                    last_entitlement_check = Instant::now();
+                    if !active_voice_usage_entitled(&state, user_id).await {
+                        tracing::info!(
+                            user_id,
+                            "Ending OpenAI web call because usage allowance is depleted"
+                        );
+                        break;
+                    }
+                }
                 let pcm_16k: Vec<i16> = data
                     .as_chunks::<2>()
                     .0
@@ -2185,7 +2365,8 @@ async fn handle_openai_web_ws(state: Arc<AppState>, socket: WebSocket, user_id: 
                     .collect();
                 let pcm_24k = resample(&pcm_16k, 16000, 24000);
                 let bytes: Vec<u8> = pcm_24k.iter().flat_map(|&s| s.to_le_bytes()).collect();
-                let _ = openai_tx
+                let _ = openai_session
+                    .tx
                     .send(serde_json::json!({
                         "type": "input_audio_buffer.append",
                         "audio": BASE64.encode(bytes)
@@ -2211,18 +2392,8 @@ async fn handle_openai_web_ws(state: Arc<AppState>, socket: WebSocket, user_id: 
         user_id,
         duration_secs
     );
-    // Realtime response usage is billed as it arrives. Web voice has no carrier leg.
-    if !crate::services::metronome_billing::metronome_enabled() {
-        if let Err(e) =
-            crate::utils::usage::deduct_user_credits(&state, user_id, "voice", Some(duration_secs))
-        {
-            tracing::error!(
-                "Failed to deduct credits for OpenAI Realtime web call user {}: {}",
-                user_id,
-                e
-            );
-        }
-    }
+    // Realtime response usage is charged exactly as response.done events arrive.
+    openai_session.shutdown().await;
 }
 
 // ---------------------------------------------------------------------------
@@ -2295,6 +2466,7 @@ async fn init_session(
         mark_counter: 0,
         is_outbound,
         media_count: 0,
+        last_entitlement_check: Instant::now(),
     })
 }
 

@@ -13,6 +13,12 @@ pub struct BillingRepository {
     pool: PgDbPool,
 }
 
+pub fn capped_usage_microusd(requested: i64, current_total: i64, period_cap: i64) -> i64 {
+    requested
+        .max(0)
+        .min(period_cap.saturating_sub(current_total).max(0))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BillingWebhookClaim {
     Claimed,
@@ -210,6 +216,68 @@ impl BillingRepository {
         Ok(transaction_id)
     }
 
+    /// Enqueue usage while atomically capping this billing period's total.
+    /// Locking the account row serializes concurrent channels for one user.
+    pub fn enqueue_usage_capped(
+        &self,
+        user_id: i32,
+        event_type: &str,
+        requested_cost_microusd: i64,
+        occurred_at: i32,
+        period_start: i32,
+        period_end: i32,
+        period_cap_microusd: i64,
+        transaction_id: Option<String>,
+    ) -> Result<(String, i64), DieselError> {
+        let transaction_id = transaction_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let now = chrono::Utc::now().timestamp() as i32;
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+        conn.transaction(|conn| {
+            let account = billing_accounts::table
+                .find(user_id)
+                .for_update()
+                .first::<BillingAccount>(conn)?;
+            if let Some(existing) = billing_usage_events::table
+                .find(&transaction_id)
+                .first::<BillingUsageEvent>(conn)
+                .optional()?
+            {
+                return Ok((transaction_id, existing.cost_microusd));
+            }
+            let costs = billing_usage_events::table
+                .filter(billing_usage_events::user_id.eq(user_id))
+                .filter(billing_usage_events::occurred_at.ge(period_start))
+                .filter(billing_usage_events::occurred_at.lt(period_end))
+                .select(billing_usage_events::cost_microusd)
+                .load::<i64>(conn)?;
+            let total = costs.into_iter().fold(0_i64, i64::saturating_add);
+            let remaining = period_cap_microusd.saturating_sub(total).max(0);
+            let billed = capped_usage_microusd(requested_cost_microusd, total, period_cap_microusd);
+            if billed > 0 {
+                diesel::insert_into(billing_usage_events::table)
+                    .values(NewBillingUsageEvent {
+                        transaction_id: transaction_id.clone(),
+                        user_id,
+                        event_type: event_type.to_string(),
+                        cost_microusd: billed,
+                        occurred_at,
+                        next_attempt_at: now,
+                        created_at: now,
+                    })
+                    .execute(conn)?;
+            }
+            if billed < requested_cost_microusd || billed == remaining {
+                diesel::update(billing_accounts::table.find(account.user_id))
+                    .set((
+                        billing_accounts::usage_entitled.eq(false),
+                        billing_accounts::updated_at.eq(now),
+                    ))
+                    .execute(conn)?;
+            }
+            Ok((transaction_id, billed))
+        })
+    }
+
     /// Persist a billing intent before a user-visible action begins. Dynamic
     /// cost can be finalized later without a crash silently erasing evidence
     /// that a billable action ran.
@@ -283,6 +351,83 @@ impl BillingRepository {
         })
     }
 
+    pub fn finalize_usage_intent_capped(
+        &self,
+        transaction_id: &str,
+        requested_cost_microusd: i64,
+        occurred_at: i32,
+        period_start: i32,
+        period_end: i32,
+        period_cap_microusd: i64,
+    ) -> Result<i64, DieselError> {
+        let now = chrono::Utc::now().timestamp() as i32;
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+        conn.transaction(|conn| {
+            let intent = billing_usage_intents::table
+                .find(transaction_id)
+                .first::<BillingUsageIntent>(conn)?;
+            let _account = billing_accounts::table
+                .find(intent.user_id)
+                .for_update()
+                .first::<BillingAccount>(conn)?;
+            let intent = billing_usage_intents::table
+                .find(transaction_id)
+                .for_update()
+                .first::<BillingUsageIntent>(conn)?;
+            if intent.status == "finalized" {
+                return Ok(billing_usage_events::table
+                    .find(transaction_id)
+                    .select(billing_usage_events::cost_microusd)
+                    .first::<i64>(conn)
+                    .optional()?
+                    .unwrap_or(0));
+            }
+            if intent.status != "open" {
+                return Err(DieselError::RollbackTransaction);
+            }
+            let costs = billing_usage_events::table
+                .filter(billing_usage_events::user_id.eq(intent.user_id))
+                .filter(billing_usage_events::occurred_at.ge(period_start))
+                .filter(billing_usage_events::occurred_at.lt(period_end))
+                .select(billing_usage_events::cost_microusd)
+                .load::<i64>(conn)?;
+            let total = costs.into_iter().fold(0_i64, i64::saturating_add);
+            let remaining = period_cap_microusd.saturating_sub(total).max(0);
+            let billed = capped_usage_microusd(requested_cost_microusd, total, period_cap_microusd);
+            if billed > 0 {
+                diesel::insert_into(billing_usage_events::table)
+                    .values(NewBillingUsageEvent {
+                        transaction_id: transaction_id.to_string(),
+                        user_id: intent.user_id,
+                        event_type: intent.event_type,
+                        cost_microusd: billed,
+                        occurred_at,
+                        next_attempt_at: now,
+                        created_at: now,
+                    })
+                    .on_conflict(billing_usage_events::transaction_id)
+                    .do_nothing()
+                    .execute(conn)?;
+            }
+            diesel::update(billing_usage_intents::table.find(transaction_id))
+                .set((
+                    billing_usage_intents::status.eq("finalized"),
+                    billing_usage_intents::finalized_at.eq(Some(now)),
+                    billing_usage_intents::last_error.eq::<Option<String>>(None),
+                ))
+                .execute(conn)?;
+            if billed < requested_cost_microusd || billed == remaining {
+                diesel::update(billing_accounts::table.find(intent.user_id))
+                    .set((
+                        billing_accounts::usage_entitled.eq(false),
+                        billing_accounts::updated_at.eq(now),
+                    ))
+                    .execute(conn)?;
+            }
+            Ok(billed)
+        })
+    }
+
     pub fn abandon_usage_intent(&self, transaction_id: &str) -> Result<(), DieselError> {
         let now = chrono::Utc::now().timestamp() as i32;
         let mut conn = self.pool.get().expect("Failed to get PG connection");
@@ -297,6 +442,31 @@ impl BillingRepository {
         ))
         .execute(&mut conn)?;
         Ok(())
+    }
+
+    pub fn open_usage_intents(
+        &self,
+        event_type: &str,
+        limit: i64,
+    ) -> Result<Vec<BillingUsageIntent>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+        billing_usage_intents::table
+            .filter(billing_usage_intents::status.eq("open"))
+            .filter(billing_usage_intents::event_type.eq(event_type))
+            .order(billing_usage_intents::created_at.asc())
+            .limit(limit)
+            .load::<BillingUsageIntent>(&mut conn)
+    }
+
+    pub fn get_usage_intent(
+        &self,
+        transaction_id: &str,
+    ) -> Result<Option<BillingUsageIntent>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get PG connection");
+        billing_usage_intents::table
+            .find(transaction_id)
+            .first::<BillingUsageIntent>(&mut conn)
+            .optional()
     }
 
     pub fn claim_due_usage(&self, limit: i64) -> Result<Vec<BillingUsageEvent>, DieselError> {

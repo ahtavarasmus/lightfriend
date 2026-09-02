@@ -130,10 +130,10 @@ pub async fn update_overage(
                 Json(json!({"error": "User not found"})),
             )
         })?;
-    if user.sub_tier.as_deref() != Some("tier 2") || state.user_core.is_byot_user(user.id) {
+    if user.sub_tier.as_deref() != Some("tier 2") {
         return Err((
             StatusCode::FORBIDDEN,
-            Json(json!({"error": "Overage billing requires an active hosted plan"})),
+            Json(json!({"error": "Overage billing requires an active subscription"})),
         ));
     }
 
