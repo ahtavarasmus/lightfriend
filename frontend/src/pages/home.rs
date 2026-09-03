@@ -104,11 +104,6 @@ pub fn Home() -> Html {
                                                 format!("stripe_checkout:{}", session_id);
                                             let metadata = [("checkout_type", "authenticated")];
                                             track_goal_once(
-                                                "trial_started",
-                                                &conversion_key,
-                                                &metadata,
-                                            );
-                                            track_goal_once(
                                                 "subscription_started",
                                                 &conversion_key,
                                                 &metadata,

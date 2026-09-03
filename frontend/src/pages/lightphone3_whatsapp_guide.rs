@@ -79,7 +79,7 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
                 <div class="blog-cta blog-cta-inline">
                     <h3>{"Stay reachable on Light Phone III"}</h3>
                     <p>{"Text-first access to your WhatsApp account through ordinary SMS and calls — no smartphone required."}</p>
-                    <a href="/#plans" class="hero-cta" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="light-phone-3-whatsapp-guide" data-fast-goal-content-cluster="messaging">{"See plans and start a trial"}</a>
+                    <a href="/#plans" class="hero-cta" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="light-phone-3-whatsapp-guide" data-fast-goal-content-cluster="messaging">{"See plans"}</a>
                 </div>
 
                 <h2>{"Setup: what you still need"}</h2>
@@ -131,7 +131,7 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
                 <div class="blog-cta">
                     <h3>{"Can you leave your smartphone without losing the people who use WhatsApp?"}</h3>
                     <p>{"Text-first access for phones that can call and send SMS. Initial connected-service setup still uses the provider's supported device."}</p>
-                    <a href="/#plans" class="hero-cta" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="light-phone-3-whatsapp-guide" data-fast-goal-content-cluster="messaging">{"See plans and start a trial"}</a>
+                    <a href="/#plans" class="hero-cta" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="light-phone-3-whatsapp-guide" data-fast-goal-content-cluster="messaging">{"See plans"}</a>
                 </div>
 
                 <h2>{"Continue planning your setup"}</h2>

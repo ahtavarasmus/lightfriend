@@ -365,7 +365,7 @@ pub fn public_guide(props: &PublicGuideProps) -> Html {
                 <h1>{title}</h1>
                 <p class="guide-intro">{introduction}</p>
                 <div class="guide-actions">
-                    <a class="guide-primary" href="/#plans">{"Start 7-day free trial"}</a>
+                    <a class="guide-primary" href="/#plans">{"See plans"}</a>
                     <a class="guide-secondary" href="/limitations">{"Read the limitations"}</a>
                 </div>
             </header>

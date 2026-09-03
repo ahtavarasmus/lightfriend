@@ -142,7 +142,7 @@ pub fn landing() -> Html {
             html! {
                 <>
                     <p>{"There are two number routes: a Lightfriend-provided number from the currently available pool, or an eligible Twilio number you already own. Neither route works automatically in every country."}</p>
-                    <p>{"Availability depends on the selected number's current voice and SMS capabilities, destination permissions, provider rules, and local regulations. "}<a href="/supported-countries">{"See the current country routes"}</a>{" before starting a trial."}</p>
+                    <p>{"Availability depends on the selected number's current voice and SMS capabilities, destination permissions, provider rules, and local regulations. "}<a href="/supported-countries">{"See the current country routes"}</a>{" before choosing a plan."}</p>
                 </>
             },
         ),
@@ -239,7 +239,7 @@ pub fn landing() -> Html {
                         {"Important people and messages from WhatsApp, Signal, Telegram, and email reach any phone by text or call."}
                     </p>
                     <div class="quiet-hero-actions">
-                        <a href="#plans" class="quiet-cta">{"Start 7-day free trial"}</a>
+                        <a href="#plans" class="quiet-cta">{"See plans"}</a>
                     </div>
                     <p class="quiet-hero-note">{"No apps. No feed. Any phone."}</p>
                 </div>
@@ -346,7 +346,7 @@ pub fn landing() -> Html {
                 <div class="section-intro">
                     <p class="quiet-eyebrow">{"Start"}</p>
                     <h2>{"Leave the smartphone behind."}</h2>
-                    <p>{"Every plan starts with a 7-day free trial."}</p>
+                    <p>{"Choose monthly, quarterly, or annual billing."}</p>
                 </div>
                 <StripePricingTable />
                 <p class="pricing-provider-note">

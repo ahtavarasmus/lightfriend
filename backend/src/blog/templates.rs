@@ -294,7 +294,7 @@ pub fn render_blog_post(post: &BlogPost, related: &[BlogPost]) -> String {
         <div class="blog-cta">
             <h3>Works with any phone that can text</h3>
             <p>Lightfriend runs outside the handset. Use the phone you already have, then check the country route and connected-service setup you need.</p>
-            <a href="/#plans" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="{slug}" data-fast-goal-content-cluster="{cluster}">See plans and start a trial</a>
+            <a href="/#plans" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="{slug}" data-fast-goal-content-cluster="{cluster}">See plans</a>
         </div>
     </div>
     <footer class="blog-footer">
@@ -486,7 +486,7 @@ pub fn render_blog_index(
         <div class="blog-cta">
             <h3>Works with any phone that can text</h3>
             <p>Lightfriend runs outside the handset. Use the phone you already have, then check the country route and connected-service setup you need.</p>
-            <a href="/#plans" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="blog-index" data-fast-goal-content-cluster="index">See plans and start a trial</a>
+            <a href="/#plans" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="blog-index" data-fast-goal-content-cluster="index">See plans</a>
         </div>
     </div>
     <footer class="blog-footer">

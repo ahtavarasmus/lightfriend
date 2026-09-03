@@ -38,7 +38,6 @@ pub fn subscription_success() -> Html {
                                 attribute_payment(&attribution.email);
                                 let conversion_key = format!("stripe_checkout:{}", session_id);
                                 let metadata = [("checkout_type", "guest")];
-                                track_goal_once("trial_started", &conversion_key, &metadata);
                                 track_goal_once("subscription_started", &conversion_key, &metadata);
                             }
                         }

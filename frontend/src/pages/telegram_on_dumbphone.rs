@@ -155,7 +155,7 @@ pub fn telegram_on_dumbphone() -> Html {
                 <div class="blog-cta">
                     <h3>{"Use Telegram without carrying a smartphone"}</h3>
                     <p>{"Then verify your country route, setup device, message volume, and ordinary SMS compatibility."}</p>
-                    <a href="/#plans" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="telegram-on-dumbphone" data-fast-goal-content-cluster="messaging">{"See plans and start a trial"}</a>
+                    <a href="/#plans" data-fast-goal="blog_pricing_click" data-fast-goal-content-slug="telegram-on-dumbphone" data-fast-goal-content-cluster="messaging">{"See plans"}</a>
                 </div>
             </section>
             <style>

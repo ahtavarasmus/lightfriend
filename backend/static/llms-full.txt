@@ -52,7 +52,7 @@ Lightfriend is a practical solution for phone addiction: it decouples essential 
 
 ### Autopilot - one experience, three billing timelines
 - $80/month, $210 every 3 months, or $420/year
-- 7-day free trial on every billing timeline
+- Monthly, quarterly, and annual billing options
 - SMS chat interface with AI assistant
 - Voice calling interface
 - Web search, weather
@@ -242,7 +242,7 @@ A: Lightfriend bridges the gap between minimalist dumbphones and essential digit
 A: Local-number service is offered in the US, Canada, UK, Finland, Netherlands, and Australia when current inventory and capabilities permit. Many other countries have a notification-only route. An eligible Twilio number can provide another route.
 
 **Q: Can I try the service before signing up?**
-A: Every current subscription plan starts with a 7-day free trial. Review the supported-country, compatible-phone, and limitations pages before checkout.
+A: New subscriptions are billed when checkout completes. Review the supported-country, compatible-phone, and limitations pages before checkout.
 
 **Q: How does Lightfriend protect my data?**
 A: Lightfriend's production application runs inside an AWS Nitro Enclave and encrypts stored application data with AES-256-GCM. AWS-signed attestation reports the enclave's code measurement, approved measurements are published to an Arbitrum smart contract, and Marlin KMS evaluates those proofs before releasing keys. Tinfoil publishes attestation evidence for AI inference, and Lightfriend's source code is public.
