@@ -88,6 +88,7 @@ pub mod proactive {
     pub mod system_behaviors;
     pub mod utils;
 }
+pub mod rate_limits;
 pub mod tool_call_utils {
     pub mod bridge;
     pub mod email;
@@ -250,7 +251,6 @@ pub use api::tesla_client::{
 use dashmap::DashMap;
 use diesel::prelude::*;
 use diesel::r2d2::{self, ConnectionManager};
-use governor::{clock::DefaultClock, state::keyed::DefaultKeyedStateStore, RateLimiter};
 use oauth2::{basic::BasicClient, EndpointNotSet, EndpointSet};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicI64};
@@ -300,14 +300,7 @@ pub struct AppState {
     pub youtube_oauth_client: GoogleOAuthClient,
     pub tesla_oauth_client: TeslaOAuthClient,
     pub session_store: MemoryStore,
-    pub login_limiter:
-        DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
-    pub password_reset_limiter:
-        DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
-    pub password_reset_verify_limiter:
-        DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
-    pub api_rate_limiter:
-        DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+    pub rate_limiters: rate_limits::SecurityRateLimiters,
     /// Per-user Matrix client + sync task, stored together under a single
     /// per-user mutex so that building, tearing down, and restarting are
     /// atomic. See `utils::matrix_auth::ensure_matrix_user_running`. Empty
@@ -328,11 +321,6 @@ pub struct AppState {
     // Track vehicles currently being woken to prevent parallel wake attempts
     // Key: VIN, Value: broadcast sender that notifies waiters when wake completes
     pub tesla_waking_vehicles: Arc<DashMap<String, tokio::sync::broadcast::Sender<bool>>>,
-    pub password_reset_otps: DashMap<String, (String, u64)>, // (email, (otp, expiration))
-    pub phone_verify_limiter:
-        DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
-    pub phone_verify_verify_limiter:
-        DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     pub phone_verify_otps: DashMap<String, (String, u64)>,
     pub pending_message_senders: Arc<Mutex<HashMap<i32, oneshot::Sender<()>>>>,
     pub totp_repository: Arc<TotpRepository>,
@@ -344,11 +332,6 @@ pub struct AppState {
     pub webhook_tokens_repository: Arc<WebhookTokensRepository>,
     pub pending_totp_logins: DashMap<String, (i32, i64)>, // (totp_token, (user_id, expiry_timestamp))
     pub pending_password_resets: DashMap<String, (i32, i64)>, // (reset_token, (user_id, expiry_timestamp))
-    pub session_to_token: DashMap<String, String>, // stripe_session_id -> magic_token (temporary, for redirect flow)
-    pub totp_verify_limiter:
-        DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
-    pub webauthn_verify_limiter:
-        DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     pub llm_usage_repository: Arc<LlmUsageRepository>,
     pub bandwidth_repository: Arc<BandwidthRepository>,
     pub tuwunel_cleanup_repository: Arc<TuwunelCleanupRepository>,

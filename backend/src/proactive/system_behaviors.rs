@@ -719,7 +719,11 @@ pub async fn run_urgency_classification(
                             user_id
                         );
                         if let Some(mid) = message_id {
-                            let _ = state.ontology_repository.mark_digest_delivered(&[mid], now);
+                            let _ = state.ontology_repository.mark_digest_delivered(
+                                user_id,
+                                &[mid],
+                                now,
+                            );
                         }
                         return Ok(());
                     }
@@ -751,7 +755,11 @@ pub async fn run_urgency_classification(
                             user_id
                         );
                         if let Some(mid) = message_id {
-                            let _ = state.ontology_repository.mark_digest_delivered(&[mid], now);
+                            let _ = state.ontology_repository.mark_digest_delivered(
+                                user_id,
+                                &[mid],
+                                now,
+                            );
                         }
                         return Ok(());
                     }

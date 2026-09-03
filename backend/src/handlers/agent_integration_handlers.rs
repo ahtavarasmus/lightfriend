@@ -15,11 +15,9 @@ use axum::extract::{OriginalUri, Path, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use governor::{Quota, RateLimiter};
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::num::NonZeroU32;
 use std::sync::Arc;
 
 const DEVICE_PREFIX: &str = "lfpair_";
@@ -107,7 +105,11 @@ pub async fn start_pairing(
     if uri.query().is_some() {
         return minimal(StatusCode::BAD_REQUEST, "rejected");
     }
-    if !check_rate_limit(&state, &headers, "agent-pairing-start", 6) {
+    if !check_rate_limit(
+        &state,
+        &headers,
+        crate::rate_limits::RateLimitScope::AgentPairingStart,
+    ) {
         return minimal(StatusCode::TOO_MANY_REQUESTS, "rejected");
     }
     let Some(client_name) = printable(&request.client_name, 64) else {
@@ -149,7 +151,11 @@ pub async fn poll_pairing(
     if uri.query().is_some() || !valid_prefixed_hex(&request.device_code, DEVICE_PREFIX, 64) {
         return minimal(StatusCode::UNAUTHORIZED, "rejected");
     }
-    if !check_rate_limit(&state, &headers, "agent-pairing-poll", 30) {
+    if !check_rate_limit(
+        &state,
+        &headers,
+        crate::rate_limits::RateLimitScope::AgentPairingPoll,
+    ) {
         return minimal(StatusCode::TOO_MANY_REQUESTS, "rejected");
     }
     let now = now_unix();
@@ -573,25 +579,11 @@ fn has_active_subscription(state: &Arc<AppState>, user_id: i32) -> bool {
 fn check_rate_limit(
     state: &Arc<AppState>,
     headers: &HeaderMap,
-    namespace: &str,
-    per_minute: u32,
+    scope: crate::rate_limits::RateLimitScope,
 ) -> bool {
-    let client = headers
-        .get("cf-connecting-ip")
-        .or_else(|| headers.get("x-real-ip"))
-        .or_else(|| headers.get("x-forwarded-for"))
-        .and_then(|value| value.to_str().ok())
-        .map(|value| value.split(',').next().unwrap_or(value).trim())
-        .filter(|value| !value.is_empty())
-        .unwrap_or("unknown");
-    let key = format!("{namespace}:{client}");
-    let quota = Quota::per_minute(NonZeroU32::new(per_minute).unwrap())
-        .allow_burst(NonZeroU32::new(per_minute.min(6)).unwrap());
-    let limiter = state
-        .api_rate_limiter
-        .entry(key.clone())
-        .or_insert_with(|| RateLimiter::keyed(quota));
-    limiter.check_key(&key).is_ok()
+    state
+        .rate_limiters
+        .check(scope, crate::rate_limits::client_identity(headers))
 }
 
 fn no_store(mut response: Response) -> Response {

@@ -559,21 +559,12 @@ pub async fn verify_login(
     State(state): State<Arc<AppState>>,
     Json(req): Json<VerifyLoginRequest>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    use governor::{Quota, RateLimiter};
-    use std::num::NonZeroU32;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    // Rate limiting: 5 attempts per minute per login_token
-    let quota = Quota::per_minute(NonZeroU32::new(5).unwrap());
-    let limiter_key = req.login_token.clone();
-
-    let entry = state
-        .webauthn_verify_limiter
-        .entry(limiter_key.clone())
-        .or_insert_with(|| RateLimiter::keyed(quota));
-    let limiter = entry.value();
-
-    if limiter.check_key(&limiter_key).is_err() {
+    if !state.rate_limiters.check(
+        crate::rate_limits::RateLimitScope::WebauthnVerify,
+        &req.login_token,
+    ) {
         tracing::warn!("Rate limit exceeded for WebAuthn verification");
         return Err((
             StatusCode::TOO_MANY_REQUESTS,

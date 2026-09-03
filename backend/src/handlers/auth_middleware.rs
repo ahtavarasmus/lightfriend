@@ -8,10 +8,8 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use governor::{Quota, RateLimiter};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde_json::json;
-use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use crate::handlers::auth_dtos::Claims;
@@ -152,25 +150,11 @@ pub async fn apply_api_rate_limit(
         return Ok(next.run(request).await);
     }
 
-    let client_key = request
-        .headers()
-        .get("cf-connecting-ip")
-        .or_else(|| request.headers().get("x-real-ip"))
-        .or_else(|| request.headers().get("x-forwarded-for"))
-        .and_then(|value| value.to_str().ok())
-        .map(|raw| raw.split(',').next().unwrap_or(raw).trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "unknown-client".to_string());
-
-    let quota =
-        Quota::per_minute(NonZeroU32::new(120).unwrap()).allow_burst(NonZeroU32::new(30).unwrap());
-    let entry = state
-        .api_rate_limiter
-        .entry(client_key.clone())
-        .or_insert_with(|| RateLimiter::keyed(quota));
-    let limiter = entry.value();
-
-    if limiter.check_key(&client_key).is_err() {
+    let client_key = crate::rate_limits::client_identity(request.headers());
+    if !state
+        .rate_limiters
+        .check(crate::rate_limits::RateLimitScope::Api, client_key)
+    {
         return Err((
             StatusCode::TOO_MANY_REQUESTS,
             Json(json!({

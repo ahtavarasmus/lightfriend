@@ -2141,7 +2141,7 @@ pub async fn mark_digest_read(
     if !ids.is_empty() {
         state
             .ontology_repository
-            .mark_digest_delivered(&ids, now)
+            .mark_digest_delivered(auth_user.user_id, &ids, now)
             .map_err(|e| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,

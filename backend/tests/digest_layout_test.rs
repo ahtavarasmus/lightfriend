@@ -330,7 +330,7 @@ fn pending_messages_by_urgency_excludes_already_delivered() {
     // Mark as delivered
     state
         .ontology_repository
-        .mark_digest_delivered(&[msg.id], now)
+        .mark_digest_delivered(user.id, &[msg.id], now)
         .unwrap();
 
     // Should no longer appear
@@ -339,6 +339,47 @@ fn pending_messages_by_urgency_excludes_already_delivered() {
         .get_pending_messages_by_urgency(user.id, &["medium"], now - 86400, 100)
         .unwrap();
     assert!(pending.is_empty());
+}
+
+#[test]
+#[serial]
+fn marking_digest_delivered_cannot_modify_another_users_message() {
+    let state = create_test_state();
+    let attacker = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+    let victim = create_test_user(&state, &TestUserParams::finland_user(10.0, 5.0));
+    assert_ne!(attacker.id, victim.id);
+    let now = 2_150_000;
+
+    let (message, _) = state
+        .ontology_repository
+        .insert_message(&NewOntMessage {
+            user_id: victim.id,
+            room_id: "!victim-room".to_string(),
+            platform: "whatsapp".to_string(),
+            sender_name: "Alice".to_string(),
+            sender_key: None,
+            content: "private reminder".to_string(),
+            person_id: None,
+            created_at: now,
+            matrix_event_id: None,
+        })
+        .unwrap();
+    state
+        .ontology_repository
+        .update_message_classification(message.id, "medium", "social", None, None, None)
+        .unwrap();
+
+    state
+        .ontology_repository
+        .mark_digest_delivered(attacker.id, &[message.id], now)
+        .unwrap();
+
+    let victim_pending = state
+        .ontology_repository
+        .get_pending_messages_by_urgency(victim.id, &["medium"], now - 86400, 100)
+        .unwrap();
+    assert_eq!(victim_pending.len(), 1);
+    assert_eq!(victim_pending[0].id, message.id);
 }
 
 #[test]

@@ -1,20 +1,24 @@
 use crate::handlers::auth_middleware::AuthUser;
 use crate::UserCoreOps;
-use axum::{extract::State, http::StatusCode, response::Response, Json};
+use axum::{
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    response::Response,
+    Json,
+};
 use chrono::{Duration, Utc};
-use governor::{Quota, RateLimiter};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use rand::Rng;
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::env;
-use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
     handlers::auth_dtos::{LoginRequest, NewUser, RegisterRequest, UserResponse},
+    rate_limits::RateLimitScope,
     AppState,
 };
 
@@ -41,6 +45,18 @@ fn hash_token(token: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(token.as_bytes());
     hex::encode(hasher.finalize())
+}
+
+fn cookie_value(headers: &HeaderMap, cookie_name: &str) -> Option<String> {
+    headers
+        .get("cookie")?
+        .to_str()
+        .ok()?
+        .split(';')
+        .find_map(|cookie| {
+            let (name, value) = cookie.trim().split_once('=')?;
+            (name == cookie_name).then(|| value.to_string())
+        })
 }
 
 pub async fn get_users(
@@ -100,19 +116,10 @@ pub async fn login(
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     tracing::debug!("Login attempt received");
 
-    // Define rate limit: 5 attempts per minute
-    let quota = Quota::per_minute(NonZeroU32::new(5).unwrap());
-    let limiter_key = login_req.email.clone(); // Use email as the key
-
-    // Get or create a keyed rate limiter for this email
-    let entry = state
-        .login_limiter
-        .entry(limiter_key.clone())
-        .or_insert_with(|| RateLimiter::keyed(quota)); // Bind the Entry here
-    let limiter = entry.value(); // Now borrow from the bound value
-
-    // Check if rate limit is exceeded
-    if limiter.check_key(&limiter_key).is_err() {
+    if !state
+        .rate_limiters
+        .check(RateLimitScope::Login, &login_req.email)
+    {
         tracing::warn!("Rate limit exceeded for login attempt");
         return Err((
             StatusCode::TOO_MANY_REQUESTS,
@@ -220,17 +227,10 @@ pub async fn request_phone_verify(
     State(state): State<Arc<AppState>>,
     Json(reset_req): Json<SendOtpRequest>,
 ) -> Result<Json<PasswordResetResponse>, (StatusCode, Json<serde_json::Value>)> {
-    // Define rate limit: 3 attempts per hour per phone_number
-    let quota = Quota::per_hour(NonZeroU32::new(3).unwrap());
-    let limiter_key = reset_req.phone_number.clone();
-    // Get or create a rate limiter for this phone_number
-    let entry = state
-        .phone_verify_limiter
-        .entry(limiter_key.clone())
-        .or_insert_with(|| RateLimiter::keyed(quota));
-    let limiter = entry.value();
-    // Check if rate limit is exceeded
-    if limiter.check_key(&limiter_key).is_err() {
+    if !state
+        .rate_limiters
+        .check(RateLimitScope::PhoneVerifyRequest, &reset_req.phone_number)
+    {
         tracing::warn!("Rate limit exceeded for phone verify request: [redacted phone]");
         return Err((
             StatusCode::TOO_MANY_REQUESTS,
@@ -293,19 +293,10 @@ pub async fn verify_phone_verify(
     State(state): State<Arc<AppState>>,
     Json(verify_req): Json<VerifyOtpRequest>,
 ) -> Result<Json<PasswordResetResponse>, (StatusCode, Json<serde_json::Value>)> {
-    // Define rate limit: 3 attempts per 60 minutes per phone_number
-    let quota = Quota::with_period(std::time::Duration::from_secs(60 * 60))
-        .unwrap()
-        .allow_burst(NonZeroU32::new(3).unwrap());
-    let limiter_key = verify_req.phone_number.clone();
-    // Get or create a rate limiter for this phone_number
-    let entry = state
-        .phone_verify_verify_limiter
-        .entry(limiter_key.clone())
-        .or_insert_with(|| RateLimiter::keyed(quota));
-    let limiter = entry.value();
-    // Check if rate limit is exceeded
-    if limiter.check_key(&limiter_key).is_err() {
+    if !state
+        .rate_limiters
+        .check(RateLimitScope::PhoneVerifyAttempt, &verify_req.phone_number)
+    {
         tracing::warn!("Rate limit exceeded for phone verify verification: [redacted phone]");
         return Err((
             StatusCode::TOO_MANY_REQUESTS,
@@ -512,28 +503,12 @@ pub async fn register(
 
 pub async fn refresh_token(
     State(state): State<Arc<AppState>>,
-    headers: reqwest::header::HeaderMap,
+    headers: HeaderMap,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    let refresh_token = match headers.get("cookie") {
-        Some(cookie_header) => {
-            let cookies = cookie_header.to_str().unwrap_or("");
-            cookies
-                .split(';')
-                .find(|c| c.trim().starts_with("refresh_token="))
-                .and_then(|c| c.split('=').nth(1))
-                .map(|t| t.to_string())
-                .ok_or((
-                    StatusCode::UNAUTHORIZED,
-                    Json(json!({"error": "Missing refresh token"})),
-                ))?
-        }
-        None => {
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "Missing cookies"})),
-            ));
-        }
-    };
+    let refresh_token = cookie_value(&headers, "refresh_token").ok_or((
+        StatusCode::UNAUTHORIZED,
+        Json(json!({"error": "Missing refresh token"})),
+    ))?;
 
     // Validate refresh token
     let validation = Validation::new(Algorithm::HS256);
@@ -748,11 +723,45 @@ pub async fn auth_status(
     })))
 }
 
-pub async fn logout() -> Result<Response, StatusCode> {
-    // Create response that clears both authentication cookies
+pub async fn logout(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    let mut revoke_failed = false;
+    if let Some(refresh_token) = cookie_value(&headers, "refresh_token") {
+        let validation = Validation::new(Algorithm::HS256);
+        if let Ok(token_data) = decode::<serde_json::Value>(
+            &refresh_token,
+            &DecodingKey::from_secret(
+                env::var("JWT_REFRESH_KEY")
+                    .expect("JWT_REFRESH_KEY must be set")
+                    .as_bytes(),
+            ),
+            &validation,
+        ) {
+            let user_id = token_data.claims["sub"].as_i64().unwrap_or(0) as i32;
+            let is_refresh = token_data.claims["type"].as_str() == Some("refresh");
+            if user_id != 0 && is_refresh {
+                let token_hash = hash_token(&refresh_token);
+                if let Err(error) = state.user_core.revoke_refresh_token(user_id, &token_hash) {
+                    tracing::error!(user_id, %error, "Failed to revoke refresh token during logout");
+                    revoke_failed = true;
+                }
+            }
+        }
+    }
+
+    let status = if revoke_failed {
+        StatusCode::INTERNAL_SERVER_ERROR
+    } else {
+        StatusCode::OK
+    };
+    let message = if revoke_failed {
+        "Session could not be revoked"
+    } else {
+        "Logged out successfully"
+    };
     let mut response = Response::new(axum::body::Body::from(
-        Json(json!({"message": "Logged out successfully"})).to_string(),
+        Json(json!({"message": message})).to_string(),
     ));
+    *response.status_mut() = status;
 
     let is_development =
         std::env::var("ENVIRONMENT").unwrap_or_else(|_| "production".to_string()) == "development";
@@ -767,22 +776,22 @@ pub async fn logout() -> Result<Response, StatusCode> {
         "Set-Cookie",
         format!("access_token={}", cookie_clear_options)
             .parse()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+            .expect("static cookie attributes must form a valid header"),
     );
     response.headers_mut().append(
         "Set-Cookie",
         format!("refresh_token={}", cookie_clear_options)
             .parse()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+            .expect("static cookie attributes must form a valid header"),
     );
     response.headers_mut().insert(
         "Content-Type",
         "application/json"
             .parse()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+            .expect("static content type must form a valid header"),
     );
 
-    Ok(response)
+    response
 }
 
 // ==================== Magic Link Handlers ====================
@@ -918,46 +927,6 @@ pub async fn set_password_from_magic_link(
 
     // Generate JWT tokens and return
     generate_tokens_and_response(&state, user.id)
-}
-
-/// Get magic token from Stripe session ID (for redirect flow)
-/// GET /api/auth/session-token/:session_id
-pub fn consume_session_token(
-    session_to_token: &dashmap::DashMap<String, String>,
-    session_id: &str,
-) -> Option<String> {
-    session_to_token.remove(session_id).map(|(_, token)| token)
-}
-
-pub async fn get_token_from_session(
-    State(state): State<Arc<AppState>>,
-    Path(session_id): Path<String>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Atomically consume the mapping so concurrent requests cannot both use it.
-    let token = consume_session_token(&state.session_to_token, &session_id).ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "Session not found or expired"})),
-        )
-    })?;
-
-    // Check if this is an existing user checkout (should redirect to login instead of auto-login)
-    if token == "EXISTING_USER" {
-        return Ok(Json(json!({
-            "existing_user": true
-        })));
-    }
-
-    // Check if this is a new user checkout (should check email for magic link)
-    if token == "NEW_USER_CHECK_EMAIL" {
-        return Ok(Json(json!({
-            "new_user_check_email": true
-        })));
-    }
-
-    Ok(Json(json!({
-        "token": token
-    })))
 }
 
 // ==================== Waitlist Handler ====================

@@ -99,6 +99,7 @@ pub trait UserCoreOps: Send + Sync {
     ) -> Result<(), DieselError>;
     fn update_accountability_enabled(&self, user_id: i32, value: bool) -> Result<(), DieselError>;
     fn set_refresh_token_hash(&self, user_id: i32, token_hash: &str) -> Result<(), DieselError>;
+    fn revoke_refresh_token(&self, user_id: i32, token_hash: &str) -> Result<bool, DieselError>;
     fn mark_refresh_token_compromised(&self, user_id: i32) -> Result<(), DieselError>;
 
     // User info
@@ -441,6 +442,18 @@ impl UserCoreOps for UserCore {
             ))
             .execute(&mut pg_conn)?;
         Ok(())
+    }
+
+    fn revoke_refresh_token(&self, user_id: i32, token_hash: &str) -> Result<bool, DieselError> {
+        let mut pg_conn = self.pg_pool.get().expect("Failed to get PG connection");
+        let updated = diesel::update(
+            users::table
+                .filter(users::id.eq(user_id))
+                .filter(users::refresh_token_hash.eq(Some(token_hash))),
+        )
+        .set(users::refresh_token_hash.eq::<Option<String>>(None))
+        .execute(&mut pg_conn)?;
+        Ok(updated == 1)
     }
 
     fn mark_refresh_token_compromised(&self, user_id: i32) -> Result<(), DieselError> {

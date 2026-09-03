@@ -48,7 +48,14 @@ struct CachedCore {
 #[derive(Clone)]
 struct CachedEvents {
     fetched_at: Instant,
-    builds: Vec<HistoricalBuild>,
+    builds: Vec<CachedHistoricalBuild>,
+}
+
+#[derive(Clone)]
+struct CachedHistoricalBuild {
+    build: HistoricalBuild,
+    propose_block: Option<String>,
+    activate_block: Option<String>,
 }
 
 #[derive(Clone, Default)]
@@ -476,7 +483,7 @@ pub fn compare_history_order_desc(a: &HistoryOrderKey, b: &HistoryOrderKey) -> O
 }
 
 struct OrderedHistoricalBuild {
-    build: HistoricalBuild,
+    cached: CachedHistoricalBuild,
     order_key: HistoryOrderKey,
 }
 
@@ -560,7 +567,7 @@ async fn get_all_historical_builds(
     rpc_url: &str,
     contract: &str,
     current_image_id: &str,
-) -> Vec<HistoricalBuild> {
+) -> Vec<CachedHistoricalBuild> {
     let cache = EVENTS_CACHE.get_or_init(|| RwLock::new(None));
     if let Some(cached) = cache.read().await.as_ref() {
         if cached.fetched_at.elapsed() < EVENTS_CACHE_TTL {
@@ -572,7 +579,9 @@ async fn get_all_historical_builds(
     let activated_fut = fetch_event_logs(client, rpc_url, contract, IMAGE_ACTIVATED_TOPIC, None);
     let (proposed_logs, activated_logs) = tokio::join!(proposed_fut, activated_fut);
 
-    // Map imageId -> (tx, block, timestamp hint)
+    // Keep block IDs for timestamp enrichment after pagination. Looking up every
+    // event block here used to create hundreds of concurrent RPC requests on every
+    // cold cache fill and could make the production origin temporarily fail.
     let mut activated_map: HashMap<String, (String, Option<String>, Option<String>)> =
         HashMap::new();
     for log in &activated_logs {
@@ -593,7 +602,7 @@ async fn get_all_historical_builds(
         }
     }
 
-    // Decode proposed events into partial entries (without timestamps yet)
+    // Decode proposed events into sortable history entries.
     struct PartialEntry {
         image_id: String,
         commit_hash: String,
@@ -615,7 +624,7 @@ async fn get_all_historical_builds(
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
-        let block_num = log
+        let block = log
             .get("blockNumber")
             .and_then(|v| v.as_str())
             .map(String::from);
@@ -637,14 +646,14 @@ async fn get_all_historical_builds(
                 .or_else(|| decode_image_proposed_activates_at(data));
             let (activate_tx, activate_block, activate_timestamp_hint) = activated_map
                 .get(&image_id)
-                .map(|(tx, b, ts)| (Some(tx.clone()), b.clone(), ts.clone()))
+                .map(|(tx, block, ts)| (Some(tx.clone()), block.clone(), ts.clone()))
                 .unwrap_or((None, None, None));
 
             partials.push(PartialEntry {
                 image_id,
                 commit_hash,
                 propose_tx: tx_hash,
-                propose_block: block_num,
+                propose_block: block,
                 propose_block_number: block_number,
                 propose_log_index: log_index,
                 propose_timestamp_hint,
@@ -655,29 +664,15 @@ async fn get_all_historical_builds(
         }
     }
 
-    // Parallel fetch of ALL timestamps (two per entry: propose + activate)
-    let ts_futures = partials.iter().flat_map(|p| {
-        [
-            maybe_fetch_timestamp(client, rpc_url, p.propose_block.clone()),
-            maybe_fetch_timestamp(client, rpc_url, p.activate_block.clone()),
-        ]
-    });
-    let timestamps = join_all(ts_futures).await;
-
     let mut ordered_builds: Vec<OrderedHistoricalBuild> = partials
         .into_iter()
-        .enumerate()
-        .map(|(i, p)| {
-            let propose_timestamp = timestamps
-                .get(i * 2)
-                .cloned()
-                .flatten()
-                .or(p.propose_timestamp_hint);
-            let activate_timestamp = timestamps
-                .get(i * 2 + 1)
-                .cloned()
-                .flatten()
-                .or(p.activate_timestamp_hint);
+        .map(|p| {
+            // Keep any timestamps included by the RPC response. For proposal logs,
+            // the event's activatesAt value is also a reliable fallback because the
+            // production contract currently has a zero-second cooldown. Any missing
+            // timestamps are fetched only for the requested page below.
+            let propose_timestamp = p.propose_timestamp_hint;
+            let activate_timestamp = p.activate_timestamp_hint;
             let is_current = p.image_id == current_image_id;
             let order_key = HistoryOrderKey {
                 block_number: p.propose_block_number,
@@ -695,15 +690,20 @@ async fn get_all_historical_builds(
                 commit_message: None,
                 pr_number: None,
             };
+            let cached = CachedHistoricalBuild {
+                build,
+                propose_block: p.propose_block,
+                activate_block: p.activate_block,
+            };
 
-            OrderedHistoricalBuild { build, order_key }
+            OrderedHistoricalBuild { cached, order_key }
         })
         .collect();
 
     ordered_builds.sort_by(|a, b| compare_history_order_desc(&a.order_key, &b.order_key));
-    let builds: Vec<HistoricalBuild> = ordered_builds
+    let builds: Vec<CachedHistoricalBuild> = ordered_builds
         .into_iter()
-        .map(|ordered| ordered.build)
+        .map(|ordered| ordered.cached)
         .collect();
 
     *cache.write().await = Some(CachedEvents {
@@ -712,6 +712,40 @@ async fn get_all_historical_builds(
     });
 
     builds
+}
+
+/// Fetch missing timestamps only for the requested page, rather than for the
+/// complete on-chain history. With the default page size this caps the fan-out at
+/// 20 block lookups, and usually 10 because proposal events carry activatesAt.
+async fn fetch_history_timestamps(
+    client: &Client,
+    rpc_url: Option<&str>,
+    builds: &[CachedHistoricalBuild],
+) -> Vec<(Option<String>, Option<String>)> {
+    let fetches = builds.iter().map(|entry| async move {
+        let propose_fut = async {
+            if entry.build.propose_timestamp.is_some() {
+                entry.build.propose_timestamp.clone()
+            } else if let (Some(rpc), Some(block)) = (rpc_url, entry.propose_block.as_deref()) {
+                fetch_block_timestamp(client, rpc, block).await
+            } else {
+                None
+            }
+        };
+        let activate_fut = async {
+            if entry.build.activate_timestamp.is_some() {
+                entry.build.activate_timestamp.clone()
+            } else if let (Some(rpc), Some(block)) = (rpc_url, entry.activate_block.as_deref()) {
+                fetch_block_timestamp(client, rpc, block).await
+            } else {
+                None
+            }
+        };
+
+        tokio::join!(propose_fut, activate_fut)
+    });
+
+    join_all(fetches).await
 }
 
 /// Look up (and populate the cache for) commit info for a single SHA.
@@ -799,17 +833,13 @@ fn parse_commit_response(v: &serde_json::Value) -> CommitInfo {
     }
 }
 
-/// Enrich a slice of builds with commit_message/pr_number in parallel.
-async fn enrich_commit_info(client: &Client, builds: &mut [HistoricalBuild]) {
+/// Fetch commit metadata for a slice of builds in parallel.
+async fn fetch_commit_infos(client: &Client, builds: &[HistoricalBuild]) -> Vec<CommitInfo> {
     let fetches = builds
         .iter()
         .map(|b| fetch_commit_info(client, &b.commit_hash))
         .collect::<Vec<_>>();
-    let infos = join_all(fetches).await;
-    for (build, info) in builds.iter_mut().zip(infos) {
-        build.commit_message = info.message;
-        build.pr_number = info.pr_number;
-    }
+    join_all(fetches).await
 }
 
 // -- Handlers --
@@ -955,8 +985,23 @@ pub async fn get_trust_chain_history(
     let total = all_builds.len();
     let start = offset.min(total);
     let end = (start + limit).min(total);
-    let mut page: Vec<HistoricalBuild> = all_builds[start..end].to_vec();
-    enrich_commit_info(&client, &mut page).await;
+    let page_entries = all_builds[start..end].to_vec();
+    let mut page: Vec<HistoricalBuild> = page_entries
+        .iter()
+        .map(|entry| entry.build.clone())
+        .collect();
+    let timestamps_fut = fetch_history_timestamps(&client, rpc_url.as_deref(), &page_entries);
+    let commit_infos_fut = fetch_commit_infos(&client, &page);
+    let (timestamps, commit_infos) = tokio::join!(timestamps_fut, commit_infos_fut);
+
+    for ((build, (propose_timestamp, activate_timestamp)), commit_info) in
+        page.iter_mut().zip(timestamps).zip(commit_infos)
+    {
+        build.propose_timestamp = propose_timestamp;
+        build.activate_timestamp = activate_timestamp;
+        build.commit_message = commit_info.message;
+        build.pr_number = commit_info.pr_number;
+    }
 
     Json(TrustChainHistoryResponse {
         builds: page,

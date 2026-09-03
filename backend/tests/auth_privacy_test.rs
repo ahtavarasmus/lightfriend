@@ -92,31 +92,6 @@ async fn phone_verify_request_returns_the_same_response_for_known_and_unknown_nu
     assert!(!state.phone_verify_otps.contains_key(unknown_phone));
 }
 
-#[test]
-fn session_token_is_consumed_atomically() {
-    let tokens = std::sync::Arc::new(dashmap::DashMap::new());
-    tokens.insert("single-use-session".to_string(), "secret-token".to_string());
-    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
-
-    let workers: Vec<_> = (0..2)
-        .map(|_| {
-            let tokens = tokens.clone();
-            let barrier = barrier.clone();
-            std::thread::spawn(move || {
-                barrier.wait();
-                auth_handlers::consume_session_token(&tokens, "single-use-session")
-            })
-        })
-        .collect();
-    let results: Vec<_> = workers
-        .into_iter()
-        .map(|worker| worker.join().unwrap())
-        .collect();
-
-    assert_eq!(results.iter().filter(|token| token.is_some()).count(), 1);
-    assert_eq!(results.iter().filter(|token| token.is_none()).count(), 1);
-}
-
 async fn unsubscribe_request(app: &Router, email: &str, token: &str) -> axum::response::Response {
     let uri = format!(
         "/api/unsubscribe?email={}&token={}",

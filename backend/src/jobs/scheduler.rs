@@ -2157,9 +2157,10 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
 
                 if delivered {
                     state.digest_cooldowns.insert(user_id, now);
-                    if let Err(error) = state
-                        .ontology_repository
-                        .mark_digest_delivered(&message_ids, now)
+                    if let Err(error) =
+                        state
+                            .ontology_repository
+                            .mark_digest_delivered(user_id, &message_ids, now)
                     {
                         error!(
                             "Failed to mark recovered digest messages as delivered for user {}: {}",
@@ -2285,9 +2286,10 @@ async fn deliver_smart_digests(state: &Arc<AppState>) {
             // Record cooldown and mark as delivered only on successful SMS
             state.digest_cooldowns.insert(user_id, now);
             if !message_ids.is_empty() {
-                if let Err(e) = state
-                    .ontology_repository
-                    .mark_digest_delivered(&message_ids, now)
+                if let Err(e) =
+                    state
+                        .ontology_repository
+                        .mark_digest_delivered(user_id, &message_ids, now)
                 {
                     error!(
                         "Failed to mark digest messages as delivered for user {}: {}",

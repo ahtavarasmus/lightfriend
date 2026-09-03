@@ -14,6 +14,10 @@ mod id_verifier_test;
 mod imap_auth_test;
 #[path = "imap_idle_test.rs"]
 mod imap_idle_test;
+#[path = "logout_security_test.rs"]
+mod logout_security_test;
+#[path = "rate_limits_test.rs"]
+mod rate_limits_test;
 #[path = "sender_match_test.rs"]
 mod sender_match_test;
 #[path = "signup_service_test.rs"]

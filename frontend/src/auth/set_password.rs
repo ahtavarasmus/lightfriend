@@ -17,16 +17,6 @@ struct MagicLinkResponse {
 }
 
 #[derive(Deserialize)]
-struct SessionTokenResponse {
-    #[serde(default)]
-    token: Option<String>,
-    #[serde(default)]
-    existing_user: bool,
-    #[serde(default)]
-    new_user_check_email: bool,
-}
-
-#[derive(Deserialize)]
 struct ErrorResponse {
     error: String,
 }
@@ -44,7 +34,6 @@ pub fn SetPassword(props: &SetPasswordProps) -> Html {
     let success = use_state(|| None::<String>);
     let loading = use_state(|| true);
     let needs_password = use_state(|| true);
-    let check_email = use_state(|| false);
     let token = use_state(|| props.token.clone().unwrap_or_default());
     let is_submitting = use_state(|| false);
 
@@ -54,7 +43,6 @@ pub fn SetPassword(props: &SetPasswordProps) -> Html {
         let loading = loading.clone();
         let error = error.clone();
         let needs_password = needs_password.clone();
-        let check_email = check_email.clone();
         let prop_token = props.token.clone();
 
         use_effect_with_deps(
@@ -63,103 +51,18 @@ pub fn SetPassword(props: &SetPasswordProps) -> Html {
                 let loading = loading.clone();
                 let error = error.clone();
                 let needs_password = needs_password.clone();
-                let check_email = check_email.clone();
                 let prop_token = prop_token.clone();
 
                 wasm_bindgen_futures::spawn_local(async move {
-                    // Get token from props or query string
-                    let final_token = if let Some(t) = prop_token {
-                        t
+                    let final_token = if let Some(token) = prop_token {
+                        token
                     } else {
-                        // Try to get session_id from query string
-                        if let Some(window) = web_sys::window() {
-                            if let Ok(search) = window.location().search() {
-                                let params = web_sys::UrlSearchParams::new_with_str(&search).ok();
-                                if let Some(params) = params {
-                                    if let Some(session_id) = params.get("session_id") {
-                                        // Fetch token from session_id
-                                        match Request::get(&format!(
-                                            "{}/api/auth/session-token/{}",
-                                            config::get_backend_url(),
-                                            session_id
-                                        ))
-                                        .send()
-                                        .await
-                                        {
-                                            Ok(response) => {
-                                                if response.ok() {
-                                                    if let Ok(resp) = response
-                                                        .json::<SessionTokenResponse>()
-                                                        .await
-                                                    {
-                                                        // Check if this is an existing user checkout
-                                                        if resp.existing_user {
-                                                            // Redirect to login instead of auto-logging in
-                                                            if let Some(window) = web_sys::window()
-                                                            {
-                                                                let _ = window.location().set_href(
-                                                                    "/login?subscription=activated",
-                                                                );
-                                                            }
-                                                            return;
-                                                        }
-                                                        // Check if this is a new user who needs to check email
-                                                        if resp.new_user_check_email {
-                                                            check_email.set(true);
-                                                            loading.set(false);
-                                                            return;
-                                                        }
-                                                        if let Some(token) = resp.token {
-                                                            token
-                                                        } else {
-                                                            error.set(Some(
-                                                                "No token in response".to_string(),
-                                                            ));
-                                                            loading.set(false);
-                                                            return;
-                                                        }
-                                                    } else {
-                                                        error.set(Some(
-                                                            "Failed to parse session response"
-                                                                .to_string(),
-                                                        ));
-                                                        loading.set(false);
-                                                        return;
-                                                    }
-                                                } else {
-                                                    error.set(Some("Session not found. Try clicking the link in your email.".to_string()));
-                                                    loading.set(false);
-                                                    return;
-                                                }
-                                            }
-                                            Err(e) => {
-                                                error.set(Some(format!("Request failed: {}", e)));
-                                                loading.set(false);
-                                                return;
-                                            }
-                                        }
-                                    } else {
-                                        error.set(Some(
-                                            "No token or session_id provided".to_string(),
-                                        ));
-                                        loading.set(false);
-                                        return;
-                                    }
-                                } else {
-                                    error.set(Some("Invalid URL parameters".to_string()));
-                                    loading.set(false);
-                                    return;
-                                }
-                            } else {
-                                error.set(Some("Could not read URL".to_string()));
-                                loading.set(false);
-                                return;
-                            }
-                        } else {
-                            error.set(Some("No window object".to_string()));
-                            loading.set(false);
-                            return;
-                        }
+                        error.set(Some(
+                            "Invalid password setup link. Use the link sent to your email."
+                                .to_string(),
+                        ));
+                        loading.set(false);
+                        return;
                     };
 
                     token.set(final_token.clone());
@@ -371,20 +274,6 @@ pub fn SetPassword(props: &SetPasswordProps) -> Html {
                         html! {
                             <div class="success-message" style="color: #4ecdc4; text-align: center;">
                                 {success_message}
-                            </div>
-                        }
-                    } else if *check_email {
-                        html! {
-                            <div style="text-align: center;">
-                                <div style="color: #4ecdc4; font-size: 1.2rem; margin-bottom: 1.5rem;">
-                                    {"Thank you for subscribing!"}
-                                </div>
-                                <p style="color: rgba(255, 255, 255, 0.7); margin-bottom: 1.5rem;">
-                                    {"We've sent you an email with a link to set your password and access your account."}
-                                </p>
-                                <p style="color: rgba(255, 255, 255, 0.5); font-size: 0.9rem;">
-                                    {"Please check your inbox (and spam folder) for the email from Lightfriend."}
-                                </p>
                             </div>
                         }
                     } else if *needs_password {

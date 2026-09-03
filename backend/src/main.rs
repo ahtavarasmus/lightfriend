@@ -579,11 +579,7 @@ async fn main() {
             tesla_oauth_client,
             youtube_oauth_client,
             session_store: session_store.clone(),
-            login_limiter: DashMap::new(),
-            password_reset_limiter: DashMap::new(),
-            password_reset_verify_limiter: DashMap::new(),
-            api_rate_limiter: DashMap::new(),
-            password_reset_otps: DashMap::new(),
+            rate_limiters: backend::rate_limits::SecurityRateLimiters::default(),
             phone_verify_otps: DashMap::new(),
             matrix_users,
             matrix_reconcile_lock: Arc::new(Mutex::new(())),
@@ -591,8 +587,6 @@ async fn main() {
             tesla_charging_monitor_tasks: Arc::new(DashMap::new()),
             imap_idle_tasks: Arc::new(DashMap::new()),
             tesla_waking_vehicles: Arc::new(DashMap::new()),
-            phone_verify_limiter: DashMap::new(),
-            phone_verify_verify_limiter: DashMap::new(),
             pending_message_senders: Arc::new(Mutex::new(HashMap::new())),
             totp_repository,
             webauthn_repository,
@@ -603,9 +597,6 @@ async fn main() {
             webhook_tokens_repository,
             pending_totp_logins: DashMap::new(),
             pending_password_resets: DashMap::new(),
-            session_to_token: DashMap::new(),
-            totp_verify_limiter: DashMap::new(),
-            webauthn_verify_limiter: DashMap::new(),
             llm_usage_repository,
             bandwidth_repository,
             tuwunel_cleanup_repository,
@@ -828,25 +819,37 @@ async fn main() {
             post(trust_chain_handlers::verify_live),
         )
         .route("/api/unsubscribe", get(admin_handlers::unsubscribe))
-        .route("/api/login", post(auth_handlers::login))
-        .route("/api/register", post(auth_handlers::register))
-        .route("/api/logout", post(auth_handlers::logout))
-        .route("/api/auth/refresh", post(auth_handlers::refresh_token))
+        .route(
+            "/api/login",
+            post(auth_handlers::login).layer(DefaultBodyLimit::max(4 * 1024)),
+        )
+        .route(
+            "/api/register",
+            post(auth_handlers::register).layer(DefaultBodyLimit::max(8 * 1024)),
+        )
+        .route(
+            "/api/logout",
+            post(auth_handlers::logout).layer(DefaultBodyLimit::max(1024)),
+        )
+        .route(
+            "/api/auth/refresh",
+            post(auth_handlers::refresh_token).layer(DefaultBodyLimit::max(1024)),
+        )
         .route(
             "/api/password-reset/validate/{token}",
             get(auth_handlers::validate_reset_token),
         )
         .route(
             "/api/password-reset/complete",
-            post(auth_handlers::complete_password_reset),
+            post(auth_handlers::complete_password_reset).layer(DefaultBodyLimit::max(8 * 1024)),
         )
         .route(
             "/api/phone-verify/request",
-            post(auth_handlers::request_phone_verify),
+            post(auth_handlers::request_phone_verify).layer(DefaultBodyLimit::max(2 * 1024)),
         )
         .route(
             "/api/phone-verify/verify",
-            post(auth_handlers::verify_phone_verify),
+            post(auth_handlers::verify_phone_verify).layer(DefaultBodyLimit::max(2 * 1024)),
         )
         .route(
             "/api/pricing/byot/{country_code}",
@@ -862,16 +865,16 @@ async fn main() {
         )
         .route(
             "/api/totp/verify",
-            post(handlers::totp_handlers::verify_login),
+            post(handlers::totp_handlers::verify_login).layer(DefaultBodyLimit::max(4 * 1024)),
         )
         // WebAuthn public routes (for login flow)
         .route(
             "/api/webauthn/login/start",
-            post(handlers::webauthn_handlers::login_start),
+            post(handlers::webauthn_handlers::login_start).layer(DefaultBodyLimit::max(4 * 1024)),
         )
         .route(
             "/api/webauthn/verify-login",
-            post(handlers::webauthn_handlers::verify_login),
+            post(handlers::webauthn_handlers::verify_login).layer(DefaultBodyLimit::max(16 * 1024)),
         )
         // Magic link and guest checkout routes (subscribe-first flow)
         .route(
@@ -889,10 +892,6 @@ async fn main() {
         .route(
             "/api/auth/magic/{token}",
             get(auth_handlers::validate_magic_link),
-        )
-        .route(
-            "/api/auth/session-token/{session_id}",
-            get(auth_handlers::get_token_from_session),
         )
         .route(
             "/api/auth/set-password",
@@ -1847,6 +1846,16 @@ async fn main() {
     let state_for_scheduler = state.clone();
     tokio::spawn(async move {
         jobs::scheduler::start_scheduler(state_for_scheduler).await;
+    });
+
+    let state_for_rate_limit_cleanup = state.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5 * 60));
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            state_for_rate_limit_cleanup.rate_limiters.retain_recent();
+        }
     });
 
     if let Some(responder) = state.light_tool_responder.clone() {

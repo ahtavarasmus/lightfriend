@@ -1142,10 +1142,11 @@ async fn execute_flow_action(
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs() as i32;
-                    if let Err(e) = state
-                        .ontology_repository
-                        .mark_digest_delivered(&[message_id], now)
-                    {
+                    if let Err(e) = state.ontology_repository.mark_digest_delivered(
+                        rule.user_id,
+                        &[message_id],
+                        now,
+                    ) {
                         warn!(
                             "Always-show rule {} delivered but message {} could not be marked delivered: {}",
                             rule.id, message_id, e

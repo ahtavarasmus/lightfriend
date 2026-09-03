@@ -409,7 +409,7 @@ pub async fn get_service_rooms(client: &MatrixClient, service: &str) -> Result<V
                     }
                 };
                 if skip_terms.iter().any(|t| display_name.contains(t)) {
-                    tracing::info!(
+                    tracing::debug!(
                         "get_service_rooms: skipped bridge management/bot room for service={} room_id={}",
                         service,
                         room_id_str
@@ -436,7 +436,7 @@ pub async fn get_service_rooms(client: &MatrixClient, service: &str) -> Result<V
                 let name_match = room_name_matches_service(&display_name, &service);
                 let member_match = has_service_member(&service, &member_localparts);
                 if !name_match && !member_match {
-                    tracing::info!(
+                    tracing::debug!(
                         "get_service_rooms: skipped non-service room for service={} room_id={} member_count={}",
                         service,
                         room_id_str,
@@ -444,7 +444,7 @@ pub async fn get_service_rooms(client: &MatrixClient, service: &str) -> Result<V
                     );
                     return None;
                 }
-                tracing::info!(
+                tracing::debug!(
                     "get_service_rooms: matched service room for service={} room_id={} name_match={} member_match={} member_count={}",
                     service,
                     room_id_str,
@@ -2826,10 +2826,11 @@ pub async fn handle_bridge_message(
                     snapshot["person_id"] = serde_json::json!(pid);
                 }
                 if !attention.include_in_digest {
-                    if let Err(e) = state_clone
-                        .ontology_repository
-                        .mark_digest_delivered(&[created.id], msg.created_at)
-                    {
+                    if let Err(e) = state_clone.ontology_repository.mark_digest_delivered(
+                        user_id,
+                        &[created.id],
+                        msg.created_at,
+                    ) {
                         tracing::warn!(
                             "Failed to exclude muted bridge message {} from digests: {}",
                             created.id,

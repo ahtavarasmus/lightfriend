@@ -199,19 +199,13 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         youtube_oauth_client: google_oauth.clone(),
         tesla_oauth_client: tesla_oauth,
         session_store: MemoryStore::default(),
-        login_limiter: DashMap::new(),
-        password_reset_limiter: DashMap::new(),
-        password_reset_verify_limiter: DashMap::new(),
-        api_rate_limiter: DashMap::new(),
+        rate_limiters: crate::rate_limits::SecurityRateLimiters::default(),
         matrix_users: Arc::new(DashMap::new()),
         matrix_reconcile_lock: Arc::new(Mutex::new(())),
         tesla_monitoring_tasks: Arc::new(DashMap::new()),
         tesla_charging_monitor_tasks: Arc::new(DashMap::new()),
         imap_idle_tasks: Arc::new(DashMap::new()),
         tesla_waking_vehicles: Arc::new(DashMap::new()),
-        password_reset_otps: DashMap::new(),
-        phone_verify_limiter: DashMap::new(),
-        phone_verify_verify_limiter: DashMap::new(),
         phone_verify_otps: DashMap::new(),
         pending_message_senders: Arc::new(Mutex::new(HashMap::new())),
         totp_repository,
@@ -223,9 +217,6 @@ pub fn create_test_state() -> Arc<crate::AppState> {
         webhook_tokens_repository,
         pending_totp_logins: DashMap::new(),
         pending_password_resets: DashMap::new(),
-        session_to_token: DashMap::new(),
-        totp_verify_limiter: DashMap::new(),
-        webauthn_verify_limiter: DashMap::new(),
         llm_usage_repository,
         bandwidth_repository,
         tuwunel_cleanup_repository,
@@ -971,6 +962,14 @@ pub mod mock_user_core {
             _token_hash: &str,
         ) -> Result<(), DieselError> {
             Ok(())
+        }
+
+        fn revoke_refresh_token(
+            &self,
+            _user_id: i32,
+            _token_hash: &str,
+        ) -> Result<bool, DieselError> {
+            Ok(true)
         }
 
         fn mark_refresh_token_compromised(&self, _user_id: i32) -> Result<(), DieselError> {

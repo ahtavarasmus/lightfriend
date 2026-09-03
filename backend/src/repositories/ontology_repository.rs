@@ -1930,11 +1930,20 @@ impl OntologyRepository {
     }
 
     /// Mark digest messages as delivered.
-    pub fn mark_digest_delivered(&self, message_ids: &[i64], now: i32) -> Result<(), DieselError> {
+    pub fn mark_digest_delivered(
+        &self,
+        user_id: i32,
+        message_ids: &[i64],
+        now: i32,
+    ) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(ont_messages::table.filter(ont_messages::id.eq_any(message_ids)))
-            .set(ont_messages::digest_delivered_at.eq(now))
-            .execute(&mut conn)?;
+        diesel::update(
+            ont_messages::table
+                .filter(ont_messages::user_id.eq(user_id))
+                .filter(ont_messages::id.eq_any(message_ids)),
+        )
+        .set(ont_messages::digest_delivered_at.eq(now))
+        .execute(&mut conn)?;
         Ok(())
     }
 
