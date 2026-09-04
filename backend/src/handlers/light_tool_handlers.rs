@@ -6,6 +6,7 @@ use crate::{
     },
     repositories::{
         light_tool_devices_repository::LightToolDevicesRepository,
+        light_tool_notification_repository::is_light_tool_notification_client_message_id,
         light_tool_pairing_repository::{LightToolPairingRepository, PairingConsumption},
         light_tool_push_outbox_repository::LightToolPushOutboxRepository,
         light_tool_push_repository::LightToolPushRepository,
@@ -142,11 +143,19 @@ pub struct UserMessageResponse {
 #[derive(Serialize)]
 pub struct MessageHistoryRunResponse {
     pub run_id: String,
+    pub kind: MessageHistoryRunKindResponse,
     pub state: RunStateResponse,
     pub user_message: UserMessageResponse,
     pub activity_text: Option<String>,
     pub assistant_message: Option<AssistantMessageResponse>,
     pub error_message: Option<String>,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageHistoryRunKindResponse {
+    Conversation,
+    Notification,
 }
 
 #[derive(Serialize)]
@@ -691,6 +700,11 @@ fn message_history_run_response(
     };
 
     Ok(MessageHistoryRunResponse {
+        kind: if is_light_tool_notification_client_message_id(&run.client_message_id) {
+            MessageHistoryRunKindResponse::Notification
+        } else {
+            MessageHistoryRunKindResponse::Conversation
+        },
         run_id: run.id,
         state,
         user_message: UserMessageResponse {

@@ -9,7 +9,7 @@ use std::{collections::HashSet, env, time::Duration};
 use thiserror::Error;
 use url::Url;
 
-pub const CONVERSATION_CHANGED_PAYLOAD: &[u8] = b"conversation_changed";
+pub const CONVERSATION_CHANGED_PAYLOAD: &[u8] = br#"{"type":"conversation_changed"}"#;
 const ALLOWED_HOSTS_ENV: &str = "LIGHT_TOOL_PUSH_ALLOWED_HOSTS";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,7 +97,7 @@ impl LightToolPushDeliveryService {
         let response = self
             .client
             .post(&registration.endpoint)
-            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(CONVERSATION_CHANGED_PAYLOAD)
             .send()
             .await

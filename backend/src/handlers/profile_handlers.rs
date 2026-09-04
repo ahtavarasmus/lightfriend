@@ -680,11 +680,13 @@ pub async fn patch_profile_field(
                     Json(json!({"error": "notification_type must be a string"})),
                 )
             })?;
-            let allowed_types = ["sms", "call"];
+            let allowed_types = ["sms", "call", "light_phone"];
             if !allowed_types.contains(&value) {
                 return Err((
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "Invalid notification type. Must be 'sms' or 'call'"})),
+                    Json(
+                        json!({"error": "Invalid notification type. Must be 'sms', 'call', or 'light_phone'"}),
+                    ),
                 ));
             }
             state

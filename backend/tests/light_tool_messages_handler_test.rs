@@ -547,6 +547,7 @@ async fn message_history_returns_current_device_runs_and_resumable_state() {
     let runs = history["runs"].as_array().unwrap();
     assert_eq!(runs.len(), 3);
     assert_eq!(runs[0]["run_id"], running_id);
+    assert_eq!(runs[0]["kind"], "conversation");
     assert_eq!(runs[0]["state"], "running");
     assert_eq!(runs[0]["activity_text"], "SEARCHING");
     assert_eq!(runs[0]["user_message"]["text"], "Still working");

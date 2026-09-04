@@ -290,6 +290,7 @@ impl LightToolRunsRepository {
         let query = light_tool_runs::table
             .filter(light_tool_runs::device_id.eq(device_id))
             .filter(light_tool_runs::status.eq("completed"))
+            .filter(light_tool_runs::client_message_id.not_like("notification:%"))
             .filter(light_tool_runs::created_at.le(before_created_at))
             .filter(light_tool_runs::encrypted_assistant_message.is_not_null())
             .into_boxed();

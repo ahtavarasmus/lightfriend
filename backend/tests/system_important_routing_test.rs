@@ -17,6 +17,14 @@ fn email_with_sms_preference_routes_to_sms() {
 }
 
 #[test]
+fn email_with_light_phone_preference_routes_to_light_phone() {
+    assert_eq!(
+        resolve_system_important_content_type(Some("light_phone"), false, "email"),
+        "system_important_light_phone"
+    );
+}
+
+#[test]
 fn known_chat_contact_keeps_call_escalation() {
     assert_eq!(
         resolve_system_important_content_type(Some("sms"), true, "whatsapp"),

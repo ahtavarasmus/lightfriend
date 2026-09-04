@@ -8,6 +8,8 @@ mod light_tool_devices_repository_test;
 mod light_tool_identity_test;
 #[path = "light_tool_messages_handler_test.rs"]
 mod light_tool_messages_handler_test;
+#[path = "light_tool_notification_test.rs"]
+mod light_tool_notification_test;
 #[path = "light_tool_pairing_test.rs"]
 mod light_tool_pairing_test;
 #[path = "light_tool_push_delivery_test.rs"]

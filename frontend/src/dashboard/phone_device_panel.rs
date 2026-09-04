@@ -711,6 +711,9 @@ pub fn phone_device_panel(props: &PhoneDevicePanelProps) -> Html {
                             <option value="call" selected={*notification_type == "call"}>
                                 {"Call me"}
                             </option>
+                            <option value="light_phone" selected={*notification_type == "light_phone"}>
+                                {"Light Phone"}
+                            </option>
                         </select>
                         {save_error(&notification_save_state)}
                     </div>

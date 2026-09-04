@@ -1,4 +1,7 @@
-use crate::repositories::user_repository::LogUsageParams;
+use crate::repositories::{
+    light_tool_notification_repository::LightToolNotificationRepository,
+    user_repository::LogUsageParams,
+};
 use crate::AppState;
 use crate::UserCoreOps;
 use std::sync::Arc;
@@ -293,6 +296,8 @@ pub fn resolve_system_important_content_type(
 ) -> &'static str {
     if (is_known_contact && platform != "email") || default_notification_type == Some("call") {
         "system_important_call"
+    } else if default_notification_type == Some("light_phone") {
+        "system_important_light_phone"
     } else {
         "system_important_sms"
     }
@@ -485,6 +490,8 @@ pub async fn send_notification_with_context(
             .unwrap_or("sms")
     } else if content_type == "digest" {
         "sms" // Digests are always SMS - never call for informational summaries
+    } else if content_type.contains("_light_phone") {
+        "light_phone"
     } else if content_type.contains("_call") {
         "call"
     } else if content_type.contains("_sms") {
@@ -496,7 +503,7 @@ pub async fn send_notification_with_context(
             .unwrap_or("sms")
     };
 
-    let mut sms_delivered = false;
+    let mut notification_delivered = false;
     let outbound_notification = if content_type.starts_with("system_important") {
         format!(
             "{}\n\nReply 1=worth it, 2=should wait.",
@@ -513,6 +520,68 @@ pub async fn send_notification_with_context(
         .unwrap_or_else(|| outbound_notification.clone());
 
     match notification_type {
+        "light_phone" => {
+            match LightToolNotificationRepository::new(state.pg_pool.clone()).enqueue_for_user(
+                user_id,
+                &outbound_notification,
+                current_time,
+            ) {
+                Ok(device_ids) if !device_ids.is_empty() => {
+                    notification_delivered = true;
+                    tracing::info!(
+                        user_id,
+                        device_count = device_ids.len(),
+                        "Queued notification for Light Phone"
+                    );
+                    let entry = crate::pg_models::NewPgMessageHistory {
+                        user_id: user.id,
+                        role: "assistant".to_string(),
+                        encrypted_content: history_notification.clone(),
+                        tool_name: None,
+                        tool_call_id: None,
+                        tool_calls_json: None,
+                        created_at: current_time,
+                        conversation_id: "".to_string(),
+                    };
+                    if let Err(error) = state.user_repository.create_message_history(&entry) {
+                        tracing::error!(
+                            user_id,
+                            "Failed to store Light Phone notification in history: {error}"
+                        );
+                    }
+                    let activity_type = if content_type.contains("_light_phone") {
+                        content_type.clone()
+                    } else {
+                        format!("{}_light_phone", content_type)
+                    };
+                    if let Err(error) = state.user_repository.log_usage(LogUsageParams {
+                        user_id,
+                        sid: None,
+                        activity_type,
+                        credits: None,
+                        time_consumed: None,
+                        success: Some(true),
+                        reason: None,
+                        status: Some("queued".to_string()),
+                        recharge_threshold_timestamp: None,
+                        zero_credits_timestamp: None,
+                    }) {
+                        tracing::error!(
+                            user_id,
+                            "Failed to log Light Phone notification usage: {error}"
+                        );
+                    }
+                }
+                Ok(_) => tracing::warn!(
+                    user_id,
+                    "Could not queue Light Phone notification because no paired device has a push endpoint"
+                ),
+                Err(error) => tracing::error!(
+                    user_id,
+                    "Failed to queue Light Phone notification: {error}"
+                ),
+            }
+        }
         "call" => {
             if let Err(e) =
                 crate::utils::usage::check_user_credits(state, &user, "noti_msg", None).await
@@ -568,7 +637,7 @@ pub async fn send_notification_with_context(
             {
                 Ok(response_sid) => {
                     let response_sid = response_sid.into_inner();
-                    sms_delivered = true;
+                    notification_delivered = true;
                     tracing::info!("SMS sent for call notification user {}", user_id);
                     let entry = crate::pg_models::NewPgMessageHistory {
                         user_id: user.id,
@@ -617,7 +686,7 @@ pub async fn send_notification_with_context(
             {
                 Ok(response_sid) => {
                     let response_sid = response_sid.into_inner();
-                    sms_delivered = true;
+                    notification_delivered = true;
                     tracing::info!("Sent notification to user {}", user_id);
                     let entry = crate::pg_models::NewPgMessageHistory {
                         user_id: user.id,
@@ -670,7 +739,7 @@ pub async fn send_notification_with_context(
 
     // Notify activity feed SSE subscribers after any notification attempt
     state.notify_activity_feed(user_id);
-    sms_delivered
+    notification_delivered
 }
 
 /// Send SMS to an arbitrary phone (not necessarily a Lightfriend user).

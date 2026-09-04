@@ -144,6 +144,7 @@ pub mod repositories {
     pub mod byot_repository;
     pub mod commitment_repository;
     pub mod light_tool_devices_repository;
+    pub mod light_tool_notification_repository;
     pub mod light_tool_pairing_repository;
     pub mod light_tool_push_outbox_repository;
     pub mod light_tool_push_repository;

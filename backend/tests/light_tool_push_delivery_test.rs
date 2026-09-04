@@ -30,7 +30,7 @@ async fn conversation_change_push_contains_no_conversation_data() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/push/device-token"))
-        .and(header("content-type", "application/octet-stream"))
+        .and(header("content-type", "application/json"))
         .and(body_bytes(CONVERSATION_CHANGED_PAYLOAD))
         .respond_with(ResponseTemplate::new(204))
         .expect(1)
