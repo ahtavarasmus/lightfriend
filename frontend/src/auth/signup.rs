@@ -147,7 +147,7 @@ pub mod login {
                                 let window = web_sys::window().unwrap();
                                 wasm_bindgen_futures::spawn_local(async move {
                                     gloo_timers::future::TimeoutFuture::new(2_000).await;
-                                    let _ = window.location().set_href("/");
+                                    let _ = window.location().set_href("/app");
                                 });
                             } else {
                                 log!("Login request failed with status:", response.status());
@@ -216,7 +216,7 @@ pub mod login {
                                 let window = web_sys::window().unwrap();
                                 wasm_bindgen_futures::spawn_local(async move {
                                     gloo_timers::future::TimeoutFuture::new(2_000).await;
-                                    let _ = window.location().set_href("/");
+                                    let _ = window.location().set_href("/app");
                                 });
                             } else {
                                 match response.json::<ErrorResponse>().await {
@@ -336,7 +336,7 @@ pub mod login {
                                 let window = web_sys::window().unwrap();
                                 wasm_bindgen_futures::spawn_local(async move {
                                     gloo_timers::future::TimeoutFuture::new(2_000).await;
-                                    let _ = window.location().set_href("/");
+                                    let _ = window.location().set_href("/app");
                                 });
                             } else {
                                 match response.json::<ErrorResponse>().await {

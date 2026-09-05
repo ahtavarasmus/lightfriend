@@ -97,7 +97,7 @@ fn tesla_error_redirect(error_msg: &str) -> Redirect {
         std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
     let encoded_error = urlencoding::encode(error_msg);
     Redirect::to(&format!(
-        "{}?tesla=error&message={}",
+        "{}/app?tesla=error&message={}",
         frontend_url, encoded_error
     ))
 }
@@ -512,7 +512,7 @@ pub async fn tesla_callback(
     let frontend_url =
         std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
 
-    Redirect::to(&format!("{}?tesla=success", frontend_url))
+    Redirect::to(&format!("{}/app?tesla=success", frontend_url))
 }
 
 // Tesla disconnect endpoint

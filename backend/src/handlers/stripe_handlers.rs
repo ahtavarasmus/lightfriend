@@ -684,8 +684,8 @@ pub async fn create_unified_subscription_checkout(
         ..Default::default()
     }];
 
-    let success_url = datafast_checkout_success_url(&domain_url, "/?subscription=success");
-    let cancel_url = format!("{}/?subscription=canceled", domain_url);
+    let success_url = datafast_checkout_success_url(&domain_url, "/app?subscription=success");
+    let cancel_url = format!("{}/app?subscription=canceled", domain_url);
     let datafast_metadata = datafast_metadata_from_headers(&headers);
     let mut create_params = CreateCheckoutSession {
         success_url: Some(&success_url),
@@ -724,7 +724,7 @@ pub async fn create_unified_subscription_checkout(
         ..Default::default()
     };
     // Handle metadata for plan changes
-    let success_url1 = datafast_checkout_success_url(&domain_url, "/?subscription=changed");
+    let success_url1 = datafast_checkout_success_url(&domain_url, "/app?subscription=changed");
     if let Some(current_subscription) = current_subscription {
         tracing::debug!("Found existing subscription: {}", current_subscription.id);
 
@@ -1326,9 +1326,9 @@ pub async fn create_checkout_session(
         CreateCheckoutSession {
             success_url: Some(&datafast_checkout_success_url(
                 &domain_url,
-                "/?credits=success",
+                "/app?credits=success",
             )), // Redirect after success
-            cancel_url: Some(&format!("{}/?credits=canceled", domain_url)), // Redirect after cancellation
+            cancel_url: Some(&format!("{}/app?credits=canceled", domain_url)), // Redirect after cancellation
             payment_method_types: Some(vec![stripe::CreateCheckoutSessionPaymentMethodTypes::Card]), // Allow card payments
             mode: Some(stripe::CheckoutSessionMode::Payment), // One-time payment mode
             line_items: Some(vec![stripe::CreateCheckoutSessionLineItems {

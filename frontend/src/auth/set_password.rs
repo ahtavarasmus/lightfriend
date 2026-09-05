@@ -86,7 +86,7 @@ pub fn SetPassword(props: &SetPasswordProps) -> Html {
                                     } else {
                                         // Already has password - user is now logged in, redirect to home
                                         if let Some(window) = web_sys::window() {
-                                            let _ = window.location().set_href("/");
+                                            let _ = window.location().set_href("/app");
                                         }
                                     }
                                 } else {
@@ -171,7 +171,7 @@ pub fn SetPassword(props: &SetPasswordProps) -> Html {
                             // Redirect to home after success
                             if let Some(window) = web_sys::window() {
                                 gloo_timers::callback::Timeout::new(1_500, move || {
-                                    let _ = window.location().set_href("/");
+                                    let _ = window.location().set_href("/app");
                                 })
                                 .forget();
                             }

@@ -428,7 +428,7 @@ pub async fn youtube_callback(
         _ => "youtube",
     };
     Ok(Redirect::to(&format!(
-        "{}/?{}=success",
+        "{}/app?{}=success",
         frontend_url, redirect_param
     )))
 }

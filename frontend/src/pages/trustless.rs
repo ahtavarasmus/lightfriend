@@ -135,7 +135,7 @@ pub fn trustless_verification() -> Html {
             </section>
 
             <div class="legal-links">
-                <Link<Route> to={Route::Home}>{"Home"}</Link<Route>>
+                <a href="/">{"Home"}</a>
                 {" | "}
                 <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
                 {" | "}

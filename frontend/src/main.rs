@@ -40,7 +40,6 @@ mod pages {
     pub mod blog;
     pub mod bring_own_number;
     pub mod home;
-    pub mod landing;
     pub mod lightphone3_whatsapp_guide;
     pub mod prompt_injection_safe;
     pub mod public_guides;
@@ -124,7 +123,7 @@ pub enum Route {
     Blog,
     #[at("/bring-own-number")]
     TwilioHostedInstructions,
-    #[at("/")]
+    #[at("/app")]
     Home,
     #[at("/login")]
     Login,
@@ -457,9 +456,13 @@ pub fn nav(props: &NavProps) -> Html {
         )}>
             <div class="nav-content">
                 <div class="nav-left">
-                    <Link<Route> to={Route::Home} classes="nav-logo">
-                        {"lightfriend"}
-                    </Link<Route>>
+                    if *auth_state == AuthState::LoggedIn {
+                        <Link<Route> to={Route::Home} classes="nav-logo">
+                            {"lightfriend"}
+                        </Link<Route>>
+                    } else {
+                        <a href="/" class="nav-logo">{"lightfriend"}</a>
+                    }
                     if is_pricing {
                         <Link<Route> to={Route::Home} classes="nav-back-button">
                             <i class="fa-solid fa-arrow-left"></i>
@@ -516,6 +519,22 @@ pub fn nav(props: &NavProps) -> Html {
         </nav>
     }
 }
+#[derive(Properties, PartialEq)]
+struct RoutedContentProps {
+    auth_state: AuthState,
+}
+
+#[function_component]
+fn RoutedContent(props: &RoutedContentProps) -> Html {
+    let route = use_route::<Route>();
+
+    if props.auth_state == AuthState::LoggedIn && matches!(route, Some(Route::Login)) {
+        html! { <Redirect<Route> to={Route::Home} /> }
+    } else {
+        html! { <Switch<Route> render={switch} /> }
+    }
+}
+
 #[function_component]
 fn App() -> Html {
     let auth_state = use_state(|| AuthState::Checking); // Start in checking state
@@ -575,7 +594,7 @@ fn App() -> Html {
         <>
             <BrowserRouter>
                 <Nav auth_state={*auth_state} />
-                <Switch<Route> render={switch} />
+                <RoutedContent auth_state={*auth_state} />
             </BrowserRouter>
         </>
     }

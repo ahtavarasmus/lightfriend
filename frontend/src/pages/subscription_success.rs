@@ -61,7 +61,7 @@ pub fn subscription_success() -> Html {
                     if response.ok() {
                         // User is logged in - redirect to home
                         if let Some(window) = web_sys::window() {
-                            let _ = window.location().set_href("/?subscription=success");
+                            let _ = window.location().set_href("/app?subscription=success");
                         }
                     }
                 }

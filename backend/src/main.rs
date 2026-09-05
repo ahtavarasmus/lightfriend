@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tower::ServiceBuilder;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -1720,6 +1721,15 @@ async fn main() {
             post(tesla_auth::register_tesla_partner),
         );
 
+    let landing_page = ServiceBuilder::new()
+        .layer(SetResponseHeaderLayer::overriding(
+            axum::http::header::CACHE_CONTROL,
+            HeaderValue::from_static(
+                "public, max-age=0, s-maxage=300, stale-while-revalidate=86400",
+            ),
+        ))
+        .service(ServeFile::new("public/landing.html"));
+
     let app = Router::new()
         .merge(maintenance_routes)
         .merge(public_routes)
@@ -1748,6 +1758,7 @@ async fn main() {
             "/.well-known/llms.txt",
             get(blog::handlers::llms_txt_handler),
         )
+        .route_service("/", landing_page)
         .fallback_service(ServeDir::new("public").fallback(ServeFile::new("public/index.html")))
         .layer(middleware::from_fn_with_state(
             state.clone(),

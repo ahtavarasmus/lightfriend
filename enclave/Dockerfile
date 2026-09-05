@@ -93,6 +93,7 @@ WORKDIR /app
 COPY frontend/Cargo.toml frontend/Cargo.lock ./
 COPY frontend/src ./src
 COPY frontend/index.html ./
+COPY frontend/landing.html ./
 COPY frontend/assets ./assets
 COPY frontend/Trunk.toml ./
 COPY frontend/robots.txt ./

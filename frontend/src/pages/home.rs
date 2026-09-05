@@ -1,12 +1,12 @@
 use crate::dashboard::focused_dashboard::FocusedDashboardView;
 use crate::dashboard::settings_panel::{SettingsPanel, SettingsTab};
-use crate::pages::landing::Landing;
 use crate::profile::billing_models::UserProfile;
 use crate::profile::stripe::StripePricingTable;
 use crate::utils::api::Api;
 use crate::utils::datafast::{
     attribute_payment, attribute_pending_payment, mark_payment_pending, track_goal_once,
 };
+use crate::Route;
 use futures::future::{select, Either};
 use gloo_timers::callback::Timeout;
 use gloo_timers::future::TimeoutFuture;
@@ -24,7 +24,7 @@ struct DataFastCheckoutAttribution {
 
 #[function_component]
 pub fn Home() -> Html {
-    let auth_status = use_state(|| None::<bool>); // None = loading, Some(true) = authenticated, Some(false) = not authenticated
+    let auth_status = use_state(|| None::<bool>);
     let profile_data = use_state(|| None::<UserProfile>);
     let user_verified = use_state(|| true);
     let error = use_state(|| None::<String>);
@@ -259,8 +259,7 @@ pub fn Home() -> Html {
                 };
             }
 
-            // Not authenticated - show landing page
-            html! { <Landing /> }
+            html! { <Redirect<Route> to={Route::Login} /> }
         }
         Some(true) => {
             // Authenticated - show dashboard
@@ -390,7 +389,7 @@ fn post_checkout_success() -> Html {
 fn clean_url() {
     if let Some(window) = window() {
         if let Ok(history) = window.history() {
-            let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some("/"));
+            let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some("/app"));
         }
     }
 }

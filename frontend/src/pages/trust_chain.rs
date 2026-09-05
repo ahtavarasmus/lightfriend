@@ -283,7 +283,7 @@ pub fn trust_chain_page() -> Html {
                 </Link<Route>>
             </div>
             <div class="legal-links">
-                <Link<Route> to={Route::Home}>{"Home"}</Link<Route>>
+                <a href="/">{"Home"}</a>
                 {" | "}
                 <Link<Route> to={Route::Terms}>{"Terms"}</Link<Route>>
                 {" | "}

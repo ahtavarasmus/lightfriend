@@ -1,12 +1,10 @@
 use crate::utils::api::Api;
 use crate::utils::seo::{use_seo, SeoMeta};
-use crate::Route;
 use gloo_net::http::Request;
 use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{window, Event, MouseEvent};
 use yew::prelude::*;
-use yew_router::prelude::*;
 
 #[derive(Properties, PartialEq)]
 pub struct TwilioHostedInstructionsProps {
@@ -1161,9 +1159,9 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                     is_token_valid={is_token_valid}
                 />
                 <div class="back-home-container">
-                    <Link<Route> to={Route::Home} classes="back-home-button">
+                    <a href="/" class="back-home-button">
                         {"Back to Home"}
-                    </Link<Route>>
+                    </a>
                 </div>
             </section>
             <ModalComponent
