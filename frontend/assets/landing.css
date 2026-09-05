@@ -536,17 +536,6 @@ a {
     color: var(--landing-blue);
 }
 
-.native-plan-cta {
-    width: 100%;
-    border: 0;
-    cursor: pointer;
-}
-
-.native-plan-cta:disabled {
-    cursor: wait;
-    opacity: 0.72;
-}
-
 .native-plan-fineprint {
     margin: 0.85rem 0 0;
     color: var(--landing-faint);
@@ -582,6 +571,13 @@ a {
 }
 
 .stripe-pricing-error { color: #ffb4a8; }
+
+.pricing-retry {
+    min-width: 9rem;
+    margin: 0 auto;
+    border: 0;
+    cursor: pointer;
+}
 
 .pricing-provider-note {
     max-width: 760px;

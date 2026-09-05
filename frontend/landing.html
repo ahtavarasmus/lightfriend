@@ -149,10 +149,9 @@
                     <li>$25 monthly allowance for metered Lightfriend usage</li>
                     <li>Open-source, independently verifiable architecture</li>
                 </ul>
-                <button id="load-pricing" class="quiet-cta native-plan-cta" type="button" aria-controls="stripe-pricing" aria-expanded="false">See prices and billing options</button>
-                <p class="native-plan-fineprint">Secure checkout is provided by Stripe. It loads only when you ask for it.</p>
+                <p class="native-plan-fineprint">Secure checkout is provided by Stripe.</p>
             </article>
-            <div id="stripe-pricing" class="stripe-pricing-table-wrap" hidden aria-live="polite"></div>
+            <div id="stripe-pricing" class="stripe-pricing-table-wrap" hidden aria-live="polite" aria-busy="false"></div>
             <p class="pricing-provider-note">Bringing your own Twilio number? Twilio usage is billed separately to your Twilio account, and higher SMS, notification, or call volume can increase those provider charges. <a href="/bring-own-number">See setup details</a>.</p>
         </section>
 
@@ -223,46 +222,78 @@
 
     <script>
         (() => {
-            const pricingButton = document.getElementById('load-pricing');
+            const pricingSection = document.getElementById('plans');
             const pricingContainer = document.getElementById('stripe-pricing');
+            let pricingLoadPromise;
 
-            pricingButton.addEventListener('click', async () => {
-                pricingButton.disabled = true;
-                pricingButton.textContent = 'Loading secure prices…';
-                pricingContainer.hidden = false;
-                pricingContainer.textContent = 'Loading Stripe checkout options…';
+            const loadPricing = () => {
+                if (pricingLoadPromise) return pricingLoadPromise;
 
-                try {
-                    const response = await fetch('/api/stripe/pricing-table-config', {
-                        credentials: 'same-origin',
-                        headers: { Accept: 'application/json' }
-                    });
-                    if (!response.ok) throw new Error('Pricing is unavailable');
-                    const config = await response.json();
+                pricingLoadPromise = (async () => {
+                    pricingContainer.hidden = false;
+                    pricingContainer.setAttribute('aria-busy', 'true');
 
-                    if (!customElements.get('stripe-pricing-table')) {
-                        await new Promise((resolve, reject) => {
-                            const script = document.createElement('script');
-                            script.src = 'https://js.stripe.com/v3/pricing-table.js';
-                            script.async = true;
-                            script.onload = resolve;
-                            script.onerror = reject;
-                            document.head.appendChild(script);
+                    const loadingMessage = document.createElement('p');
+                    loadingMessage.className = 'stripe-pricing-loading';
+                    loadingMessage.textContent = 'Loading secure prices…';
+                    pricingContainer.replaceChildren(loadingMessage);
+
+                    try {
+                        const response = await fetch('/api/stripe/pricing-table-config', {
+                            credentials: 'same-origin',
+                            headers: { Accept: 'application/json' }
                         });
-                    }
+                        if (!response.ok) throw new Error('Pricing is unavailable');
+                        const config = await response.json();
 
-                    const table = document.createElement('stripe-pricing-table');
-                    table.setAttribute('pricing-table-id', config.pricing_table_id);
-                    table.setAttribute('publishable-key', config.publishable_key);
-                    pricingContainer.replaceChildren(table);
-                    pricingButton.hidden = true;
-                    pricingButton.setAttribute('aria-expanded', 'true');
-                } catch (_) {
-                    pricingContainer.textContent = 'Prices could not load. Please try again or email support@lightfriend.ai.';
-                    pricingButton.disabled = false;
-                    pricingButton.textContent = 'Try loading prices again';
-                }
-            });
+                        if (!customElements.get('stripe-pricing-table')) {
+                            await new Promise((resolve, reject) => {
+                                const script = document.createElement('script');
+                                script.src = 'https://js.stripe.com/v3/pricing-table.js';
+                                script.async = true;
+                                script.onload = resolve;
+                                script.onerror = reject;
+                                document.head.appendChild(script);
+                            });
+                        }
+
+                        const table = document.createElement('stripe-pricing-table');
+                        table.setAttribute('pricing-table-id', config.pricing_table_id);
+                        table.setAttribute('publishable-key', config.publishable_key);
+                        pricingContainer.replaceChildren(table);
+                    } catch (_) {
+                        pricingLoadPromise = undefined;
+
+                        const errorMessage = document.createElement('p');
+                        errorMessage.className = 'stripe-pricing-error';
+                        errorMessage.textContent = 'Prices could not load. Please try again or email support@lightfriend.ai.';
+
+                        const retryButton = document.createElement('button');
+                        retryButton.className = 'quiet-cta pricing-retry';
+                        retryButton.type = 'button';
+                        retryButton.textContent = 'Try again';
+                        retryButton.addEventListener('click', loadPricing, { once: true });
+
+                        pricingContainer.replaceChildren(errorMessage, retryButton);
+                    } finally {
+                        pricingContainer.setAttribute('aria-busy', 'false');
+                    }
+                })();
+
+                return pricingLoadPromise;
+            };
+
+            if ('IntersectionObserver' in window) {
+                const pricingObserver = new IntersectionObserver((entries, observer) => {
+                    if (!entries.some((entry) => entry.isIntersecting)) return;
+                    observer.disconnect();
+                    void loadPricing();
+                }, { rootMargin: '900px 0px' });
+
+                pricingObserver.observe(pricingSection);
+            } else {
+                window.setTimeout(loadPricing, 0);
+            }
 
             let analyticsLoaded = false;
             const loadAnalytics = () => {
