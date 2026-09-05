@@ -489,17 +489,35 @@ pub async fn imap_login(
     // Attempt to connect to Gmail's IMAP server to verify credentials
     match connect_imap(&email, &password, imap_server, imap_port).await {
         Ok(mut session) => {
+            // Capture the mailbox boundary before persisting the connection.
+            // Only UIDs created after this point may enter proactive processing;
+            // existing inbox contents remain available to explicit user fetches.
+            let processing_start_uid = match session.select("INBOX").await {
+                Ok(mailbox) => i64::from(mailbox.uid_next.unwrap_or(1).saturating_sub(1)),
+                Err(error) => {
+                    tracing::error!("Failed to establish IMAP processing boundary: {}", error);
+                    let _ = session.logout().await;
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        AxumJson(
+                            json!({"error": "Could not read that inbox. Please try connecting it again."}),
+                        ),
+                    ));
+                }
+            };
+
             // Logout immediately after verification to avoid keeping the session open
             if let Err(e) = session.logout().await {
                 tracing::warn!("Failed to logout IMAP session: {}", e);
             }
 
-            let new_conn_id = match state.user_repository.set_imap_credentials(
+            let new_conn_id = match state.user_repository.set_imap_credentials_at_uid(
                 auth_user.user_id,
                 &email,
                 &password,
                 imap_server,
                 imap_port,
+                Some(processing_start_uid),
             ) {
                 Ok(id) => id,
                 Err(e) => {

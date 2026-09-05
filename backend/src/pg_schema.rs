@@ -42,6 +42,7 @@ diesel::table! {
         imap_server -> Nullable<Text>,
         imap_port -> Nullable<Int4>,
         nickname -> Nullable<Text>,
+        processing_start_uid -> Nullable<Int8>,
     }
 }
 

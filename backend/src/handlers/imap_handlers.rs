@@ -498,6 +498,71 @@ pub fn email_preview_content(preview: &ImapEmailPreview) -> String {
     )
 }
 
+/// IMAP UIDs are monotonically increasing within a mailbox UIDVALIDITY.
+/// Fail closed for malformed values: a message without a valid UID must not
+/// bypass the historical-mail boundary and trigger proactive behavior.
+pub fn email_uid_is_after_processing_start(email_uid: &str, processing_start_uid: i64) -> bool {
+    email_uid
+        .parse::<i64>()
+        .map(|uid| uid > processing_start_uid)
+        .unwrap_or(false)
+}
+
+fn ensure_imap_processing_start_uid(
+    state: &AppState,
+    user_id: i32,
+    imap_connection_id: i32,
+    mailbox_highest_uid: u32,
+) -> Result<i64, ImapError> {
+    if let Some(uid) = state
+        .user_repository
+        .get_imap_processing_start_uid(imap_connection_id)
+        .map_err(|error| ImapError::FetchError(error.to_string()))?
+    {
+        if uid <= i64::from(mailbox_highest_uid) {
+            return Ok(uid);
+        }
+
+        // UIDNEXT moving behind a durable boundary indicates a new IMAP UID
+        // namespace. Reset at the current mailbox edge so old UIDs still stay
+        // historical and future mail can resume normally.
+        let reset_uid = i64::from(mailbox_highest_uid);
+        state
+            .user_repository
+            .set_imap_processing_start_uid(imap_connection_id, reset_uid)
+            .map_err(|error| ImapError::FetchError(error.to_string()))?;
+        return Ok(reset_uid);
+    }
+
+    // Existing connections may already have durable processed rows. Continue
+    // from their highest UID; otherwise baseline the live mailbox without
+    // importing any of its current contents.
+    let last_processed_uid = state
+        .user_repository
+        .get_max_processed_uid(user_id, imap_connection_id)
+        .map_err(|error| ImapError::FetchError(error.to_string()))?;
+    // A processed UID above UIDNEXT means the mailbox's UIDVALIDITY was reset.
+    // In that case the old cursor belongs to a different UID namespace, so
+    // baseline the current mailbox instead of stalling until it catches up.
+    let inferred_uid = last_processed_uid
+        .filter(|uid| *uid <= mailbox_highest_uid)
+        .unwrap_or(mailbox_highest_uid);
+    state
+        .user_repository
+        .initialize_imap_processing_start_uid(imap_connection_id, i64::from(inferred_uid))
+        .map_err(|error| ImapError::FetchError(error.to_string()))?;
+
+    // Another worker may have won the guarded initialization with a different
+    // (newer) observation. Always honor the value actually stored in the DB.
+    state
+        .user_repository
+        .get_imap_processing_start_uid(imap_connection_id)
+        .map_err(|error| ImapError::FetchError(error.to_string()))?
+        .ok_or_else(|| {
+            ImapError::FetchError("IMAP processing boundary was not initialized".to_string())
+        })
+}
+
 /// Compatibility check for cron-era `email_<uid>` rows. Legacy UIDs do not
 /// identify a mailbox, so they must never be assigned to a connection based on
 /// UID alone. Reuse is allowed only when the stored sender and content match
@@ -822,8 +887,8 @@ pub fn normalize_email_sender_key(email: &str) -> Option<String> {
 /// every wake event (NewData) and at startup (initial resync).
 ///
 /// * `since_uid = Some(n)`: fetch UID `(n+1):*` — normal resync path.
-/// * `since_uid = None`: first-ever startup for this connection; fetch
-///   the last 10 messages via the mailbox's `uid_next` counter.
+/// * `since_uid = None`: first-ever startup for this connection; establish a
+///   boundary at the current highest UID without importing existing mail.
 ///
 /// Crucially: `mark_email_as_processed` is called ONLY after
 /// `insert_email_into_ontology` returns `Ok`. If insertion fails, the
@@ -842,16 +907,20 @@ pub async fn process_new_emails(
         .await
         .map_err(|e| ImapError::FetchError(format!("Failed to select INBOX: {}", e)))?;
 
-    // Compute UID range.
-    let uid_range = match since_uid {
-        Some(n) => format!("{}:*", n.saturating_add(1)),
-        None => {
-            // First-ever startup — fetch the last 10 UIDs.
-            let uid_next = mailbox.uid_next.unwrap_or(1);
-            let start = uid_next.saturating_sub(10).max(1);
-            format!("{}:{}", start, uid_next.saturating_sub(1).max(1))
-        }
-    };
+    let mailbox_highest_uid = mailbox.uid_next.unwrap_or(1).saturating_sub(1);
+    let processing_start_uid =
+        ensure_imap_processing_start_uid(state, user_id, imap_connection_id, mailbox_highest_uid)?;
+
+    // Continue after both the connection-time boundary and the newest
+    // successfully processed message. The explicit boundary check below is
+    // still required because IMAP sequence ranges can behave surprisingly
+    // when their start is above the current mailbox maximum.
+    let effective_since_uid = since_uid
+        .filter(|uid| *uid <= mailbox_highest_uid)
+        .map(i64::from)
+        .unwrap_or(processing_start_uid)
+        .max(processing_start_uid);
+    let uid_range = format!("{}:*", effective_since_uid.saturating_add(1));
 
     tracing::debug!(
         "process_new_emails: user={} conn={} fetching UID range {}",
@@ -890,6 +959,10 @@ pub async fn process_new_emails(
                 continue;
             }
         };
+
+        if !email_uid_is_after_processing_start(&preview.id, processing_start_uid) {
+            continue;
+        }
 
         // Skip if already processed (by UID).
         match state.user_repository.is_email_processed(
@@ -1562,6 +1635,22 @@ async fn fetch_emails_imap_for_account(
                 .await
                 .map_err(|e| ImapError::FetchError(format!("Failed to select INBOX: {}", e)))?;
 
+            let processing_start_uid = if unprocessed {
+                let connection_id = imap_connection_id.ok_or_else(|| {
+                    ImapError::FetchError(
+                        "An IMAP connection id is required for proactive processing".to_string(),
+                    )
+                })?;
+                Some(ensure_imap_processing_start_uid(
+                    state,
+                    user_id,
+                    connection_id,
+                    mailbox.uid_next.unwrap_or(1).saturating_sub(1),
+                )?)
+            } else {
+                None
+            };
+
             let sequence_set = format!(
                 "{}:{}",
                 (mailbox.exists.saturating_sub(limit - 1)),
@@ -1612,6 +1701,12 @@ async fn fetch_emails_imap_for_account(
                         continue;
                     }
                 };
+
+                if let Some(boundary) = processing_start_uid {
+                    if !email_uid_is_after_processing_start(&preview.id, boundary) {
+                        continue;
+                    }
+                }
 
                 // Skip read emails if unread_only is true.
                 if unread_only && preview.is_read {

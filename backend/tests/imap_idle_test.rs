@@ -7,8 +7,9 @@
 
 use backend::handlers::imap_handlers::{
     active_imap_connection_belongs_to_user, email_identity_matches_account, email_preview_content,
-    email_room_id, fetch_single_email_imap_for_connection, insert_email_into_ontology,
-    legacy_email_matches_preview, parse_email_room_id, ImapEmailPreview, ImapError,
+    email_room_id, email_uid_is_after_processing_start, fetch_single_email_imap_for_connection,
+    insert_email_into_ontology, legacy_email_matches_preview, parse_email_room_id,
+    ImapEmailPreview, ImapError,
 };
 use backend::models::ontology_models::{NewOntMessage, OntMessage};
 use backend::test_utils::{
@@ -43,6 +44,14 @@ fn account_scoped_email_room_ids_round_trip() {
     assert_eq!(parsed.uid, "42");
     assert!(email_identity_matches_account(&parsed, 17, 2));
     assert!(!email_identity_matches_account(&parsed, 18, 2));
+}
+
+#[test]
+fn historical_email_uids_do_not_cross_processing_boundary() {
+    assert!(!email_uid_is_after_processing_start("99", 100));
+    assert!(!email_uid_is_after_processing_start("100", 100));
+    assert!(email_uid_is_after_processing_start("101", 100));
+    assert!(!email_uid_is_after_processing_start("not-a-uid", 100));
 }
 
 #[test]
@@ -698,6 +707,68 @@ fn test_set_imap_credentials_upsert_returns_existing_id() {
         .unwrap()
         .unwrap();
     assert_eq!(info.password, "pw2");
+}
+
+#[test]
+#[serial]
+fn test_reconnecting_imap_resets_processing_boundary() {
+    setup_test_encryption();
+    let state = create_test_state();
+    let user = create_test_user(&state, &TestUserParams::us_user(10.0, 5.0));
+
+    let id = state
+        .user_repository
+        .set_imap_credentials_at_uid(
+            user.id,
+            "reconnect@example.com",
+            "pw1",
+            None,
+            None,
+            Some(500),
+        )
+        .unwrap();
+    assert_eq!(
+        state
+            .user_repository
+            .get_imap_processing_start_uid(id)
+            .unwrap(),
+        Some(500)
+    );
+
+    let reconnected_id = state
+        .user_repository
+        .set_imap_credentials_at_uid(
+            user.id,
+            "reconnect@example.com",
+            "pw2",
+            None,
+            None,
+            Some(900),
+        )
+        .unwrap();
+
+    assert_eq!(reconnected_id, id);
+    assert_eq!(
+        state
+            .user_repository
+            .get_imap_processing_start_uid(id)
+            .unwrap(),
+        Some(900),
+        "reconnecting must exclude everything already present in the inbox"
+    );
+
+    state
+        .user_repository
+        .initialize_imap_processing_start_uid(id, 1_000)
+        .unwrap();
+    assert_eq!(
+        state
+            .user_repository
+            .get_imap_processing_start_uid(id)
+            .unwrap(),
+        Some(900),
+        "worker initialization must not overwrite the login boundary"
+    );
 }
 
 #[test]

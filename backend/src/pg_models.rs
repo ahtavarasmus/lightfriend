@@ -214,6 +214,7 @@ pub struct PgImapConnection {
     pub imap_server: Option<String>,
     pub imap_port: Option<i32>,
     pub nickname: Option<String>,
+    pub processing_start_uid: Option<i64>,
 }
 
 #[derive(Insertable)]
@@ -229,6 +230,7 @@ pub struct NewPgImapConnection {
     pub imap_server: Option<String>,
     pub imap_port: Option<i32>,
     pub nickname: Option<String>,
+    pub processing_start_uid: Option<i64>,
 }
 
 // -- message_history --

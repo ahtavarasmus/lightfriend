@@ -250,6 +250,21 @@ impl UserRepository {
         imap_server: Option<&str>,
         imap_port: Option<u16>,
     ) -> Result<i32, diesel::result::Error> {
+        self.set_imap_credentials_at_uid(user_id, email, password, imap_server, imap_port, None)
+    }
+
+    /// Store credentials together with the current mailbox UID boundary.
+    /// The login handler uses this so reconnecting cannot create a window in
+    /// which historical messages are mistaken for newly arrived mail.
+    pub fn set_imap_credentials_at_uid(
+        &self,
+        user_id: i32,
+        email: &str,
+        password: &str,
+        imap_server: Option<&str>,
+        imap_port: Option<u16>,
+        processing_start_uid: Option<i64>,
+    ) -> Result<i32, diesel::result::Error> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Encrypt password
@@ -297,6 +312,7 @@ impl UserRepository {
                 imap_connection::method.eq(imap_server
                     .map(|s| s.to_string())
                     .unwrap_or("gmail".to_string())),
+                imap_connection::processing_start_uid.eq(processing_start_uid),
             ))
             .execute(&mut conn)?;
             Ok(existing.id)
@@ -315,6 +331,7 @@ impl UserRepository {
                 imap_server: imap_server.map(|s| s.to_string()),
                 imap_port: imap_port.map(|p| p as i32),
                 nickname: None,
+                processing_start_uid,
             };
 
             let inserted: crate::pg_models::PgImapConnection =
@@ -466,24 +483,25 @@ impl UserRepository {
     /// to resync mail that arrived while the task was down: we fetch UID
     /// `(max+1):*` from INBOX instead of re-scanning the last 10.
     ///
-    /// Returns `None` for a brand-new connection (first-ever startup) —
-    /// the caller should fall back to "fetch the last N messages".
+    /// Returns `None` for a brand-new connection. The caller must initialize
+    /// the connection's processing boundary at the mailbox's current highest
+    /// UID rather than fetching historical messages.
     pub fn get_max_processed_uid(
         &self,
         user_id: i32,
         imap_connection_id: i32,
     ) -> Result<Option<u32>, DieselError> {
-        use diesel::sql_types::{Integer, Nullable};
+        use diesel::sql_types::{BigInt, Integer, Nullable};
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         #[derive(QueryableByName)]
         struct MaxUid {
-            #[diesel(sql_type = Nullable<Integer>)]
-            max_uid: Option<i32>,
+            #[diesel(sql_type = Nullable<BigInt>)]
+            max_uid: Option<i64>,
         }
 
         let row: MaxUid = diesel::sql_query(
-            "SELECT MAX(CAST(email_uid AS INTEGER)) AS max_uid \
+            "SELECT MAX(CAST(email_uid AS BIGINT)) AS max_uid \
              FROM processed_emails \
              WHERE user_id = $1 \
              AND imap_connection_id = $2 \
@@ -493,7 +511,59 @@ impl UserRepository {
         .bind::<Integer, _>(imap_connection_id)
         .get_result(&mut conn)?;
 
-        Ok(row.max_uid.map(|n| n as u32))
+        Ok(row.max_uid.and_then(|uid| u32::try_from(uid).ok()))
+    }
+
+    /// Return the UID boundary captured when an inbox was connected.
+    /// Messages at or below this UID predate the connection and are excluded
+    /// from proactive processing.
+    pub fn get_imap_processing_start_uid(
+        &self,
+        imap_connection_id: i32,
+    ) -> Result<Option<i64>, DieselError> {
+        use crate::pg_schema::imap_connection;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        imap_connection::table
+            .filter(imap_connection::id.eq(imap_connection_id))
+            .select(imap_connection::processing_start_uid)
+            .first::<Option<i64>>(&mut conn)
+    }
+
+    /// Initialize the processing boundary for a pre-migration connection.
+    /// The `IS NULL` guard makes concurrent cron and IDLE initialization safe.
+    pub fn initialize_imap_processing_start_uid(
+        &self,
+        imap_connection_id: i32,
+        processing_start_uid: i64,
+    ) -> Result<(), DieselError> {
+        use crate::pg_schema::imap_connection;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::update(
+            imap_connection::table
+                .filter(imap_connection::id.eq(imap_connection_id))
+                .filter(imap_connection::processing_start_uid.is_null()),
+        )
+        .set(imap_connection::processing_start_uid.eq(processing_start_uid))
+        .execute(&mut conn)?;
+        Ok(())
+    }
+
+    /// Replace a stale processing boundary after the server starts a new UID
+    /// namespace (detected when the stored boundary is above UIDNEXT).
+    pub fn set_imap_processing_start_uid(
+        &self,
+        imap_connection_id: i32,
+        processing_start_uid: i64,
+    ) -> Result<(), DieselError> {
+        use crate::pg_schema::imap_connection;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::update(imap_connection::table.filter(imap_connection::id.eq(imap_connection_id)))
+            .set(imap_connection::processing_start_uid.eq(processing_start_uid))
+            .execute(&mut conn)?;
+        Ok(())
     }
 
     /// Get IMAP credentials for a specific email address
