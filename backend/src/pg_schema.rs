@@ -1,3 +1,12 @@
+diesel::table! {
+    ai_model_prices (provider, model) {
+        provider -> Text,
+        model -> Text,
+        rates -> Text,
+        fetched_at -> Int4,
+    }
+}
+
 // PostgreSQL schema - hand-written to match pg_migrations.
 // Diesel CLI lacks PG backend support, so this must be maintained manually.
 
@@ -541,6 +550,10 @@ diesel::table! {
         completion_tokens -> Int4,
         total_tokens -> Int4,
         created_at -> Int4,
+        cached_prompt_tokens -> Nullable<Int4>,
+        provider_cost_usd -> Nullable<Float8>,
+        customer_cost_usd -> Nullable<Float8>,
+        pricing_snapshot -> Nullable<Text>,
     }
 }
 
@@ -910,6 +923,7 @@ diesel::joinable!(agent_action_audit -> agent_credentials (credential_id));
 diesel::joinable!(agent_action_audit -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    ai_model_prices,
     user_secrets,
     user_info,
     imap_connection,

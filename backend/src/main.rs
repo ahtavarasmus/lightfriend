@@ -563,7 +563,13 @@ async fn main() {
 
     let channel_router = Arc::new(router);
 
-    let ai_config = AiConfig::from_env();
+    let mut ai_config = AiConfig::from_env();
+    ai_config.pricing = llm_usage_repository.pricing.clone();
+    backend::services::model_pricing::start_pricing_refresh(
+        ai_config.clone(),
+        llm_usage_repository.clone(),
+    )
+    .await;
     let state = Arc::new_cyclic(|weak_state| {
         let light_tool_responder: Arc<dyn LightToolResponder> = Arc::new(
             LightToolAgentResponder::new(ai_config.clone(), weak_state.clone()),

@@ -51,7 +51,7 @@ impl Default for AiChatOptions {
 }
 
 pub struct AiChatResult {
-    pub response: chat_completion::ChatCompletionResponse,
+    pub response: crate::services::ai_usage::ChatResponse,
     pub provider: AiProvider,
     pub model: String,
     pub fallback_from: Option<AiProvider>,
@@ -74,6 +74,7 @@ struct CircuitBreakerState {
 /// Centralized AI configuration
 #[derive(Debug, Clone)]
 pub struct AiConfig {
+    pub pricing: Arc<crate::services::model_pricing::PricingCatalog>,
     // OpenRouter key kept as optional fallback (only needed if OpenRouter is used directly)
     openrouter_api_key: Option<String>,
     tinfoil_api_key: Option<String>,
@@ -99,6 +100,7 @@ impl AiConfig {
             near_base_url: DEFAULT_NEAR_BASE_URL.to_string(),
             near_default_model: DEFAULT_NEAR_DEFAULT_MODEL.to_string(),
             near_fast_model: DEFAULT_NEAR_FAST_MODEL.to_string(),
+            pricing: Arc::new(crate::services::model_pricing::PricingCatalog::default()),
             circuit_breaker: Arc::new(Mutex::new(CircuitBreakerState::default())),
             circuit_breaker_config: CircuitBreakerConfig {
                 failure_threshold: TINFOIL_FAILURE_THRESHOLD,
@@ -134,6 +136,7 @@ impl AiConfig {
             near_base_url,
             near_default_model,
             near_fast_model,
+            pricing: Arc::new(crate::services::model_pricing::PricingCatalog::default()),
             circuit_breaker: Arc::new(Mutex::new(CircuitBreakerState::default())),
             circuit_breaker_config: CircuitBreakerConfig {
                 failure_threshold: TINFOIL_FAILURE_THRESHOLD,
@@ -155,6 +158,16 @@ impl AiConfig {
             AiProvider::Tinfoil => &self.tinfoil_base_url,
             AiProvider::Near => &self.near_base_url,
         }
+    }
+
+    /// Configure an OpenAI-compatible endpoint (also used by local provider tests).
+    pub fn with_provider_endpoint(mut self, provider: AiProvider, endpoint: String) -> Self {
+        match provider {
+            AiProvider::Tinfoil => self.tinfoil_base_url = endpoint,
+            AiProvider::Near => self.near_base_url = endpoint,
+            AiProvider::OpenRouter => self.openrouter_base_url = endpoint,
+        }
+        self
     }
 
     /// Get the API key for a provider
@@ -242,7 +255,7 @@ impl AiConfig {
         }
     }
 
-    fn provider_configured(&self, provider: AiProvider) -> bool {
+    pub fn provider_configured(&self, provider: AiProvider) -> bool {
         match provider {
             AiProvider::OpenRouter => self.openrouter_api_key.is_some(),
             AiProvider::Tinfoil => self.tinfoil_api_key.is_some(),
@@ -417,15 +430,20 @@ impl AiConfig {
             match result {
                 Ok(response) => {
                     self.record_provider_success(provider);
+                    let snapshot =
+                        self.pricing
+                            .cost(Self::provider_name(provider), &model, &response.usage);
                     if let Some(repo) = usage_repo {
-                        log_llm_usage(
-                            repo,
+                        if let Err(error) = repo.log_priced_usage(
                             user_id,
                             Self::provider_name(provider),
                             &model,
                             callsite,
-                            &response,
-                        );
+                            &response.usage,
+                            &snapshot,
+                        ) {
+                            tracing::warn!(%error, callsite, "Failed to log AI usage");
+                        }
                     }
                     if let Some(from) = fallback_from {
                         tracing::warn!(
@@ -437,12 +455,7 @@ impl AiConfig {
                             "AI provider fallback succeeded"
                         );
                     }
-                    let provider_cost_usd = crate::services::usage_pricing::text_llm_cost_usd(
-                        provider,
-                        &model,
-                        response.usage.prompt_tokens,
-                        response.usage.completion_tokens,
-                    );
+                    let provider_cost_usd = snapshot.provider_cost_usd;
                     return Ok(AiChatResult {
                         response,
                         provider,
@@ -542,10 +555,7 @@ impl AiConfig {
         &self,
         provider: AiProvider,
         request: &openai_api_rs::v1::chat_completion::ChatCompletionRequest,
-    ) -> Result<
-        openai_api_rs::v1::chat_completion::ChatCompletionResponse,
-        openai_api_rs::v1::error::APIError,
-    > {
+    ) -> Result<crate::services::ai_usage::ChatResponse, openai_api_rs::v1::error::APIError> {
         self.chat_completion_with_attempts(provider, request, 3)
             .await
     }
@@ -555,10 +565,7 @@ impl AiConfig {
         provider: AiProvider,
         request: &openai_api_rs::v1::chat_completion::ChatCompletionRequest,
         max_attempts: u32,
-    ) -> Result<
-        openai_api_rs::v1::chat_completion::ChatCompletionResponse,
-        openai_api_rs::v1::error::APIError,
-    > {
+    ) -> Result<crate::services::ai_usage::ChatResponse, openai_api_rs::v1::error::APIError> {
         let url = format!("{}/chat/completions", self.endpoint(provider));
         let api_key = self.api_key(provider);
         let use_streaming = provider == AiProvider::Tinfoil;
@@ -581,6 +588,10 @@ impl AiConfig {
                 })?;
                 if let Some(obj) = body.as_object_mut() {
                     obj.insert("stream".into(), serde_json::json!(true));
+                    obj.insert(
+                        "stream_options".into(),
+                        serde_json::json!({"include_usage": true}),
+                    );
                     // Remove max_tokens for reasoning models - reasoning tokens count
                     // against the budget, causing finish_reason:length before the
                     // actual tool call is produced
@@ -741,7 +752,7 @@ impl AiConfig {
     /// and builds a complete response matching the non-streaming format.
     fn assemble_sse_response(
         sse_text: &str,
-    ) -> Result<openai_api_rs::v1::chat_completion::ChatCompletionResponse, String> {
+    ) -> Result<crate::services::ai_usage::ChatResponse, String> {
         let mut response_id = String::new();
         let mut response_model = String::new();
         let mut content = String::new();
@@ -751,9 +762,7 @@ impl AiConfig {
         let mut tool_calls: std::collections::BTreeMap<i64, (String, String, String, String)> =
             std::collections::BTreeMap::new();
         let mut has_data = false;
-        let mut usage_prompt_tokens: i64 = 0;
-        let mut usage_completion_tokens: i64 = 0;
-        let mut usage_total_tokens: i64 = 0;
+        let mut usage_details = serde_json::json!({});
 
         for line in sse_text.lines() {
             let line = line.trim();
@@ -770,15 +779,7 @@ impl AiConfig {
 
             // Capture usage from the final SSE chunk (sent when stream_options.include_usage=true)
             if let Some(usage) = chunk.get("usage") {
-                if let Some(pt) = usage.get("prompt_tokens").and_then(|v| v.as_i64()) {
-                    usage_prompt_tokens = pt;
-                }
-                if let Some(ct) = usage.get("completion_tokens").and_then(|v| v.as_i64()) {
-                    usage_completion_tokens = ct;
-                }
-                if let Some(tt) = usage.get("total_tokens").and_then(|v| v.as_i64()) {
-                    usage_total_tokens = tt;
-                }
+                crate::services::ai_usage::merge_stream_usage(&mut usage_details, usage);
             }
 
             // Check for error in chunk
@@ -902,11 +903,7 @@ impl AiConfig {
                 "message": message,
                 "finish_reason": finish_reason,
             }],
-            "usage": {
-                "prompt_tokens": usage_prompt_tokens,
-                "completion_tokens": usage_completion_tokens,
-                "total_tokens": usage_total_tokens
-            }
+            "usage": usage_details
         });
 
         Self::inject_missing_fields(&mut json);
@@ -942,10 +939,7 @@ impl AiConfig {
         provider: AiProvider,
         request: &openai_api_rs::v1::chat_completion::ChatCompletionRequest,
         reasoning_tx: Option<tokio::sync::mpsc::Sender<String>>,
-    ) -> Result<
-        openai_api_rs::v1::chat_completion::ChatCompletionResponse,
-        openai_api_rs::v1::error::APIError,
-    > {
+    ) -> Result<crate::services::ai_usage::ChatResponse, openai_api_rs::v1::error::APIError> {
         self.chat_completion_streaming_with_attempts(provider, request, reasoning_tx, 3)
             .await
     }
@@ -956,10 +950,7 @@ impl AiConfig {
         request: &openai_api_rs::v1::chat_completion::ChatCompletionRequest,
         reasoning_tx: Option<tokio::sync::mpsc::Sender<String>>,
         max_attempts: u32,
-    ) -> Result<
-        openai_api_rs::v1::chat_completion::ChatCompletionResponse,
-        openai_api_rs::v1::error::APIError,
-    > {
+    ) -> Result<crate::services::ai_usage::ChatResponse, openai_api_rs::v1::error::APIError> {
         // Fast path: no reasoning channel -> reuse existing method unchanged
         let reasoning_tx = match reasoning_tx {
             Some(tx) => tx,
@@ -995,6 +986,10 @@ impl AiConfig {
             })?;
             if let Some(obj) = body.as_object_mut() {
                 obj.insert("stream".into(), serde_json::json!(true));
+                obj.insert(
+                    "stream_options".into(),
+                    serde_json::json!({"include_usage": true}),
+                );
                 obj.remove("max_tokens");
             }
             Self::sanitize_request_body(&mut body);
@@ -1041,9 +1036,7 @@ impl AiConfig {
             let mut has_data = false;
             let mut last_reasoning_send = std::time::Instant::now();
             let mut stream_error: Option<String> = None;
-            let mut usage_prompt_tokens: i64 = 0;
-            let mut usage_completion_tokens: i64 = 0;
-            let mut usage_total_tokens: i64 = 0;
+            let mut usage_details = serde_json::json!({});
 
             while let Some(chunk_result) = stream.next().await {
                 let bytes = match chunk_result {
@@ -1074,15 +1067,7 @@ impl AiConfig {
 
                     // Capture usage from the final SSE chunk
                     if let Some(usage) = chunk.get("usage") {
-                        if let Some(pt) = usage.get("prompt_tokens").and_then(|v| v.as_i64()) {
-                            usage_prompt_tokens = pt;
-                        }
-                        if let Some(ct) = usage.get("completion_tokens").and_then(|v| v.as_i64()) {
-                            usage_completion_tokens = ct;
-                        }
-                        if let Some(tt) = usage.get("total_tokens").and_then(|v| v.as_i64()) {
-                            usage_total_tokens = tt;
-                        }
+                        crate::services::ai_usage::merge_stream_usage(&mut usage_details, usage);
                     }
 
                     if chunk.get("error").is_some() {
@@ -1267,11 +1252,7 @@ impl AiConfig {
                     "message": message,
                     "finish_reason": finish_reason,
                 }],
-                "usage": {
-                    "prompt_tokens": usage_prompt_tokens,
-                    "completion_tokens": usage_completion_tokens,
-                    "total_tokens": usage_total_tokens
-                }
+                "usage": usage_details
             });
 
             Self::inject_missing_fields(&mut json);
@@ -1305,12 +1286,17 @@ pub fn log_llm_usage(
     provider: &str,
     model: &str,
     callsite: &str,
-    response: &openai_api_rs::v1::chat_completion::ChatCompletionResponse,
+    response: &crate::services::ai_usage::ChatResponse,
 ) {
-    let u = &response.usage;
-    let (pt, ct, tt) = (u.prompt_tokens, u.completion_tokens, u.total_tokens);
-
-    if let Err(e) = repo.log_usage(user_id, provider, model, callsite, pt, ct, tt) {
+    let snapshot = repo.pricing.cost(provider, model, &response.usage);
+    if let Err(e) = repo.log_priced_usage(
+        user_id,
+        provider,
+        model,
+        callsite,
+        &response.usage,
+        &snapshot,
+    ) {
         tracing::warn!("Failed to log LLM usage for callsite {}: {}", callsite, e);
     }
 }

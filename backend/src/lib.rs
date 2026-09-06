@@ -173,6 +173,8 @@ pub mod repositories {
     pub mod whatsapp_bridge_repository;
 }
 pub mod services {
+    pub mod ai_usage;
+    pub mod ai_usage_report;
     pub mod byot_setup;
     pub mod country_service;
     pub mod data_purge;
@@ -189,6 +191,7 @@ pub mod services {
     pub mod mcp_client;
     pub mod metrics_service;
     pub mod metronome_billing;
+    pub mod model_pricing;
     pub mod signup_service;
     pub mod twilio_message_service;
     pub mod twilio_status_service;

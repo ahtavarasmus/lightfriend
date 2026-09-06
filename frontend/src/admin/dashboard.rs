@@ -154,6 +154,18 @@ struct ActivityTypeBreakdown {
 #[derive(Deserialize, Clone, Debug)]
 #[allow(dead_code)]
 struct LlmUsageStatsResponse {
+    current_prices: Vec<CurrentModelPrice>,
+    days: i32,
+    active_users: usize,
+    missing_usage_calls: i64,
+    projected_monthly_provider_cost_usd: f64,
+    projected_monthly_customer_cost_usd: f64,
+    provider_cost_usd: f64,
+    customer_cost_usd: f64,
+    historical_estimate_calls: i64,
+    fallback_price_calls: i64,
+    incomplete_usage_calls: i64,
+    cached_prompt_tokens: i64,
     total_calls: i64,
     total_prompt_tokens: i64,
     total_completion_tokens: i64,
@@ -166,14 +178,29 @@ struct LlmUsageStatsResponse {
 }
 
 #[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
 struct LlmUserUsage {
+    provider_cost_usd: f64,
+    customer_cost_usd: f64,
+    historical_estimate_calls: i64,
+    fallback_price_calls: i64,
+    incomplete_usage_calls: i64,
+    cached_prompt_tokens: i64,
     user_id: i32,
     calls: i64,
     total_tokens: i64,
 }
 
 #[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
 struct LlmUserUsageDetailed {
+    provider: String,
+    provider_cost_usd: f64,
+    customer_cost_usd: f64,
+    historical_estimate_calls: i64,
+    fallback_price_calls: i64,
+    incomplete_usage_calls: i64,
+    cached_prompt_tokens: i64,
     user_id: i32,
     model: String,
     callsite: String,
@@ -184,25 +211,65 @@ struct LlmUserUsageDetailed {
 }
 
 #[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
 struct LlmCallsiteBreakdown {
+    provider_cost_usd: f64,
+    customer_cost_usd: f64,
+    historical_estimate_calls: i64,
+    fallback_price_calls: i64,
+    incomplete_usage_calls: i64,
+    cached_prompt_tokens: i64,
     callsite: String,
     calls: i64,
     total_tokens: i64,
 }
 
 #[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
 struct LlmModelBreakdown {
+    provider: String,
+    provider_cost_usd: f64,
+    customer_cost_usd: f64,
+    historical_estimate_calls: i64,
+    fallback_price_calls: i64,
+    incomplete_usage_calls: i64,
+    cached_prompt_tokens: i64,
     model: String,
     calls: i64,
     total_tokens: i64,
 }
 
 #[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
 struct DailyLlmStat {
+    provider_cost_usd: f64,
+    customer_cost_usd: f64,
+    historical_estimate_calls: i64,
+    fallback_price_calls: i64,
+    incomplete_usage_calls: i64,
+    cached_prompt_tokens: i64,
     date: String,
     calls: i64,
     prompt_tokens: i64,
     completion_tokens: i64,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct CurrentModelPrice {
+    provider: String,
+    model: String,
+    source: String,
+    fetched_at: Option<i32>,
+    rates: CurrentModelRates,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct CurrentModelRates {
+    input_per_million: f64,
+    output_per_million: f64,
+    cached_input_per_million: Option<f64>,
+    request_usd: f64,
+    search_usd: f64,
 }
 
 // Admin Alert types
@@ -460,6 +527,38 @@ pub fn admin_dashboard() -> Html {
     let usage_stats: UseStateHandle<Option<UsageStatsResponse>> = use_state(|| None);
     let llm_stats: UseStateHandle<Option<LlmUsageStatsResponse>> = use_state(|| None);
     let show_llm_section = use_state(|| false);
+    let llm_days = use_state(|| 14i32);
+    let llm_error = use_state(|| false);
+    {
+        let llm_stats = llm_stats.clone();
+        let llm_error = llm_error.clone();
+        use_effect_with_deps(
+            move |days| {
+                let days = *days;
+                let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
+                let pending = cancelled.clone();
+                llm_stats.set(None);
+                llm_error.set(false);
+                wasm_bindgen_futures::spawn_local(async move {
+                    let data = match Api::get(&format!("/api/admin/stats/llm?days={days}"))
+                        .send()
+                        .await
+                    {
+                        Ok(response) if response.ok() => {
+                            response.json::<LlmUsageStatsResponse>().await.ok()
+                        }
+                        _ => None,
+                    };
+                    if !pending.get() {
+                        llm_error.set(data.is_none());
+                        llm_stats.set(data);
+                    }
+                });
+                move || cancelled.set(true)
+            },
+            *llm_days,
+        );
+    }
     let stats_days = use_state(|| 30i32);
     // Admin alerts state
     let admin_alerts: UseStateHandle<Vec<AdminAlert>> = use_state(|| Vec::new());
@@ -482,7 +581,6 @@ pub fn admin_dashboard() -> Html {
     let global_stats_effect = global_stats.clone();
     let cost_stats_effect = cost_stats.clone();
     let usage_stats_effect = usage_stats.clone();
-    let llm_stats_effect = llm_stats.clone();
     let stats_days_effect = (*stats_days).clone();
     let admin_alerts_effect = admin_alerts.clone();
     let disabled_types_effect = disabled_alert_types.clone();
@@ -496,7 +594,6 @@ pub fn admin_dashboard() -> Html {
             let global_stats = global_stats_effect;
             let cost_stats = cost_stats_effect;
             let usage_stats = usage_stats_effect;
-            let llm_stats = llm_stats_effect;
             let stats_days = stats_days_effect;
             let admin_alerts = admin_alerts_effect;
             let disabled_types = disabled_types_effect;
@@ -556,15 +653,6 @@ pub fn admin_dashboard() -> Html {
                     if response.ok() {
                         if let Ok(data) = response.json::<UsageStatsResponse>().await {
                             usage_stats.set(Some(data));
-                        }
-                    }
-                }
-
-                // Fetch LLM usage stats
-                if let Ok(response) = Api::get("/api/admin/stats/llm?days=14").send().await {
-                    if response.ok() {
-                        if let Ok(data) = response.json::<LlmUsageStatsResponse>().await {
-                            llm_stats.set(Some(data));
                         }
                     }
                 }
@@ -1261,15 +1349,37 @@ pub fn admin_dashboard() -> Html {
                             </h2>
                             <span class="toggle-indicator">{if *show_llm_section { "\u{25BC}" } else { "\u{25B6}" }}</span>
                         </div>
+                        <label class="stats-period-selector">
+                            {"AI reporting period "}
+                            <select value={llm_days.to_string()} onchange={{
+                                let llm_days = llm_days.clone();
+                                Callback::from(move |event: Event| {
+                                    let select: web_sys::HtmlSelectElement = event.target_unchecked_into();
+                                    if let Ok(days) = select.value().parse::<i32>() { llm_days.set(days); }
+                                })
+                            }}>
+                                <option value="7">{"Last 7 days"}</option>
+                                <option value="14">{"Last 14 days"}</option>
+                                <option value="30">{"Last 30 days"}</option>
+                                <option value="90">{"Last 90 days"}</option>
+                            </select>
+                        </label>
                         {
                             if *show_llm_section {
                                 if let Some(stats) = (*llm_stats).as_ref() {
                                     html! {
                                         <div class="collapsible-content">
+                                            <p>{"AI estimates only; carrier and voice costs are reported separately. Projected charges apply the markup and do not mean these amounts were billed."}</p>
+                                            <p>{format!("{} users. {} historical calls estimated at current rates; {} calls use default prices; {} have incomplete usage details ({} missing token counts).",
+                                                stats.active_users, stats.historical_estimate_calls, stats.fallback_price_calls, stats.incomplete_usage_calls, stats.missing_usage_calls)}</p>
                                             <div class="stats-grid">
+                                                <div class="stat-card"><div class="stat-value">{format!("${:.2}", stats.provider_cost_usd)}</div><div class="stat-label">{"Estimated AI provider cost"}</div></div>
+                                                <div class="stat-card"><div class="stat-value">{format!("${:.2}", stats.customer_cost_usd)}</div><div class="stat-label">{"Projected usage charge"}</div></div>
+                                                <div class="stat-card"><div class="stat-value">{format!("${:.2}", stats.projected_monthly_provider_cost_usd)}</div><div class="stat-label">{"Provider cost at this pace / 30d"}</div></div>
+                                                <div class="stat-card"><div class="stat-value">{format!("${:.2}", stats.projected_monthly_customer_cost_usd)}</div><div class="stat-label">{"Usage charge at this pace / 30d"}</div></div>
                                                 <div class="stat-card">
                                                     <div class="stat-value">{stats.total_calls}</div>
-                                                    <div class="stat-label">{"Total Calls (14d)"}</div>
+                                                    <div class="stat-label">{format!("Total Calls ({}d)", stats.days)}</div>
                                                 </div>
                                                 <div class="stat-card">
                                                     <div class="stat-value">{stats.total_prompt_tokens}</div>
@@ -1286,7 +1396,7 @@ pub fn admin_dashboard() -> Html {
                                                 <div class="stat-card">
                                                     <div class="stat-value">{
                                                         if !stats.daily_stats.is_empty() {
-                                                            format!("{}", stats.total_tokens / stats.daily_stats.len() as i64)
+                                                            format!("{}", stats.total_tokens / stats.days as i64)
                                                         } else {
                                                             "-".to_string()
                                                         }
@@ -1296,7 +1406,7 @@ pub fn admin_dashboard() -> Html {
                                                 <div class="stat-card">
                                                     <div class="stat-value">{
                                                         if !stats.daily_stats.is_empty() && !stats.per_user.is_empty() {
-                                                            format!("{}", stats.total_tokens / stats.daily_stats.len() as i64 / stats.per_user.len() as i64)
+                                                            format!("{}", stats.total_tokens / stats.days as i64 / stats.per_user.len() as i64)
                                                         } else {
                                                             "-".to_string()
                                                         }
@@ -1306,12 +1416,13 @@ pub fn admin_dashboard() -> Html {
                                             </div>
 
                                             <h3>{"By Callsite"}</h3>
-                                            <table class="stats-table">
+                                            <div style="overflow-x: auto;"><table class="stats-table">
                                                 <thead>
                                                     <tr>
                                                         <th>{"Callsite"}</th>
                                                         <th>{"Calls"}</th>
                                                         <th>{"Tokens"}</th>
+                                                        <th>{"Provider cost"}</th><th>{"Projected charge"}</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -1322,78 +1433,111 @@ pub fn admin_dashboard() -> Html {
                                                                     <td>{&cs.callsite}</td>
                                                                     <td>{cs.calls}</td>
                                                                     <td>{cs.total_tokens}</td>
+                                                                    <td>{format!("${:.4}", cs.provider_cost_usd)}</td><td>{format!("${:.4}", cs.customer_cost_usd)}</td>
                                                                 </tr>
                                                             }
                                                         }).collect::<Html>()
                                                     }
                                                 </tbody>
-                                            </table>
+                                            </table></div>
 
                                             <h3>{"By Model"}</h3>
-                                            <table class="stats-table">
+                                            <div style="overflow-x: auto;"><table class="stats-table">
                                                 <thead>
                                                     <tr>
-                                                        <th>{"Model"}</th>
+                                                        <th>{"Provider / Model"}</th>
                                                         <th>{"Calls"}</th>
                                                         <th>{"Tokens"}</th>
+                                                        <th>{"Provider cost"}</th><th>{"Projected charge"}</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
                                                     {
                                                         stats.by_model.iter().map(|m| {
                                                             html! {
-                                                                <tr key={m.model.clone()}>
-                                                                    <td>{&m.model}</td>
+                                                                <tr key={format!("{}-{}", m.provider, m.model)}>
+                                                                    <td>{format!("{} / {}", m.provider, m.model)}</td>
                                                                     <td>{m.calls}</td>
                                                                     <td>{m.total_tokens}</td>
+                                                                    <td>{format!("${:.4}", m.provider_cost_usd)}</td><td>{format!("${:.4}", m.customer_cost_usd)}</td>
                                                                 </tr>
                                                             }
                                                         }).collect::<Html>()
                                                     }
                                                 </tbody>
-                                            </table>
+                                            </table></div>
 
+                                            <details>
+                                                <summary>{"Current model prices (USD)"}</summary>
+                                                <p>{"API prices refresh hourly. Saved prices survive outages and restarts; defaults apply when no saved price exists. Historical charges retain their original rates."}</p>
+                                                <div style="overflow-x: auto;"><table class="stats-table">
+                                                    <thead><tr><th>{"Provider / model"}</th><th>{"Input / 1M"}</th><th>{"Output / 1M"}</th><th>{"Cached / 1M"}</th><th>{"Request + search"}</th><th>{"Price source"}</th><th>{"Last fetched (UTC)"}</th></tr></thead>
+                                                    <tbody>{for stats.current_prices.iter().map(|p| html! {
+                                                        <tr key={format!("{}-{}", p.provider, p.model)}>
+                                                            <td>{format!("{} / {}", p.provider, p.model)}</td>
+                                                            <td>{format!("${:.4}", p.rates.input_per_million)}</td>
+                                                            <td>{format!("${:.4}", p.rates.output_per_million)}</td>
+                                                            <td>{p.rates.cached_input_per_million.map(|v| format!("${v:.4}")).unwrap_or_else(|| "Not listed".into())}</td>
+                                                            <td>{format!("${:.4}", p.rates.request_usd + p.rates.search_usd)}</td>
+                                                            <td>{match p.source.as_str() { "provider_api" => "Provider API", "saved_api" => "Saved API price", "default_model" => "Model default", _ => "Provider default" }}</td>
+                                                            <td>{p.fetched_at.and_then(|ts| chrono::DateTime::from_timestamp(ts as i64, 0)).map(|date| date.format("%Y-%m-%d %H:%M").to_string()).unwrap_or_else(|| "Never".into())}</td>
+                                                        </tr>
+                                                    })}</tbody>
+                                                </table></div>
+                                            </details>
+                                            <h3>{"By User (total AI usage)"}</h3>
+                                            <div style="overflow-x: auto;"><table class="stats-table">
+                                                <thead><tr><th>{"User"}</th><th>{"Calls"}</th><th>{"Provider cost"}</th><th>{"Projected charge"}</th><th>{"Projected charge / 30d"}</th></tr></thead>
+                                                <tbody>{for stats.per_user.iter().map(|u| html! {
+                                                    <tr key={u.user_id}><td>{u.user_id}</td><td>{u.calls}</td>
+                                                        <td>{format!("${:.4}", u.provider_cost_usd)}</td>
+                                                        <td>{format!("${:.4}", u.customer_cost_usd)}</td>
+                                                        <td>{format!("${:.2}", u.customer_cost_usd * 30.0 / stats.days as f64)}</td>
+                                                    </tr>
+                                                })}</tbody>
+                                            </table></div>
                                             <h3>{"By User (detailed)"}</h3>
-                                            <table class="stats-table">
+                                            <div style="overflow-x: auto;"><table class="stats-table">
                                                 <thead>
                                                     <tr>
                                                         <th>{"User"}</th>
-                                                        <th>{"Model"}</th>
+                                                        <th>{"Provider / Model"}</th>
                                                         <th>{"Callsite"}</th>
                                                         <th>{"Calls"}</th>
                                                         <th>{"Input"}</th>
                                                         <th>{"Output"}</th>
-                                                        <th>{"Total"}</th>
+                                                        <th>{"Total"}</th><th>{"Cached input"}</th><th>{"Provider cost"}</th><th>{"Projected charge"}</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
                                                     {
                                                         stats.per_user_detailed.iter().map(|u| {
-                                                            let key = format!("{}-{}-{}", u.user_id, u.model, u.callsite);
+                                                            let key = format!("{}-{}-{}-{}", u.user_id, u.provider, u.model, u.callsite);
                                                             html! {
                                                                 <tr key={key}>
                                                                     <td>{u.user_id}</td>
-                                                                    <td>{&u.model}</td>
+                                                                    <td>{format!("{} / {}", u.provider, u.model)}</td>
                                                                     <td>{&u.callsite}</td>
                                                                     <td>{u.calls}</td>
                                                                     <td>{u.prompt_tokens}</td>
                                                                     <td>{u.completion_tokens}</td>
-                                                                    <td>{u.total_tokens}</td>
+                                                                    <td>{u.total_tokens}</td><td>{u.cached_prompt_tokens}</td>
+                                                                    <td>{format!("${:.4}", u.provider_cost_usd)}</td><td>{format!("${:.4}", u.customer_cost_usd)}</td>
                                                                 </tr>
                                                             }
                                                         }).collect::<Html>()
                                                     }
                                                 </tbody>
-                                            </table>
+                                            </table></div>
 
-                                            <h3>{"Daily Stats (14d)"}</h3>
-                                            <table class="stats-table">
+                                            <h3>{format!("Daily Stats ({}d, UTC)", stats.days)}</h3>
+                                            <div style="overflow-x: auto;"><table class="stats-table">
                                                 <thead>
                                                     <tr>
                                                         <th>{"Date"}</th>
                                                         <th>{"Calls"}</th>
                                                         <th>{"Prompt"}</th>
-                                                        <th>{"Completion"}</th>
+                                                        <th>{"Completion"}</th><th>{"Provider cost"}</th><th>{"Projected charge"}</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -1405,16 +1549,17 @@ pub fn admin_dashboard() -> Html {
                                                                     <td>{d.calls}</td>
                                                                     <td>{d.prompt_tokens}</td>
                                                                     <td>{d.completion_tokens}</td>
+                                                                    <td>{format!("${:.4}", d.provider_cost_usd)}</td><td>{format!("${:.4}", d.customer_cost_usd)}</td>
                                                                 </tr>
                                                             }
                                                         }).collect::<Html>()
                                                     }
                                                 </tbody>
-                                            </table>
+                                            </table></div>
                                         </div>
                                     }
                                 } else {
-                                    html! { <p class="loading">{"Loading LLM stats..."}</p> }
+                                    html! { <p role="status">{if *llm_error { "Could not load AI usage. Change the reporting period to retry." } else { "Loading AI usage..." }}</p> }
                                 }
                             } else {
                                 html! {}

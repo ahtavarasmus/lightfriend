@@ -2,6 +2,8 @@
 mod billing_reliability_test;
 #[path = "byot_reliability_test.rs"]
 mod byot_reliability_test;
+#[path = "dynamic_ai_pricing_test.rs"]
+mod dynamic_ai_pricing_test;
 #[path = "metronome_billing_test.rs"]
 mod metronome_billing_test;
 #[path = "stripe_webhook_state_test.rs"]

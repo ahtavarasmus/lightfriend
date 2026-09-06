@@ -159,7 +159,7 @@ pub async fn run_agent_loop(
         let result = if round == 0 {
             if let Some(mock_response) = input.mock_llm_response.take() {
                 tracing::debug!("Using mock LLM response for testing");
-                mock_response
+                mock_response.into()
             } else {
                 call_llm_round(&input, &loop_messages, sticky_provider)
                     .await

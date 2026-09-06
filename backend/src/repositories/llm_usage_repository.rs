@@ -1,14 +1,21 @@
 use crate::pg_models::NewPgLlmUsageLog;
 use crate::pg_schema::llm_usage_logs;
+use crate::services::{
+    ai_usage::TokenUsage,
+    model_pricing::{CostSnapshot, ModelRates, PriceQuote, PricingCatalog},
+};
 use crate::PgDbPool;
 use diesel::dsl::count;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use serde::Serialize;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[derive(Clone)]
 pub struct LlmUsageRepository {
     pool: PgDbPool,
+    pub pricing: Arc<PricingCatalog>,
 }
 
 #[derive(Debug, Serialize)]
@@ -73,7 +80,109 @@ type DetailedUsageRow = (
 
 impl LlmUsageRepository {
     pub fn new(pool: PgDbPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            pricing: Arc::new(PricingCatalog::default()),
+        }
+    }
+
+    pub fn save_price(
+        &self,
+        provider: &str,
+        model: &str,
+        quote: &PriceQuote,
+    ) -> anyhow::Result<()> {
+        self.save_prices(provider, &[(model.to_string(), quote.clone())])
+    }
+
+    pub fn save_prices(
+        &self,
+        provider: &str,
+        entries: &[(String, PriceQuote)],
+    ) -> anyhow::Result<()> {
+        use crate::pg_schema::ai_model_prices as p;
+        let mut conn = self.pool.get()?;
+        conn.transaction::<_, anyhow::Error, _>(|conn| {
+            for (model, quote) in entries {
+                if !quote.rates.is_valid() {
+                    anyhow::bail!("Invalid model price");
+                }
+                let rates = serde_json::to_string(&quote.rates)?;
+                let fetched_at = quote.fetched_at.unwrap_or(0);
+                diesel::insert_into(p::table)
+                    .values((
+                        p::provider.eq(provider),
+                        p::model.eq(model),
+                        p::rates.eq(&rates),
+                        p::fetched_at.eq(fetched_at),
+                    ))
+                    .on_conflict((p::provider, p::model))
+                    .do_update()
+                    .set((p::rates.eq(&rates), p::fetched_at.eq(fetched_at)))
+                    .execute(conn)?;
+            }
+            Ok(())
+        })
+    }
+
+    pub fn load_prices(&self) -> anyhow::Result<()> {
+        use crate::pg_schema::ai_model_prices as p;
+        let mut conn = self.pool.get()?;
+        let rows: Vec<(String, String, String, i32)> = p::table
+            .select((p::provider, p::model, p::rates, p::fetched_at))
+            .load(&mut conn)?;
+        for (provider, model, rates, fetched_at) in rows {
+            match serde_json::from_str::<ModelRates>(&rates) {
+                Ok(rates) => self.pricing.insert(
+                    &provider,
+                    &model,
+                    PriceQuote {
+                        rates,
+                        source: "saved_api".into(),
+                        fetched_at: Some(fetched_at),
+                    },
+                ),
+                Err(error) => {
+                    tracing::warn!(%error, provider, model, "Invalid saved model pricing")
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn log_priced_usage(
+        &self,
+        user_id: i32,
+        provider: &str,
+        model: &str,
+        callsite: &str,
+        usage: &TokenUsage,
+        snapshot: &CostSnapshot,
+    ) -> anyhow::Result<()> {
+        let mut conn = self.pool.get()?;
+        let log = NewPgLlmUsageLog {
+            user_id,
+            provider: provider.into(),
+            model: model.into(),
+            callsite: callsite.into(),
+            prompt_tokens: usage.prompt_tokens,
+            completion_tokens: usage.completion_tokens,
+            total_tokens: usage.total_tokens.max(
+                usage
+                    .prompt_tokens
+                    .max(0)
+                    .saturating_add(usage.completion_tokens.max(0)),
+            ),
+            created_at: chrono::Utc::now().timestamp() as i32,
+            cached_prompt_tokens: usage.cached_tokens(),
+            provider_cost_usd: Some(snapshot.provider_cost_usd),
+            customer_cost_usd: Some(snapshot.customer_cost_usd),
+            pricing_snapshot: Some(serde_json::to_string(snapshot)?),
+        };
+        diesel::insert_into(llm_usage_logs::table)
+            .values(log)
+            .execute(&mut conn)?;
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -103,6 +212,10 @@ impl LlmUsageRepository {
             completion_tokens,
             total_tokens,
             created_at: now,
+            cached_prompt_tokens: None,
+            provider_cost_usd: None,
+            customer_cost_usd: None,
+            pricing_snapshot: None,
         };
 
         diesel::insert_into(llm_usage_logs::table)
@@ -172,6 +285,26 @@ impl LlmUsageRepository {
                 })
                 .collect(),
         })
+    }
+
+    pub fn get_cost_report(
+        &self,
+        days: i32,
+        now: i32,
+    ) -> anyhow::Result<crate::services::ai_usage_report::AiUsageReport> {
+        let days = days.clamp(1, 90);
+        let mut conn = self.pool.get()?;
+        let rows = llm_usage_logs::table
+            .filter(llm_usage_logs::created_at.ge(now.saturating_sub(days * 86400)))
+            .filter(llm_usage_logs::created_at.lt(now))
+            .select(crate::pg_models::PgLlmUsageLog::as_select())
+            .load(&mut conn)?;
+        Ok(crate::services::ai_usage_report::build_report(
+            &rows,
+            &self.pricing,
+            days,
+            now,
+        ))
     }
 
     pub fn get_per_user_stats(

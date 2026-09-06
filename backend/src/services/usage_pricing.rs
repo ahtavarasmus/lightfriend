@@ -24,8 +24,14 @@ pub fn text_llm_cost_usd(
     input + output
 }
 
+pub fn customer_usage_multiplier() -> f64 {
+    env_rate("AI_USAGE_MULTIPLIER")
+        .filter(|v| *v >= 1.0)
+        .unwrap_or(CUSTOMER_USAGE_MARGIN)
+}
+
 pub fn billable_customer_cost_usd(provider_cost_usd: f64) -> f64 {
-    provider_cost_usd.max(0.0) * CUSTOMER_USAGE_MARGIN
+    provider_cost_usd.max(0.0) * customer_usage_multiplier()
 }
 
 pub fn openai_realtime_cost_usd(usage: RealtimeTokenUsage) -> f64 {
@@ -128,54 +134,9 @@ fn token_count(value: &serde_json::Value, key: &str) -> u64 {
 }
 
 fn text_token_rates(provider: AiProvider, model: &str) -> (f64, f64) {
-    let normalized = model.to_ascii_lowercase();
-    match provider {
-        AiProvider::Tinfoil if normalized.contains("kimi-k2-6") => env_rates(
-            "TINFOIL_KIMI_INPUT_USD_PER_MILLION",
-            "TINFOIL_KIMI_OUTPUT_USD_PER_MILLION",
-            (1.50, 5.25),
-        ),
-        AiProvider::Tinfoil if normalized.contains("gemma4-31b") => env_rates(
-            "TINFOIL_GEMMA_INPUT_USD_PER_MILLION",
-            "TINFOIL_GEMMA_OUTPUT_USD_PER_MILLION",
-            (0.40, 1.00),
-        ),
-        AiProvider::Near if normalized.contains("glm-5.1") => env_rates(
-            "NEAR_GLM_INPUT_USD_PER_MILLION",
-            "NEAR_GLM_OUTPUT_USD_PER_MILLION",
-            (0.85, 3.30),
-        ),
-        AiProvider::Near if normalized.contains("gemma-4-31b") => env_rates(
-            "NEAR_GEMMA_INPUT_USD_PER_MILLION",
-            "NEAR_GEMMA_OUTPUT_USD_PER_MILLION",
-            (0.13, 0.40),
-        ),
-        AiProvider::OpenRouter if normalized.contains("gpt-4o") => (2.50, 10.00),
-        // A configured model should set these generic overrides when it is not one of the
-        // known defaults. The fallback is intentionally conservative rather than free usage.
-        AiProvider::Tinfoil => env_rates(
-            "TINFOIL_INPUT_USD_PER_MILLION",
-            "TINFOIL_OUTPUT_USD_PER_MILLION",
-            (1.50, 5.25),
-        ),
-        AiProvider::Near => env_rates(
-            "NEAR_AI_INPUT_USD_PER_MILLION",
-            "NEAR_AI_OUTPUT_USD_PER_MILLION",
-            (0.85, 3.30),
-        ),
-        AiProvider::OpenRouter => env_rates(
-            "OPENROUTER_INPUT_USD_PER_MILLION",
-            "OPENROUTER_OUTPUT_USD_PER_MILLION",
-            (2.50, 10.00),
-        ),
-    }
-}
-
-fn env_rates(input_key: &str, output_key: &str, defaults: (f64, f64)) -> (f64, f64) {
-    (
-        env_rate(input_key).unwrap_or(defaults.0),
-        env_rate(output_key).unwrap_or(defaults.1),
-    )
+    let rates =
+        super::model_pricing::fallback_quote(crate::AiConfig::provider_name(provider), model).rates;
+    (rates.input_per_million, rates.output_per_million)
 }
 
 fn env_rate(key: &str) -> Option<f64> {

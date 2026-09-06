@@ -744,6 +744,10 @@ pub struct PgLlmUsageLog {
     pub completion_tokens: i32,
     pub total_tokens: i32,
     pub created_at: i32,
+    pub cached_prompt_tokens: Option<i32>,
+    pub provider_cost_usd: Option<f64>,
+    pub customer_cost_usd: Option<f64>,
+    pub pricing_snapshot: Option<String>,
 }
 
 #[derive(Insertable, Debug)]
@@ -757,6 +761,10 @@ pub struct NewPgLlmUsageLog {
     pub completion_tokens: i32,
     pub total_tokens: i32,
     pub created_at: i32,
+    pub cached_prompt_tokens: Option<i32>,
+    pub provider_cost_usd: Option<f64>,
+    pub customer_cost_usd: Option<f64>,
+    pub pricing_snapshot: Option<String>,
 }
 
 #[derive(Insertable)]
