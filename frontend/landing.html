@@ -28,6 +28,7 @@
     <link rel="icon" type="image/webp" href="/assets/fav.webp">
     <link rel="preload" href="/assets/child-field-hero.webp" as="image" type="image/webp" fetchpriority="high">
     <link rel="stylesheet" href="/assets/landing.css">
+    <script defer src="/assets/analytics.js"></script>
     <title>Lightfriend: Your group chats, on a Nokia</title>
     <script type="application/ld+json">
     {
@@ -42,6 +43,7 @@
     </script>
 </head>
 <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <nav class="landing-nav" aria-label="Primary navigation">
         <a class="landing-nav-brand" href="/" aria-label="Lightfriend home">lightfriend</a>
         <div class="landing-nav-actions">
@@ -50,61 +52,74 @@
         </div>
     </nav>
 
-    <main class="landing-page">
+    <main id="main" class="landing-page">
         <header class="quiet-hero">
             <div class="quiet-hero-inner">
-                <p class="quiet-kicker">Lightfriend</p>
                 <h1>Your group chats, on a Nokia.</h1>
                 <p class="quiet-hero-subtitle">Important people and messages from WhatsApp, Signal, Telegram, and email reach any phone by text or call.</p>
                 <div class="quiet-hero-actions">
                     <a href="#plans" class="quiet-cta">See plans</a>
+                    <a href="#demo" class="quiet-cta quiet-cta-secondary">See how it works</a>
                 </div>
-                <p class="quiet-hero-note">No apps. No feed. Any phone.</p>
+                <p class="quiet-hero-note">Works through ordinary SMS and calls.</p>
             </div>
         </header>
 
-        <section class="quiet-section quiet-how" aria-labelledby="how-heading">
+        <section id="demo" class="quiet-section quiet-how" aria-labelledby="how-heading">
             <div class="quiet-copy">
-                <p class="quiet-eyebrow">How it works</p>
-                <h2 id="how-heading">Leave the smartphone. Keep the people.</h2>
-                <p>Lightfriend watches the places people already reach you, learns what matters, and interrupts you only when something cannot wait.</p>
+                <h2 id="how-heading">A change of plans, straight to your phone.</h2>
+                <p>Your friends keep using WhatsApp. You get the important update by SMS and can reply from your dumbphone. Photos and everyday chatter can wait for a digest.</p>
             </div>
-            <div class="hero-diagram app-bridge-visual" role="img" aria-label="Messaging services connect to any phone through Lightfriend">
-                <div class="diagram-left">
-                    <img src="/assets/empty-phone.webp" alt="Any phone" class="diagram-nokia" loading="lazy" decoding="async" width="160" height="240">
-                    <span class="diagram-node-label">Any phone</span>
-                </div>
-                <div class="diagram-center-group">
-                    <svg class="diagram-left-line" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true">
-                        <defs>
-                            <marker id="quiet-arrow-right" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto"><path d="M0,0 L6,2 L0,4" fill="rgba(126,178,255,0.6)"></path></marker>
-                            <marker id="quiet-arrow-left" markerWidth="6" markerHeight="4" refX="1" refY="2" orient="auto"><path d="M6,0 L0,2 L6,4" fill="rgba(126,178,255,0.6)"></path></marker>
-                        </defs>
-                        <line x1="4" y1="12" x2="96" y2="12" stroke="rgba(126,178,255,0.4)" stroke-width="1" marker-start="url(#quiet-arrow-left)" marker-end="url(#quiet-arrow-right)"></line>
-                    </svg>
-                    <span class="diagram-edge-label">SMS / Call</span>
-                    <div class="diagram-lf-wrapper">
-                        <img src="/assets/fav.webp" alt="Lightfriend" class="diagram-lf-icon" loading="lazy" decoding="async" width="128" height="128">
+            <div class="message-demo">
+                <div class="demo-context">
+                    <div class="source-message">
+                        <p class="message-sender">WhatsApp · Saturday plans</p>
+                        <p>Alex: Change of plan — meet at the west entrance in 20 minutes!</p>
                     </div>
-                </div>
-                <div class="diagram-right-group">
-                    <svg class="diagram-fan-svg" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">
-                        <defs>
-                            <marker id="quiet-fan-arrow-r" markerWidth="5" markerHeight="4" refX="4" refY="2" orient="auto"><path d="M0,0 L5,2 L0,4" fill="rgba(126,178,255,0.5)"></path></marker>
-                            <marker id="quiet-fan-arrow-l" markerWidth="5" markerHeight="4" refX="1" refY="2" orient="auto"><path d="M5,0 L0,2 L5,4" fill="rgba(126,178,255,0.5)"></path></marker>
-                        </defs>
-                        <line x1="0" y1="50" x2="65" y2="5" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#quiet-fan-arrow-l)" marker-end="url(#quiet-fan-arrow-r)"></line>
-                        <line x1="0" y1="50" x2="65" y2="35" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#quiet-fan-arrow-l)" marker-end="url(#quiet-fan-arrow-r)"></line>
-                        <line x1="0" y1="50" x2="65" y2="65" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#quiet-fan-arrow-l)" marker-end="url(#quiet-fan-arrow-r)"></line>
-                        <line x1="0" y1="50" x2="65" y2="95" stroke="rgba(126,178,255,0.3)" stroke-width="1" marker-start="url(#quiet-fan-arrow-l)" marker-end="url(#quiet-fan-arrow-r)"></line>
-                    </svg>
-                    <div class="diagram-apps-list quiet-apps-list">
-                        <div class="diagram-app-row"><span class="diagram-app-icon" aria-hidden="true">W</span><span>WhatsApp</span></div>
-                        <div class="diagram-app-row"><span class="diagram-app-icon" aria-hidden="true">S</span><span>Signal</span></div>
-                        <div class="diagram-app-row"><span class="diagram-app-icon" aria-hidden="true">T</span><span>Telegram</span></div>
-                        <div class="diagram-app-row"><span class="diagram-app-icon" aria-hidden="true">@</span><span>Email</span></div>
+                    <div class="digest-preview">
+                        <p class="message-sender">The rest can wait</p>
+                        <p>Photos from yesterday. A restaurant recommendation. Catch up in your next digest.</p>
                     </div>
+                    <p class="demo-caption">An example conversation. Lightfriend uses AI to decide what can wait; you can add your own rules.</p>
                 </div>
+                <div class="sms-demo" role="group" aria-label="Example SMS conversation with Lightfriend">
+                    <div class="sms-header"><div><strong>Lightfriend</strong><span>An example SMS exchange</span></div></div>
+                    <ol class="sms-messages">
+                        <li class="sms-received"><span class="sr-only">Lightfriend: </span>Alex in Saturday plans: meet at the west entrance in 20 minutes.</li>
+                        <li class="sms-sent"><span class="sr-only">You: </span>Reply to Alex in Saturday plans: On my way!</li>
+                        <li class="sms-received"><span class="sr-only">Lightfriend: </span>Queued your reply: “On my way!” You have 60 seconds to cancel.</li>
+                    </ol>
+                    <p class="sms-note">Reply by text. No app to open.</p>
+                </div>
+            </div>
+            <p class="demo-delivery-note">Replies are queued before sending. Delivery depends on the connected service.</p>
+        </section>
+
+        <section id="setup" class="quiet-section quiet-setup" aria-labelledby="setup-heading">
+            <div class="quiet-copy">
+                <h2 id="setup-heading">Getting started</h2>
+            </div>
+            <ol class="setup-steps">
+                <li><h3>Connect your accounts</h3><p>Link WhatsApp, Signal, Telegram, or email through your Lightfriend dashboard.</p></li>
+                <li><h3>Choose what matters</h3><p>Add rules for the people and updates you want to hear about. Set up digests for the rest.</p></li>
+                <li><h3>Text your Lightfriend</h3><p>Save your Lightfriend number and send it a message. Ask a question, check your messages, or request a reply.</p></li>
+            </ol>
+            <div id="countries" class="setup-check">
+                <h3>Where it works</h3>
+                <div>
+                    <p>Lightfriend has local numbers in the <strong>United States, Canada, Finland, Netherlands, United Kingdom, and Australia.</strong></p>
+                    <p>In another country? It may work there too. <a href="mailto:rasmus@lightfriend.ai?subject=Lightfriend%20in%20my%20country">Email me to check</a> before subscribing.</p>
+                    <p class="setup-requirement">Your everyday phone only needs calls and SMS. For WhatsApp, keep access to a smartphone for linking and periodic activity in the native app.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="quiet-section quiet-founder" aria-labelledby="founder-heading">
+            <img src="/assets/rasmus-pfp.webp" alt="Rasmus, founder of Lightfriend" loading="lazy" decoding="async" width="382" height="333">
+            <div class="quiet-founder-copy">
+                <h2 id="founder-heading">I wanted to use a dumbphone.</h2>
+                <p>I’m <a class="story-link" href="https://rasmus.ahtava.com" target="_blank" rel="noopener noreferrer">Rasmus</a>. Between studying, training, and work, I was losing hours to scrolling. I switched to a dumbphone, but I still wanted to be there for my people. So I built Lightfriend.</p>
+                <p>I still use it every day. It helped me keep competing in sports, finish my computer science degree, and make more room for the things I actually want to do.</p>
             </div>
         </section>
 
@@ -113,10 +128,43 @@
             <p>— Kasperi</p>
         </section>
 
+        <section id="plans" class="landing-pricing-section quiet-pricing" aria-labelledby="plans-heading">
+            <div class="section-intro">
+                <h2 id="plans-heading">Pricing</h2>
+                <p>One subscription includes all connections, alerts, digests, and SMS or voice access.</p>
+            </div>
+            <article class="native-plan-card">
+                <h3>Lightfriend Autopilot</h3>
+                <!-- Monthly USD price verified against the live Stripe table on 2026-09-06.
+                     Keep this summary in sync when changing the Stripe subscription price. -->
+                <p class="native-plan-price"><strong>$60</strong><span>USD / month<br>with monthly billing</span></p>
+                <ul>
+                    <li>WhatsApp, Signal, Telegram, and email connections</li>
+                    <li>Important updates by SMS or voice call</li>
+                    <li>$25 of usage included every month</li>
+                    <li>Open-source, independently verifiable architecture</li>
+                </ul>
+                <div class="allowance-explainer">
+                    <h4>What does the $25 cover?</h4>
+                    <p>A shared allowance for AI processing, SMS, and calls. A short text exchange uses less than a long voice call; the amount also depends on destination and carrier fees. It renews monthly and does not roll over.</p>
+                    <p>When it runs out, metered usage pauses unless you enable pay-as-you-go overage with a valid payment method in billing settings.</p>
+                </div>
+                <a href="#billing-options" class="quiet-cta plan-cta">Choose a billing schedule</a>
+                <p class="native-plan-fineprint">Monthly, quarterly, and annual options below. Secure checkout by Stripe.</p>
+            </article>
+            <div id="billing-options" class="billing-options"><h3>Choose your billing schedule</h3></div>
+            <noscript><p class="pricing-provider-note">Enable JavaScript to choose a billing schedule and subscribe. For help, <a href="mailto:rasmus@lightfriend.ai">email Rasmus</a>.</p></noscript>
+            <div id="stripe-pricing" class="stripe-pricing-table-wrap" hidden aria-live="polite" aria-busy="false"></div>
+            <details class="provider-details">
+                <summary>Using your own Twilio number?</summary>
+                <p>Twilio bills your number and carrier usage separately. Your Lightfriend allowance still covers AI and other metered Lightfriend usage. <a href="/bring-own-number">See setup details</a>.</p>
+            </details>
+        </section>
+
         <section class="quiet-section quiet-trust quiet-trust-static" aria-labelledby="trust-heading">
             <div class="quiet-trust-copy">
-                <h2 id="trust-heading">Private by architecture.</h2>
-                <p>Designed so no one else can see your chats or data. That design includes AI processing. All of Lightfriend’s code is open source, and cryptographic evidence lets anyone independently verify which code is running in production.</p>
+                <h2 id="trust-heading">How your messages are protected</h2>
+                <p>Lightfriend uses encrypted storage and an isolated computing environment to protect the data it processes. The code is open source, with published evidence you can inspect. Messaging providers and phone carriers still handle their parts of a conversation; optional voice calls use an external AI service.</p>
                 <div class="quiet-links">
                     <a href="/trustless">How privacy works</a>
                     <a href="/trust-chain">View the trust chain</a>
@@ -124,41 +172,9 @@
             </div>
         </section>
 
-        <section class="quiet-section quiet-founder" aria-labelledby="founder-heading">
-            <img src="/assets/rasmus-pfp.webp" alt="Rasmus, founder of Lightfriend" loading="lazy" decoding="async" width="382" height="333">
-            <div class="quiet-founder-copy">
-                <p class="quiet-eyebrow">Founder story</p>
-                <h2 id="founder-heading">Why I built it.</h2>
-                <p>I’m <a class="story-link" href="https://rasmus.ahtava.com" target="_blank" rel="noopener noreferrer">Rasmus</a>. At one point I was studying, training, and working at the same time. I couldn’t afford to get sucked into scrolling during the day. Hours would just disappear, and I wouldn’t get to do the things I actually wanted to do. So I felt like I had no option but to switch to a dumbphone. But I didn’t want to become unreachable either, so I built Lightfriend for myself.</p>
-                <p>I still rely on it every day. It helped me keep doing sports professionally, finish my bachelor’s degree in computer science, and work at the same time. I made it available to others because I think we should get to decide what we spend our time on. Smartphones made me feel like I had less of that choice.</p>
-            </div>
-        </section>
-
-        <section id="plans" class="landing-pricing-section quiet-pricing" aria-labelledby="plans-heading">
-            <div class="section-intro">
-                <p class="quiet-eyebrow">Start</p>
-                <h2 id="plans-heading">Leave the smartphone behind.</h2>
-                <p>Choose monthly, quarterly, or annual billing.</p>
-            </div>
-            <article class="native-plan-card">
-                <p class="native-plan-name">Autopilot</p>
-                <h3>Your important messages, without the feed.</h3>
-                <ul>
-                    <li>WhatsApp, Signal, Telegram, and email connections</li>
-                    <li>Important updates by SMS or voice call</li>
-                    <li>$25 monthly allowance for metered Lightfriend usage</li>
-                    <li>Open-source, independently verifiable architecture</li>
-                </ul>
-                <p class="native-plan-fineprint">Secure checkout is provided by Stripe.</p>
-            </article>
-            <div id="stripe-pricing" class="stripe-pricing-table-wrap" hidden aria-live="polite" aria-busy="false"></div>
-            <p class="pricing-provider-note">Bringing your own Twilio number? Twilio usage is billed separately to your Twilio account, and higher SMS, notification, or call volume can increase those provider charges. <a href="/bring-own-number">See setup details</a>.</p>
-        </section>
-
         <section id="faq" class="quiet-section quiet-faq" aria-labelledby="faq-heading">
             <div class="faq-in-filter">
-                <p class="quiet-eyebrow">Questions</p>
-                <h2 id="faq-heading">Only the essentials.</h2>
+                <h2 id="faq-heading">Questions before you switch</h2>
 
                 <details class="landing-faq-item">
                     <summary class="landing-faq-question"><span class="question-text">Do I need a phone with internet?</span><span class="toggle-icon" aria-hidden="true">+</span></summary>
@@ -182,7 +198,7 @@
                 </details>
                 <details class="landing-faq-item">
                     <summary class="landing-faq-question"><span class="question-text">Is Lightfriend available in my country?</span><span class="toggle-icon" aria-hidden="true">+</span></summary>
-                    <div class="landing-faq-answer"><p>There are two number routes: a Lightfriend-provided number from the currently available pool, or an eligible Twilio number you already own. Neither route works automatically in every country.</p><p>Availability depends on the selected number’s current voice and SMS capabilities, destination permissions, provider rules, and local regulations. <a href="/supported-countries">See the current country routes</a> before choosing a plan.</p></div>
+                    <div class="landing-faq-answer"><p>Lightfriend works with local numbers in the United States, Canada, Finland, Netherlands, United Kingdom, and Australia.</p><p>Other countries may work too. <a href="mailto:rasmus@lightfriend.ai?subject=Lightfriend%20in%20my%20country">Email Rasmus</a> to check your country before subscribing.</p></div>
                 </details>
                 <details class="landing-faq-item">
                     <summary class="landing-faq-question"><span class="question-text">Can I bring my own Twilio number?</span><span class="toggle-icon" aria-hidden="true">+</span></summary>
@@ -194,11 +210,11 @@
                 </details>
                 <details class="landing-faq-item">
                     <summary class="landing-faq-question"><span class="question-text">How much usage is included?</span><span class="toggle-icon" aria-hidden="true">+</span></summary>
-                    <div class="landing-faq-answer"><p>Every subscription includes a $25 monthly allowance for metered Lightfriend usage, including annual subscriptions. The allowance renews monthly and does not roll over.</p><p>Actual usage depends on AI processing, destinations, carrier fees, and call duration. Bring-your-own-Twilio charges are separate and billed by Twilio.</p></div>
+                    <div class="landing-faq-answer"><p>Every subscription includes a $25 monthly allowance for metered Lightfriend usage, including annual subscriptions. The allowance renews monthly and does not roll over.</p><p>Actual usage depends on AI processing, destinations, carrier fees, and call duration. Once the allowance runs out, metered usage pauses unless you enable pay-as-you-go overage with a valid payment method. Bring-your-own-Twilio charges are separate and billed by Twilio.</p></div>
                 </details>
                 <details class="landing-faq-item">
                     <summary class="landing-faq-question"><span class="question-text">How is Lightfriend designed with privacy in mind?</span><span class="toggle-icon" aria-hidden="true">+</span></summary>
-                    <div class="landing-faq-answer"><p>Lightfriend is open source and documents a production architecture that uses an AWS Nitro Enclave and encrypted storage. Published build and enclave information is intended to make parts of that architecture independently inspectable.</p><p>No system is risk-free, and connected providers and phone carriers still process their parts of a communication.</p><p><a href="/trustless">Read the architecture details</a></p></div>
+                    <div class="landing-faq-answer"><p>Lightfriend is open source and documents a production architecture that uses an AWS Nitro Enclave and encrypted storage. Published build and enclave information is intended to make parts of that architecture independently inspectable.</p><p>Connected providers and phone carriers still process their parts of a communication. Optional voice calls use an external AI service outside Lightfriend’s independently verifiable environment.</p><p><a href="/trustless">Read the architecture details</a></p></div>
                 </details>
                 <details class="landing-faq-item">
                     <summary class="landing-faq-question"><span class="question-text">Need something Lightfriend does not do yet?</span><span class="toggle-icon" aria-hidden="true">+</span></summary>
@@ -210,11 +226,18 @@
         </section>
 
         <footer class="quiet-footer">
-            <p class="quiet-footer-line">FREE LIKE A CHILD</p>
+            <p class="quiet-footer-line">lightfriend</p>
+            <p class="footer-contact">Built by Rasmus. <a href="mailto:rasmus@lightfriend.ai">Say hello.</a></p>
             <div class="development-links">
                 <p>Open source on <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer">GitHub</a></p>
                 <div class="legal-links">
-                    <a href="/blog">Blog</a> · <a href="/how-it-works">How it works</a> · <a href="/compatible-phones">Phones</a> · <a href="/supported-countries">Countries</a> · <a href="/limitations">Limitations</a> · <a href="/mcp">MCP</a> · <a href="/whatsapp-on-dumbphone">WhatsApp</a> · <a href="/telegram-on-dumbphone">Telegram</a> · <a href="/signal-on-dumbphone">Signal</a> · <a href="/ai-assistant-by-sms">AI by SMS</a> · <a href="/email-on-dumbphone">Email by SMS</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="/trustless">Architecture</a> · <a href="/trust-chain">Trust chain</a>
+                    <a href="/blog">Blog</a>
+                    <a href="/how-it-works">How it works</a>
+                    <a href="#countries">Countries</a>
+                    <a href="/limitations">Limitations</a>
+                    <a href="/terms">Terms</a>
+                    <a href="/privacy">Privacy</a>
+                </div>
                 </div>
             </div>
         </footer>
@@ -304,13 +327,6 @@
                 analyticsStyle.rel = 'stylesheet';
                 analyticsStyle.href = '/assets/analytics.css';
                 document.head.appendChild(analyticsStyle);
-
-                const datafast = document.createElement('script');
-                datafast.defer = true;
-                datafast.dataset.websiteId = 'dfid_ICHRky5CwoxQQSthciEQz';
-                datafast.dataset.domain = 'lightfriend.ai';
-                datafast.src = '/assets/analytics.js';
-                document.head.appendChild(datafast);
 
                 const simpleAnalytics = document.createElement('script');
                 simpleAnalytics.async = true;

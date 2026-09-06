@@ -159,6 +159,14 @@
       });
     }
 
+    if (destination.hash === "#demo") {
+      trackGoal("demo_click", { source_path: window.location.pathname });
+    }
+
+    if (destination.hash === "#billing-options") {
+      trackGoal("billing_options_click", { source_path: window.location.pathname });
+    }
+
     if (destination.pathname === "/supported-countries") {
       trackGoal("supported_country_click", {
         source_path: window.location.pathname,
@@ -171,6 +179,23 @@
   window.lightfriendTrackDataFastGoal = trackGoal;
   window.lightfriendTrackDataFastGoalOnce = trackGoalOnce;
   document.addEventListener("click", trackHighIntentLink);
+
+  // Observe the actual plan card, not the pricing embed's prefetch boundary.
+  function observeLandingPlans() {
+    const plan = document.querySelector(".native-plan-card");
+    if (!plan || !("IntersectionObserver" in window)) return;
+    const observer = new IntersectionObserver(function (entries) {
+      if (!entries.some(function (entry) { return entry.isIntersecting; })) return;
+      trackGoal("plans_viewed", { source_path: window.location.pathname });
+      observer.disconnect();
+    }, { threshold: 0.25 });
+    observer.observe(plan);
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", observeLandingPlans, { once: true });
+  } else {
+    observeLandingPlans();
+  }
 
   // --- Quiet opt-out control ("Privacy choices" button + small panel) ---
 
