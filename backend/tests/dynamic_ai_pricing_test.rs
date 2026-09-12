@@ -41,7 +41,7 @@ fn cache_discount_search_fees_and_reported_cost_are_not_double_counted() {
     let usage: TokenUsage = serde_json::from_value(json!({"prompt_tokens":1_000_000,
         "completion_tokens":100_000, "prompt_tokens_details":{"cached_tokens":800_000}}))
     .unwrap();
-    let cost = catalog.cost("tinfoil", "deepseek-v4-flash", &usage);
+    let cost = catalog.cost("tinfoil", "deepseek-v4-1-flash", &usage);
     assert!((cost.provider_cost_usd - 0.178).abs() < 1e-10);
     assert!(cost.usage_complete);
     let search = catalog.cost(
@@ -265,7 +265,7 @@ async fn streaming_chat_requests_usage_and_preserves_discount_details() {
     let config =
         AiConfig::default_for_tests().with_provider_endpoint(AiProvider::Tinfoil, server.uri());
     let stream = concat!(
-        "data: {\"id\":\"test\",\"model\":\"deepseek-v4-flash\",\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"Hello\"},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: {\"id\":\"test\",\"model\":\"deepseek-v4-1-flash\",\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"Hello\"},\"finish_reason\":\"stop\"}]}\n\n",
         "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"total_tokens\":120,\"prompt_tokens_details\":{\"cached_tokens\":80}}}\n\n",
         "data: [DONE]\n\n"
     );
@@ -279,7 +279,7 @@ async fn streaming_chat_requests_usage_and_preserves_discount_details() {
         .mount(&server)
         .await;
     let request = openai_api_rs::v1::chat_completion::ChatCompletionRequest::new(
-        "deepseek-v4-flash".into(),
+        "deepseek-v4-1-flash".into(),
         vec![],
     );
     let buffered = config

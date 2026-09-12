@@ -39,14 +39,47 @@ pub fn openai_realtime_cost_usd(usage: RealtimeTokenUsage) -> f64 {
         .expect("the built-in gpt-realtime-2 pricing is always available")
 }
 
+/// Published per-million-token rates for the models with built-in pricing.
+/// Cached-input rates are tracked per modality because OpenAI prices them
+/// differently on some models (e.g. gpt-realtime-2.1-mini).
+#[derive(Debug, Clone, Copy)]
+struct RealtimeModelRates {
+    text_input: f64,
+    audio_input: f64,
+    cached_text_input: f64,
+    cached_audio_input: f64,
+    text_output: f64,
+    audio_output: f64,
+}
+
+fn builtin_realtime_model_rates(model: &str) -> Option<RealtimeModelRates> {
+    match model.trim().to_ascii_lowercase().as_str() {
+        // gpt-realtime-2.1 shares gpt-realtime-2's published rates.
+        "gpt-realtime-2" | "gpt-realtime-2.1" => Some(RealtimeModelRates {
+            text_input: 4.0,
+            audio_input: 32.0,
+            cached_text_input: 0.40,
+            cached_audio_input: 0.40,
+            text_output: 24.0,
+            audio_output: 64.0,
+        }),
+        "gpt-realtime-2.1-mini" => Some(RealtimeModelRates {
+            text_input: 0.60,
+            audio_input: 10.0,
+            cached_text_input: 0.06,
+            cached_audio_input: 0.30,
+            text_output: 2.40,
+            audio_output: 20.0,
+        }),
+        _ => None,
+    }
+}
+
 pub fn openai_realtime_cost_usd_for_model(
     model: &str,
     usage: RealtimeTokenUsage,
 ) -> Result<f64, String> {
-    let defaults = match model.trim().to_ascii_lowercase().as_str() {
-        "gpt-realtime-2" => Some((4.0, 32.0, 0.40, 24.0, 64.0)),
-        _ => None,
-    };
+    let defaults = builtin_realtime_model_rates(model);
     let rate = |key: &str, default: Option<f64>| {
         env_rate(key).or(default).ok_or_else(|| {
             format!(
@@ -57,23 +90,39 @@ pub fn openai_realtime_cost_usd_for_model(
     };
     let text_input_per_million = rate(
         "OPENAI_REALTIME_TEXT_INPUT_USD_PER_MILLION",
-        defaults.map(|rates| rates.0),
+        defaults.map(|rates| rates.text_input),
     )?;
     let audio_input_per_million = rate(
         "OPENAI_REALTIME_AUDIO_INPUT_USD_PER_MILLION",
-        defaults.map(|rates| rates.1),
+        defaults.map(|rates| rates.audio_input),
     )?;
-    let cached_input_per_million = rate(
-        "OPENAI_REALTIME_CACHED_INPUT_USD_PER_MILLION",
-        defaults.map(|rates| rates.2),
-    )?;
+    // Per-modality cached rates take precedence, then the legacy generic
+    // override, then the built-in model pricing.
+    let cached_text_input_per_million = env_rate("OPENAI_REALTIME_CACHED_TEXT_INPUT_USD_PER_MILLION")
+        .or_else(|| env_rate("OPENAI_REALTIME_CACHED_INPUT_USD_PER_MILLION"))
+        .or_else(|| defaults.map(|rates| rates.cached_text_input))
+        .ok_or_else(|| {
+            format!(
+                "OPENAI_REALTIME_CACHED_TEXT_INPUT_USD_PER_MILLION (or OPENAI_REALTIME_CACHED_INPUT_USD_PER_MILLION) must be configured when OPENAI_REALTIME_MODEL is '{}'",
+                model
+            )
+        })?;
+    let cached_audio_input_per_million = env_rate("OPENAI_REALTIME_CACHED_AUDIO_INPUT_USD_PER_MILLION")
+        .or_else(|| env_rate("OPENAI_REALTIME_CACHED_INPUT_USD_PER_MILLION"))
+        .or_else(|| defaults.map(|rates| rates.cached_audio_input))
+        .ok_or_else(|| {
+            format!(
+                "OPENAI_REALTIME_CACHED_AUDIO_INPUT_USD_PER_MILLION (or OPENAI_REALTIME_CACHED_INPUT_USD_PER_MILLION) must be configured when OPENAI_REALTIME_MODEL is '{}'",
+                model
+            )
+        })?;
     let text_output_per_million = rate(
         "OPENAI_REALTIME_TEXT_OUTPUT_USD_PER_MILLION",
-        defaults.map(|rates| rates.3),
+        defaults.map(|rates| rates.text_output),
     )?;
     let audio_output_per_million = rate(
         "OPENAI_REALTIME_AUDIO_OUTPUT_USD_PER_MILLION",
-        defaults.map(|rates| rates.4),
+        defaults.map(|rates| rates.audio_output),
     )?;
 
     let uncached_text = usage
@@ -85,8 +134,8 @@ pub fn openai_realtime_cost_usd_for_model(
 
     Ok((uncached_text as f64 * text_input_per_million
         + uncached_audio as f64 * audio_input_per_million
-        + usage.cached_input_text_tokens as f64 * cached_input_per_million
-        + usage.cached_input_audio_tokens as f64 * cached_input_per_million
+        + usage.cached_input_text_tokens as f64 * cached_text_input_per_million
+        + usage.cached_input_audio_tokens as f64 * cached_audio_input_per_million
         + usage.output_text_tokens as f64 * text_output_per_million
         + usage.output_audio_tokens as f64 * audio_output_per_million)
         / 1_000_000.0)

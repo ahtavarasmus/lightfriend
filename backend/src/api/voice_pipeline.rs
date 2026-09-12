@@ -1469,7 +1469,7 @@ struct OpenAiReaderSession {
 }
 
 fn openai_realtime_model() -> String {
-    std::env::var("OPENAI_REALTIME_MODEL").unwrap_or_else(|_| "gpt-realtime-2".to_string())
+    std::env::var("OPENAI_REALTIME_MODEL").unwrap_or_else(|_| "gpt-realtime-2.1".to_string())
 }
 
 const OPENAI_REALTIME_VOICES: &[&str] = &[

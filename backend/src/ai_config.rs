@@ -192,7 +192,7 @@ impl AiConfig {
     pub fn model(&self, provider: AiProvider, purpose: ModelPurpose) -> &str {
         match (provider, purpose) {
             (AiProvider::OpenRouter, ModelPurpose::Default) => "openai/gpt-4o-2024-11-20",
-            (AiProvider::Tinfoil, ModelPurpose::Default) => "deepseek-v4-flash",
+            (AiProvider::Tinfoil, ModelPurpose::Default) => "deepseek-v4-1-flash",
             (AiProvider::Near, ModelPurpose::Default) => &self.near_default_model,
             // Voice: fast non-reasoning model for low-latency responses
             (AiProvider::Tinfoil, ModelPurpose::Voice) => "gemma4-31b",
@@ -202,7 +202,9 @@ impl AiConfig {
     }
 
     /// Select a vision-capable model whenever the request includes an image.
-    /// DeepSeek V4 Flash is text-only, while the existing fast models support images.
+    /// DeepSeek V4.1 Flash is multimodal upstream, but image requests keep
+    /// routing to the fast model until image input via Tinfoil's chat
+    /// endpoint is verified end to end.
     pub fn model_for_request(
         &self,
         provider: AiProvider,
@@ -231,7 +233,7 @@ impl AiConfig {
 
     pub fn reasoning_effort_for_model(model: &str) -> Option<&'static str> {
         match model {
-            "deepseek-v4-flash" => Some("medium"),
+            "deepseek-v4-1-flash" => Some("medium"),
             _ => None,
         }
     }

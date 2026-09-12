@@ -113,9 +113,14 @@ every new dashboard or Light Tool message disproportionately expensive.
 
 OpenAI Realtime is calculated from detailed usage, not call duration: text
 input $4/M, audio input $32/M, cached input $0.40/M, text output $24/M, and
-audio output $64/M for `gpt-realtime-2`. A different model requires all five
-`OPENAI_REALTIME_*_USD_PER_MILLION` overrides. The `response.id` is used as the
-idempotent transaction ID.
+audio output $64/M for `gpt-realtime-2` and `gpt-realtime-2.1`. Built-in
+pricing also covers `gpt-realtime-2.1-mini` (text input $0.60/M, audio input
+$10/M, cached text input $0.06/M, cached audio input $0.30/M, text output
+$2.40/M, audio output $20/M). Any other model requires all five
+`OPENAI_REALTIME_*_USD_PER_MILLION` overrides (plus the optional
+`OPENAI_REALTIME_CACHED_TEXT_INPUT_USD_PER_MILLION` /
+`OPENAI_REALTIME_CACHED_AUDIO_INPUT_USD_PER_MILLION` per-modality cached
+rates). The `response.id` is used as the idempotent transaction ID.
 
 - `web_chat`: all Tinfoil/NEAR/OpenRouter model rounds used by one dashboard
   interaction, including verifier retries and SMS-length condensation.

@@ -21,7 +21,43 @@ fn realtime_model_pricing_uses_the_selected_model() {
         openai_realtime_cost_usd_for_model("gpt-realtime-2", usage).unwrap(),
         64.0
     );
+    // gpt-realtime-2.1 shares gpt-realtime-2's published rates.
+    assert_eq!(
+        openai_realtime_cost_usd_for_model("gpt-realtime-2.1", usage).unwrap(),
+        64.0
+    );
 }
+
+#[test]
+fn realtime_mini_pricing_uses_discounted_rates() {
+    let usage = RealtimeTokenUsage {
+        output_audio_tokens: 1_000_000,
+        ..Default::default()
+    };
+    assert_eq!(
+        openai_realtime_cost_usd_for_model("gpt-realtime-2.1-mini", usage).unwrap(),
+        20.0
+    );
+}
+
+#[test]
+fn realtime_mini_pricing_prices_cached_text_and_audio_differently() {
+    let cost = openai_realtime_cost_usd_for_model(
+        "gpt-realtime-2.1-mini",
+        RealtimeTokenUsage {
+            cached_input_text_tokens: 1_000_000,
+            cached_input_audio_tokens: 1_000_000,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    // 0.06 cached text + 0.30 cached audio
+    assert!((cost - 0.36).abs() < 0.00000001);
+}
+// Note: no unit test for the OPENAI_REALTIME_CACHED_INPUT_USD_PER_MILLION /
+// OPENAI_REALTIME_CACHED_*_USD_PER_MILLION overrides — they are process-global
+// env vars and mutating them would race with the parallel cached-rate tests.
+
 
 #[test]
 fn realtime_cost_separates_cached_audio_and_text_tokens() {

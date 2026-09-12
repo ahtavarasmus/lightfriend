@@ -2,15 +2,15 @@ use backend::{AiConfig, AiProvider, ModelPurpose};
 use openai_api_rs::v1::chat_completion;
 
 #[test]
-fn tinfoil_default_model_uses_deepseek_v4_flash() {
+fn tinfoil_default_model_uses_deepseek_v4_1_flash() {
     let config = AiConfig::default_for_tests();
 
     assert_eq!(
         config.model(AiProvider::Tinfoil, ModelPurpose::Default),
-        "deepseek-v4-flash"
+        "deepseek-v4-1-flash"
     );
     assert_eq!(
-        AiConfig::reasoning_effort_for_model("deepseek-v4-flash"),
+        AiConfig::reasoning_effort_for_model("deepseek-v4-1-flash"),
         Some("medium")
     );
 }

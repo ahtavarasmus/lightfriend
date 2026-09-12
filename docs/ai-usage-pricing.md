@@ -18,7 +18,10 @@ If a model has never had a valid API price, `model_pricing::fallback_quote` uses
 a built-in model default, then a generic provider default. These are estimates,
 not guaranteed upper bounds. Admin identifies default prices explicitly. The
 DeepSeek and Gemma defaults were checked against Tinfoil's public catalog on
-2026-09-06. API rates always take precedence over defaults.
+2026-09-06; the DeepSeek fallback was carried over to `deepseek-v4-1-flash`
+(from the deprecated `deepseek-v4-flash`) on 2026-09-11 pending a catalog
+refresh confirming V4.1 Flash pricing. API rates always take precedence over
+defaults.
 
 `AI_USAGE_MULTIPLIER` sets the customer usage multiplier (default `1.30`, meaning
 a 30% markup). Invalid values or values below 1 use the default. The old text
