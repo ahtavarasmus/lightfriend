@@ -186,6 +186,7 @@ pub fn parse_catalog(provider: &str, value: &Value, fetched_at: i32) -> Vec<(Str
 /// Last-resort estimates used only when the catalog has no saved rate for this model.
 pub fn fallback_quote(provider: &str, model: &str) -> PriceQuote {
     let (input, output, cached, search, known) = match (provider, model) {
+        ("tinfoil", "glm-5-3-flash") => (0.40, 1.25, Some(0.10), 0.0, true),
         // deepseek-v4-flash was replaced by deepseek-v4-1-flash (Tinfoil
         // deprecation, 2026-09-15). Rates carried over from V4 Flash until the
         // live provider catalog confirms V4.1 Flash pricing.

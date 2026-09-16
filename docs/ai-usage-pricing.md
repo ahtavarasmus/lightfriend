@@ -22,6 +22,8 @@ DeepSeek and Gemma defaults were checked against Tinfoil's public catalog on
 (from the deprecated `deepseek-v4-flash`) on 2026-09-11 pending a catalog
 refresh confirming V4.1 Flash pricing. API rates always take precedence over
 defaults.
+The GLM-5.3 Flash default was checked against Tinfoil's public catalog on
+2026-09-16.
 
 `AI_USAGE_MULTIPLIER` sets the customer usage multiplier (default `1.30`, meaning
 a 30% markup). Invalid values or values below 1 use the default. The old text

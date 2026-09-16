@@ -41,8 +41,8 @@ fn cache_discount_search_fees_and_reported_cost_are_not_double_counted() {
     let usage: TokenUsage = serde_json::from_value(json!({"prompt_tokens":1_000_000,
         "completion_tokens":100_000, "prompt_tokens_details":{"cached_tokens":800_000}}))
     .unwrap();
-    let cost = catalog.cost("tinfoil", "deepseek-v4-1-flash", &usage);
-    assert!((cost.provider_cost_usd - 0.178).abs() < 1e-10);
+    let cost = catalog.cost("tinfoil", "glm-5-3-flash", &usage);
+    assert!((cost.provider_cost_usd - 0.285).abs() < 1e-10);
     assert!(cost.usage_complete);
     let search = catalog.cost(
         "openrouter",
