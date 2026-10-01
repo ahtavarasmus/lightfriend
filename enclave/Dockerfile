@@ -15,7 +15,10 @@ ARG MAUTRIX_TELEGRAM_VERSION=0.15.3
 
 FROM rust:1.88-bookworm AS backend-builder
 
-RUN cargo install cargo-chef sccache --locked
+# Pin build tools compatible with the Rust 1.88 builder. --locked alone only
+# pins transitive dependencies, not the version of the installed tool itself.
+RUN cargo install cargo-chef --version 0.1.78 --locked && \
+    cargo install sccache --version 0.17.0 --locked
 
 ENV RUSTC_WRAPPER=/usr/local/cargo/bin/sccache
 ENV SCCACHE_DIR=/sccache
@@ -87,7 +90,7 @@ RUN --mount=type=cache,id=lightfriend-cargo-registry,target=/usr/local/cargo/reg
 FROM rust:1.88-bookworm AS frontend-builder
 
 RUN rustup target add wasm32-unknown-unknown
-RUN cargo install trunk --locked
+RUN cargo install trunk --version 0.21.14 --locked
 
 WORKDIR /app
 COPY frontend/Cargo.toml frontend/Cargo.lock ./
