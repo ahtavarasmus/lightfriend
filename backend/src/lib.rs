@@ -1,5 +1,6 @@
 // Module declarations - moved from main.rs for library access
 pub mod handlers {
+    pub mod admin_export_handlers;
     pub mod admin_handlers;
     pub mod admin_stats_handlers;
     pub mod agent_integration_handlers;
@@ -138,6 +139,7 @@ pub mod models {
 pub mod repositories {
     pub mod admin_alert_repository;
     pub mod agent_integration_repository;
+    pub mod analytics_export_repository;
     pub mod bandwidth_repository;
     pub mod billing_repository;
     pub mod bridge_login_repository;

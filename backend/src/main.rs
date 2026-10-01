@@ -912,6 +912,10 @@ async fn main() {
         );
     // Admin routes that need admin authentication
     let admin_routes = Router::new()
+        .route(
+            "/api/admin/exports/analytics",
+            get(handlers::admin_export_handlers::export_analytics),
+        )
         .route("/api/admin/users", get(auth_handlers::get_users))
         .route(
             "/api/admin/preferred-number/{user_id}",

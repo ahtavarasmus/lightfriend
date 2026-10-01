@@ -1,3 +1,5 @@
+#[path = "analytics_export_test.rs"]
+mod analytics_export_test;
 #[path = "billing_reliability_test.rs"]
 mod billing_reliability_test;
 #[path = "byot_reliability_test.rs"]

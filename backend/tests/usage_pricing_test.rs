@@ -58,7 +58,6 @@ fn realtime_mini_pricing_prices_cached_text_and_audio_differently() {
 // OPENAI_REALTIME_CACHED_*_USD_PER_MILLION overrides — they are process-global
 // env vars and mutating them would race with the parallel cached-rate tests.
 
-
 #[test]
 fn realtime_cost_separates_cached_audio_and_text_tokens() {
     let cost = openai_realtime_cost_usd(RealtimeTokenUsage {

@@ -710,6 +710,18 @@ pub fn admin_dashboard() -> Html {
                         </Link<Route>>
                     </div>
 
+                    <section class="collapsible-section" aria-labelledby="analytics-export-heading" style="padding: 20px;">
+                        <h2 id="analytics-export-heading">{"Export all analytics"}</h2>
+                        <p>{"Download all retained usage, recorded costs, account and waitlist emails, and billing references in one JSON archive. Includes event timestamps and user IDs for later analysis."}</p>
+                        <p>{"Excludes messages, prompts, responses, phone numbers, contacts and credentials. Missing costs stay unknown. Payment history and hosting/provider invoices must be saved separately to calculate profit."}</p>
+                        <a class="back-link"
+                            href={format!("{}/api/admin/exports/analytics", crate::config::get_backend_url())}
+                            target="_blank" rel="noopener noreferrer">
+                            {"Download all analytics (.json)"}
+                        </a>
+                        <p>{"Large exports may take a moment to prepare. Check that the file finishes downloading before shutdown, and export again after final usage and provider charges have settled."}</p>
+                    </section>
+
                     <div class="collapsible-section broadcast-section">
                         <div class="collapsible-header" onclick={{
                             let show_broadcast_section = show_broadcast_section.clone();

@@ -13,6 +13,7 @@ strsim = "0.11.1"
 governor = "0.6"  # For rate limiting
 dashmap = "5.5"  # For concurrent hash map to store per-user limits
 anyhow = "1.0"
+tempfile = "3"
 mail-parser = "0.10"
 async-imap = { version = "0.10", default-features = false, features = ["runtime-tokio"] }
 async-native-tls = { version = "0.5", default-features = false, features = ["runtime-tokio"] }
